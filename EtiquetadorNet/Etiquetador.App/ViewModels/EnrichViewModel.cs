@@ -377,12 +377,14 @@ public partial class EnrichViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Reanaliza la fila seleccionada. Si se pasan términos, se buscan ESOS en vez de deducirlos del
-    /// nombre del archivo. El resultado se guarda en la caché: la corrección persiste entre sesiones.
+    /// Reanaliza UNA fila. Si se pasan términos, se buscan ESOS en vez de deducirlos del nombre del
+    /// archivo. El resultado se guarda en la caché: la corrección persiste entre sesiones.
+    /// La fila llega por parámetro a propósito: el diálogo previo es modal y la tabla puede perder
+    /// la selección mientras está abierto (releer SelectedRow aquí dejaba el reanálisis sin efecto).
     /// </summary>
-    public async Task ReanalyzeSelectedAsync(string searchArtist = "", string searchTitle = "")
+    public async Task ReanalyzeRowAsync(PreviewRow? row, string searchArtist = "", string searchTitle = "")
     {
-        var row = SelectedRow;
+        row ??= SelectedRow;
         if (row == null || IsBusy) return;
         IsBusy = true;
         var manual = searchArtist.Length > 0 || searchTitle.Length > 0;
@@ -396,6 +398,7 @@ public partial class EnrichViewModel : ViewModelBase
             opts.SearchTitle = searchTitle;
             var r = await Task.Run(() => _engine.Processor.ProcessAsync(row.Result.FilePath, isAcapella: false, opts));
             row.UpdateFrom(r);
+            RowsView.Refresh();   // repinta la celda en la vista agrupada
 
             if (r.Found || r.CleanOnly)
             {
