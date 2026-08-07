@@ -1,0 +1,41 @@
+# ---- Build .NET ----
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+publicado/
+*.user
+*.suo
+*.userprefs
+.vs/
+TestResults/
+project.lock.json
+artifacts/
+
+# ---- Binarios / artefactos ----
+*.exe
+*.dll
+*.pdb
+*.log
+*.tmp
+*.zip
+
+# ---- Config local / secretos (nunca publicar) ----
+.claude/
+config.net.json
+appsettings.*.json
+*.secret
+
+# ---- App original de PowerShell (fuera del repo publico) ----
+/Compilar EXE.bat
+/Compilar-EXE.ps1
+/Enriquecer-App.ps1
+/Etiquetador de Musica.bat
+/Etiquetador de Musica.vbs
+/Etiquetador.Tests.ps1
+/EtiquetadorMusica.exe
+/LEEME.txt
+/icono.ico
+EtiquetadorNet/PLAN-PORT.md
+
+# ---- Iconos permitidos como recurso del proyecto ----
+!EtiquetadorNet/Etiquetador.App/Assets/*.ico

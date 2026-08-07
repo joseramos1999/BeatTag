@@ -1,0 +1,33 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="120"
+             x:CompileBindings="False"
+             x:Class="Etiquetador.App.Views.FolderListView">
+    <!-- Sin x:DataType (bindings por reflexión): hereda el DataContext del VM (Biblioteca o Enriquecer). -->
+    <Border BorderBrush="#55888888" BorderThickness="1" CornerRadius="6" Background="#0F888888" Padding="6">
+        <DockPanel>
+            <TextBlock DockPanel.Dock="Top" Margin="2,0,2,4" FontWeight="SemiBold"
+                       Text="{Binding Folders.Count, StringFormat='📁 Carpetas ({0})  ·  arrástralas aquí desde el Explorador'}" />
+            <ScrollViewer MaxHeight="110">
+            <ItemsControl ItemsSource="{Binding Folders}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <DockPanel Margin="0,1">
+                            <Button DockPanel.Dock="Right" Content="✕" Padding="8,0" Margin="6,0,0,0"
+                                    Background="Transparent" Foreground="#C0392B" FontWeight="Bold"
+                                    ToolTip.Tip="Quitar esta carpeta"
+                                    Command="{Binding DataContext.RemoveFolderPathCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                    CommandParameter="{Binding Path}" />
+                            <CheckBox IsChecked="{Binding Enabled}" VerticalAlignment="Center" Margin="0,0,6,0"
+                                      ToolTip.Tip="Marcar/desmarcar: solo se analizan las carpetas marcadas." />
+                            <TextBlock Text="{Binding Path}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</UserControl>

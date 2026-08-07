@@ -1,0 +1,56 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="560"
+             x:Class="Etiquetador.App.Views.StatsView"
+             x:CompileBindings="False">
+
+    <UserControl.Resources>
+        <DataTemplate x:Key="BarTpl">
+            <Grid ColumnDefinitions="150,260,Auto" Margin="0,1">
+                <TextBlock Grid.Column="0" Text="{Binding Label}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <Border Grid.Column="1" Height="16" Width="{Binding BarWidth}" HorizontalAlignment="Left"
+                        Background="#7C3AED" CornerRadius="3" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="{Binding Count}" Margin="8,0,0,0" VerticalAlignment="Center" Foreground="Gray" />
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <DockPanel Margin="8">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="10" Margin="0,0,0,6">
+            <Button Content="Analizar" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding !IsBusy}"
+                    Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding Status}" VerticalAlignment="Center" Foreground="Gray" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+        <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="4" Margin="0,0,0,6" />
+
+        <ScrollViewer>
+            <StackPanel Spacing="14">
+                <TextBlock Text="{Binding Summary}" FontSize="15" FontWeight="Bold" />
+
+                <StackPanel Spacing="2">
+                    <TextBlock Text="Por BPM" FontWeight="Bold" Margin="0,0,0,2" />
+                    <ItemsControl ItemsSource="{Binding ByBpm}" ItemTemplate="{StaticResource BarTpl}" />
+                </StackPanel>
+                <StackPanel Spacing="2">
+                    <TextBlock Text="Por género (top 15)" FontWeight="Bold" Margin="0,0,0,2" />
+                    <ItemsControl ItemsSource="{Binding ByGenre}" ItemTemplate="{StaticResource BarTpl}" />
+                </StackPanel>
+                <StackPanel Spacing="2">
+                    <TextBlock Text="Por calidad" FontWeight="Bold" Margin="0,0,0,2" />
+                    <ItemsControl ItemsSource="{Binding ByQuality}" ItemTemplate="{StaticResource BarTpl}" />
+                </StackPanel>
+                <StackPanel Spacing="2">
+                    <TextBlock Text="Por década" FontWeight="Bold" Margin="0,0,0,2" />
+                    <ItemsControl ItemsSource="{Binding ByDecade}" ItemTemplate="{StaticResource BarTpl}" />
+                </StackPanel>
+                <StackPanel Spacing="2">
+                    <TextBlock Text="Clean / Explícito" FontWeight="Bold" Margin="0,0,0,2" />
+                    <ItemsControl ItemsSource="{Binding ByExplicit}" ItemTemplate="{StaticResource BarTpl}" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

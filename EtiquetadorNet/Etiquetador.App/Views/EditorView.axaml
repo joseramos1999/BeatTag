@@ -1,0 +1,74 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="560"
+             x:Class="Etiquetador.App.Views.EditorView"
+             x:DataType="vm:EditorViewModel">
+
+    <Grid ColumnDefinitions="2*,4,3*" Margin="8">
+        <!-- Lista de canciones de la biblioteca -->
+        <DockPanel Grid.Column="0">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,6">
+                <Button Content="⯆ Desplegar" Click="ExpandAll_Click" />
+                <Button Content="⯈ Cerrar" Click="CollapseAll_Click" />
+            </StackPanel>
+            <TextBox DockPanel.Dock="Top" PlaceholderText="Buscar (archivo / título / artista)…"
+                     Text="{Binding Search}" Margin="0,0,0,6" />
+            <DataGrid ItemsSource="{Binding TracksView}" SelectedItem="{Binding SelectedTrack}"
+                      x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
+                      CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                      DoubleTapped="Grid_DoubleTapped">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="2*" MinWidth="120" />
+                    <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="1.5*" MinWidth="90" />
+                    <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="1.2*" MinWidth="80" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </DockPanel>
+
+        <GridSplitter Grid.Column="1" Width="4" Background="#33888888" ResizeDirection="Columns" />
+
+        <!-- Formulario de edición -->
+        <ScrollViewer Grid.Column="2" Margin="8,0,0,0">
+            <StackPanel Spacing="6" IsEnabled="{Binding CanEdit}">
+                <TextBlock Text="Editar tags" FontWeight="Bold" FontSize="15" />
+                <TextBlock Text="Título" />
+                <TextBox Text="{Binding Title}" />
+                <TextBlock Text="Artista (varios separados por coma)" />
+                <TextBox Text="{Binding Artist}" />
+                <TextBlock Text="Álbum" />
+                <TextBox Text="{Binding Album}" />
+                <TextBlock Text="Género" />
+                <TextBox Text="{Binding Genre}" />
+                <Grid ColumnDefinitions="*,12,*">
+                    <StackPanel Grid.Column="0" Spacing="6">
+                        <TextBlock Text="Año" />
+                        <TextBox Text="{Binding Year}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Spacing="6">
+                        <TextBlock Text="BPM" />
+                        <TextBox Text="{Binding Bpm}" />
+                    </StackPanel>
+                </Grid>
+                <TextBlock Text="Comentario" />
+                <TextBox Text="{Binding Comment}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" />
+
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                    <Button Content="Guardar" Command="{Binding SaveCommand}"
+                            Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
+                    <Button Content="Recargar" Command="{Binding ReloadCommand}"
+                            Background="#6B7280" Foreground="White" FontWeight="SemiBold" />
+                    <Button Content="▶ Escuchar" Command="{Binding PlayPreviewCommand}"
+                            Background="#7C3AED" Foreground="White" FontWeight="SemiBold" />
+                    <Button Content="⏹ Parar" Command="{Binding StopPreviewCommand}"
+                            Background="#6B7280" Foreground="White" FontWeight="SemiBold" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+
+        <TextBlock Grid.Column="2" VerticalAlignment="Bottom" Text="{Binding Status}"
+                   Foreground="Gray" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
+    </Grid>
+</UserControl>

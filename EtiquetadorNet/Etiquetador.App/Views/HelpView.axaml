@@ -1,0 +1,35 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="560"
+             x:Class="Etiquetador.App.Views.HelpView">
+    <ScrollViewer Padding="16">
+        <StackPanel Spacing="10" MaxWidth="820">
+            <TextBlock Text="BeatTag — guía rápida" FontSize="20" FontWeight="Bold" />
+            <TextBlock TextWrapping="Wrap" Foreground="Gray"
+                       Text="Etiqueta y organiza tu biblioteca para DJ. Flujo típico: añade carpetas en Biblioteca, escanea, y luego usa Enriquecer para completar tags y renombrar. Todo cambio aplicado se puede Deshacer." />
+
+            <TextBlock Text="📚 Biblioteca" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
+            <TextBlock TextWrapping="Wrap" Text="Añade o arrastra carpetas (marca/desmarca cada una para incluirla o no) y pulsa Escanear. Verás tus canciones con sus tags, calidad y si son Clean/Explícito. 'Importar rekordbox…' trae BPM y clave musical desde un XML de rekordbox (se puede deshacer)." />
+
+            <TextBlock Text="✨ Enriquecer" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
+            <TextBlock TextWrapping="Wrap" Text="Analiza y propone tags y un nombre de archivo. 'Analizar' usa la caché (rápido); 'Reanalizar todo' ignora la caché. Revisa la tabla: puedes editar cualquier celda, escuchar la canción (clic derecho), y desmarcar lo que no quieras. Las de baja confianza se desmarcan solas. Pulsa 'Aplicar seleccionados' para escribir; 'Deshacer última' revierte. Puedes Pausar/Cancelar durante el análisis." />
+
+            <TextBlock Text="📝 Editor" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
+            <TextBlock TextWrapping="Wrap" Text="Edita a mano el título y los tags de cualquier canción. Busca, selecciona, cambia y Guarda. '▶ Escuchar' reproduce un fragmento para comprobar." />
+
+            <TextBlock Text="🔁 Duplicados · 🎚️ Calidad · ⚠️ Incompletas · 🔎 No encontradas" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
+            <TextBlock TextWrapping="Wrap" Text="Herramientas de revisión sobre la biblioteca escaneada. Duplicados: agrupa copias (por artista+título, solo título, o +duración) y permite enviar a la papelera. Calidad: clasifica el audio y filtra el de baja calidad. Incompletas: canciones a las que les falta algún tag (clic derecho para Editar o Reanalizar). No encontradas: las que ninguna fuente identifica." />
+
+            <TextBlock Text="📊 Estadísticas" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
+            <TextBlock TextWrapping="Wrap" Text="Reparto de la biblioteca por BPM, género, calidad, década y Clean/Explícito." />
+
+            <TextBlock Text="⚙️ Ajustes" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
+            <TextBlock TextWrapping="Wrap" Text="Introduce tus claves de API (se guardan cifradas en tu equipo) y prueba la conexión. 'Vaciar caché' borra las cachés de red, escaneo y análisis. A la derecha, el registro (log) en vivo." />
+
+            <TextBlock Text="Consejos" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
+            <TextBlock TextWrapping="Wrap" Text="• Pasa el ratón por los botones para ver qué hacen.  • Doble clic en una cabecera de columna la ajusta al contenido.  • Usa 'Desplegar/Cerrar todo' para navegar por carpetas.  • Los cambios se pueden deshacer desde Enriquecer.  • Los logs y crashes se guardan en Documentos\Etiquetador de Musica\logs." />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -1,0 +1,39 @@
+name: Release
+
+# Publica BeatTag.exe como artefacto de la Release al empujar una etiqueta v* (p. ej. v1.0.0).
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: EtiquetadorNet
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Test
+        run: dotnet test -c Release
+
+      - name: Publish single-file exe
+        run: >
+          dotnet publish Etiquetador.App/Etiquetador.App.csproj
+          -c Release -r win-x64 --self-contained
+          -p:PublishSingleFile=true
+          -o publicado
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: EtiquetadorNet/publicado/BeatTag.exe
+          generate_release_notes: true

@@ -1,0 +1,135 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:views="using:Etiquetador.App.Views"
+             xmlns:sys="using:System"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="560"
+             x:Class="Etiquetador.App.Views.EnrichView"
+             x:DataType="vm:EnrichViewModel">
+
+    <UserControl.Styles>
+        <!-- Botones de acción con color: texto blanco y en negrita -->
+        <Style Selector="Button.act">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,6,4" />
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel Margin="8">
+        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+            <Button Content="Añadir carpeta…" Click="AddFolder_Click" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#0D9488" />
+            <Button Content="Vaciar carpetas" Command="{Binding ClearFoldersCommand}" Classes="act" Background="#6B7280" Margin="0,0,12,4"
+                    ToolTip.Tip="Quita todas las carpetas de la lista." />
+            <Button Content="Analizar" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#2563EB"
+                    ToolTip.Tip="Rápido: usa la caché y solo reprocesa lo nuevo o modificado." />
+            <Button Content="Reanalizar todo" Command="{Binding ReanalyzeAllCommand}" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#7C3AED"
+                    ToolTip.Tip="Ignora la caché y vuelve a analizar toda la biblioteca." />
+            <Button Content="{Binding IsPaused, Converter={x:Static vm:EnrichViewModel.PauseLabel}}"
+                    Command="{Binding PauseCommand}" IsVisible="{Binding IsBusy}" Classes="act" Background="#D97706" />
+            <Button Content="Cancelar" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" Classes="act" Background="#DC2626" />
+            <Button Content="Aplicar seleccionados" Command="{Binding ApplyCommand}" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#16A34A" />
+            <Button Content="Deshacer última" Command="{Binding UndoCommand}" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#D97706" Margin="0,0,12,4" />
+            <Button Content="Marcar todo" Command="{Binding MarkAllCommand}" Classes="act" Background="#475569"
+                    ToolTip.Tip="Marca todas las filas para aplicar." />
+            <Button Content="Desmarcar todo" Command="{Binding MarkNoneCommand}" Classes="act" Background="#475569" Margin="0,0,12,4"
+                    ToolTip.Tip="Desmarca todas las filas." />
+            <Button Content="⯆ Desplegar" Click="ExpandAll_Click" Margin="0,0,6,4" />
+            <Button Content="⯈ Cerrar" Click="CollapseAll_Click" Margin="0,0,6,4" />
+        </WrapPanel>
+
+        <views:FolderListView DockPanel.Dock="Top" Margin="0,0,0,6" />
+
+        <Expander DockPanel.Dock="Top" Header="Opciones" Margin="0,0,0,6">
+            <StackPanel Spacing="6" Margin="4">
+                <TextBlock Text="Fuentes" FontWeight="Bold" />
+                <WrapPanel>
+                    <CheckBox Content="Deezer" IsChecked="{Binding UseDeezer}" Margin="0,0,12,0" />
+                    <CheckBox Content="iTunes" IsChecked="{Binding UseItunes}" Margin="0,0,12,0" />
+                    <CheckBox Content="Spotify" IsChecked="{Binding UseSpotify}" Margin="0,0,12,0" />
+                    <CheckBox Content="Discogs" IsChecked="{Binding UseDiscogs}" Margin="0,0,12,0" />
+                    <CheckBox Content="MusicBrainz" IsChecked="{Binding UseMusicBrainz}" Margin="0,0,12,0" />
+                    <CheckBox Content="AcoustID" IsChecked="{Binding UseAcoustId}" Margin="0,0,12,0" />
+                    <CheckBox Content="IA (Gemini)" IsChecked="{Binding UseAi}" Margin="0,0,12,0" />
+                </WrapPanel>
+                <TextBlock Text="Campos a escribir" FontWeight="Bold" Margin="0,6,0,0" />
+                <WrapPanel>
+                    <CheckBox Content="Título" IsChecked="{Binding WriteTitle}" Margin="0,0,12,0" />
+                    <CheckBox Content="Artista" IsChecked="{Binding WriteArtist}" Margin="0,0,12,0" />
+                    <CheckBox Content="Álbum" IsChecked="{Binding WriteAlbum}" Margin="0,0,12,0" />
+                    <CheckBox Content="Género" IsChecked="{Binding WriteGenre}" Margin="0,0,12,0" />
+                    <CheckBox Content="Año" IsChecked="{Binding WriteYear}" Margin="0,0,12,0" />
+                    <CheckBox Content="BPM" IsChecked="{Binding WriteBpm}" Margin="0,0,12,0" />
+                </WrapPanel>
+                <WrapPanel Margin="0,6,0,0">
+                    <CheckBox Content="Sobrescribir tags existentes" IsChecked="{Binding Overwrite}" Margin="0,0,12,0" />
+                    <CheckBox Content="Solo limpiar nombre (sin buscar)" IsChecked="{Binding CleanOnly}" Margin="0,0,12,0" />
+                    <TextBlock Text="Carátula:" VerticalAlignment="Center" Margin="8,0,4,0" />
+                    <ComboBox SelectedItem="{Binding CoverMode}" MinWidth="110">
+                        <sys:String>keep</sys:String>
+                        <sys:String>spotify</sys:String>
+                        <sys:String>png</sys:String>
+                    </ComboBox>
+                    <Button Content="Imagen…" Click="PickCover_Click" Margin="6,0,0,0"
+                            IsVisible="{Binding CoverMode, Converter={x:Static vm:EnrichViewModel.IsPngMode}}" />
+                    <TextBlock Text="{Binding CoverPath}" VerticalAlignment="Center" Margin="6,0,0,0"
+                               Foreground="Gray" TextTrimming="CharacterEllipsis" MaxWidth="240"
+                               IsVisible="{Binding CoverMode, Converter={x:Static vm:EnrichViewModel.IsPngMode}}" />
+                </WrapPanel>
+            </StackPanel>
+        </Expander>
+
+        <TextBlock DockPanel.Dock="Top" Text="{Binding Status}" Margin="0,0,0,4" TextTrimming="CharacterEllipsis" />
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,6" IsVisible="{Binding IsBusy}">
+            <ProgressBar Grid.Column="0" Minimum="0" Maximum="100" Value="{Binding Progress}" Height="8" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="{Binding TimeInfo}" Margin="10,0,0,0" Foreground="Gray" VerticalAlignment="Center" />
+        </Grid>
+
+        <DataGrid Name="RowsGrid"
+                  ItemsSource="{Binding RowsView}"
+                  SelectedItem="{Binding SelectedRow}"
+                  x:CompileBindings="False"
+                  AutoGenerateColumns="False"
+                  CanUserSortColumns="True"
+                  CanUserResizeColumns="True"
+                  GridLinesVisibility="Horizontal"
+                  IsReadOnly="False"
+                  DoubleTapped="Rows_DoubleTapped"
+                  BeginningEdit="Rows_BeginningEdit"
+                  PointerPressed="Rows_PointerPressed">
+            <DataGrid.Styles>
+                <Style Selector="DataGridRow">
+                    <Setter Property="Background" Value="{Binding StateBrush}" />
+                </Style>
+            </DataGrid.Styles>
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
+                    <MenuItem Header="Marcar / desmarcar" Command="{Binding ToggleSelectedCommand}" />
+                    <MenuItem Header="Reanalizar" Command="{Binding ReanalyzeSelectedCommand}" />
+                    <MenuItem Header="Quitar de la lista" Command="{Binding RemoveSelectedCommand}" />
+                    <Separator />
+                    <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+            <DataGrid.Columns>
+                <DataGridCheckBoxColumn Header="Aplicar" Binding="{Binding Apply}" Width="60" MinWidth="55" />
+                <DataGridTextColumn Header="Archivo (original)" Binding="{Binding Old}" Width="180" MinWidth="120" IsReadOnly="True" />
+                <DataGridTextColumn Header="Archivo propuesto" Binding="{Binding New}" Width="200" MinWidth="130" />
+                <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="150" MinWidth="90" />
+                <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="120" MinWidth="80" />
+                <DataGridTextColumn Header="Álbum" Binding="{Binding Album}" Width="120" MinWidth="80" />
+                <DataGridTextColumn Header="Género" Binding="{Binding Genre}" Width="90" MinWidth="60" />
+                <DataGridTextColumn Header="Año" Binding="{Binding Year}" Width="55" MinWidth="45" />
+                <DataGridTextColumn Header="BPM" Binding="{Binding Bpm}" Width="55" MinWidth="45" />
+                <DataGridTextColumn Header="Dur." Binding="{Binding Duration}" Width="60" MinWidth="50" IsReadOnly="True" />
+                <DataGridTextColumn Header="Calidad" Binding="{Binding Quality}" Width="80" MinWidth="60" IsReadOnly="True" />
+                <DataGridTextColumn Header="Conf." Binding="{Binding Score}" Width="55" MinWidth="45" IsReadOnly="True" />
+                <DataGridTextColumn Header="Fuente" Binding="{Binding Source}" Width="100" MinWidth="70" IsReadOnly="True" />
+                <DataGridTextColumn Header="Estado" Binding="{Binding RowStatus}" Width="110" MinWidth="70" IsReadOnly="True" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>

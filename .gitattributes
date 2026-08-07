@@ -1,0 +1,18 @@
+# Normaliza los finales de linea: en el repo siempre LF, en Windows checkout CRLF.
+* text=auto
+
+*.cs        text diff=csharp
+*.axaml     text
+*.csproj    text
+*.sln       text eol=crlf
+*.md        text
+*.json      text
+*.yml       text
+*.yaml      text
+
+# Binarios: sin conversion.
+*.ico       binary
+*.png       binary
+*.jpg       binary
+*.exe       binary
+*.dll       binary

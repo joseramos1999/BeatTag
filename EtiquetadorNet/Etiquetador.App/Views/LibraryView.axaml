@@ -1,0 +1,54 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:views="using:Etiquetador.App.Views"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="560"
+             x:Class="Etiquetador.App.Views.LibraryView"
+             x:DataType="vm:LibraryViewModel">
+
+    <DockPanel Margin="8">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
+            <Button Content="Añadir carpeta…" Click="AddFolder_Click" IsEnabled="{Binding !IsBusy}"
+                    Background="#0D9488" Foreground="White" FontWeight="SemiBold" />
+            <Button Content="Vaciar carpetas" Command="{Binding ClearFoldersCommand}"
+                    Background="#6B7280" Foreground="White" FontWeight="SemiBold"
+                    ToolTip.Tip="Quita todas las carpetas de la lista." />
+            <Button Content="Escanear" Command="{Binding ScanCommand}" IsEnabled="{Binding !IsBusy}"
+                    Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+            <Button Content="⯆ Desplegar" Click="ExpandAll_Click" />
+            <Button Content="⯈ Cerrar" Click="CollapseAll_Click" />
+            <Button Content="Importar rekordbox…" Click="ImportRekordbox_Click" IsEnabled="{Binding !IsBusy}"
+                    Background="#7C3AED" Foreground="White" FontWeight="SemiBold"
+                    ToolTip.Tip="Importa BPM y clave musical desde un XML exportado de rekordbox (casa por ruta de archivo)." />
+        </StackPanel>
+
+        <views:FolderListView DockPanel.Dock="Top" Margin="0,0,0,6" />
+
+        <TextBlock DockPanel.Dock="Top" Text="{Binding Status}" Margin="0,0,0,4" TextTrimming="CharacterEllipsis" />
+        <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="4" Margin="0,0,0,6" />
+
+        <DataGrid ItemsSource="{Binding TracksView}"
+                  x:CompileBindings="False"
+                  IsReadOnly="True"
+                  AutoGenerateColumns="False"
+                  CanUserSortColumns="True"
+                  CanUserResizeColumns="True"
+                  GridLinesVisibility="Horizontal"
+                  DoubleTapped="Grid_DoubleTapped">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="2*" MinWidth="120" />
+                <DataGridTextColumn Header="Título"  Binding="{Binding Title}"    Width="2*" MinWidth="100" />
+                <DataGridTextColumn Header="Artista" Binding="{Binding Artist}"   Width="1.5*" MinWidth="90" />
+                <DataGridTextColumn Header="Álbum"   Binding="{Binding Album}"    Width="1.5*" MinWidth="90" />
+                <DataGridTextColumn Header="Género"  Binding="{Binding Genre}"    Width="1*" MinWidth="70" />
+                <DataGridTextColumn Header="Año"     Binding="{Binding Year}"     Width="60" MinWidth="50" />
+                <DataGridTextColumn Header="BPM"     Binding="{Binding Bpm}"      Width="60" MinWidth="50" />
+                <DataGridTextColumn Header="Dur."    Binding="{Binding Duration}" Width="70" MinWidth="55" />
+                <DataGridTextColumn Header="Calidad" Binding="{Binding Quality}"  Width="90" MinWidth="70" />
+                <DataGridTextColumn Header="Explícito" Binding="{Binding Explicit}" Width="80" MinWidth="60" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>

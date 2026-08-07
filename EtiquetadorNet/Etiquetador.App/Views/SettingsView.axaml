@@ -1,0 +1,58 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="560"
+             x:Class="Etiquetador.App.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+
+    <Grid ColumnDefinitions="*,*" Margin="12">
+        <StackPanel Grid.Column="0" Spacing="8" Margin="0,0,12,0">
+            <TextBlock Text="Claves de API" FontWeight="Bold" FontSize="15" />
+            <TextBlock Text="Se guardan cifradas con DPAPI (solo tu usuario de Windows puede leerlas)."
+                       Foreground="Gray" TextWrapping="Wrap" />
+
+            <TextBlock Text="Spotify Client ID" Margin="0,6,0,0" />
+            <TextBox Text="{Binding SpotifyId}" />
+            <TextBlock Text="Spotify Client Secret" />
+            <TextBox Text="{Binding SpotifySecret}" PasswordChar="•" />
+            <TextBlock Text="Token de Discogs" />
+            <TextBox Text="{Binding DiscogsToken}" PasswordChar="•" />
+            <TextBlock Text="Clave de AcoustID" />
+            <TextBox Text="{Binding AcoustIdKey}" PasswordChar="•" />
+            <TextBlock Text="Clave de Gemini (IA)" />
+            <TextBox Text="{Binding AiKey}" PasswordChar="•" />
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                <CheckBox Content="Usar caché de respuestas (recomendado)" IsChecked="{Binding Cache}" VerticalAlignment="Center" />
+                <Button Content="Vaciar caché" Command="{Binding ClearCacheCommand}" Background="#6B7280" Foreground="White" FontWeight="SemiBold" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                <Button Content="Guardar" Command="{Binding SaveCommand}"
+                        Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
+                <Button Content="Probar conexión" Command="{Binding TestConnectionCommand}" IsEnabled="{Binding !IsBusy}"
+                        Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding Status}" VerticalAlignment="Center" Foreground="Gray" />
+            </StackPanel>
+
+            <TextBlock Text="Resultado de la prueba" FontWeight="Bold" Margin="0,10,0,0" />
+            <Border BorderBrush="Gray" BorderThickness="1" CornerRadius="4" Padding="8" MinHeight="90">
+                <ScrollViewer>
+                    <SelectableTextBlock Text="{Binding TestReport}" FontFamily="Consolas,monospace" />
+                </ScrollViewer>
+            </Border>
+        </StackPanel>
+
+        <DockPanel Grid.Column="1">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
+                <TextBlock Text="Registro (log)" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                <Button Content="Limpiar" Command="{Binding ClearLogCommand}" Background="#6B7280" Foreground="White" />
+            </StackPanel>
+            <Border BorderBrush="Gray" BorderThickness="1" CornerRadius="4">
+                <ListBox ItemsSource="{Binding Log}" FontFamily="Consolas,monospace" FontSize="12" />
+            </Border>
+        </DockPanel>
+    </Grid>
+</UserControl>

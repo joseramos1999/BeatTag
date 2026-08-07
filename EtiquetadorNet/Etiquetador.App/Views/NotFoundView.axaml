@@ -1,0 +1,48 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="560"
+             x:Class="Etiquetador.App.Views.NotFoundView"
+             x:DataType="vm:NotFoundViewModel">
+
+    <DockPanel Margin="8">
+        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+            <Button Content="Analizar" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding !IsBusy}"
+                    Background="#2563EB" Foreground="White" FontWeight="SemiBold" Margin="0,0,6,4"
+                    ToolTip.Tip="Rápido: usa la caché de análisis." />
+            <Button Content="Reanalizar todo" Command="{Binding ReanalyzeAllCommand}" IsEnabled="{Binding !IsBusy}"
+                    Background="#7C3AED" Foreground="White" FontWeight="SemiBold" Margin="0,0,6,4"
+                    ToolTip.Tip="Ignora la caché y vuelve a analizar todo." />
+            <Button Content="Cancelar" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}"
+                    Background="#DC2626" Foreground="White" FontWeight="SemiBold" Margin="0,0,12,4" />
+            <Button Content="⯆ Desplegar todo" Click="ExpandAll_Click" Margin="0,0,6,4" />
+            <Button Content="⯈ Cerrar todo" Click="CollapseAll_Click" Margin="0,0,6,4" />
+            <TextBlock Text="{Binding Status}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        </WrapPanel>
+        <ProgressBar DockPanel.Dock="Top" Minimum="0" Maximum="100" Value="{Binding Progress}" Height="6"
+                     IsVisible="{Binding IsBusy}" Margin="0,0,0,6" />
+
+        <DataGrid Name="Grid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
+                  x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
+                  CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                  PointerPressed="Grid_PointerPressed" DoubleTapped="Grid_DoubleTapped">
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
+                    <MenuItem Header="Editar esta canción" Command="{Binding EditThisCommand}" />
+                    <MenuItem Header="Reanalizar (y aplicar si aparece)" Command="{Binding ReanalyzeThisCommand}" />
+                    <Separator />
+                    <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="2*" MinWidth="150" />
+                <DataGridTextColumn Header="Búsqueda usada" Binding="{Binding Query}" Width="1.5*" MinWidth="120" />
+                <DataGridTextColumn Header="Carpeta" Binding="{Binding Folder}" Width="1.5*" MinWidth="120" />
+                <DataGridTextColumn Header="Estado" Binding="{Binding RowStatus}" Width="140" MinWidth="90" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>

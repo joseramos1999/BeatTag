@@ -1,0 +1,40 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="560"
+             x:Class="Etiquetador.App.Views.QualityView"
+             x:DataType="vm:QualityViewModel">
+
+    <DockPanel Margin="8">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,6">
+            <Button Content="Analizar" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding !IsBusy}"
+                    Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+            <CheckBox Content="Solo baja calidad" IsChecked="{Binding OnlyPoor}" VerticalAlignment="Center" />
+            <Button Content="⯆ Desplegar" Click="ExpandAll_Click" />
+            <Button Content="⯈ Cerrar" Click="CollapseAll_Click" />
+            <TextBlock Text="{Binding Status}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+        <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="4" Margin="0,0,0,6" />
+
+        <DataGrid Name="Grid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
+                  x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
+                  CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                  PointerPressed="Grid_PointerPressed" DoubleTapped="Grid_DoubleTapped">
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="2*" MinWidth="150" />
+                <DataGridTextColumn Header="Calidad" Binding="{Binding QualityLabel}" Width="100" MinWidth="80" />
+                <DataGridTextColumn Header="Bitrate" Binding="{Binding Bitrate}" Width="80" MinWidth="60" />
+                <DataGridTextColumn Header="Muestreo" Binding="{Binding SampleRate}" Width="90" MinWidth="70" />
+                <DataGridTextColumn Header="Canales" Binding="{Binding Channels}" Width="70" MinWidth="60" />
+                <DataGridTextColumn Header="Dur." Binding="{Binding Duration}" Width="70" MinWidth="55" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>
