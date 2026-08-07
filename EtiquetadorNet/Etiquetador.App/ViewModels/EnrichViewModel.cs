@@ -399,7 +399,8 @@ public partial class EnrichViewModel : ViewModelBase
     /// La fila llega por parámetro a propósito: el diálogo previo es modal y la tabla puede perder
     /// la selección mientras está abierto (releer SelectedRow aquí dejaba el reanálisis sin efecto).
     /// </summary>
-    public async Task ReanalyzeRowAsync(PreviewRow? row, string searchArtist = "", string searchTitle = "")
+    public async Task ReanalyzeRowAsync(PreviewRow? row, string searchArtist = "", string searchTitle = "",
+        string searchSource = "")
     {
         row ??= SelectedRow;
         if (row == null || IsBusy) return;
@@ -413,6 +414,7 @@ public partial class EnrichViewModel : ViewModelBase
             var opts = _engine.BuildOptions();
             opts.SearchArtist = searchArtist;
             opts.SearchTitle = searchTitle;
+            opts.SearchSource = searchSource;
             var r = await Task.Run(() => _engine.Processor.ProcessAsync(row.Result.FilePath, isAcapella: false, opts));
             row.UpdateFrom(r);
             RowsView.Refresh();   // repinta la celda en la vista agrupada

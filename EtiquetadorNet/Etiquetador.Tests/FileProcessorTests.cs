@@ -99,6 +99,14 @@ public class FileProcessorTests
     }
 
     [Fact]
+    public void Signature_ignora_la_fuente_elegida()
+    {
+        var a = new ProcessOptions { Deezer = true, SearchArtist = "A", SearchTitle = "B" };
+        var b = new ProcessOptions { Deezer = true, SearchArtist = "A", SearchTitle = "B", SearchSource = "iTunes" };
+        Assert.Equal(a.Signature(), b.Signature());
+    }
+
+    [Fact]
     public void Signature_ignora_los_terminos_manuales()
     {
         // Los términos NO entran en la firma: el resultado de una búsqueda manual se guarda en la

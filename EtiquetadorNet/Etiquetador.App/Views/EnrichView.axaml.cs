@@ -120,7 +120,7 @@ public partial class EnrichView : UserControl
 
         var terms = await SearchDialog.AskAsync(owner, row.Old, artist, title, vm.FindCandidatesAsync);
         if (terms == null) return;   // cancelado
-        await vm.ReanalyzeRowAsync(row, terms.Artist, terms.Title);   // la fila capturada, no SelectedRow
+        await vm.ReanalyzeRowAsync(row, terms.Artist, terms.Title, terms.Source);   // la fila capturada, no SelectedRow
     }
 
     private void ExpandAll_Click(object? sender, RoutedEventArgs e) => GridBehaviors.SetAllGroups(this.FindDescendantOfType<DataGrid>(), true);

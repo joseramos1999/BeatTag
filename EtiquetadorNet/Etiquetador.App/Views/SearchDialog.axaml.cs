@@ -7,8 +7,11 @@ using Etiquetador.Core.Providers;
 
 namespace Etiquetador.App.Views;
 
-/// <summary>Términos que el usuario dicta para reanalizar una canción concreta.</summary>
-public sealed record SearchTerms(string Artist, string Title);
+/// <summary>
+/// Términos que el usuario dicta para reanalizar una canción concreta. <paramref name="Source"/>
+/// va informado solo si eligió una coincidencia de la lista: entonces se busca solo en esa fuente.
+/// </summary>
+public sealed record SearchTerms(string Artist, string Title, string Source = "");
 
 /// <summary>
 /// Diálogo previo a "Reanalizar": permite afinar qué se busca y ELEGIR entre las coincidencias
@@ -78,7 +81,7 @@ public partial class SearchDialog : Window
     private void UseSelected_Click(object? sender, RoutedEventArgs e)
     {
         if (Results.SelectedItem is not Candidate c) return;
-        _result = new SearchTerms(c.Artist, c.Title);
+        _result = new SearchTerms(c.Artist, c.Title, c.Source);   // se respeta la fuente elegida
         Close();
     }
 
