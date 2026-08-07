@@ -44,6 +44,7 @@ public sealed class AppEngine
     /// <summary>Caché persistente del resultado del análisis (por archivo + firma de opciones).</summary>
     public AnalysisCache Analysis { get; }
     public IgnoreList Ignored { get; }
+    public CandidateFinder Candidates { get; }
 
     /// <summary>Reproductor de vista previa (uno a la vez), compartido entre pestañas.</summary>
     public AudioPreview Preview { get; } = new();
@@ -66,6 +67,7 @@ public sealed class AppEngine
         Api = new ApiClient(Paths) { CacheOn = Config.Cache };
 
         Deezer = new DeezerProvider(Api);
+        Candidates = new CandidateFinder(Api);
         Itunes = new ItunesProvider(Api);
         Spotify = new SpotifyProvider(Api, Logger);
         MusicBrainz = new MusicBrainzProvider(Api);

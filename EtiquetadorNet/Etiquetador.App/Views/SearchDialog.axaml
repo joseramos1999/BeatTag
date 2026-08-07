@@ -2,35 +2,59 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="460" d:DesignHeight="300"
+        mc:Ignorable="d" d:DesignWidth="560" d:DesignHeight="520"
         x:Class="Etiquetador.App.Views.SearchDialog"
-        Title="Reanalizar — buscar concretamente"
-        Width="460" SizeToContent="Height"
+        x:CompileBindings="False"
+        Title="Reanalizar — elegir coincidencia"
+        Width="560" Height="520"
         WindowStartupLocation="CenterOwner"
-        CanResize="False"
         ShowInTaskbar="False">
 
-    <StackPanel Margin="18" Spacing="10">
-        <TextBlock Text="¿Qué buscamos?" FontSize="16" FontWeight="Bold" />
-        <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="12"
-                   Text="Corrige el artista y el título para afinar la búsqueda en las fuentes. Se usa solo para esta canción." />
+    <DockPanel Margin="18" LastChildFill="True">
 
-        <TextBlock Text="Archivo" FontWeight="Bold" Margin="0,6,0,0" />
-        <TextBlock x:Name="FileText" TextWrapping="Wrap" Foreground="Gray" FontSize="12" />
+        <StackPanel DockPanel.Dock="Top" Spacing="8">
+            <TextBlock Text="¿Qué buscamos?" FontSize="16" FontWeight="Bold" />
+            <TextBlock x:Name="FileText" TextWrapping="Wrap" Foreground="Gray" FontSize="12" />
 
-        <TextBlock Text="Artista" FontWeight="Bold" Margin="0,6,0,0" />
-        <TextBox x:Name="ArtistBox" PlaceholderText="Ej: Daft Punk" KeyDown="OnKeyDown" />
+            <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" Margin="0,4,0,0">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Artista" FontWeight="Bold" Margin="0,0,6,2" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="Título" FontWeight="Bold" Margin="6,0,0,2" />
+                <TextBox Grid.Row="1" Grid.Column="0" x:Name="ArtistBox" Margin="0,0,6,0"
+                         PlaceholderText="Ej: Daft Punk" KeyDown="OnKeyDown" />
+                <TextBox Grid.Row="1" Grid.Column="1" x:Name="TitleBox" Margin="6,0,0,0"
+                         PlaceholderText="Ej: One More Time" KeyDown="OnKeyDown" />
+            </Grid>
 
-        <TextBlock Text="Título" FontWeight="Bold" />
-        <TextBox x:Name="TitleBox" PlaceholderText="Ej: One More Time" KeyDown="OnKeyDown" />
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2,0,0">
+                <Button x:Name="SearchBtn" Content="🔎 Buscar coincidencias" Click="Search_Click" />
+                <TextBlock x:Name="SearchStatus" Foreground="Gray" FontSize="12" VerticalAlignment="Center" />
+            </StackPanel>
 
-        <TextBlock TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,2,0,0"
-                   Text="Consejo: añade (Remix), (Extended) o (Live) al título si quieres esa versión concreta. Deja un campo vacío para que se deduzca del nombre del archivo." />
-
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
-            <Button Content="Cancelar" Click="Cancel_Click" MinWidth="90" />
-            <Button Content="Buscar" Click="Ok_Click" MinWidth="90"
-                    Background="#7C3AED" Foreground="White" IsDefault="True" />
+            <TextBlock Text="Coincidencias" FontWeight="Bold" Margin="0,8,0,0" />
         </StackPanel>
-    </StackPanel>
+
+        <!-- Botonera abajo -->
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Spacing="8" Margin="0,12,0,0">
+            <Button Content="Cancelar" Click="Cancel_Click" MinWidth="90" />
+            <Button x:Name="UseTypedBtn" Content="Usar lo escrito" Click="Ok_Click" MinWidth="110"
+                    ToolTip.Tip="Busca con el artista y el título tal cual los has escrito, sin elegir de la lista." />
+            <Button x:Name="UseSelectedBtn" Content="Usar la elegida" Click="UseSelected_Click" MinWidth="110"
+                    Background="#7C3AED" Foreground="White" IsDefault="True" IsEnabled="False" />
+        </StackPanel>
+
+        <Border BorderBrush="#40808080" BorderThickness="1" CornerRadius="4">
+            <ListBox x:Name="Results" DoubleTapped="Results_DoubleTapped"
+                     SelectionChanged="Results_SelectionChanged">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Margin="2">
+                            <TextBlock Text="{Binding Display}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding Source}" Foreground="Gray" FontSize="11" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
+    </DockPanel>
 </Window>

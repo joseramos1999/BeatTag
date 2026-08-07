@@ -15,6 +15,7 @@ using CommunityToolkit.Mvvm.Input;
 using Etiquetador.App.Services;
 using Etiquetador.Core;
 using Etiquetador.Core.Pipeline;
+using Etiquetador.Core.Providers;
 
 namespace Etiquetador.App.ViewModels;
 
@@ -382,6 +383,14 @@ public partial class EnrichViewModel : ViewModelBase
         Rows.Remove(row);
         RowsView.Refresh();
         Status = $"Descartada «{row.Old}». No volverá a aparecer (puedes recuperarlas en Ajustes).";
+    }
+
+    /// <summary>Coincidencias del catálogo para que el usuario elija (diálogo de "Reanalizar…").</summary>
+    public Task<IReadOnlyList<Candidate>> FindCandidatesAsync(string artist, string title)
+    {
+        // Si el usuario tiene ambas fuentes apagadas, se usa Deezer (no necesita clave) para poder listar.
+        var dz = UseDeezer || !UseItunes;
+        return _engine.Candidates.FindAsync(artist, title, dz, UseItunes);
     }
 
     /// <summary>
