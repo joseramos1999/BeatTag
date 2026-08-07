@@ -1,8 +1,13 @@
+using System;
+using System.Collections.Specialized;
 using System.IO;
+using System.Linq;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Etiquetador.App.ViewModels;
 
@@ -11,6 +16,7 @@ namespace Etiquetador.App.Views;
 public partial class EnrichView : UserControl
 {
     private bool _suppressToggle;   // true si el doble clic entró a editar una celda
+    private INotifyCollectionChanged? _rowsHook;   // coleccion de filas seguida para el auto-scroll
 
     public EnrichView()
     {
@@ -18,6 +24,40 @@ public partial class EnrichView : UserControl
         DragDrop.SetAllowDrop(this, true);
         DragDrop.AddDragOverHandler(this, OnDragOver);
         DragDrop.AddDropHandler(this, OnDrop);
+    }
+
+    // Sigue la coleccion de filas del VM para desplazar al final cada vez que el analisis
+    // añade una propuesta nueva.
+    protected override void OnDataContextChanged(EventArgs e)
+    {
+        base.OnDataContextChanged(e);
+        if (_rowsHook != null) { _rowsHook.CollectionChanged -= OnRowsChanged; _rowsHook = null; }
+        if (DataContext is EnrichViewModel vm)
+        {
+            _rowsHook = vm.Rows;
+            _rowsHook.CollectionChanged += OnRowsChanged;
+        }
+    }
+
+    private void OnRowsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        // Solo al añadir filas, y solo si la pestaña Enriquecer está visible. Este guardado
+        // evita la cascada de arranque (cargar la caché con el grid oculto) que provocaba el crash.
+        if (e.Action != NotifyCollectionChangedAction.Add || !IsEffectivelyVisible) return;
+        Dispatcher.UIThread.Post(ScrollToEnd, DispatcherPriority.Background);
+    }
+
+    // Desplaza el ScrollViewer interno hasta el fondo. Deliberadamente NO usa ScrollIntoView(item):
+    // en un DataGrid agrupado eso dispara el bug de layout de Avalonia (InsertDisplayedElement fuera
+    // de rango). Mover el offset del ScrollViewer es seguro y Avalonia lo recorta al máximo válido.
+    private void ScrollToEnd()
+    {
+        try
+        {
+            var sv = RowsGrid.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+            if (sv != null) sv.Offset = new Vector(sv.Offset.X, sv.Extent.Height);
+        }
+        catch { }
     }
 
     private async void PickCover_Click(object? sender, RoutedEventArgs e)
