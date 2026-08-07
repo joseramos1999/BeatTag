@@ -30,6 +30,31 @@
 
             <TextBlock Text="Consejos" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
             <TextBlock TextWrapping="Wrap" Text="• Pasa el ratón por los botones para ver qué hacen.  • Doble clic en una cabecera de columna la ajusta al contenido.  • Usa 'Desplegar/Cerrar todo' para navegar por carpetas.  • Los cambios se pueden deshacer desde Enriquecer.  • Los logs y crashes se guardan en Documentos\Etiquetador de Musica\logs." />
+
+            <!-- Créditos -->
+            <Border Margin="0,20,0,0" Padding="16" CornerRadius="8"
+                    Background="#20808080" BorderBrush="#40808080" BorderThickness="1">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="🎧 BeatTag" FontSize="18" FontWeight="Bold" />
+                    <TextBlock x:Name="VersionText" Foreground="Gray" />
+                    <TextBlock TextWrapping="Wrap" Margin="0,4,0,0"
+                               Text="Etiquetador y organizador de bibliotecas musicales para DJ. Reescritura en C#/.NET 9 + Avalonia de la app original en PowerShell." />
+
+                    <TextBlock Text="Desarrollo" FontWeight="Bold" Margin="0,8,0,0" />
+                    <TextBlock TextWrapping="Wrap" Text="Creado por Jose Ramos." />
+
+                    <TextBlock Text="Fuentes de datos" FontWeight="Bold" Margin="0,8,0,0" />
+                    <TextBlock TextWrapping="Wrap" Foreground="Gray"
+                               Text="Deezer · iTunes · Spotify · MusicBrainz · Discogs · AcoustID / Chromaprint · IA (opcional)." />
+
+                    <TextBlock Text="Tecnologías" FontWeight="Bold" Margin="0,8,0,0" />
+                    <TextBlock TextWrapping="Wrap" Foreground="Gray"
+                               Text="Avalonia · CommunityToolkit.Mvvm · TagLibSharp · NAudio · xUnit." />
+
+                    <TextBlock TextWrapping="Wrap" Foreground="Gray" Margin="0,8,0,0"
+                               Text="Licencia MIT · © 2026 BeatTag" />
+                </StackPanel>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </UserControl>
