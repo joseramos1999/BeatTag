@@ -136,5 +136,12 @@ public sealed class AppEngine
         return r;
     }
 
+    /// <summary>Progreso dentro de la canción en curso (fase, 0..1) para la barra secundaria.</summary>
+    public IProgress<(string Phase, double Fraction)>? StepProgress
+    {
+        get => Processor.StepProgress;
+        set => Processor.StepProgress = value;
+    }
+
     public void ClearAnalysisCache() => Analysis.Clear();
 }

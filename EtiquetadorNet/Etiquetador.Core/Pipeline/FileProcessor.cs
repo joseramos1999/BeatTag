@@ -60,10 +60,19 @@ public sealed class FileProcessor
         _artistExc = artistExc; _log = log;
     }
 
+    /// <summary>
+    /// Progreso DENTRO de una canción: (fase, 0..1). Permite a la UI mostrar una segunda barra
+    /// con el avance del tema en curso. Opcional: si es null no se reporta nada.
+    /// </summary>
+    public IProgress<(string Phase, double Fraction)>? StepProgress { get; set; }
+
+    private void Step(string phase, double fraction) => StepProgress?.Report((phase, fraction));
+
     public async Task<ProcessResult> ProcessAsync(string filePath, bool isAcapella, ProcessOptions o, CancellationToken ct = default)
     {
         var fileName = Path.GetFileName(filePath);
         var ext = Path.GetExtension(filePath);
+        Step("leyendo tags", 0.05);
 
         if (o.ForceSkipMix)
             return new ProcessResult { FilePath = filePath, Old = fileName, New = fileName, Source = "Mezcla", Skip = true };
@@ -108,6 +117,7 @@ public sealed class FileProcessor
             // ORDEN: Deezer -> iTunes -> Spotify (último, cuota limitada)
             if (o.Deezer)
             {
+                Step("Deezer", 0.15);
                 dz = await _dz.SearchAsync(fnArtist, qTitle, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (dz != null) variant = "nombre";
                 if (dz == null && fnArtist.Length > 0) { dz = await _dz.SearchAsync(fnTitle, fnArtist, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (dz != null) variant = "invertido"; }
                 if (dz == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(tagArtist, tagTitle, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (dz != null) variant = "tag"; }
@@ -117,6 +127,7 @@ public sealed class FileProcessor
             }
             if (o.Itunes && dz == null)
             {
+                Step("iTunes", 0.3);
                 it = await _it.SearchAsync(fnArtist, qTitle, localDur, isEdit, ct).ConfigureAwait(false); if (it != null) variant = "nombre";
                 if (it == null && fnArtist.Length > 0) { it = await _it.SearchAsync(fnTitle, fnArtist, localDur, isEdit, ct).ConfigureAwait(false); if (it != null) variant = "invertido"; }
                 if (it == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { it = await _it.SearchAsync(tagArtist, tagTitle, localDur, isEdit, ct).ConfigureAwait(false); if (it != null) variant = "tag"; }
@@ -126,6 +137,7 @@ public sealed class FileProcessor
             }
             if (o.Spotify && o.SpotifyId.Length > 0 && o.SpotifySecret.Length > 0 && dz == null && it == null)
             {
+                Step("Spotify", 0.42);
                 sp = await _sp.SearchAsync(fnArtist, qTitle, o.SpotifyId, o.SpotifySecret, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (sp != null) variant = "nombre";
                 if (sp == null && fnArtist.Length > 0) { sp = await _sp.SearchAsync(fnTitle, fnArtist, o.SpotifyId, o.SpotifySecret, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (sp != null) variant = "invertido"; }
                 if (sp == null && tagTitle.Length > 0) { sp = await _sp.SearchAsync(tagArtist, tagTitle, o.SpotifyId, o.SpotifySecret, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (sp != null) variant = "tag"; }
@@ -135,6 +147,7 @@ public sealed class FileProcessor
 
             if (primary == null)
             {
+                Step("MusicBrainz/Discogs", 0.55);
                 if (o.MusicBrainz && fnArtist.Length > 0) mb = await _mb.SearchAsync(fnArtist, qTitle, AppInfo.MusicBrainzUserAgent, ct).ConfigureAwait(false);
                 if (o.Discogs) dc = await _dc.SearchAsync(fnArtist, qTitle, AppInfo.UserAgent, o.DiscogsToken, ct).ConfigureAwait(false);
                 if (mb == null && dc == null && tagTitle.Length > 0)
@@ -153,6 +166,7 @@ public sealed class FileProcessor
             // IA de rescate: la propuesta se RE-VERIFICA contra Deezer/iTunes; nunca se escribe sin confirmar.
             if (primary == null && o.Ai && o.AiKey.Length > 0)
             {
+                Step("IA", 0.7);
                 var ai = await _ai.ParseAsync(@base, tagArtist, tagTitle, o.AiKey, ct).ConfigureAwait(false);
                 if (ai != null && ai.Title.Length > 0 && ai.Confidence >= 0.5 && !ai.IsMashup)
                 {
@@ -171,6 +185,7 @@ public sealed class FileProcessor
             // AcoustID (último recurso): identificar por audio
             if (primary == null && o.AcoustId && o.AcoustIdKey.Length > 0)
             {
+                Step("huella acústica", 0.82);
                 var fpr = await _fp.GetAsync(filePath, _http, ct).ConfigureAwait(false);
                 if (fpr is FingerprintResult f)
                 {
@@ -259,6 +274,8 @@ public sealed class FileProcessor
 
         var titleTag = title;
         if (otros.Count > 0) titleTag = $"{title} (" + string.Join(", ", otros) + ")";
+
+        Step("componiendo", 0.95);
 
         // Confianza mostrada = puntuación del proveedor + coherencia con los tags ya embebidos.
         var scoreStr = "";

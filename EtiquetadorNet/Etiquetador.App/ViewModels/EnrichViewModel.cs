@@ -114,6 +114,8 @@ public partial class EnrichViewModel : ViewModelBase
     [ObservableProperty] private bool _isPaused;
     [ObservableProperty] private double _progress;      // 0..100 (barra real)
     [ObservableProperty] private string _timeInfo = ""; // transcurrido + estimado restante
+    [ObservableProperty] private double _stepProgress;      // 0..100: avance DENTRO de la canción actual
+    [ObservableProperty] private string _stepInfo = "";     // fase en curso (Deezer, iTunes, IA…)
     [ObservableProperty] private string? _selectedFolder;
     [ObservableProperty] private PreviewRow? _selectedRow;
 
@@ -180,9 +182,17 @@ public partial class EnrichViewModel : ViewModelBase
         IsBusy = true;
         IsPaused = false;
         Progress = 0; TimeInfo = "";
+        StepProgress = 0; StepInfo = "";
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
         var sw = Stopwatch.StartNew();
+
+        // Barra secundaria: avance dentro de la canción en curso. Progress<T> marshalea al hilo de UI.
+        _engine.StepProgress = new Progress<(string Phase, double Fraction)>(p =>
+        {
+            StepInfo = p.Phase;
+            StepProgress = p.Fraction * 100;
+        });
         try
         {
             if (!_engine.Library.IsScanned) { Status = "Escaneando biblioteca…"; await _engine.Library.ScanAsync(); }
@@ -204,9 +214,11 @@ public partial class EnrichViewModel : ViewModelBase
                 var per = sw.Elapsed.TotalSeconds / i;
                 TimeInfo = $"⏱ {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)} · resto ~{TextUtils.FormatEta(per * (tracks.Count - i))}";
 
+                StepProgress = 0; StepInfo = "";   // la barra secundaria arranca de cero en cada canción
+
                 var cached = force ? null : _engine.Analysis.Get(t.FilePath, sig);
                 ProcessResult r;
-                if (cached != null) { r = cached; fromCache++; }
+                if (cached != null) { r = cached; fromCache++; StepProgress = 100; StepInfo = "de caché"; }
                 else
                 {
                     try { r = await Task.Run(() => _engine.AnalyzeCachedAsync(t.FilePath, opts, sig, force, ct), ct); }
@@ -223,7 +235,12 @@ public partial class EnrichViewModel : ViewModelBase
             Status = $"Analizadas {tracks.Count} · propuestas {Rows.Count} · {fromCache} de caché · en {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}.";
         }
         catch (OperationCanceledException) { _engine.Analysis.Save(); RowsView.Refresh(); Status = $"Análisis cancelado ({Rows.Count} propuestas hasta ahora)."; }
-        finally { IsBusy = false; _cts.Dispose(); _cts = null; }
+        finally
+        {
+            _engine.StepProgress = null;   // deja de reportar al salir
+            StepProgress = 0; StepInfo = "";
+            IsBusy = false; _cts.Dispose(); _cts = null;
+        }
     }
 
     // Crea la fila de previsualización; auto-desmarca y marca "baja confianza" si el score es muy bajo.

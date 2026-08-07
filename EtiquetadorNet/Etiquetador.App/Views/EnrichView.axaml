@@ -82,10 +82,20 @@
         </Expander>
 
         <TextBlock DockPanel.Dock="Top" Text="{Binding Status}" Margin="0,0,0,4" TextTrimming="CharacterEllipsis" />
-        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,6" IsVisible="{Binding IsBusy}">
-            <ProgressBar Grid.Column="0" Minimum="0" Maximum="100" Value="{Binding Progress}" Height="8" VerticalAlignment="Center" />
-            <TextBlock Grid.Column="1" Text="{Binding TimeInfo}" Margin="10,0,0,0" Foreground="Gray" VerticalAlignment="Center" />
-        </Grid>
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,6" Spacing="3" IsVisible="{Binding IsBusy}">
+            <!-- Barra 1: progreso global (canciones procesadas) -->
+            <Grid ColumnDefinitions="*,Auto">
+                <ProgressBar Grid.Column="0" Minimum="0" Maximum="100" Value="{Binding Progress}" Height="8" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{Binding TimeInfo}" Margin="10,0,0,0" Foreground="Gray" VerticalAlignment="Center" />
+            </Grid>
+            <!-- Barra 2: progreso DENTRO de la canción en curso (fuente que se está consultando) -->
+            <Grid ColumnDefinitions="*,Auto">
+                <ProgressBar Grid.Column="0" Minimum="0" Maximum="100" Value="{Binding StepProgress}" Height="4"
+                             VerticalAlignment="Center" Opacity="0.75" />
+                <TextBlock Grid.Column="1" Text="{Binding StepInfo}" Margin="10,0,0,0" Foreground="Gray"
+                           FontSize="11" VerticalAlignment="Center" />
+            </Grid>
+        </StackPanel>
 
         <DataGrid Name="RowsGrid"
                   ItemsSource="{Binding RowsView}"
