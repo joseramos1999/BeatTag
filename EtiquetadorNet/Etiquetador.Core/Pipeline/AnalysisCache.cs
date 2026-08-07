@@ -42,6 +42,12 @@ public sealed class AnalysisCache
         _dirty = true;
     }
 
+    /// <summary>Olvida el resultado de un archivo concreto (al descartarlo a mano).</summary>
+    public void Remove(string path)
+    {
+        if (_map.Remove(path)) _dirty = true;
+    }
+
     public void Prune(ISet<string> livePaths)
     {
         foreach (var k in _map.Keys.Where(k => !livePaths.Contains(k)).ToList()) { _map.Remove(k); _dirty = true; }

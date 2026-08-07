@@ -105,4 +105,14 @@ public partial class SettingsViewModel : ViewModelBase
         }
         catch (Exception e) { Status = "No se pudo vaciar del todo la caché: " + e.Message; }
     }
+
+    /// <summary>Vuelve a tener en cuenta las canciones descartadas con "Quitar de la lista".</summary>
+    [RelayCommand]
+    private void RestoreIgnored()
+    {
+        var n = _engine.Ignored.Count;
+        if (n == 0) { Status = "No hay ninguna canción descartada."; return; }
+        _engine.ClearIgnored();
+        Status = $"Recuperadas {n} canciones descartadas. Vuelve a analizar en Enriquecer para verlas.";
+    }
 }

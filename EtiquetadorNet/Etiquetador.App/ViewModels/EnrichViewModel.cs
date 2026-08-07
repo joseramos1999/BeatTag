@@ -209,6 +209,7 @@ public partial class EnrichViewModel : ViewModelBase
                 while (IsPaused) { ct.ThrowIfCancellationRequested(); await Task.Delay(150, ct); }
                 i++;
                 seen.Add(t.FilePath);
+                if (_engine.Ignored.Contains(t.FilePath)) continue;   // descartada por el usuario
                 Status = $"{(force ? "Reanalizando" : "Analizando")} {i}/{tracks.Count}…  {t.FileName}";
                 Progress = tracks.Count == 0 ? 0 : (double)i / tracks.Count * 100;
                 var per = sw.Elapsed.TotalSeconds / i;
@@ -267,6 +268,7 @@ public partial class EnrichViewModel : ViewModelBase
         int loaded = 0;
         foreach (var t in tracks)
         {
+            if (_engine.Ignored.Contains(t.FilePath)) continue;   // descartada por el usuario
             var c = _engine.Analysis.Get(t.FilePath, sig);
             if (c == null || c.Skip) continue;
             if (c.Found || c.CleanOnly) { AddRow(c, t); loaded++; }
@@ -370,10 +372,16 @@ public partial class EnrichViewModel : ViewModelBase
     [RelayCommand]
     private void ToggleSelected() => SelectedRow?.Toggle();
 
+    /// <summary>Quita la fila y DESCARTA la canción: no volverá a aparecer en Enriquecer.</summary>
     [RelayCommand]
     private void RemoveSelected()
     {
-        if (SelectedRow != null) { Rows.Remove(SelectedRow); RowsView.Refresh(); }
+        var row = SelectedRow;
+        if (row == null) return;
+        _engine.IgnoreTrack(row.Result.FilePath);
+        Rows.Remove(row);
+        RowsView.Refresh();
+        Status = $"Descartada «{row.Old}». No volverá a aparecer (puedes recuperarlas en Ajustes).";
     }
 
     /// <summary>

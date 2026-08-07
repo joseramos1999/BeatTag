@@ -26,7 +26,7 @@
             <TextBlock TextWrapping="Wrap" Text="Reparto de la biblioteca por BPM, género, calidad, década y Clean/Explícito." />
 
             <TextBlock Text="⚙️ Ajustes" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
-            <TextBlock TextWrapping="Wrap" Text="Introduce tus claves de API (se guardan cifradas en tu equipo) y prueba la conexión. 'Vaciar caché' borra las cachés de red, escaneo y análisis. A la derecha, el registro (log) en vivo." />
+            <TextBlock TextWrapping="Wrap" Text="Introduce tus claves de API (se guardan cifradas en tu equipo) y prueba la conexión. 'Vaciar caché' borra las cachés de red, escaneo y análisis. 'Recuperar descartadas' vuelve a tener en cuenta las canciones que quitaste de la lista en Enriquecer. A la derecha, el registro (log) en vivo." />
 
             <TextBlock Text="Consejos" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
             <TextBlock TextWrapping="Wrap" Text="• Pasa el ratón por los botones para ver qué hacen.  • Doble clic en una cabecera de columna la ajusta al contenido.  • Usa 'Desplegar/Cerrar todo' para navegar por carpetas.  • Los cambios se pueden deshacer desde Enriquecer.  • Los logs y crashes se guardan en Documentos\Etiquetador de Musica\logs." />

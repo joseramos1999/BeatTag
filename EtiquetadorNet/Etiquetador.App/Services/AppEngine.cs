@@ -43,6 +43,7 @@ public sealed class AppEngine
 
     /// <summary>Caché persistente del resultado del análisis (por archivo + firma de opciones).</summary>
     public AnalysisCache Analysis { get; }
+    public IgnoreList Ignored { get; }
 
     /// <summary>Reproductor de vista previa (uno a la vez), compartido entre pestañas.</summary>
     public AudioPreview Preview { get; } = new();
@@ -81,6 +82,7 @@ public sealed class AppEngine
         Tester = new ConnectionTester(Api, Spotify, Ai);
         Library = new LibraryStore(Config, SaveConfig, new ScanCache(Paths.ScanCachePath));
         Analysis = new AnalysisCache(Paths.AnalysisCachePath);
+        Ignored = new IgnoreList(Paths.IgnoredPath);
     }
 
     /// <summary>Opciones de proceso a partir de la config actual.</summary>
@@ -144,4 +146,16 @@ public sealed class AppEngine
     }
 
     public void ClearAnalysisCache() => Analysis.Clear();
+
+    /// <summary>Descarta una canción: la olvida del análisis y la excluye de futuras pasadas.</summary>
+    public void IgnoreTrack(string filePath)
+    {
+        Analysis.Remove(filePath);
+        Analysis.Save();
+        Ignored.Add(filePath);
+        Ignored.Save();
+    }
+
+    /// <summary>Vuelve a tener en cuenta todas las canciones descartadas.</summary>
+    public void ClearIgnored() => Ignored.Clear();
 }
