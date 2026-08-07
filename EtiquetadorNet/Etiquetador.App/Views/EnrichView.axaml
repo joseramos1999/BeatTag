@@ -118,7 +118,7 @@
                 <ContextMenu>
                     <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
                     <MenuItem Header="Marcar / desmarcar" Command="{Binding ToggleSelectedCommand}" />
-                    <MenuItem Header="Reanalizar" Command="{Binding ReanalyzeSelectedCommand}" />
+                    <MenuItem Header="Reanalizar…" Click="Reanalyze_Click" />
                     <MenuItem Header="Quitar de la lista" Command="{Binding RemoveSelectedCommand}" />
                     <Separator />
                     <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />

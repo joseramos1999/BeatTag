@@ -107,6 +107,22 @@ public partial class EnrichView : UserControl
 
     private void Rows_BeginningEdit(object? sender, DataGridBeginningEditEventArgs e) => _suppressToggle = true;
 
+    // "Reanalizar…": primero pregunta QUÉ buscar (para afinar cuando el nombre del archivo engaña).
+    private async void Reanalyze_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not EnrichViewModel vm || vm.SelectedRow is not { } row) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+
+        // Se propone lo que se buscaría por defecto: lo deducido del nombre del archivo.
+        var pr = Etiquetador.Core.Pipeline.FileNameParser.Parse(row.Old);
+        var artist = pr.FnArtist.Length > 0 ? pr.FnArtist : (row.Artist ?? "");
+        var title = pr.QTitle.Length > 0 ? pr.QTitle : (row.Title ?? "");
+
+        var terms = await SearchDialog.AskAsync(owner, row.Old, artist, title);
+        if (terms == null) return;   // cancelado
+        await vm.ReanalyzeSelectedAsync(terms.Artist, terms.Title);
+    }
+
     private void ExpandAll_Click(object? sender, RoutedEventArgs e) => GridBehaviors.SetAllGroups(this.FindDescendantOfType<DataGrid>(), true);
     private void CollapseAll_Click(object? sender, RoutedEventArgs e) => GridBehaviors.SetAllGroups(this.FindDescendantOfType<DataGrid>(), false);
 

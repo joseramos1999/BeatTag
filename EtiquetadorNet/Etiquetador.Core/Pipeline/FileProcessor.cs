@@ -24,6 +24,14 @@ public sealed class ProcessOptions
     public bool CleanOnly { get; set; }
     public bool ForceSkipMix { get; set; }
 
+    /// <summary>
+    /// Búsqueda manual: si vienen informados, sustituyen al artista/título deducidos del nombre de
+    /// archivo (el usuario dicta qué buscar desde "Reanalizar con búsqueda…"). Deliberadamente NO
+    /// entran en Signature(): el resultado se guarda en la caché como la propuesta buena del archivo.
+    /// </summary>
+    public string SearchArtist { get; set; } = "";
+    public string SearchTitle { get; set; } = "";
+
     /// <summary>Huella de las opciones que afectan al RESULTADO del análisis (para validar la caché).</summary>
     public string Signature() =>
         $"{Deezer}{Itunes}{Spotify}{MusicBrainz}{Discogs}{AcoustId}{Ai}|" +
@@ -80,6 +88,14 @@ public sealed class FileProcessor
         var pr = FileNameParser.Parse(fileName);
         string @base = pr.Base, rawForOtros = pr.RawForOtros, fnArtist = pr.FnArtist, fnTitle = pr.FnTitle, qTitle = pr.QTitle;
 
+        // Búsqueda manual: lo que teclea el usuario manda sobre lo deducido del nombre de archivo.
+        var manual = o.SearchArtist.Length > 0 || o.SearchTitle.Length > 0;
+        if (manual)
+        {
+            if (o.SearchArtist.Length > 0) fnArtist = o.SearchArtist.Trim();
+            if (o.SearchTitle.Length > 0) { qTitle = o.SearchTitle.Trim(); fnTitle = qTitle; }
+        }
+
         // Tags embebidos + duración local
         string tagTitle = "", tagArtist = "";
         int localDur = 0;
@@ -96,7 +112,8 @@ public sealed class FileProcessor
         var isEdit = Regex.IsMatch(rawForOtros, Descriptors.DescRe, IC);
         var kwUsed = Descriptors.CleanKeywords($"{fnArtist} {qTitle}");
 
-        if (Matching.IsSkipMix(@base, fnTitle, fnArtist))
+        // En búsqueda manual no se descarta como mezcla: el usuario pide expresamente identificar ESTE tema.
+        if (!manual && Matching.IsSkipMix(@base, fnTitle, fnArtist))
             return new ProcessResult { FilePath = filePath, Old = fileName, New = fileName, Source = "Mezcla", Skip = true, Kw = kwUsed, DurLocal = localDur };
 
         var cleanOnly = o.CleanOnly;
@@ -104,8 +121,10 @@ public sealed class FileProcessor
         ProviderResult? acHit = null;
         string variant = "", secSrc = "";
 
-        var wantRemix = Regex.IsMatch(rawForOtros, @"(?i)\b(remix|rmx|bootleg|flip|mashup|vip)\b");
-        var wantLive = Regex.IsMatch(rawForOtros, @"(?i)\b(live|en\s+vivo|en\s+directo|unplugged|ac[uú]stic[oa])\b");
+        // Los descriptores también se leen de lo tecleado: buscar "Tema (Live)" pide la versión en directo.
+        var descSrc = manual ? $"{rawForOtros} {o.SearchTitle}" : rawForOtros;
+        var wantRemix = Regex.IsMatch(descSrc, @"(?i)\b(remix|rmx|bootleg|flip|mashup|vip)\b");
+        var wantLive = Regex.IsMatch(descSrc, @"(?i)\b(live|en\s+vivo|en\s+directo|unplugged|ac[uú]stic[oa])\b");
 
         const string splitArt = @"(?i)\s*(?:,| x | vs\.?| feat\.?| ft\.?)\s*";
         var firstArtist = fnArtist.Length > 0 ? Regex.Split(fnArtist, splitArt)[0].Trim() : "";

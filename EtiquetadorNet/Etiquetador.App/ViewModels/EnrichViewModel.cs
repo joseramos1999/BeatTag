@@ -376,20 +376,39 @@ public partial class EnrichViewModel : ViewModelBase
         if (SelectedRow != null) { Rows.Remove(SelectedRow); RowsView.Refresh(); }
     }
 
-    [RelayCommand]
-    private async Task ReanalyzeSelectedAsync()
+    /// <summary>
+    /// Reanaliza la fila seleccionada. Si se pasan términos, se buscan ESOS en vez de deducirlos del
+    /// nombre del archivo. El resultado se guarda en la caché: la corrección persiste entre sesiones.
+    /// </summary>
+    public async Task ReanalyzeSelectedAsync(string searchArtist = "", string searchTitle = "")
     {
         var row = SelectedRow;
         if (row == null || IsBusy) return;
         IsBusy = true;
-        Status = "Reanalizando " + row.Old + "…";
+        var manual = searchArtist.Length > 0 || searchTitle.Length > 0;
+        Status = manual
+            ? $"Buscando «{searchArtist} - {searchTitle}»…"
+            : "Reanalizando " + row.Old + "…";
         try
         {
             var opts = _engine.BuildOptions();
+            opts.SearchArtist = searchArtist;
+            opts.SearchTitle = searchTitle;
             var r = await Task.Run(() => _engine.Processor.ProcessAsync(row.Result.FilePath, isAcapella: false, opts));
             row.UpdateFrom(r);
-            row.RowStatus = r.Skip ? "saltado" : (r.Found || r.CleanOnly ? "reanalizado" : "sin resultado");
-            Status = "Reanalizado: " + row.Old;
+
+            if (r.Found || r.CleanOnly)
+            {
+                row.RowStatus = manual ? "✔ búsqueda manual" : "reanalizado";
+                // La propuesta pasa a ser la buena de este archivo (misma firma que el análisis normal).
+                _engine.Analysis.Set(row.Result.FilePath, _engine.BuildOptions().Signature(), r);
+                _engine.Analysis.Save();
+            }
+            else row.RowStatus = r.Skip ? "saltado" : "sin resultado";
+
+            Status = r.Found || r.CleanOnly
+                ? "Reanalizado: " + row.Old
+                : $"Sin resultado para «{searchArtist} - {searchTitle}». Prueba otra grafía.";
         }
         catch (Exception e) { row.RowStatus = "⚠ " + e.Message; Status = "Error al reanalizar."; }
         finally { IsBusy = false; }

@@ -52,4 +52,59 @@ public class FileProcessorTests
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
+
+    // --- Búsqueda manual (Reanalizar…) ---
+
+    [Fact]
+    public async Task Busqueda_manual_no_descarta_como_mezcla()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            // Mismo nombre que el test anterior (se saltaría por "Mashup"), pero el usuario dicta qué buscar.
+            var p = Path.Combine(dir, "Don Omar - Taboo Pedro Cabrera Mashup.mp3");
+            Mp3Fixture.WriteMinMp3(p);
+            var proc = NewProcessor(dir);
+            var r = await proc.ProcessAsync(p, isAcapella: false, new ProcessOptions
+            {
+                CleanOnly = true,   // sin red
+                SearchArtist = "Don Omar",
+                SearchTitle = "Taboo",
+            });
+            Assert.False(r.Skip);
+            Assert.NotEqual("Mezcla", r.Source);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Busqueda_manual_manda_sobre_el_nombre_del_archivo()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var p = Path.Combine(dir, "TRACK01_BRGS_ripped.mp3");   // nombre inservible
+            Mp3Fixture.WriteMinMp3(p);
+            var proc = NewProcessor(dir);
+            var r = await proc.ProcessAsync(p, isAcapella: false, new ProcessOptions
+            {
+                CleanOnly = true,
+                SearchArtist = "Daft Punk",
+                SearchTitle = "One More Time",
+            });
+            Assert.Contains("Daft Punk", r.New);
+            Assert.Contains("One More Time", r.New);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void Signature_ignora_los_terminos_manuales()
+    {
+        // Los términos NO entran en la firma: el resultado de una búsqueda manual se guarda en la
+        // caché como la propuesta buena del archivo y se reutiliza en los análisis normales.
+        var a = new ProcessOptions { Deezer = true };
+        var b = new ProcessOptions { Deezer = true, SearchArtist = "Daft Punk", SearchTitle = "Da Funk" };
+        Assert.Equal(a.Signature(), b.Signature());
+    }
 }
