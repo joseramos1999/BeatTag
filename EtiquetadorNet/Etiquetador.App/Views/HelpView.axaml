@@ -14,7 +14,7 @@
             <TextBlock TextWrapping="Wrap" Text="Añade o arrastra carpetas (marca/desmarca cada una para incluirla o no) y pulsa Escanear. Verás tus canciones con sus tags, calidad y si son Clean/Explícito. 'Importar rekordbox…' trae BPM y clave musical desde un XML de rekordbox (se puede deshacer)." />
 
             <TextBlock Text="✨ Enriquecer" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
-            <TextBlock TextWrapping="Wrap" Text="Analiza y propone tags y un nombre de archivo. 'Analizar' usa la caché (rápido); 'Reanalizar todo' ignora la caché. Revisa la tabla: puedes editar cualquier celda, escuchar la canción (clic derecho), y desmarcar lo que no quieras. Las de baja confianza se desmarcan solas. Pulsa 'Aplicar seleccionados' para escribir; 'Deshacer última' revierte. Puedes Pausar/Cancelar durante el análisis." />
+            <TextBlock TextWrapping="Wrap" Text="Analiza y propone tags y un nombre de archivo. 'Analizar' usa la caché (rápido); 'Reanalizar todo' ignora la caché. Revisa la tabla: puedes editar cualquier celda, escuchar la canción (clic derecho), y desmarcar lo que no quieras. Las de baja confianza se desmarcan solas. Pulsa 'Aplicar seleccionados' para escribir; 'Deshacer última' revierte. Con el clic derecho puedes aplicar una sola canción. Puedes Pausar/Cancelar durante el análisis." />
 
             <TextBlock Text="📝 Editor" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
             <TextBlock TextWrapping="Wrap" Text="Edita a mano el título y los tags de cualquier canción. Busca, selecciona, cambia y Guarda. '▶ Escuchar' reproduce un fragmento para comprobar." />

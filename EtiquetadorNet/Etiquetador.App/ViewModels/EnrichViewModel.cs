@@ -284,10 +284,27 @@ public partial class EnrichViewModel : ViewModelBase
     [RelayCommand]
     private void Cancel() { IsPaused = false; _cts?.Cancel(); }
 
+    /// <summary>Aplica todas las filas marcadas.</summary>
     [RelayCommand]
-    private async Task ApplyAsync()
+    private Task ApplyAsync()
     {
-        if (Rows.Count == 0) { Status = "No hay nada que aplicar. Analiza primero."; return; }
+        if (Rows.Count == 0) { Status = "No hay nada que aplicar. Analiza primero."; return Task.CompletedTask; }
+        var marked = Rows.Where(r => r.Apply).ToList();
+        if (marked.Count == 0) { Status = "No hay ninguna canción marcada."; return Task.CompletedTask; }
+        return ApplyRowsAsync(marked);
+    }
+
+    /// <summary>Aplica SOLO la canción seleccionada (menú contextual), esté marcada o no.</summary>
+    [RelayCommand]
+    private Task ApplySelectedAsync()
+    {
+        var row = SelectedRow;
+        if (row == null) { Status = "Selecciona antes una canción."; return Task.CompletedTask; }
+        return ApplyRowsAsync(new List<PreviewRow> { row });
+    }
+
+    private async Task ApplyRowsAsync(List<PreviewRow> toApply)
+    {
         if (IsBusy) return;
         IsBusy = true;
         _cts = new CancellationTokenSource();
@@ -310,7 +327,6 @@ public partial class EnrichViewModel : ViewModelBase
                 else { Status = "Elige una imagen PNG/JPG válida para la portada."; IsBusy = false; return; }
             }
 
-            var toApply = Rows.Where(r => r.Apply).ToList();
             int applied = 0, marked = toApply.Count, done = 0;
             Progress = 0; TimeInfo = "";
             var sw = Stopwatch.StartNew();
@@ -341,7 +357,11 @@ public partial class EnrichViewModel : ViewModelBase
             await _engine.Library.ScanAsync();   // refleja renombrados/tags en la biblioteca compartida
             Status = cancelled
                 ? $"Cancelado: {applied} aplicados antes de parar. Manifiesto: {Path.GetFileName(undoFile)}"
-                : $"Aplicados {applied} de {marked}. Biblioteca actualizada. Manifiesto: {Path.GetFileName(undoFile)}";
+                : marked == 1
+                    ? (applied == 1
+                        ? $"Aplicada «{toApply[0].Old}». Manifiesto: {Path.GetFileName(undoFile)}"
+                        : $"No se pudo aplicar «{toApply[0].Old}»: {toApply[0].RowStatus}")
+                    : $"Aplicados {applied} de {marked}. Biblioteca actualizada. Manifiesto: {Path.GetFileName(undoFile)}";
         }
         finally { IsBusy = false; _cts.Dispose(); _cts = null; }
     }
