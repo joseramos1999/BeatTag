@@ -17,6 +17,9 @@ public sealed class LibraryStore
     private readonly Action _saveConfig;
     private readonly ScanCache _cache;
 
+    /// <summary>Log opcional (se asigna desde AppEngine tras construirlo).</summary>
+    public Logger? Log { get; set; }
+
     /// <summary>Carpetas elegidas (con estado marcado/desmarcado). Misma instancia para todas las pestañas.</summary>
     public ObservableCollection<FolderItem> Folders { get; } = new();
 
@@ -83,9 +86,14 @@ public sealed class LibraryStore
     {
         if (IsScanning) return;
         IsScanning = true;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             var roots = EnabledPaths();   // solo las carpetas marcadas
+            Log?.Head($"Escaneando {roots.Count} carpeta(s)…");
+            foreach (var r in roots) Log?.Detail($"    carpeta: {r}");
+            var skipped = Folders.Count - roots.Count;
+            if (skipped > 0) Log?.Detail($"    ({skipped} carpeta(s) desmarcada(s) que se omiten)");
             var list = await Task.Run(() =>
             {
                 var acc = new List<Track>();
@@ -105,8 +113,10 @@ public sealed class LibraryStore
             Tracks.Clear();
             foreach (var t in list) Tracks.Add(t);
             IsScanned = true;
+            Log?.Sum($"Escaneo terminado: {Tracks.Count} canciones en {sw.ElapsedMilliseconds} ms.");
             Changed?.Invoke();
         }
+        catch (Exception e) { Log?.Error("Error al escanear la biblioteca", e); throw; }
         finally { IsScanning = false; }
     }
 }

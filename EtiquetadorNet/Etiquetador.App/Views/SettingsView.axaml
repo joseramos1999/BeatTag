@@ -30,6 +30,9 @@
                 <Button Content="Recuperar descartadas" Command="{Binding RestoreIgnoredCommand}"
                         Background="#6B7280" Foreground="White" FontWeight="SemiBold"
                         ToolTip.Tip="Vuelve a tener en cuenta las canciones que quitaste de la lista en Enriquecer." />
+                <Button Content="📁 Ver logs" Command="{Binding OpenLogFolderCommand}"
+                        Background="#6B7280" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Abre la carpeta de registros con el archivo de esta sesión (traza detallada de cada canción)." />
             </StackPanel>
 
             <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">

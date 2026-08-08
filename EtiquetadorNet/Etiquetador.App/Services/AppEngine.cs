@@ -61,11 +61,19 @@ public sealed class AppEngine
 
         // Log de la sesión a archivo (además del panel en Ajustes).
         Logger.LogFile = Path.Combine(Paths.LogsDir, $"beattag_{DateTime.Now:yyyyMMdd_HHmmss}.log");
-        Logger.Log($"BeatTag {AppInfo.Version} iniciado.", LogKind.Head);
+        Logger.SessionHeader(AppInfo.Name, AppInfo.Version, Paths.DataDir);
+        Logger.Head($"BeatTag {AppInfo.Version} iniciado.");
+        var pruned = Logger.PruneOldLogs(Paths.LogsDir);
+        if (pruned > 0) Logger.Detail($"Limpieza de logs: {pruned} antiguos borrados (>30 días).");
 
         Config = AppConfig.Load(Paths, out var cfgErr);
-        if (cfgErr.Length > 0) Logger.Log(cfgErr, LogKind.Err);
-        Api = new ApiClient(Paths) { CacheOn = Config.Cache };
+        if (cfgErr.Length > 0) Logger.Err(cfgErr);
+        Api = new ApiClient(Paths) { CacheOn = Config.Cache, Log = Logger };
+        Logger.Detail($"Config: caché={Config.Cache} · fuentes: deezer={Config.UseDeezer} itunes={Config.UseItunes} "
+                    + $"spotify={Config.UseSpotify} discogs={Config.UseDiscogs} mb={Config.UseMusicBrainz} "
+                    + $"acoustid={Config.UseAcoustId} ia={Config.UseAi}");
+        Logger.Detail($"Claves presentes: spotify={Config.SpotifyId.Length > 0 && Config.SpotifySecret.Length > 0} "
+                    + $"discogs={Config.DiscogsToken.Length > 0} acoustid={Config.AcoustIdKey.Length > 0} ia={Config.AiKey.Length > 0}");
 
         Deezer = new DeezerProvider(Api);
         Candidates = new CandidateFinder(Api);
@@ -84,7 +92,7 @@ public sealed class AppEngine
         Apply = new ApplyEngine(Covers);
         Undo = new UndoEngine(Paths, Logger);
         Tester = new ConnectionTester(Api, Spotify, Ai);
-        Library = new LibraryStore(Config, SaveConfig, new ScanCache(Paths.ScanCachePath));
+        Library = new LibraryStore(Config, SaveConfig, new ScanCache(Paths.ScanCachePath)) { Log = Logger };
         Analysis = new AnalysisCache(Paths.AnalysisCachePath);
         Ignored = new IgnoreList(Paths.IgnoredPath);
     }

@@ -201,6 +201,9 @@ public partial class EnrichViewModel : ViewModelBase
             var opts = _engine.BuildOptions();
             var sig = opts.Signature();
             var tracks = _engine.Library.Tracks.ToList();   // biblioteca compartida (sin re-escanear)
+            _engine.Logger.Head($"{(force ? "REANÁLISIS COMPLETO" : "Análisis")} de {tracks.Count} canciones"
+                              + (_engine.Ignored.Count > 0 ? $" ({_engine.Ignored.Count} descartadas se omiten)" : ""));
+            _engine.Logger.Detail($"Firma de opciones: {sig}");
             var seen = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 
             int i = 0, fromCache = 0;
@@ -235,8 +238,17 @@ public partial class EnrichViewModel : ViewModelBase
             RowsView.Refresh();
             Progress = 100;
             Status = $"Analizadas {tracks.Count} · propuestas {Rows.Count} · {fromCache} de caché · en {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}.";
+            var low = Rows.Count(r => r.RowStatus.StartsWith('⚠'));
+            _engine.Logger.Sum($"Análisis terminado: {tracks.Count} revisadas · {Rows.Count} propuestas · {fromCache} de caché · "
+                             + $"{low} de baja confianza · {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}");
+            _engine.Logger.Detail($"Caché de red: {_engine.Api.CacheHits} aciertos / {_engine.Api.CacheMiss} peticiones nuevas");
         }
-        catch (OperationCanceledException) { _engine.Analysis.Save(); RowsView.Refresh(); Status = $"Análisis cancelado ({Rows.Count} propuestas hasta ahora)."; }
+        catch (OperationCanceledException)
+        {
+            _engine.Analysis.Save(); RowsView.Refresh();
+            Status = $"Análisis cancelado ({Rows.Count} propuestas hasta ahora).";
+            _engine.Logger.Err($"Análisis cancelado por el usuario ({Rows.Count} propuestas hasta ahora).");
+        }
         finally
         {
             _engine.StepProgress = null;   // deja de reportar al salir
@@ -328,6 +340,7 @@ public partial class EnrichViewModel : ViewModelBase
             }
 
             int applied = 0, marked = toApply.Count, done = 0;
+            _engine.Logger.Head($"Aplicando {marked} canción(es) · manifiesto {Path.GetFileName(undoFile)}");
             Progress = 0; TimeInfo = "";
             var sw = Stopwatch.StartNew();
             var cancelled = false;
@@ -343,10 +356,20 @@ public partial class EnrichViewModel : ViewModelBase
                     row.SyncToResult();   // respeta lo editado en la tabla (nombre y tags)
                     var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(row.Result, Overwrite, fields, CoverMode, png, undoFile, doneLog, ct), ct);
                     row.RowStatus = res is { TagOk: true, RenOk: true } ? "✔ aplicado" : $"⚠ {res.TagErr}{res.RenErr}";
-                    if (res.TagOk && res.RenOk) { applied++; appliedRows.Add(row); }
+                    if (res.TagOk && res.RenOk)
+                    {
+                        applied++; appliedRows.Add(row);
+                        _engine.Logger.Detail($"    OK  '{row.Old}' -> '{row.New}'");
+                    }
+                    else
+                        _engine.Logger.Err($"No se pudo aplicar '{row.Old}': {res.TagErr}{res.RenErr}");
                 }
                 catch (OperationCanceledException) { cancelled = true; break; }
-                catch (Exception e) { row.RowStatus = "⚠ " + e.Message; }
+                catch (Exception e)
+                {
+                    row.RowStatus = "⚠ " + e.Message;
+                    _engine.Logger.Error($"Error al aplicar '{row.Old}'", e);
+                }
             }
             // Las canciones ya aplicadas salen de la lista de Enriquecer (las que fallaron se quedan con su aviso).
             if (appliedRows.Count > 0)
@@ -354,6 +377,9 @@ public partial class EnrichViewModel : ViewModelBase
                 foreach (var r in appliedRows) Rows.Remove(r);
                 RowsView.Refresh();
             }
+            _engine.Logger.Sum($"Aplicación terminada: {applied} de {marked} correctas"
+                             + (applied < marked ? $" · {marked - applied} con problemas" : "")
+                             + (cancelled ? " (cancelada)" : ""));
             await _engine.Library.ScanAsync();   // refleja renombrados/tags en la biblioteca compartida
             Status = cancelled
                 ? $"Cancelado: {applied} aplicados antes de parar. Manifiesto: {Path.GetFileName(undoFile)}"
@@ -372,9 +398,11 @@ public partial class EnrichViewModel : ViewModelBase
         if (IsBusy) return;
         IsBusy = true;
         Status = "Deshaciendo la última ejecución…";
+        _engine.Logger.Head("Deshaciendo la última ejecución…");
         try
         {
             var res = await Task.Run(() => _engine.Undo.UndoLastRun());
+            _engine.Logger.Sum($"Deshacer: {res.Reverted} revertidos · {res.Manual} conservados · {res.Missing} ausentes · {res.Errors} errores.");
             if (!res.None) await _engine.Library.ScanAsync();   // refleja el estado revertido
             Status = res.None
                 ? "No hay ninguna ejecución que deshacer."
@@ -400,6 +428,7 @@ public partial class EnrichViewModel : ViewModelBase
         var row = SelectedRow;
         if (row == null) return;
         _engine.IgnoreTrack(row.Result.FilePath);
+        _engine.Logger.Log($"Descartada '{row.Old}' (total descartadas: {_engine.Ignored.Count})");
         Rows.Remove(row);
         RowsView.Refresh();
         Status = $"Descartada «{row.Old}». No volverá a aparecer (puedes recuperarlas en Ajustes).";
@@ -433,6 +462,9 @@ public partial class EnrichViewModel : ViewModelBase
         Status = manual
             ? $"Buscando «{searchArtist} - {searchTitle}»…"
             : "Reanalizando " + row.Old + "…";
+        _engine.Logger.Head($"Reanalizar '{row.Old}'"
+            + (manual ? $" · buscando '{searchArtist} - {searchTitle}'"
+                      + (searchSource.Length > 0 ? $" solo en {searchSource}" : "") : ""));
         try
         {
             var opts = _engine.BuildOptions();
@@ -456,7 +488,12 @@ public partial class EnrichViewModel : ViewModelBase
                 ? "Reanalizado: " + row.Old
                 : $"Sin resultado para «{searchArtist} - {searchTitle}». Prueba otra grafía.";
         }
-        catch (Exception e) { row.RowStatus = "⚠ " + e.Message; Status = "Error al reanalizar."; }
+        catch (Exception e)
+        {
+            row.RowStatus = "⚠ " + e.Message;
+            Status = "Error al reanalizar.";
+            _engine.Logger.Error($"Error al reanalizar '{row.Old}'", e);
+        }
         finally { IsBusy = false; }
     }
 

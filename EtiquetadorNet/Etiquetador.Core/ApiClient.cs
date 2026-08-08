@@ -17,6 +17,9 @@ public sealed class ApiClient : IDisposable
     private readonly bool _ownsHttp;
     private readonly AppPaths _paths;
 
+    /// <summary>Log opcional: cada petición queda trazada en el archivo (no en la UI).</summary>
+    public Logger? Log { get; set; }
+
     public bool CacheOn { get; set; } = true;
     public int CacheTtlDays { get; set; } = 30;
     public int CacheHits { get; private set; }
@@ -95,11 +98,12 @@ public sealed class ApiClient : IDisposable
     {
         var cp = (CacheOn && useCache) ? CachePath(url) : null;
         var cached = TryReadCache(cp);
-        if (cached != null) return Parse(cached);
+        if (cached != null) { Log?.Detail($"    GET {Short(url)} · caché"); return Parse(cached); }
 
         var th = throttleMs >= 0 ? throttleMs : InferThrottle(url);
         if (th > 0) await Task.Delay(th, ct).ConfigureAwait(false);
 
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         for (int i = 0; i < 4; i++)
         {
             try
@@ -115,21 +119,50 @@ public sealed class ApiClient : IDisposable
                     LastApiError = ($"HTTP {code} {tx}").Trim();
                     if (code == 429 || code == 503)
                     {
-                        if (i >= 1) return null;   // tras 2 intentos, rendirse
+                        if (i >= 1) { Log?.Detail($"    GET {Short(url)} · HTTP {code}, se abandona tras 2 intentos"); return null; }
                         int ra = RetryAfterSeconds(resp.Headers.RetryAfter);
+                        Log?.Detail($"    GET {Short(url)} · HTTP {code}, reintento en {ra}s");
                         await Task.Delay(ra * 1000, ct).ConfigureAwait(false);
                         continue;
                     }
+                    Log?.Detail($"    GET {Short(url)} · HTTP {code} · {Trunc(tx, 200)}");
                     return null;
                 }
                 CacheMiss++;
                 if (CacheOn && cp != null) CacheStore(cp, tx);
+                Log?.Detail($"    GET {Short(url)} · HTTP 200 · {tx.Length} B · {sw.ElapsedMilliseconds} ms");
                 return Parse(tx);
             }
             catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { LastApiError = ex.Message; return null; }
+            catch (Exception ex)
+            {
+                LastApiError = ex.Message;
+                Log?.Detail($"    GET {Short(url)} · FALLO: {ex.GetType().Name}: {ex.Message}");
+                return null;
+            }
         }
         return null;
+    }
+
+    /// <summary>Acorta la URL para el log: host + ruta + query recortada (sin claves largas).</summary>
+    private static string Short(string url)
+    {
+        try
+        {
+            var u = new Uri(url);
+            var q = u.Query;
+            // No se registran claves de API aunque viajen en la query.
+            q = System.Text.RegularExpressions.Regex.Replace(q, @"(?i)([?&](?:client|api|token|key)[^=]*=)[^&]+", "$1***");
+            return u.Host + u.AbsolutePath + Trunc(q, 120);
+        }
+        catch { return Trunc(url, 120); }
+    }
+
+    private static string Trunc(string? s, int n)
+    {
+        s ??= "";
+        s = s.Replace('\n', ' ').Replace('\r', ' ');
+        return s.Length <= n ? s : s.Substring(0, n) + "…";
     }
 
     /// <summary>POST application/x-www-form-urlencoded. Devuelve el cuerpo crudo o null. Sin caché.</summary>

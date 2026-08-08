@@ -82,6 +82,10 @@ public sealed class FileProcessor
 
     private void Step(string phase, double fraction) => StepProgress?.Report((phase, fraction));
 
+    /// <summary>Resumen de una coincidencia para el log ("-" si esa fuente no devolvió nada).</summary>
+    private static string Desc(ProviderResult? r)
+        => r == null ? "-" : $"'{r.Artist} - {r.Title}' ({r.Score}, {r.Dur}s)";
+
     public async Task<ProcessResult> ProcessAsync(string filePath, bool isAcapella, ProcessOptions o, CancellationToken ct = default)
     {
         var fileName = Path.GetFileName(filePath);
@@ -118,9 +122,19 @@ public sealed class FileProcessor
         var isEdit = Regex.IsMatch(rawForOtros, Descriptors.DescRe, IC);
         var kwUsed = Descriptors.CleanKeywords($"{fnArtist} {qTitle}");
 
+        // Traza por canción: es la que permite entender después POR QUÉ salió lo que salió.
+        _log?.Detail($"· {fileName}");
+        _log?.Detail($"    nombre -> artista='{fnArtist}' titulo='{qTitle}'" + (manual ? $"  [MANUAL fuente={(o.SearchSource.Length > 0 ? o.SearchSource : "cualquiera")}]" : ""));
+        if (tagArtist.Length > 0 || tagTitle.Length > 0)
+            _log?.Detail($"    tags   -> artista='{tagArtist}' titulo='{tagTitle}'");
+        _log?.Detail($"    audio  -> {localDur}s · edit={isEdit}");
+
         // En búsqueda manual no se descarta como mezcla: el usuario pide expresamente identificar ESTE tema.
         if (!manual && Matching.IsSkipMix(@base, fnTitle, fnArtist))
+        {
+            _log?.Detail("    -> SALTADA (se considera mezcla/mashup)");
             return new ProcessResult { FilePath = filePath, Old = fileName, New = fileName, Source = "Mezcla", Skip = true, Kw = kwUsed, DurLocal = localDur };
+        }
 
         var cleanOnly = o.CleanOnly;
         ProviderResult? sp = null, it = null, dz = null, mb = null, dc = null, primary = null, sec = null;
@@ -176,6 +190,8 @@ public sealed class FileProcessor
             }
             var spDiag = o.Spotify ? _sp.SpDiag : "off";
             primary = dz ?? it ?? sp;
+            _log?.Detail($"    fuentes-> Deezer={Desc(dz)} · iTunes={Desc(it)} · Spotify={Desc(sp)}"
+                       + (variant.Length > 0 ? $" (via {variant})" : ""));
 
             if (primary == null)
             {
@@ -316,7 +332,10 @@ public sealed class FileProcessor
             var tagAdj = Matching.TagCoherence(tagArtist, tagTitle, primary.Artist, primary.Title);
             var finalScore = Math.Round(primary.Score + tagAdj, 1);
             scoreStr = finalScore.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            _log?.Detail($"    confianza-> {primary.Score} (fuente) {(tagAdj >= 0 ? "+" : "")}{tagAdj} (tags) = {scoreStr}"
+                       + (finalScore < 2.0 ? "  [BAJA]" : ""));
         }
+        _log?.Detail($"    -> {(primary != null || acHit != null || genreOnly || cleanOnly ? "OK" : "SIN RESULTADO")} · fuente={srcLabel} · nuevo='{newBase + ext}'");
 
         return new ProcessResult
         {
