@@ -26,6 +26,20 @@ public static class CrashLog
         };
     }
 
+    /// <summary>
+    /// Red de seguridad de la interfaz: un fallo al pulsar un botón o una opción del menú se
+    /// registra, pero NO tumba la aplicación (antes, cualquier excepción en un comando era fatal).
+    /// Se llama cuando el Dispatcher ya existe (tras inicializar Avalonia).
+    /// </summary>
+    public static void InstallUiGuard()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.UnhandledException += (_, e) =>
+        {
+            Write("UI", e.Exception);
+            e.Handled = true;   // la app sigue viva
+        };
+    }
+
     public static void Write(string kind, Exception ex)
     {
         try

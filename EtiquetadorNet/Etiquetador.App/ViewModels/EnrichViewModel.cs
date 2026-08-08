@@ -498,12 +498,11 @@ public partial class EnrichViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void OpenContainingFolder()
+    private async Task OpenContainingFolderAsync()
     {
         var path = SelectedRow?.Result.FilePath;
         if (string.IsNullOrEmpty(path)) return;
-        try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true }); }
-        catch { /* ignora */ }
+        await Shell.OpenContainingFolderAsync(path);
     }
 
     [RelayCommand]

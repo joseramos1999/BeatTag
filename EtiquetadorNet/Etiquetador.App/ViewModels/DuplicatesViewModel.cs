@@ -1,6 +1,7 @@
+using System.Threading.Tasks;
 using System;
 using System.Collections.ObjectModel;
-using System.Diagnostics;
+
 using Avalonia.Collections;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -84,12 +85,11 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     }
 
     [RelayCommand]
-    private void OpenContainingFolder()
+    private async Task OpenContainingFolderAsync()
     {
         var path = SelectedRow?.FilePath;
         if (string.IsNullOrEmpty(path)) return;
-        try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true }); }
-        catch { }
+        await Shell.OpenContainingFolderAsync(path);
     }
 
     [RelayCommand]

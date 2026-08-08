@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Diagnostics;
+
 using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Collections;
@@ -113,11 +113,10 @@ public partial class IncompleteViewModel : ScanViewModelBase
     }
 
     [RelayCommand]
-    private void OpenContainingFolder()
+    private async Task OpenContainingFolderAsync()
     {
         var path = SelectedRow?.FilePath;
         if (string.IsNullOrEmpty(path)) return;
-        try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true }); }
-        catch { }
+        await Shell.OpenContainingFolderAsync(path);
     }
 }

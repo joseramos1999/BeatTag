@@ -1,6 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
-using System.Diagnostics;
+
 using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -107,19 +107,12 @@ public partial class SettingsViewModel : ViewModelBase
         catch (Exception e) { Status = "No se pudo vaciar del todo la caché: " + e.Message; }
     }
 
-    /// <summary>Abre la carpeta de logs con el archivo de esta sesión seleccionado.</summary>
+    /// <summary>Abre la carpeta de logs de esta sesión.</summary>
     [RelayCommand]
-    private void OpenLogFolder()
+    private async Task OpenLogFolderAsync()
     {
-        try
-        {
-            var f = _engine.Logger.LogFile;
-            if (!string.IsNullOrEmpty(f) && File.Exists(f))
-                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{f}\"") { UseShellExecute = true });
-            else
-                Process.Start(new ProcessStartInfo(_engine.Paths.LogsDir) { UseShellExecute = true });
-        }
-        catch (Exception e) { Status = "No se pudo abrir la carpeta de logs: " + e.Message; }
+        await Shell.OpenFolderAsync(_engine.Paths.LogsDir);
+        Status = "Carpeta de registros: " + _engine.Paths.LogsDir;
     }
 
     /// <summary>Vuelve a tener en cuenta las canciones descartadas con "Quitar de la lista".</summary>
