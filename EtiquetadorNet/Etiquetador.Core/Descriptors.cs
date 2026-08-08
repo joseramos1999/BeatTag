@@ -34,7 +34,8 @@ public static class Descriptors
         s = Rep(s, @"\bver\s+fin\b", " ");                              // VER2 / VER FIN
         s = Rep(s, @"\b\d{2,3}\s+a\s+\d{2,3}\b", " ");                   // transición de BPM "130 a 100"
         s = Rep(s, @"\b(hype intro|acapella intro|aca intro|aca out|acapella out|open show|break intro|melodic intro|hype|intro|outro|extended|segue|segway|redrum|break|starter|transition|djtools|dj tools|acapella|instrumental|version)\b", " ");
-        s = Rep(s, @"(feat\.?|ft\.?|featuring).*$", " ");
+        // OJO con los límites: sin \b, el "ft" de Daft/Kraftwerk/Swift truncaba el nombre entero.
+        s = Rep(s, @"\b(?:feat|ft|featuring)\b\.?.*$", " ");
         s = Rep(s, @"\b\d{2,3}\s*bpm\b", " ");
         s = Rep(s, @"\b\d{1,2}[AB]\b", " ");
         var s2 = Rep(s, @"\b\d{2,3}\b", " ");                            // quita números sueltos (BPM/pista)...

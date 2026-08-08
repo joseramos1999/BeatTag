@@ -77,6 +77,25 @@ public class TextLayerTests
     // --- Clean-Keywords / Build-Kw numericos ---
     [Fact] public void Ck_no_vacia_numerico() => Assert.Equal("404", Descriptors.CleanKeywords("404"));
     [Fact] public void Ck_quita_numero_suelto() => Assert.Equal("Randy", Descriptors.CleanKeywords("Randy 128"));
+
+    // El "ft" solo cuenta como "featuring" si va suelto: dentro de una palabra NO debe cortar.
+    [Theory]
+    [InlineData("Daft Punk", "Daft Punk")]
+    [InlineData("Kraftwerk", "Kraftwerk")]
+    [InlineData("Soft Cell", "Soft Cell")]
+    [InlineData("Taylor Swift", "Taylor Swift")]
+    [InlineData("After Dark", "After Dark")]
+    [InlineData("Defeated", "Defeated")]
+    public void Ck_no_corta_por_ft_dentro_de_palabra(string input, string expected)
+        => Assert.Equal(expected, Descriptors.CleanKeywords(input));
+
+    [Theory]
+    [InlineData("Bad Bunny feat. Drake", "Bad Bunny")]
+    [InlineData("Bad Bunny ft. Drake", "Bad Bunny")]
+    [InlineData("Bad Bunny ft Drake", "Bad Bunny")]
+    [InlineData("Bad Bunny featuring Drake", "Bad Bunny")]
+    public void Ck_sigue_quitando_el_featuring_de_verdad(string input, string expected)
+        => Assert.Equal(expected, Descriptors.CleanKeywords(input));
     [Fact] public void Bk_conserva_numerico() => Assert.Equal("23 Randy", Descriptors.BuildKw("23", "Randy feat Ape Drums"));
 
     // --- Remove-EditorTags ---
