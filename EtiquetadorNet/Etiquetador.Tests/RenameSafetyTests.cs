@@ -41,4 +41,31 @@ public class RenameSafetyTests
         Assert.True(RenameSafety.TryResolveTarget("Bad Bunny - Titi.mp3", "orig.mp3", Dir, out var target, out _));
         Assert.Equal("Bad Bunny - Titi.mp3", target);
     }
+
+    // --- Puntos suspensivos: son legítimos en los títulos y NO son un riesgo de ruta ---
+
+    [Theory]
+    [InlineData("Britney Spears - Oops!... I Did It Again.mp3", "Britney Spears - Oops!... I Did It Again.mp3")]
+    [InlineData("Artista - Espera... (Extended Mix).mp3", "Artista - Espera... (Extended Mix).mp3")]
+    [InlineData("Grupo - Y entonces.. paro.mp3", "Grupo - Y entonces.. paro.mp3")]
+    public void Acepta_puntos_suspensivos_en_el_titulo(string proposed, string expected)
+    {
+        Assert.True(RenameSafety.TryResolveTarget(proposed, "orig.mp3", Dir, out var target, out var err), err);
+        Assert.Equal(expected, target);
+    }
+
+    [Fact]
+    public void Puntos_finales_se_recortan()   // Windows no admite nombres acabados en punto
+    {
+        Assert.True(RenameSafety.TryResolveTarget("Cancion sin final....mp3", "orig.mp3", Dir, out var target, out _));
+        Assert.Equal("Cancion sin final.mp3", target);
+    }
+
+    [Theory]
+    [InlineData("..")]
+    [InlineData(".")]
+    [InlineData("...")]
+    [InlineData("  ..  ")]
+    public void Rechaza_el_nombre_que_es_solo_puntos(string proposed)
+        => Assert.False(RenameSafety.TryResolveTarget(proposed, "orig.mp3", Dir, out _, out _));
 }
