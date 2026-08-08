@@ -4,35 +4,119 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="560"
              x:Class="Etiquetador.App.Views.HelpView">
+    <UserControl.Styles>
+        <!-- Estilos locales para que la guía se lea cómoda -->
+        <Style Selector="TextBlock.h">
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Margin" Value="0,14,0,0" />
+        </Style>
+        <Style Selector="TextBlock.p">
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style Selector="TextBlock.li">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="12,0,0,0" />
+        </Style>
+        <Style Selector="TextBlock.dim">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Foreground" Value="Gray" />
+        </Style>
+    </UserControl.Styles>
+
     <ScrollViewer Padding="16">
-        <StackPanel Spacing="10" MaxWidth="820">
-            <TextBlock Text="BeatTag — guía rápida" FontSize="20" FontWeight="Bold" />
-            <TextBlock TextWrapping="Wrap" Foreground="Gray"
-                       Text="Etiqueta y organiza tu biblioteca para DJ. Flujo típico: añade carpetas en Biblioteca, escanea, y luego usa Enriquecer para completar tags y renombrar. Todo cambio aplicado se puede Deshacer." />
+        <StackPanel Spacing="6" MaxWidth="820">
 
-            <TextBlock Text="📚 Biblioteca" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
-            <TextBlock TextWrapping="Wrap" Text="Añade o arrastra carpetas (marca/desmarca cada una para incluirla o no) y pulsa Escanear. Verás tus canciones con sus tags, calidad y si son Clean/Explícito. 'Importar rekordbox…' trae BPM y clave musical desde un XML de rekordbox (se puede deshacer)." />
+            <TextBlock Text="BeatTag — guía de uso" FontSize="20" FontWeight="Bold" />
+            <TextBlock Classes="dim"
+                       Text="Etiqueta, identifica y organiza tu biblioteca para DJ. Todo lo que se escribe en tus archivos se puede deshacer." />
 
-            <TextBlock Text="✨ Enriquecer" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
-            <TextBlock TextWrapping="Wrap" Text="Analiza y propone tags y un nombre de archivo. 'Analizar' usa la caché (rápido); 'Reanalizar todo' ignora la caché. Con el clic derecho, 'Reanalizar…' te deja corregir la búsqueda, elegir entre las coincidencias encontradas o pegar el enlace de la canción en Deezer, Spotify o Apple Music. Revisa la tabla: puedes editar cualquier celda, escuchar la canción (clic derecho), y desmarcar lo que no quieras. Las de baja confianza se desmarcan solas. Pulsa 'Aplicar seleccionados' para escribir; 'Deshacer última' revierte. Con el clic derecho puedes aplicar una sola canción. Puedes Pausar/Cancelar durante el análisis." />
+            <!-- Flujo recomendado -->
+            <Border Margin="0,10,0,0" Padding="12" CornerRadius="6" Background="#18808080">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Flujo recomendado" FontWeight="Bold" />
+                    <TextBlock Classes="p" Text="1. Biblioteca → añade tus carpetas y pulsa Escanear." />
+                    <TextBlock Classes="p" Text="2. Enriquecer → Analizar. Revisa las propuestas y corrige lo que haga falta." />
+                    <TextBlock Classes="p" Text="3. Aplicar seleccionados. Si algo no te convence, Deshacer última." />
+                </StackPanel>
+            </Border>
 
-            <TextBlock Text="📝 Editor" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
-            <TextBlock TextWrapping="Wrap" Text="Edita a mano el título y los tags de cualquier canción. Busca, selecciona, cambia y Guarda. '▶ Escuchar' reproduce un fragmento para comprobar." />
+            <!-- BIBLIOTECA -->
+            <TextBlock Classes="h" Text="📚 Biblioteca" />
+            <TextBlock Classes="p" Text="El punto de partida: aquí vive tu colección." />
+            <TextBlock Classes="li" Text="• Añade carpetas con el botón o arrastrándolas desde el Explorador." />
+            <TextBlock Classes="li" Text="• Cada carpeta tiene una casilla: desmárcala para excluirla sin borrarla de la lista." />
+            <TextBlock Classes="li" Text="• Escanear lee los tags, la duración y la calidad de cada canción, y detecta si es Clean o Explícito." />
+            <TextBlock Classes="li" Text="• 'Importar rekordbox…' trae el BPM y la clave musical desde un XML exportado de rekordbox (también se puede deshacer)." />
 
-            <TextBlock Text="🔁 Duplicados · 🎚️ Calidad · ⚠️ Incompletas · 🔎 No encontradas" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
-            <TextBlock TextWrapping="Wrap" Text="Herramientas de revisión sobre la biblioteca escaneada. Duplicados: agrupa copias (por artista+título, solo título, o +duración) y permite enviar a la papelera. Calidad: clasifica el audio y filtra el de baja calidad. Incompletas: canciones a las que les falta algún tag (clic derecho para Editar o Reanalizar). No encontradas: las que ninguna fuente identifica." />
+            <!-- ENRIQUECER -->
+            <TextBlock Classes="h" Text="✨ Enriquecer" />
+            <TextBlock Classes="p" Text="El corazón de la app: identifica cada canción en varias fuentes y propone tags y un nombre de archivo limpio." />
+            <TextBlock Classes="li" Text="• Analizar aprovecha la caché: solo procesa lo nuevo o lo que ha cambiado, así que es muy rápido a partir de la segunda vez." />
+            <TextBlock Classes="li" Text="• Reanalizar todo ignora la caché y lo vuelve a consultar todo desde cero." />
+            <TextBlock Classes="li" Text="• Durante el análisis puedes Pausar y Cancelar. La lista va bajando sola con lo que se va identificando." />
+            <TextBlock Classes="li" Text="• Cualquier celda de la tabla es editable: si prefieres otro título o nombre de archivo, escríbelo antes de aplicar." />
+            <TextBlock Classes="li" Text="• Aplicar seleccionados escribe los cambios de todas las canciones marcadas. Las que se aplican bien desaparecen de la lista." />
+            <TextBlock Classes="li" Text="• Deshacer última revierte la aplicación anterior, respetando lo que hayas cambiado a mano por tu cuenta." />
 
-            <TextBlock Text="📊 Estadísticas" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
-            <TextBlock TextWrapping="Wrap" Text="Reparto de la biblioteca por BPM, género, calidad, década y Clean/Explícito." />
+            <TextBlock Classes="p" FontWeight="Bold" Margin="0,8,0,0" Text="Menú del clic derecho (sobre una canción)" />
+            <TextBlock Classes="li" Text="• Escuchar / Parar — reproduce un fragmento para comprobar que es la canción correcta." />
+            <TextBlock Classes="li" Text="• Marcar / desmarcar — igual que el doble clic sobre la fila." />
+            <TextBlock Classes="li" Text="• Aplicar esta canción — escribe solo esa, sin tocar el resto." />
+            <TextBlock Classes="li" Text="• Reanalizar… — abre el buscador (ver más abajo)." />
+            <TextBlock Classes="li" Text="• Quitar de la lista (descartar) — la aparta para siempre; no volverá a aparecer. Se recuperan desde Ajustes." />
+            <TextBlock Classes="li" Text="• Abrir carpeta contenedora." />
 
-            <TextBlock Text="⚙️ Ajustes" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
-            <TextBlock TextWrapping="Wrap" Text="Introduce tus claves de API (se guardan cifradas en tu equipo) y prueba la conexión. 'Vaciar caché' borra las cachés de red, escaneo y análisis. 'Recuperar descartadas' vuelve a tener en cuenta las canciones que quitaste de la lista en Enriquecer. A la derecha, el registro (log) en vivo." />
+            <!-- REANALIZAR -->
+            <TextBlock Classes="h" Text="🔎 Reanalizar una canción concreta" />
+            <TextBlock Classes="p" Text="Para las pistas que se resisten (nombres de archivo inservibles, versiones raras, bootlegs). Tienes tres formas de acertar:" />
+            <TextBlock Classes="li" Text="• Corregir la búsqueda — escribe el artista y el título reales y pulsa Buscar coincidencias. Añade (Remix), (Extended) o (Live) al título si quieres esa versión concreta." />
+            <TextBlock Classes="li" Text="• Elegir de la lista — se muestran las coincidencias con su álbum, año y duración. La duración es la mejor pista para distinguir el original de un radio edit. Doble clic para usarla." />
+            <TextBlock Classes="li" Text="• Pegar el enlace — lo más exacto. Vale el enlace de la canción en Deezer, Spotify o Apple Music. En Apple Music copia el enlace de la CANCIÓN (lleva «?i=» al final), no el del álbum. Los enlaces de Spotify necesitan tus claves en Ajustes." />
+            <TextBlock Classes="dim" Margin="12,2,0,0" Text="Al elegir una coincidencia o pegar un enlace se respeta esa fuente: ninguna otra la sustituye por detrás. La corrección queda guardada, así que no tendrás que repetirla." />
 
-            <TextBlock Text="Consejos" FontWeight="Bold" FontSize="15" Margin="0,8,0,0" />
-            <TextBlock TextWrapping="Wrap" Text="• Pasa el ratón por los botones para ver qué hacen.  • Doble clic en una cabecera de columna la ajusta al contenido.  • Usa 'Desplegar/Cerrar todo' para navegar por carpetas.  • Los cambios se pueden deshacer desde Enriquecer.  • Los logs y crashes se guardan en Documentos\Etiquetador de Musica\logs." />
+            <!-- CONFIANZA -->
+            <TextBlock Classes="h" Text="🎯 La columna «Conf.» (confianza)" />
+            <TextBlock Classes="p" Text="Indica cuánto se fía la app de la propuesta. Suma puntos cuando el título coincide exactamente y cuando la duración de tu archivo cuadra con la del catálogo; resta cuando la versión encontrada no es la que pedías (un directo, un remix, una versión acelerada…) y cuando los tags que ya tenía el archivo contradicen el resultado." />
+            <TextBlock Classes="p" Text="Las propuestas por debajo de 2 se desmarcan solas y se marcan como «baja confianza — revisar». No es que estén mal: es que conviene mirarlas antes de aplicar." />
+
+            <!-- EDITOR -->
+            <TextBlock Classes="h" Text="📝 Editor" />
+            <TextBlock Classes="p" Text="Edición manual, sin consultar ninguna fuente. Busca la canción, cambia el título o los tags y pulsa Guardar. '▶ Escuchar' reproduce un fragmento para comprobar." />
+
+            <!-- REVISIÓN -->
+            <TextBlock Classes="h" Text="🔁 Duplicados · 🎚️ Calidad · ⚠️ Incompletas · 🔎 No encontradas" />
+            <TextBlock Classes="p" Text="Herramientas de revisión sobre la biblioteca ya escaneada." />
+            <TextBlock Classes="li" Text="• Duplicados — agrupa copias (por artista+título, solo título, o añadiendo la duración) y permite enviarlas a la papelera." />
+            <TextBlock Classes="li" Text="• Calidad — clasifica el audio por bitrate y formato para localizar lo que conviene resustituir." />
+            <TextBlock Classes="li" Text="• Incompletas — canciones a las que les falta algún tag; con el clic derecho puedes Editar o Reanalizar." />
+            <TextBlock Classes="li" Text="• No encontradas — las que ninguna fuente ha sabido identificar. Buenas candidatas para el buscador por enlace." />
+
+            <!-- ESTADÍSTICAS -->
+            <TextBlock Classes="h" Text="📊 Estadísticas" />
+            <TextBlock Classes="p" Text="Reparto de tu biblioteca por BPM, género, calidad, década y Clean/Explícito." />
+
+            <!-- AJUSTES -->
+            <TextBlock Classes="h" Text="⚙️ Ajustes" />
+            <TextBlock Classes="li" Text="• Claves de API — Deezer y Apple Music funcionan sin nada. Spotify, Discogs, AcoustID y la IA necesitan tu clave. Se guardan cifradas en tu equipo y nunca salen de él." />
+            <TextBlock Classes="li" Text="• Probar conexión — comprueba que cada fuente responde con tus claves." />
+            <TextBlock Classes="li" Text="• Vaciar caché — borra las cachés de red, escaneo y análisis. Se regeneran solas al volver a usar la app." />
+            <TextBlock Classes="li" Text="• Recuperar descartadas — vuelve a tener en cuenta las canciones que quitaste de la lista en Enriquecer." />
+            <TextBlock Classes="li" Text="• A la derecha tienes el registro (log) en vivo de lo que va haciendo la app." />
+
+            <!-- ATAJOS -->
+            <TextBlock Classes="h" Text="💡 Trucos" />
+            <TextBlock Classes="li" Text="• Pasa el ratón por cualquier botón para ver qué hace." />
+            <TextBlock Classes="li" Text="• Doble clic en una fila la marca o desmarca; doble clic en la cabecera de una columna la ajusta al contenido." />
+            <TextBlock Classes="li" Text="• Usa Desplegar / Cerrar todo para moverte cómodo cuando tienes muchas carpetas." />
+            <TextBlock Classes="li" Text="• Desmarcar todo y marcar solo lo que quieras es más rápido que ir quitando de una en una." />
+
+            <!-- DATOS -->
+            <TextBlock Classes="h" Text="📁 Dónde se guardan tus datos" />
+            <TextBlock Classes="p" Text="En Documentos\Etiquetador de Musica: los ajustes, las cachés, los manifiestos para deshacer y los registros. Si la app fallara, en la subcarpeta logs se guarda un informe del error." />
 
             <!-- Créditos -->
-            <Border Margin="0,20,0,0" Padding="16" CornerRadius="8"
+            <Border Margin="0,22,0,0" Padding="16" CornerRadius="8"
                     Background="#20808080" BorderBrush="#40808080" BorderThickness="1">
                 <StackPanel Spacing="6">
                     <TextBlock Text="🎧 BeatTag" FontSize="18" FontWeight="Bold" />
@@ -45,7 +129,7 @@
 
                     <TextBlock Text="Fuentes de datos" FontWeight="Bold" Margin="0,8,0,0" />
                     <TextBlock TextWrapping="Wrap" Foreground="Gray"
-                               Text="Deezer · iTunes · Spotify · MusicBrainz · Discogs · AcoustID / Chromaprint · IA (opcional)." />
+                               Text="Deezer · Apple Music / iTunes · Spotify · MusicBrainz · Discogs · AcoustID / Chromaprint · IA (opcional)." />
 
                     <TextBlock Text="Tecnologías" FontWeight="Bold" Margin="0,8,0,0" />
                     <TextBlock TextWrapping="Wrap" Foreground="Gray"
