@@ -140,12 +140,13 @@ public sealed class FileProcessor
         // Fuente forzada por el usuario al elegir una coincidencia concreta.
         var onlyDz = manual && o.SearchSource == "Deezer";
         var onlyIt = manual && o.SearchSource == "iTunes";
-        var forced = onlyDz || onlyIt;   // si el usuario eligió fuente, nada la sustituye por detrás
+        var onlySp = manual && o.SearchSource == "Spotify";
+        var forced = onlyDz || onlyIt || onlySp;   // si el usuario eligió fuente, nada la sustituye por detrás
 
         if (!cleanOnly)
         {
             // ORDEN: Deezer -> iTunes -> Spotify (último, cuota limitada)
-            if (o.Deezer && !onlyIt)
+            if (o.Deezer && !onlyIt && !onlySp)
             {
                 Step("Deezer", 0.15);
                 dz = await _dz.SearchAsync(fnArtist, qTitle, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (dz != null) variant = "nombre";
@@ -155,7 +156,7 @@ public sealed class FileProcessor
                 if (dz == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { dz = await _dz.SearchAsync(firstTitleArtist, firstArtist, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (dz != null) variant = "principal"; }
                 if (dz == null && firstTitle.Length > 0) { dz = await _dz.SearchAsync("", firstTitle, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (dz != null) variant = "titulo"; }
             }
-            if (o.Itunes && dz == null && !onlyDz)
+            if (o.Itunes && dz == null && !onlyDz && !onlySp)
             {
                 Step("iTunes", 0.3);
                 it = await _it.SearchAsync(fnArtist, qTitle, localDur, isEdit, ct).ConfigureAwait(false); if (it != null) variant = "nombre";
@@ -165,7 +166,8 @@ public sealed class FileProcessor
                 if (it == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { it = await _it.SearchAsync(firstTitleArtist, firstArtist, localDur, isEdit, ct).ConfigureAwait(false); if (it != null) variant = "principal"; }
                 if (it == null && firstTitle.Length > 0) { it = await _it.SearchAsync("", firstTitle, localDur, isEdit, ct).ConfigureAwait(false); if (it != null) variant = "titulo"; }
             }
-            if (o.Spotify && o.SpotifyId.Length > 0 && o.SpotifySecret.Length > 0 && dz == null && it == null && !forced)
+            if (o.Spotify && o.SpotifyId.Length > 0 && o.SpotifySecret.Length > 0
+                && ((dz == null && it == null && !forced) || onlySp))
             {
                 Step("Spotify", 0.42);
                 sp = await _sp.SearchAsync(fnArtist, qTitle, o.SpotifyId, o.SpotifySecret, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (sp != null) variant = "nombre";

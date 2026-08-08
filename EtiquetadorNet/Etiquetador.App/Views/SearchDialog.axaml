@@ -6,7 +6,7 @@
         x:Class="Etiquetador.App.Views.SearchDialog"
         x:CompileBindings="False"
         Title="Reanalizar — elegir coincidencia"
-        Width="560" Height="520"
+        Width="560" Height="620"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False">
 
@@ -29,6 +29,19 @@
                 <Button x:Name="SearchBtn" Content="🔎 Buscar coincidencias" Click="Search_Click" />
                 <TextBlock x:Name="SearchStatus" Foreground="Gray" FontSize="12" VerticalAlignment="Center" />
             </StackPanel>
+
+            <!-- Enlace directo: lo más exacto, no hay que adivinar nada -->
+            <Border Background="#18808080" CornerRadius="4" Padding="8" Margin="0,6,0,0">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="…o pega el enlace de la canción" FontWeight="Bold" FontSize="12" />
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBox Grid.Column="0" x:Name="LinkBox" KeyDown="OnLinkKeyDown"
+                                 PlaceholderText="https://open.spotify.com/track/…  ·  deezer.com/track/…  ·  music.apple.com/…?i=…" />
+                        <Button Grid.Column="1" x:Name="LinkBtn" Content="Usar enlace" Click="UseLink_Click" Margin="8,0,0,0" />
+                    </Grid>
+                    <TextBlock x:Name="LinkStatus" Foreground="Gray" FontSize="11" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
 
             <TextBlock Text="Coincidencias" FontWeight="Bold" Margin="0,8,0,0" />
         </StackPanel>

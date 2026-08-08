@@ -405,6 +405,10 @@ public partial class EnrichViewModel : ViewModelBase
         Status = $"Descartada «{row.Old}». No volverá a aparecer (puedes recuperarlas en Ajustes).";
     }
 
+    /// <summary>Resuelve un enlace de Deezer/Spotify/Apple Music a la canción concreta que apunta.</summary>
+    public Task<LinkResolver.Result> ResolveLinkAsync(string url)
+        => _engine.Links.ResolveAsync(url, _engine.Config.SpotifyId, _engine.Config.SpotifySecret);
+
     /// <summary>Coincidencias del catálogo para que el usuario elija (diálogo de "Reanalizar…").</summary>
     public Task<IReadOnlyList<Candidate>> FindCandidatesAsync(string artist, string title)
     {

@@ -45,6 +45,7 @@ public sealed class AppEngine
     public AnalysisCache Analysis { get; }
     public IgnoreList Ignored { get; }
     public CandidateFinder Candidates { get; }
+    public LinkResolver Links { get; }
 
     /// <summary>Reproductor de vista previa (uno a la vez), compartido entre pestañas.</summary>
     public AudioPreview Preview { get; } = new();
@@ -70,6 +71,7 @@ public sealed class AppEngine
         Candidates = new CandidateFinder(Api);
         Itunes = new ItunesProvider(Api);
         Spotify = new SpotifyProvider(Api, Logger);
+        Links = new LinkResolver(Api, Spotify);
         MusicBrainz = new MusicBrainzProvider(Api);
         Discogs = new DiscogsProvider(Api);
         AcoustId = new AcoustIdProvider(Api);

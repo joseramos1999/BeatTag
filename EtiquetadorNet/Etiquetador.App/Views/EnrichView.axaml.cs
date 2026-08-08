@@ -118,7 +118,8 @@ public partial class EnrichView : UserControl
         var artist = pr.FnArtist.Length > 0 ? pr.FnArtist : (row.Artist ?? "");
         var title = pr.QTitle.Length > 0 ? pr.QTitle : (row.Title ?? "");
 
-        var terms = await SearchDialog.AskAsync(owner, row.Old, artist, title, vm.FindCandidatesAsync);
+        var svc = new SearchServices(vm.FindCandidatesAsync, vm.ResolveLinkAsync);
+        var terms = await SearchDialog.AskAsync(owner, row.Old, artist, title, svc);
         if (terms == null) return;   // cancelado
         await vm.ReanalyzeRowAsync(row, terms.Artist, terms.Title, terms.Source);   // la fila capturada, no SelectedRow
     }
