@@ -16,6 +16,10 @@ public sealed class DeezerProvider
     internal const string VerRe = @"(?i)\b(?:radio|main|album|single)\s+version\b";
 
     private readonly ApiClient _api;
+
+    /// <summary>Log opcional: deja en el archivo por qué se eligió (o se rechazó) cada candidato.</summary>
+    public Logger? Log { get; set; }
+
     public DeezerProvider(ApiClient api) => _api = api;
 
     public async Task<ProviderResult?> SearchAsync(string artist, string title, bool wantRemix, bool wantLive,
@@ -23,14 +27,16 @@ public sealed class DeezerProvider
     {
         var kw = Descriptors.BuildKw(artist, title);
         if (kw.Length == 0) kw = Descriptors.CleanKeywords(title);
-        if (kw.Length == 0) return null;
+        if (kw.Length == 0) { Log?.Detail("      dz: query vacía tras limpiar -> no se busca"); return null; }
 
+        Log?.Detail($"      dz: query='{kw}' (de '{artist}' / '{title}') remix={wantRemix} live={wantLive} dur={localDur}s");
         var r = await _api.GetAsync($"https://api.deezer.com/search?q={TextUtils.UrlEnc(kw)}&limit=8", null, 350, ct).ConfigureAwait(false);
         var data = J.A(J.P(r, "data"));
-        if (data == null || data.Count == 0) return null;
+        if (data == null || data.Count == 0) { Log?.Detail("      dz: 0 resultados"); return null; }
 
-        var pick = SelectBest(data, artist, title, wantRemix, wantLive, localDur, isEdit, out var bestSc);
-        if (pick == null) return null;
+        var pick = SelectBest(data, artist, title, wantRemix, wantLive, localDur, isEdit, out var bestSc,
+            Log == null ? null : m => Log.Detail("      dz: " + m));
+        if (pick == null) { Log?.Detail($"      dz: {data.Count} resultados, ninguno aceptado"); return null; }
 
         // Enriquecido: BPM, año y contribuidores completos vía track/{id}
         string bpm = "", year = "";
@@ -89,7 +95,7 @@ public sealed class DeezerProvider
 
     /// <summary>Selección + scoring pura sobre los items de Deezer (data). Devuelve el item elegido o null.</summary>
     public static JsonNode? SelectBest(JsonArray data, string artist, string title, bool wantRemix, bool wantLive,
-        int localDur, bool isEdit, out double bestSc)
+        int localDur, bool isEdit, out double bestSc, Action<string>? trace = null)
     {
         var na = TextUtils.Nk(artist);
         var nt = TextUtils.Nk(Descriptors.CleanKeywords(title));
@@ -103,26 +109,46 @@ public sealed class DeezerProvider
             if (an.Length > 0 && tn.StartsWith(an) && nt.Length > 0 && !nt.StartsWith(an)) continue;
             var aok = Matching.ArtistMatch(na, an);
             var tok2 = nt.Length > 0 && (tn.Contains(nt) || nt.Contains(tn));
-            if (!(aok && tok2)) continue;
+            if (!(aok && tok2))
+            {
+                trace?.Invoke($"descartado '{J.S(J.P(x, "artist", "name"))} - {J.S(J.P(x, "title"))}' "
+                            + $"({(aok ? "" : "artista≠")}{(tok2 ? "" : " titulo≠")})".TrimEnd());
+                continue;
+            }
 
             var rt = J.S(J.P(x, "title"));
             double sc = 0.0;
-            if (tn == nt) sc += 10;
-            if (Regex.IsMatch(rt, BadRe, IC)) sc -= 9;
-            if (!wantLive && Regex.IsMatch(rt, LiveRe, IC)) sc -= 9;
-            if (!wantRemix && Regex.IsMatch(rt, RemixRe, IC)) sc -= 6;
-            if (!wantRemix && !wantLive && Regex.IsMatch(rt, VerRe, IC)) sc -= 2;
-            sc -= Math.Max(0, tn.Length - nt.Length) * 0.03;
+            var why = new List<string>();
+            if (tn == nt) { sc += 10; why.Add("titulo exacto +10"); }
+            if (Regex.IsMatch(rt, BadRe, IC)) { sc -= 9; why.Add("basura -9"); }
+            if (!wantLive && Regex.IsMatch(rt, LiveRe, IC)) { sc -= 9; why.Add("live no pedido -9"); }
+            if (!wantRemix && Regex.IsMatch(rt, RemixRe, IC)) { sc -= 6; why.Add("remix no pedido -6"); }
+            if (!wantRemix && !wantLive && Regex.IsMatch(rt, VerRe, IC)) { sc -= 2; why.Add("otra version -2"); }
+            var lenPen = Math.Max(0, tn.Length - nt.Length) * 0.03;
+            if (lenPen > 0) { sc -= lenPen; why.Add($"largo -{lenPen:0.##}"); }
             var dur = J.I(J.P(x, "duration"));
             if (localDur > 0 && dur > 0)
             {
                 var dd = Math.Abs(dur - localDur);
-                if (dd <= 2) sc += 5; else if (dd <= 5) sc += 2;
-                else if (!isEdit) { if (dd > 20) sc -= 5; else if (dd > 10) sc -= 2; }
+                if (dd <= 2) { sc += 5; why.Add($"dur ={dd}s +5"); }
+                else if (dd <= 5) { sc += 2; why.Add($"dur ~{dd}s +2"); }
+                else if (!isEdit)
+                {
+                    if (dd > 20) { sc -= 5; why.Add($"dur Δ{dd}s -5"); }
+                    else if (dd > 10) { sc -= 2; why.Add($"dur Δ{dd}s -2"); }
+                    else why.Add($"dur Δ{dd}s");
+                }
+                else why.Add($"dur Δ{dd}s (edit)");
             }
+            else why.Add("sin duracion");
+            trace?.Invoke($"candidato '{J.S(J.P(x, "artist", "name"))} - {rt}' = {sc:0.##}  [{string.Join(", ", why)}]");
             if (sc > bestSc) { bestSc = sc; pick = x; }
         }
-        if (pick != null && bestSc <= -8) pick = null;   // solo versiones penalizadas -> mejor no tocar
+        if (pick != null && bestSc <= -8)
+        {
+            trace?.Invoke($"RECHAZADO: el mejor solo llega a {bestSc:0.##} (<= -8) -> mejor no tocar");
+            pick = null;   // solo versiones penalizadas -> mejor no tocar
+        }
 
         // Respaldo sin artista: título exacto (>=2 palabras), prefiriendo versión limpia
         if (pick == null && na.Length == 0 && nt.Length > 0 && J.WordCount(title) >= 2)

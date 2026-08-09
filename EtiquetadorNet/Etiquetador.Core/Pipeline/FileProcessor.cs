@@ -82,6 +82,9 @@ public sealed class FileProcessor
 
     private void Step(string phase, double fraction) => StepProgress?.Report((phase, fraction));
 
+    /// <summary>Escapa un campo de la línea DATA (el separador es |).</summary>
+    private static string Csv(string? s) => (s ?? "").Replace('|', '/').Replace('\n', ' ').Replace('\r', ' ').Trim();
+
     /// <summary>Resumen de una coincidencia para el log ("-" si esa fuente no devolvió nada).</summary>
     private static string Desc(ProviderResult? r)
         => r == null ? "-" : $"'{r.Artist} - {r.Title}' ({r.Score}, {r.Dur}s)";
@@ -355,6 +358,28 @@ public sealed class FileProcessor
                        + (finalScore < 2.0 ? "  [BAJA]" : ""));
         }
         _log?.Detail($"    -> {(primary != null || acHit != null || genreOnly || cleanOnly ? "OK" : "SIN RESULTADO")} · fuente={srcLabel} · nuevo='{newBase + ext}'");
+
+        // Línea estructurada (una por canción) pensada para analizar la tirada entera después:
+        // se puede filtrar con  findstr DATA  y abrir como CSV con separador |.
+        var durMatch = primary?.Dur ?? 0;
+        var durDelta = (localDur > 0 && durMatch > 0) ? Math.Abs(durMatch - localDur) : -1;
+        _log?.Detail(string.Join("|", new[]
+        {
+            "DATA",
+            Csv(fileName),
+            primary != null ? "OK" : (cleanOnly ? "LIMPIEZA" : genreOnly ? "SOLO-GENERO" : acHit != null ? "ACOUSTID" : "SIN-RESULTADO"),
+            Csv(srcLabel),
+            Csv(variant),
+            scoreStr,
+            localDur.ToString(),
+            durMatch.ToString(),
+            durDelta.ToString(),
+            Csv(kwUsed),
+            Csv(artist), Csv(title),
+            Csv(remix.Remixer), Csv(remix.Kind),
+            Csv(genre), Csv(bpm), Csv(year),
+            Csv(newBase + ext),
+        }));
 
         return new ProcessResult
         {

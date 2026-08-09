@@ -209,6 +209,7 @@ public partial class EnrichViewModel : ViewModelBase
             var seen = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 
             int i = 0, fromCache = 0;
+            var seenResults = new List<ProcessResult>();   // para el resumen y el informe del final
             foreach (var t in tracks)
             {
                 ct.ThrowIfCancellationRequested();
@@ -232,6 +233,7 @@ public partial class EnrichViewModel : ViewModelBase
                     catch (OperationCanceledException) { throw; }
                     catch { continue; }
                 }
+                seenResults.Add(r);
                 if (r.Skip) continue;
                 if (r.Found || r.CleanOnly) AddRow(r, t);
             }
@@ -244,6 +246,7 @@ public partial class EnrichViewModel : ViewModelBase
             _engine.Logger.Sum($"Análisis terminado: {tracks.Count} revisadas · {Rows.Count} propuestas · {fromCache} de caché · "
                              + $"{low} de baja confianza · {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}");
             _engine.Logger.Detail($"Caché de red: {_engine.Api.CacheHits} aciertos / {_engine.Api.CacheMiss} peticiones nuevas");
+            WriteAnalysisReport(seenResults);
         }
         catch (OperationCanceledException)
         {
@@ -435,6 +438,94 @@ public partial class EnrichViewModel : ViewModelBase
         RowsView.Refresh();
         Status = $"Descartada «{row.Old}». No volverá a aparecer (puedes recuperarlas en Ajustes).";
     }
+
+    /// <summary>
+    /// Cierra la tirada con las cifras que sirven para afinar el algoritmo: reparto por fuente y por
+    /// desenlace, cómo cuadran las duraciones y qué casos fallaron. Además deja un CSV en "informes"
+    /// para poder mirarlo en una hoja de cálculo.
+    /// </summary>
+    private void WriteAnalysisReport(List<ProcessResult> res)
+    {
+        if (res.Count == 0) return;
+        var log = _engine.Logger;
+
+        var found = res.Where(r => !r.Skip && r.Found).ToList();
+        var noRes = res.Where(r => !r.Skip && !r.Found && !r.CleanOnly).ToList();
+        var skipped = res.Where(r => r.Skip).ToList();
+
+        log.Sum("── Resumen para afinar el algoritmo ─────────────");
+        log.Sum($"   Identificadas {found.Count} · sin resultado {noRes.Count} · saltadas como mezcla {skipped.Count}");
+
+        // Reparto por fuente y por estrategia de búsqueda (qué variante acertó).
+        foreach (var g in found.GroupBy(r => r.Source).OrderByDescending(g => g.Count()))
+            log.Sum($"   fuente {g.Key,-14} {g.Count(),6}");
+        foreach (var g in found.Where(r => r.Variant.Length > 0).GroupBy(r => r.Variant).OrderByDescending(g => g.Count()))
+            log.Detail($"   via {g.Key,-16} {g.Count(),6}");
+
+        // Confianza: dónde se concentra y cuántas quedan por debajo del umbral.
+        var scores = found
+            .Select(r => double.TryParse(r.Score, System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : double.NaN)
+            .Where(v => !double.IsNaN(v)).ToList();
+        if (scores.Count > 0)
+        {
+            log.Sum($"   confianza: media {scores.Average():0.0} · <2 (dudosas) {scores.Count(v => v < 2)} · "
+                  + $"2-9 {scores.Count(v => v >= 2 && v < 10)} · >=10 {scores.Count(v => v >= 10)}");
+        }
+
+        // Duración: la señal más fiable de "me han dado otra versión".
+        var withDur = found.Where(r => r.DurLocal > 0 && int.TryParse(r.DurMatch, out var d) && d > 0)
+                           .Select(r => Math.Abs(int.Parse(r.DurMatch) - r.DurLocal)).ToList();
+        if (withDur.Count > 0)
+            log.Sum($"   duración: ≤2s {withDur.Count(d => d <= 2)} · ≤5s {withDur.Count(d => d is > 2 and <= 5)} · "
+                  + $"≤20s {withDur.Count(d => d is > 5 and <= 20)} · >20s {withDur.Count(d => d > 20)} (sospechosas)");
+
+        // Versiones detectadas (remix/edit y quién las firma).
+        var vers = found.Where(r => r.RemixKind.Length > 0).ToList();
+        log.Sum($"   versiones: {vers.Count} detectadas · {vers.Count(r => r.Remixer.Length > 0)} con autor identificado");
+
+        // Lo más accionable: los casos que fallaron, para leerlos y sacar patrones.
+        if (noRes.Count > 0)
+        {
+            log.Sum($"   — primeras {Math.Min(40, noRes.Count)} sin resultado (candidatas a mejorar):");
+            foreach (var r in noRes.Take(40)) log.Sum($"       {r.Old}   [query: {r.Kw}]");
+        }
+        if (skipped.Count > 0)
+        {
+            log.Detail($"   — primeras {Math.Min(20, skipped.Count)} saltadas como mezcla:");
+            foreach (var r in skipped.Take(20)) log.Detail($"       {r.Old}");
+        }
+
+        // CSV completo para hoja de cálculo.
+        try
+        {
+            Directory.CreateDirectory(_engine.Paths.ReportsDir);
+            var csv = Path.Combine(_engine.Paths.ReportsDir, $"analisis_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("archivo;estado;fuente;via;confianza;dur_local;dur_match;dur_delta;query;artista;titulo;remixer;tipo_version;genero;bpm;anio;propuesto");
+            foreach (var r in res)
+            {
+                var dm = int.TryParse(r.DurMatch, out var d) ? d : 0;
+                var delta = (r.DurLocal > 0 && dm > 0) ? Math.Abs(dm - r.DurLocal) : -1;
+                var estado = r.Skip ? "MEZCLA" : r.Found ? "OK" : r.CleanOnly ? "LIMPIEZA" : "SIN-RESULTADO";
+                sb.AppendLine(string.Join(";", new[]
+                {
+                    Q(r.Old), estado, Q(r.Source), Q(r.Variant), Q(r.Score.Replace('.', ',')),   // decimal ES para Excel
+                    r.DurLocal.ToString(), dm.ToString(), delta.ToString(),
+                    Q(r.Kw), Q(r.Artist), Q(r.Title), Q(r.Remixer), Q(r.RemixKind),
+                    Q(r.Genre), Q(r.Bpm), Q(r.Year), Q(r.New),
+                }));
+            }
+            File.WriteAllText(csv, sb.ToString(), System.Text.Encoding.UTF8);
+            log.Sum($"   Informe para analizar: {csv}");
+        }
+        catch (Exception e) { log.Error("No se pudo escribir el informe CSV", e); }
+
+        log.Sum("─────────────────────────────────────────────────");
+    }
+
+    /// <summary>Entrecomilla un campo del CSV (separador ';', como espera Excel en español).</summary>
+    private static string Q(string? s) => "\"" + (s ?? "").Replace("\"", "\"\"").Replace('\n', ' ').Replace('\r', ' ') + "\"";
 
     /// <summary>Resuelve un enlace de Deezer/Spotify/Apple Music a la canción concreta que apunta.</summary>
     public Task<LinkResolver.Result> ResolveLinkAsync(string url)

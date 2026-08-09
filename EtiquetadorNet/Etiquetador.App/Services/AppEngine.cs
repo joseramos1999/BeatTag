@@ -75,7 +75,7 @@ public sealed class AppEngine
         Logger.Detail($"Claves presentes: spotify={Config.SpotifyId.Length > 0 && Config.SpotifySecret.Length > 0} "
                     + $"discogs={Config.DiscogsToken.Length > 0} acoustid={Config.AcoustIdKey.Length > 0} ia={Config.AiKey.Length > 0}");
 
-        Deezer = new DeezerProvider(Api);
+        Deezer = new DeezerProvider(Api) { Log = Logger };
         Candidates = new CandidateFinder(Api);
         Itunes = new ItunesProvider(Api);
         Spotify = new SpotifyProvider(Api, Logger);
