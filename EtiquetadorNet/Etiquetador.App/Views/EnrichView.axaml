@@ -136,6 +136,7 @@
                 <DataGridTextColumn Header="Género" Binding="{Binding Genre}" Width="90" MinWidth="60" />
                 <DataGridTextColumn Header="Año" Binding="{Binding Year}" Width="55" MinWidth="45" />
                 <DataGridTextColumn Header="BPM" Binding="{Binding Bpm}" Width="55" MinWidth="45" />
+                <DataGridTextColumn Header="Remix / versión" Binding="{Binding Remixer}" Width="140" MinWidth="90" IsReadOnly="True" />
                 <DataGridTextColumn Header="Dur." Binding="{Binding Duration}" Width="60" MinWidth="50" IsReadOnly="True" />
                 <DataGridTextColumn Header="Calidad" Binding="{Binding Quality}" Width="80" MinWidth="60" IsReadOnly="True" />
                 <DataGridTextColumn Header="Conf." Binding="{Binding Score}" Width="55" MinWidth="45" IsReadOnly="True" />

@@ -45,6 +45,7 @@ public partial class PreviewRow : ObservableObject
     [ObservableProperty] private string _genre = "";
     [ObservableProperty] private string _year = "";
     [ObservableProperty] private string _bpm = "";
+    [ObservableProperty] private string _remixer = "";   // quién firma la versión (informativo)
 
     public string Old { get; init; } = "";
     public string Folder { get; init; } = "";
@@ -59,6 +60,7 @@ public partial class PreviewRow : ObservableObject
     {
         Result = r;
         New = r.New; Score = r.Score; Source = r.Source;
+        Remixer = r.Remixer.Length > 0 ? $"{r.Remixer} ({r.RemixKind})" : r.RemixKind;
         Title = r.Title; Artist = r.Artist; Album = r.Album; Genre = r.Genre; Year = r.Year; Bpm = r.Bpm;
     }
 

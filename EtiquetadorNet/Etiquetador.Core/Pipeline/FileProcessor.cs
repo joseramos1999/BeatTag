@@ -305,6 +305,23 @@ public sealed class FileProcessor
         var otros = Descriptors.ExtractOtros(Descriptors.CompleteTruncated(rawForOtros), title).ToList();
         foreach (var tr in titleTrail)
             if (!otros.Any(x => TextUtils.Nk(x) == TextUtils.Nk(tr))) otros.Add(tr);
+
+        // Quién firma la versión. Para un DJ, "Hello (Tiesto Remix)" y "Hello" son pistas distintas,
+        // así que el remixer NO puede perderse al limpiar el nombre. Se busca primero en el nombre
+        // del archivo (lo que puso el pool) y, si no, en el título del catálogo.
+        var remix = RemixParser.Parse(rawForOtros);
+        if (!remix.HasRemixer) remix = RemixParser.Parse(@base);
+        if (!remix.HasRemixer && primary != null) remix = RemixParser.Parse(primary.Title);
+
+        if (remix.HasRemixer && !TextUtils.Nk(title).Contains(TextUtils.Nk(remix.Remixer)))
+        {
+            // Sustituye el descriptor pelado ("Remix") por el completo ("Tiesto Remix").
+            var kindKey = TextUtils.Nk(remix.Kind);
+            var idx = otros.FindIndex(x => TextUtils.Nk(x) == kindKey);
+            if (idx >= 0) otros[idx] = remix.Label;
+            else otros.Add(remix.Label);
+            _log?.Detail($"    remix  -> '{remix.Remixer}' ({remix.Kind})");
+        }
         if (isAcapella && !TextUtils.Nk(title).Contains("acapella") && !otros.Any(x => TextUtils.Nk(x).Contains("acapella")))
             otros.Add("Acapella");
 
@@ -358,6 +375,8 @@ public sealed class FileProcessor
             Skip = false,
             Variant = variant,
             Score = scoreStr,
+            Remixer = remix.Remixer,
+            RemixKind = remix.Kind,
             DurLocal = localDur,
             DurMatch = primary != null ? primary.Dur.ToString() : "",
         };

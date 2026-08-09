@@ -38,6 +38,12 @@ public sealed class ProcessResult
     public bool Skip { get; set; }
     public string Variant { get; set; } = "";
     public string Score { get; set; } = "";
+
+    /// <summary>Quién firma la versión ("Tiesto"), vacío si es el tema original o no se pudo saber.</summary>
+    public string Remixer { get; set; } = "";
+
+    /// <summary>Tipo de versión detectada ("Remix", "Bootleg", "Edit"…). Vacío = original.</summary>
+    public string RemixKind { get; set; } = "";
     public int DurLocal { get; set; }
     public string DurMatch { get; set; } = "";
     public string FieldSrc { get; set; } = "";
