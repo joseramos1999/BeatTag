@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
@@ -17,6 +18,8 @@ public partial class EnrichView : UserControl
 {
     private bool _suppressToggle;   // true si el doble clic entró a editar una celda
     private INotifyCollectionChanged? _rowsHook;   // coleccion de filas seguida para el auto-scroll
+    private readonly DispatcherTimer _scrollTimer;  // agrupa las peticiones de scroll
+    private bool _scrollPending;
 
     public EnrichView()
     {
@@ -24,6 +27,16 @@ public partial class EnrichView : UserControl
         DragDrop.SetAllowDrop(this, true);
         DragDrop.AddDragOverHandler(this, OnDragOver);
         DragDrop.AddDropHandler(this, OnDrop);
+
+        // Al analizar entran filas muy seguidas: se desplaza como mucho 3 veces por segundo,
+        // en vez de una por cada canción (que iría a tirones y cargaría la interfaz).
+        _scrollTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(350), DispatcherPriority.Background, (_, _) =>
+        {
+            if (!_scrollPending) return;
+            _scrollPending = false;
+            ScrollToEnd();
+        });
+        _scrollTimer.Start();
     }
 
     // Sigue la coleccion de filas del VM para desplazar al final cada vez que el analisis
@@ -41,23 +54,39 @@ public partial class EnrichView : UserControl
 
     private void OnRowsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        // Solo al añadir filas, y solo si la pestaña Enriquecer está visible. Este guardado
-        // evita la cascada de arranque (cargar la caché con el grid oculto) que provocaba el crash.
+        // Solo al añadir filas, y solo con la pestaña Enriquecer a la vista: desplazar un grid oculto
+        // fue lo que provocó el crash de arranque al cargar la caché.
         if (e.Action != NotifyCollectionChangedAction.Add || !IsEffectivelyVisible) return;
-        Dispatcher.UIThread.Post(ScrollToEnd, DispatcherPriority.Background);
+        _scrollPending = true;   // lo atiende el temporizador
     }
 
-    // Desplaza el ScrollViewer interno hasta el fondo. Deliberadamente NO usa ScrollIntoView(item):
-    // en un DataGrid agrupado eso dispara el bug de layout de Avalonia (InsertDisplayedElement fuera
-    // de rango). Mover el offset del ScrollViewer es seguro y Avalonia lo recorta al máximo válido.
+    /// <summary>
+    /// Lleva la tabla a la última propuesta. El DataGrid de Avalonia NO se desplaza con un
+    /// ScrollViewer (usa PART_VerticalScrollbar + PART_RowsPresenter), así que mover un ScrollViewer
+    /// no hacía nada: hay que usar su propia API o, en su defecto, la barra de desplazamiento.
+    /// </summary>
     private void ScrollToEnd()
     {
+        if (!IsEffectivelyVisible) return;
         try
         {
-            var sv = RowsGrid.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
-            if (sv != null) sv.Offset = new Vector(sv.Offset.X, sv.Extent.Height);
+            if (RowsGrid.ItemsSource is not System.Collections.IEnumerable items) return;
+            object? last = null;
+            foreach (var it in items) last = it;      // la vista agrupada no expone índice directo
+            if (last == null) return;
+            RowsGrid.ScrollIntoView(last, null);
         }
-        catch { }
+        catch
+        {
+            // Respaldo: mover la barra vertical al máximo.
+            try
+            {
+                var bar = RowsGrid.GetVisualDescendants().OfType<ScrollBar>()
+                                  .FirstOrDefault(b => b.Orientation == Avalonia.Layout.Orientation.Vertical);
+                if (bar != null) bar.Value = bar.Maximum;
+            }
+            catch { }
+        }
     }
 
     private async void PickCover_Click(object? sender, RoutedEventArgs e)

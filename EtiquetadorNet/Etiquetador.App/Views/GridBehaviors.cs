@@ -2,6 +2,8 @@ using System.Linq;
 using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Layout;
 using Avalonia.Input;
 using Avalonia.VisualTree;
 
@@ -19,10 +21,12 @@ public static class GridBehaviors
 
         // CLAVE: ir arriba del todo antes de colapsar. Si no, el DataGrid intenta pintar un slot
         // que ya no existe tras colapsar y peta en el layout (InsertDisplayedElement fuera de rango).
+        // El DataGrid no lleva ScrollViewer dentro (comprobado): se mueve su barra vertical.
         try
         {
-            var sv = grid.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
-            if (sv != null) sv.Offset = new Vector(sv.Offset.X, 0);
+            var bar = grid.GetVisualDescendants().OfType<ScrollBar>()
+                          .FirstOrDefault(b => b.Orientation == Orientation.Vertical);
+            if (bar != null) bar.Value = 0;
         }
         catch { }
 
