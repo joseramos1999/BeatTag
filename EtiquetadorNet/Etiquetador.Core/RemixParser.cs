@@ -12,7 +12,10 @@ public readonly record struct RemixInfo(string Remixer, string Kind)
     /// <summary>Sin versión detectada (evita el default con cadenas nulas).</summary>
     public static readonly RemixInfo None = new("", "");
 
-    public bool IsRemix => !string.IsNullOrEmpty(Kind);
+    /// <summary>Es una versión (remix, bootleg, edit, intro de pool…) y no el tema tal cual.</summary>
+    public bool IsVersion => !string.IsNullOrEmpty(Kind);
+
+    /// <summary>Se ha identificado a quién la firma.</summary>
     public bool HasRemixer => !string.IsNullOrEmpty(Remixer);
 
     /// <summary>Cómo se escribe en el nombre: "Tiesto Remix", o solo "Remix" si no hay autor.</summary>
@@ -27,8 +30,17 @@ public static class RemixParser
 {
     private const RegexOptions IC = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
 
-    // Tipos de versión que llevan autor. El orden importa: los compuestos van primero.
-    private const string KindRe = @"(?<kind>remix|rmx|re\s*edit|bootleg|rework|refix|mashup|flip|blend|vip\s*mix|vip|dub\s*mix|edit)";
+    // Tipos de versión que pueden llevar autor. El orden IMPORTA: los compuestos van primero,
+    // si no "Hype Intro" se partiría y "Hype" acabaría contando como parte del nombre del autor.
+    private const string KindRe = @"(?<kind>" +
+        // compuestos (edits de pool)
+        @"hype\s*intro|melodic\s*intro|break\s*intro|drop\s*intro|short\s*intro|long\s*intro|" +
+        @"aca(?:pella)?\s*(?:intro|outro|in|out)|open\s*show|quick\s*(?:hit|edit)|short\s*edit|" +
+        @"re\s*edit|re\s*drum|vip\s*mix|dub\s*mix|club\s*edit|party\s*starter|" +
+        // simples
+        @"remix|rmx|bootleg|rework|refix|mashup|flip|blend|vip|dub|edit|" +
+        @"intro|outro|starter|transition|segue|redrum|loop|percapella|acapella|instrumental" +
+        @")";
 
     // Palabras que describen la versión pero NO son el nombre de nadie ("Extended Mix", "Radio Edit").
     private static readonly HashSet<string> Generic = new(StringComparer.OrdinalIgnoreCase)
@@ -59,15 +71,24 @@ public static class RemixParser
         {
             var inner = g.Groups[1].Value;
             var r = FromFragment(inner);
-            if (r.IsRemix) return r;
+            if (r.IsVersion) return r;
         }
 
-        // 3) Al final, sin paréntesis: "Cancion - Tiesto Remix" o "Cancion Tiesto Remix".
-        var tail = Regex.Match(s, $@"(?:[-–—]\s*)?(?<who>[^\-–—\(\)\[\]]{{0,60}}?)\s*{KindRe}\s*$", IC);
-        if (tail.Success)
+        // 3) Al final y sin paréntesis. Se prueban los separadores de más fiable a menos:
+        //    doble espacio (lo típico del pool: "Titulo  Editor Mashup"), luego guion, luego a pelo.
+        foreach (var pat in new[]
         {
+            $@"\s{{2,}}(?<who>[^\-–—\(\)\[\]]{{1,60}}?)\s+{KindRe}\s*$",
+            $@"[-–—]\s*(?<who>[^\-–—\(\)\[\]]{{1,60}}?)\s+{KindRe}\s*$",
+            $@"(?<who>[^\-–—\(\)\[\]]{{0,60}}?)\s*{KindRe}\s*$",
+        })
+        {
+            var tail = Regex.Match(s, pat, IC);
+            if (!tail.Success) continue;
             var who = Clean(tail.Groups["who"].Value);
-            return new RemixInfo(who, Norm(tail.Groups["kind"].Value));
+            if (who.Length > 0) return new RemixInfo(who, Norm(tail.Groups["kind"].Value));
+            // Sin autor reconocible: se devuelve solo el tipo (lo hace el último patrón).
+            if (pat.StartsWith("(?<who>")) return new RemixInfo("", Norm(tail.Groups["kind"].Value));
         }
 
         return RemixInfo.None;

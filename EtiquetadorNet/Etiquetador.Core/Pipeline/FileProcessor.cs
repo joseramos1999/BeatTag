@@ -309,8 +309,10 @@ public sealed class FileProcessor
         // Quién firma la versión. Para un DJ, "Hello (Tiesto Remix)" y "Hello" son pistas distintas,
         // así que el remixer NO puede perderse al limpiar el nombre. Se busca primero en el nombre
         // del archivo (lo que puso el pool) y, si no, en el título del catálogo.
-        var remix = RemixParser.Parse(rawForOtros);
-        if (!remix.HasRemixer) remix = RemixParser.Parse(@base);
+        // OJO con el orden: FileNameParser ya le quita el editor al nombre (RemoveEditorTags), así que
+        // hay que mirar el nombre ORIGINAL para no perder al autor en los casos sin paréntesis.
+        var remix = RemixParser.Parse(Path.GetFileNameWithoutExtension(fileName));
+        if (!remix.HasRemixer) remix = RemixParser.Parse(rawForOtros);
         if (!remix.HasRemixer && primary != null) remix = RemixParser.Parse(primary.Title);
 
         if (remix.HasRemixer && !TextUtils.Nk(title).Contains(TextUtils.Nk(remix.Remixer)))

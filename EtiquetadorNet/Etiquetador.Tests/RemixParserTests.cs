@@ -19,7 +19,7 @@ public class RemixParserTests
     public void Detecta_al_remixer(string input, string remixer, string kind)
     {
         var r = RemixParser.Parse(input);
-        Assert.True(r.IsRemix);
+        Assert.True(r.IsVersion);
         Assert.Equal(remixer, r.Remixer);
         Assert.Equal(kind, r.Kind);
     }
@@ -52,11 +52,49 @@ public class RemixParserTests
         Assert.Equal("Alex Ferrer", r.Remixer);
     }
 
+    // --- Edits de pool: también llevan firma y no debe perderse ---
+
+    [Theory]
+    [InlineData("Quevedo - Columbia (Alex Ferrer Hype Intro)", "Alex Ferrer", "Hype Intro")]
+    [InlineData("Bizarrap - Session 52 (DJ Nano Quick Hit)", "DJ Nano", "Quick Hit")]
+    [InlineData("Rauw Alejandro - Todo De Ti (Pedro Cabrera Intro)", "Pedro Cabrera", "Intro")]
+    [InlineData("Feid - Normal (Jose Ramos Acapella Out)", "Jose Ramos", "Acapella Out")]
+    [InlineData("Shakira - TQG (Sammy Deejay Short Edit)", "Sammy Deejay", "Short Edit")]
+    [InlineData("Bad Bunny - Moscow Mule (Juanjo Garcia Open Show)", "Juanjo Garcia", "Open Show")]
+    [InlineData("Karol G - Provenza (David Marley Break Intro)", "David Marley", "Break Intro")]
+    [InlineData("Tema (DJ Sanchez Transition)", "DJ Sanchez", "Transition")]
+    [InlineData("Tema - Alex Ferrer Redrum", "Alex Ferrer", "Redrum")]
+    public void Detecta_al_editor_en_los_edits_de_pool(string input, string editor, string kind)
+    {
+        var r = RemixParser.Parse(input);
+        Assert.Equal(editor, r.Remixer);
+        Assert.Equal(kind, r.Kind);
+    }
+
+    [Fact]
+    public void El_doble_espacio_separa_titulo_y_editor()
+    {
+        // Patrón típico de pool: "Titulo  Editor Mashup" (el separador se perdió y quedó doble espacio).
+        var r = RemixParser.Parse("Don Omar - Taboo  Pedro Cabrera Mashup");
+        Assert.Equal("Pedro Cabrera", r.Remixer);   // NO "Taboo Pedro Cabrera"
+        Assert.Equal("Mashup", r.Kind);
+    }
+
+    [Theory]
+    [InlineData("Cancion (Hype Intro)", "Hype Intro")]
+    [InlineData("Cancion (Intro)", "Intro")]
+    public void Edit_de_pool_sin_firma_conserva_el_tipo(string input, string kind)
+    {
+        var r = RemixParser.Parse(input);
+        Assert.False(r.HasRemixer);
+        Assert.Equal(kind, r.Kind);
+    }
+
     [Fact]
     public void Vacio_no_es_remix()
     {
-        Assert.False(RemixParser.Parse("").IsRemix);
-        Assert.False(RemixParser.Parse(null).IsRemix);
+        Assert.False(RemixParser.Parse("").IsVersion);
+        Assert.False(RemixParser.Parse(null).IsVersion);
         Assert.Equal("", RemixParser.Parse(null).Label);   // no debe reventar con nulos
     }
 }
