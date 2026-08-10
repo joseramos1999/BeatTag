@@ -139,15 +139,20 @@ public partial class EnrichView : UserControl
     // "Reanalizar…": primero pregunta QUÉ buscar (para afinar cuando el nombre del archivo engaña).
     private async void Reanalyze_Click(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not EnrichViewModel vm || vm.SelectedRow is not { } row) return;
-        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (DataContext is not EnrichViewModel vm) return;
+        if (vm.SelectedRow is not { } row) { vm.Status = "Selecciona antes una canción de la lista."; return; }
+        if (TopLevel.GetTopLevel(this) is not Window owner) { vm.Status = "No se pudo abrir la ventana de búsqueda."; return; }
 
-        // Se propone lo que se buscaría por defecto: lo deducido del nombre del archivo.
+        // Se proponen SIEMPRE los parámetros ORIGINALES (los que salen del nombre del archivo),
+        // no la propuesta ya calculada: si esta era mala, partir de ella arrastraría el error.
         var pr = Etiquetador.Core.Pipeline.FileNameParser.Parse(row.Old);
-        var artist = pr.FnArtist.Length > 0 ? pr.FnArtist : (row.Artist ?? "");
-        var title = pr.QTitle.Length > 0 ? pr.QTitle : (row.Title ?? "");
+        var artist = pr.FnArtist;
+        var title = pr.QTitle.Length > 0 ? pr.QTitle : pr.FnTitle;
+        // Solo si el nombre no daba nada se recurre a lo propuesto.
+        if (artist.Length == 0 && title.Length == 0) { artist = row.Artist ?? ""; title = row.Title ?? ""; }
 
-        var svc = new SearchServices(vm.FindCandidatesAsync, vm.ResolveLinkAsync);
+        var svc = new SearchServices(vm.FindCandidatesAsync, vm.ResolveLinkAsync,
+            () => vm.IdentifyByFingerprintAsync(row.Result.FilePath));
         var terms = await SearchDialog.AskAsync(owner, row.Old, artist, title, svc);
         if (terms == null) return;   // cancelado
         await vm.ReanalyzeRowAsync(row, terms.Artist, terms.Title, terms.Source);   // la fila capturada, no SelectedRow

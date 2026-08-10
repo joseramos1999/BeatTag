@@ -55,13 +55,17 @@ public partial class MainViewModel : ViewModelBase
             SelectedTabIndex = EditorTabIndex;
         };
 
+        // Al terminar un análisis en Enriquecer, las no identificadas pasan a su pestaña.
+        Enrich.AnalysisCompleted += () => NotFound.LoadFromCache();
+
         _ = InitAsync();
     }
 
     private async Task InitAsync()
     {
         if (Engine.Library.Folders.Count > 0) await Library.ScanAsync();   // rápido gracias a la caché de escaneo
-        Enrich.LoadCached();   // rellena la previsualización con lo que ya haya analizado
+        Enrich.LoadCached();      // rellena la previsualización con lo que ya haya analizado
+        NotFound.LoadFromCache(); // y las que no se identificaron, a su pestaña
     }
 
     private void OnChildChanged(object? sender, PropertyChangedEventArgs e)

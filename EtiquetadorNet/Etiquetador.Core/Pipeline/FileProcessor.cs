@@ -331,7 +331,17 @@ public sealed class FileProcessor
             if (fromDb.HasRemixer) remix = fromDb;
         }
 
-        if (remix.HasRemixer && !TextUtils.Nk(title).Contains(TextUtils.Nk(remix.Remixer)))
+        // El "autor" no puede ser el propio título de la canción: en nombres como
+        // "Stereo Love (Stereo Love Extended)" lo que precede al descriptor es el título repetido,
+        // y colarlo daba cosas como "Stereo Love (Stereo Love Extended Extended)".
+        var nRx = TextUtils.Nk(remix.Remixer);
+        var nTi = TextUtils.Nk(title);
+        var nQt = TextUtils.Nk(qTitle);
+        var esElTitulo = nRx.Length > 0 && (
+               (nTi.Length > 3 && (nTi.Contains(nRx) || nRx.Contains(nTi)))
+            || (nQt.Length > 3 && (nQt.Contains(nRx) || nRx.Contains(nQt))));
+
+        if (remix.HasRemixer && !esElTitulo)
         {
             // Sustituye el descriptor pelado ("Remix") por el completo ("Tiesto Remix").
             var kindKey = TextUtils.Nk(remix.Kind);
@@ -339,8 +349,26 @@ public sealed class FileProcessor
             if (idx >= 0) otros[idx] = remix.Label;
             else otros.Add(remix.Label);
         }
+        else if (esElTitulo) _log?.Detail($"    remix  -> '{remix.Remixer}' descartado (es el propio título)");
         if (isAcapella && !TextUtils.Nk(title).Contains("acapella") && !otros.Any(x => TextUtils.Nk(x).Contains("acapella")))
             otros.Add("Acapella");
+
+        // Descriptores redundantes: si uno ya está contenido en otro se queda el más completo
+        // ("Extended" sobra si está "Cesar Vilo Extended"). Evita "(Extended, X Extended)".
+        if (otros.Count > 1)
+        {
+            var keys = otros.Select(TextUtils.Nk).ToList();
+            for (int a = otros.Count - 1; a >= 0; a--)
+            {
+                if (keys[a].Length == 0) { otros.RemoveAt(a); keys.RemoveAt(a); continue; }
+                for (int b = 0; b < otros.Count; b++)
+                {
+                    if (a == b) continue;
+                    if (keys[b].Length > keys[a].Length && keys[b].Contains(keys[a]))
+                    { otros.RemoveAt(a); keys.RemoveAt(a); break; }
+                }
+            }
+        }
 
         var mainArtist = artist.Trim(); if (mainArtist.Length == 0) mainArtist = fnArtist;
         mainArtist = Regex.Replace(mainArtist, @"(?i)\s+ft\.?\s+", " feat. ");

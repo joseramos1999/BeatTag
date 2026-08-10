@@ -49,6 +49,30 @@ public partial class NotFoundViewModel : ViewModelBase
     [RelayCommand]
     private Task ReanalyzeAllAsync() => RunAnalyzeAsync(force: true);
 
+    /// <summary>
+    /// Rellena la lista con lo que YA hay en la caché de análisis, sin volver a consultar la red.
+    /// Es lo que se llama al terminar un análisis en Enriquecer y al abrir la app: las no
+    /// encontradas aparecen aquí solas, sin tener que reanalizar toda la biblioteca otra vez.
+    /// </summary>
+    public void LoadFromCache()
+    {
+        if (IsBusy) return;
+        var tracks = _engine.Library.Tracks.ToList();
+        if (tracks.Count == 0) return;
+        var sig = _engine.BuildOptions().Signature();
+        Rows.Clear();
+        foreach (var t in tracks)
+        {
+            if (_engine.Ignored.Contains(t.FilePath)) continue;
+            var r = _engine.Analysis.Get(t.FilePath, sig);
+            if (r == null || r.Skip) continue;
+            if (!r.Found && !r.CleanOnly)
+                Rows.Add(new NotFoundRow { FileName = r.Old, Query = r.Kw, Folder = t.Folder, FilePath = t.FilePath });
+        }
+        RowsView.Refresh();
+        if (Rows.Count > 0) Status = $"{Rows.Count} sin identificar (del último análisis).";
+    }
+
     private async Task RunAnalyzeAsync(bool force)
     {
         if (_engine.Library.Folders.Count == 0) { Status = "Añade carpetas en Biblioteca o Enriquecer."; return; }

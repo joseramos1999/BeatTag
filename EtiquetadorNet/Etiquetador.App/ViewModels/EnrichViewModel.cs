@@ -251,6 +251,7 @@ public partial class EnrichViewModel : ViewModelBase
                              + $"{low} de baja confianza · {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}");
             _engine.Logger.Detail($"Caché de red: {_engine.Api.CacheHits} aciertos / {_engine.Api.CacheMiss} peticiones nuevas");
             WriteAnalysisReport(seenResults);
+            AnalysisCompleted?.Invoke();   // las no encontradas van solas a su pestaña
         }
         catch (OperationCanceledException)
         {
@@ -538,9 +539,37 @@ public partial class EnrichViewModel : ViewModelBase
     /// <summary>Entrecomilla un campo del CSV (separador ';', como espera Excel en español).</summary>
     private static string Q(string? s) => "\"" + (s ?? "").Replace("\"", "\"\"").Replace('\n', ' ').Replace('\r', ' ') + "\"";
 
+    /// <summary>
+    /// Identifica una canción por su HUELLA ACÚSTICA (AcoustID): no depende del nombre del archivo,
+    /// así que es la última bala para las pistas cuyo nombre no dice nada. Necesita la clave AcoustID.
+    /// </summary>
+    public async Task<LinkResolver.Result> IdentifyByFingerprintAsync(string filePath)
+    {
+        var key = _engine.Config.AcoustIdKey;
+        if (string.IsNullOrWhiteSpace(key))
+            return new LinkResolver.Result(null, "Para identificar por huella hace falta tu clave de AcoustID (pestaña Ajustes).");
+        try
+        {
+            var fp = await Task.Run(() => _engine.Fingerprint.GetAsync(filePath, _engine.Http));
+            if (fp is not FingerprintResult f || f.Fingerprint.Length == 0)
+                return new LinkResolver.Result(null, "No se pudo calcular la huella de este archivo.");
+
+            var hit = await _engine.AcoustId.LookupAsync(f.Duration, f.Fingerprint, key);
+            if (hit == null || hit.Title.Length == 0)
+                return new LinkResolver.Result(null, "La huella no coincide con ninguna canción conocida.");
+
+            return new LinkResolver.Result(
+                new Candidate("AcoustID", hit.Artist, hit.Title, hit.Album, hit.Year, (int)f.Duration), "");
+        }
+        catch (Exception e) { return new LinkResolver.Result(null, "Error al identificar por huella: " + e.Message); }
+    }
+
     /// <summary>Resuelve un enlace de Deezer/Spotify/Apple Music a la canción concreta que apunta.</summary>
     public Task<LinkResolver.Result> ResolveLinkAsync(string url)
         => _engine.Links.ResolveAsync(url, _engine.Config.SpotifyId, _engine.Config.SpotifySecret);
+
+    /// <summary>Se dispara al terminar un análisis, para que otras pestañas se refresquen.</summary>
+    public event Action? AnalysisCompleted;
 
     /// <summary>Coincidencias del catálogo para que el usuario elija (diálogo de "Reanalizar…").</summary>
     public Task<IReadOnlyList<Candidate>> FindCandidatesAsync(string artist, string title)
@@ -560,7 +589,10 @@ public partial class EnrichViewModel : ViewModelBase
         string searchSource = "")
     {
         row ??= SelectedRow;
-        if (row == null || IsBusy) return;
+        // Antes se salía en silencio y parecía que "no funcionaba": ahora se dice por qué.
+        if (row == null) { Status = "Selecciona antes una canción de la lista."; return; }
+        if (IsBusy) { Status = "Hay un proceso en curso; espera a que termine para reanalizar."; return; }
+        _engine.ReleaseAudio();
         IsBusy = true;
         var manual = searchArtist.Length > 0 || searchTitle.Length > 0;
         Status = manual

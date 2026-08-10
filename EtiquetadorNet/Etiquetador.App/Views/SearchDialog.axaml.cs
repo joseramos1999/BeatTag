@@ -18,7 +18,8 @@ public sealed record SearchTerms(string Artist, string Title, string Source = ""
 /// <summary>Servicios que el diálogo necesita del ViewModel (búsqueda y resolución de enlaces).</summary>
 public sealed record SearchServices(
     Func<string, string, Task<IReadOnlyList<Candidate>>> Find,
-    Func<string, Task<LinkResolver.Result>> ResolveLink);
+    Func<string, Task<LinkResolver.Result>> ResolveLink,
+    Func<Task<LinkResolver.Result>> IdentifyByFingerprint);
 
 /// <summary>
 /// Diálogo previo a "Reanalizar": permite afinar qué se busca, ELEGIR entre las coincidencias del
@@ -79,6 +80,33 @@ public partial class SearchDialog : Window
     }
 
     private async void Search_Click(object? sender, RoutedEventArgs e) => await RunSearchAsync();
+
+    // Identifica por el AUDIO: no depende del nombre, ideal para las pistas imposibles.
+    private async void Fingerprint_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_svc == null || _busy) return;
+        _busy = true;
+        FpBtn.IsEnabled = false;
+        SearchStatus.Text = "Analizando el audio… (puede tardar unos segundos)";
+        try
+        {
+            var res = await _svc.IdentifyByFingerprint();
+            if (res.Candidate is { } c)
+            {
+                // Se rellenan los campos con lo identificado y se relanza la búsqueda para
+                // que puedas ver y elegir la versión concreta.
+                ArtistBox.Text = c.Artist;
+                TitleBox.Text = c.Title;
+                SearchStatus.Text = $"Huella: {c.Artist} — {c.Title}. Elige la versión.";
+                _busy = false;
+                await RunSearchAsync();
+                return;
+            }
+            SearchStatus.Text = "⚠ " + res.Error;
+        }
+        catch (Exception ex) { SearchStatus.Text = "⚠ " + ex.Message; }
+        finally { _busy = false; FpBtn.IsEnabled = true; }
+    }
 
     // --- Enlace directo ---
 
