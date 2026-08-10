@@ -82,7 +82,10 @@
 
             <!-- EDITOR -->
             <TextBlock Classes="h" Text="📝 Editor" />
-            <TextBlock Classes="p" Text="Edición manual, sin consultar ninguna fuente. Busca la canción, cambia el título o los tags y pulsa Guardar. '▶ Escuchar' reproduce un fragmento para comprobar." />
+            <TextBlock Classes="p" Text="Edición manual, con el control en tus manos. Busca la canción, cambia lo que quieras y pulsa Guardar." />
+            <TextBlock Classes="li" Text="• Puedes editar también el NOMBRE DEL ARCHIVO: al guardar se renombra (se conserva la extensión y nunca se pisa otro archivo)." />
+            <TextBlock Classes="li" Text="• '🔎 Reanalizar…' abre el mismo buscador que Enriquecer y RELLENA el formulario con la propuesta; no se escribe nada hasta que pulses Guardar." />
+            <TextBlock Classes="li" Text="• '▶ Escuchar' reproduce un fragmento para comprobar que es la canción correcta." />
 
             <!-- REVISIÓN -->
             <TextBlock Classes="h" Text="🔁 Duplicados · 🎚️ Calidad · ⚠️ Incompletas · 🔎 No encontradas" />

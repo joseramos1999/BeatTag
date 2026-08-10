@@ -61,6 +61,18 @@ public class RenameSafetyTests
         Assert.Equal("Cancion sin final.mp3", target);
     }
 
+    // El campo "Nombre del archivo" del Editor pasa por esta misma validación.
+    [Fact]
+    public void Editor_no_deja_cambiar_la_extension()
+    {
+        Assert.True(RenameSafety.TryResolveTarget("Nuevo nombre.wav", "cancion.mp3", Dir, out var target, out _));
+        Assert.Equal("Nuevo nombre.mp3", target);   // se conserva la extensión original
+    }
+
+    [Fact]
+    public void Editor_no_deja_escapar_de_la_carpeta()
+        => Assert.False(RenameSafety.TryResolveTarget(@"..\fuera.mp3", "cancion.mp3", Dir, out _, out _));
+
     [Theory]
     [InlineData("..")]
     [InlineData(".")]
