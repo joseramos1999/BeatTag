@@ -94,6 +94,7 @@ public partial class NotFoundViewModel : ViewModelBase
             {
                 ct.ThrowIfCancellationRequested();
                 i++;
+                if (_engine.Ignored.Contains(t.FilePath)) continue;   // descartada por el usuario
                 Progress = tracks.Count == 0 ? 0 : (double)i / tracks.Count * 100;
                 Status = $"{(force ? "Reanalizando" : "Analizando")} {i}/{tracks.Count}…  {t.FileName}";
                 ProcessResult r;
@@ -117,6 +118,22 @@ public partial class NotFoundViewModel : ViewModelBase
 
     [RelayCommand]
     private void EditThis() { if (SelectedRow != null) _engine.RequestEdit(SelectedRow.FilePath); }
+
+    /// <summary>
+    /// Descarta la canción: no volverá a aparecer ni aquí ni en Enriquecer. Útil para lo que nunca
+    /// se va a identificar (himnos, sintonías, grabaciones propias). Se recupera desde Ajustes.
+    /// </summary>
+    [RelayCommand]
+    private void DiscardSelected()
+    {
+        var row = SelectedRow;
+        if (row == null) { Status = "Selecciona antes una canción de la lista."; return; }
+        _engine.IgnoreTrack(row.FilePath);
+        _engine.Logger.Log($"Descartada '{row.FileName}' (total descartadas: {_engine.Ignored.Count})");
+        Rows.Remove(row);
+        RowsView.Refresh();
+        Status = $"Descartada «{row.FileName}». No volverá a aparecer (puedes recuperarlas en Ajustes).";
+    }
 
     [RelayCommand]
     private void PlayPreview()

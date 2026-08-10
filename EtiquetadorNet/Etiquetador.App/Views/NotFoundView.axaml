@@ -34,6 +34,8 @@
                     <MenuItem Header="Editar esta canción" Command="{Binding EditThisCommand}" />
                     <MenuItem Header="Reanalizar…" Click="Reanalyze_Click"
                               ToolTip.Tip="Corrige la búsqueda, elige entre las coincidencias, pega un enlace o identifica por huella. Si aparece, se aplica." />
+                    <MenuItem Header="Quitar de la lista (descartar)" Command="{Binding DiscardSelectedCommand}"
+                              ToolTip.Tip="No volverá a aparecer ni aquí ni en Enriquecer. Se recupera desde Ajustes." />
                     <Separator />
                     <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
                 </ContextMenu>
