@@ -32,7 +32,8 @@
                 <ContextMenu>
                     <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
                     <MenuItem Header="Editar esta canción" Command="{Binding EditThisCommand}" />
-                    <MenuItem Header="Reanalizar (y aplicar si aparece)" Command="{Binding ReanalyzeThisCommand}" />
+                    <MenuItem Header="Reanalizar…" Click="Reanalyze_Click"
+                              ToolTip.Tip="Corrige la búsqueda, elige entre las coincidencias, pega un enlace o identifica por huella. Si aparece, se aplica." />
                     <Separator />
                     <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
                 </ContextMenu>

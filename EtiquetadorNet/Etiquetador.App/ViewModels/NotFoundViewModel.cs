@@ -1,3 +1,4 @@
+using Etiquetador.App.Views;
 using System;
 using System.Collections.ObjectModel;
 
@@ -126,16 +127,35 @@ public partial class NotFoundViewModel : ViewModelBase
         catch (Exception e) { Status = "No se pudo reproducir: " + e.Message; }
     }
 
-    [RelayCommand]
-    private async Task ReanalyzeThis()
+    /// <summary>Servicios del diálogo "Reanalizar…" (los mismos que en Enriquecer).</summary>
+    public SearchServices SearchServicesFor(string filePath)
+        => new(_engine.FindCandidatesAsync, _engine.ResolveLinkAsync,
+               () => _engine.IdentifyByFingerprintAsync(filePath));
+
+    /// <summary>
+    /// Reanaliza una fila con los términos que dicte el usuario (mismo diálogo que Enriquecer) y,
+    /// si aparece, aplica el cambio. La fila llega por parámetro: el diálogo es modal y la tabla
+    /// puede perder la selección mientras está abierto.
+    /// </summary>
+    public async Task ReanalyzeRowAsync(NotFoundRow? row, string searchArtist = "", string searchTitle = "",
+        string searchSource = "")
     {
-        var row = SelectedRow;
-        if (row == null || IsBusy) return;
+        row ??= SelectedRow;
+        if (row == null) { Status = "Selecciona antes una canción de la lista."; return; }
+        if (IsBusy) { Status = "Hay un proceso en curso; espera a que termine."; return; }
+        _engine.ReleaseAudio();   // el reproductor mantiene el archivo abierto y el renombrado fallaría
         IsBusy = true;
-        Status = "Reanalizando " + row.FileName + "…";
+        var manual = searchArtist.Length > 0 || searchTitle.Length > 0;
+        Status = manual ? $"Buscando «{searchArtist} - {searchTitle}»…" : "Reanalizando " + row.FileName + "…";
+        _engine.Logger.Head($"Reanalizar (no encontradas) '{row.FileName}'"
+            + (manual ? $" · buscando '{searchArtist} - {searchTitle}'"
+                      + (searchSource.Length > 0 ? $" solo en {searchSource}" : "") : ""));
         try
         {
             var opts = _engine.BuildOptions();
+            opts.SearchArtist = searchArtist;
+            opts.SearchTitle = searchTitle;
+            opts.SearchSource = searchSource;
             var r = await Task.Run(() => _engine.Processor.ProcessAsync(row.FilePath, isAcapella: false, opts));
             if (r.Skip || !r.Found) { row.RowStatus = "sigue sin encontrarse"; Status = "Sigue sin encontrarse."; return; }
             var fields = _engine.BuildFields();
@@ -146,6 +166,8 @@ public partial class NotFoundViewModel : ViewModelBase
             {
                 Rows.Remove(row);   // solo se quita si de verdad se escribió
                 RowsView.Refresh();
+                _engine.Applied.Add(res.FinalPath);   // ya aplicada: no reaparecerá al analizar
+                _engine.Applied.Save();
                 Status = $"¡Encontrada y actualizada!: {row.FileName}";
             }
             else

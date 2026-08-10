@@ -151,8 +151,7 @@ public partial class EnrichView : UserControl
         // Solo si el nombre no daba nada se recurre a lo propuesto.
         if (artist.Length == 0 && title.Length == 0) { artist = row.Artist ?? ""; title = row.Title ?? ""; }
 
-        var svc = new SearchServices(vm.FindCandidatesAsync, vm.ResolveLinkAsync,
-            () => vm.IdentifyByFingerprintAsync(row.Result.FilePath));
+        var svc = vm.SearchServicesFor(row.Result.FilePath);
         var terms = await SearchDialog.AskAsync(owner, row.Old, artist, title, svc);
         if (terms == null) return;   // cancelado
         await vm.ReanalyzeRowAsync(row, terms.Artist, terms.Title, terms.Source);   // la fila capturada, no SelectedRow

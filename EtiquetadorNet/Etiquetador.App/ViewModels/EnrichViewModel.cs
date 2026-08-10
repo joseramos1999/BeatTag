@@ -16,6 +16,7 @@ using Etiquetador.App.Services;
 using Etiquetador.Core;
 using Etiquetador.Core.Pipeline;
 using Etiquetador.Core.Providers;
+using Etiquetador.App.Views;
 
 namespace Etiquetador.App.ViewModels;
 
@@ -539,45 +540,13 @@ public partial class EnrichViewModel : ViewModelBase
     /// <summary>Entrecomilla un campo del CSV (separador ';', como espera Excel en español).</summary>
     private static string Q(string? s) => "\"" + (s ?? "").Replace("\"", "\"\"").Replace('\n', ' ').Replace('\r', ' ') + "\"";
 
-    /// <summary>
-    /// Identifica una canción por su HUELLA ACÚSTICA (AcoustID): no depende del nombre del archivo,
-    /// así que es la última bala para las pistas cuyo nombre no dice nada. Necesita la clave AcoustID.
-    /// </summary>
-    public async Task<LinkResolver.Result> IdentifyByFingerprintAsync(string filePath)
-    {
-        var key = _engine.Config.AcoustIdKey;
-        if (string.IsNullOrWhiteSpace(key))
-            return new LinkResolver.Result(null, "Para identificar por huella hace falta tu clave de AcoustID (pestaña Ajustes).");
-        try
-        {
-            var fp = await Task.Run(() => _engine.Fingerprint.GetAsync(filePath, _engine.Http));
-            if (fp is not FingerprintResult f || f.Fingerprint.Length == 0)
-                return new LinkResolver.Result(null, "No se pudo calcular la huella de este archivo.");
-
-            var hit = await _engine.AcoustId.LookupAsync(f.Duration, f.Fingerprint, key);
-            if (hit == null || hit.Title.Length == 0)
-                return new LinkResolver.Result(null, "La huella no coincide con ninguna canción conocida.");
-
-            return new LinkResolver.Result(
-                new Candidate("AcoustID", hit.Artist, hit.Title, hit.Album, hit.Year, (int)f.Duration), "");
-        }
-        catch (Exception e) { return new LinkResolver.Result(null, "Error al identificar por huella: " + e.Message); }
-    }
-
-    /// <summary>Resuelve un enlace de Deezer/Spotify/Apple Music a la canción concreta que apunta.</summary>
-    public Task<LinkResolver.Result> ResolveLinkAsync(string url)
-        => _engine.Links.ResolveAsync(url, _engine.Config.SpotifyId, _engine.Config.SpotifySecret);
-
     /// <summary>Se dispara al terminar un análisis, para que otras pestañas se refresquen.</summary>
     public event Action? AnalysisCompleted;
 
-    /// <summary>Coincidencias del catálogo para que el usuario elija (diálogo de "Reanalizar…").</summary>
-    public Task<IReadOnlyList<Candidate>> FindCandidatesAsync(string artist, string title)
-    {
-        // Si el usuario tiene ambas fuentes apagadas, se usa Deezer (no necesita clave) para poder listar.
-        var dz = UseDeezer || !UseItunes;
-        return _engine.Candidates.FindAsync(artist, title, dz, UseItunes);
-    }
+    /// <summary>Servicios del diálogo "Reanalizar…" (los mismos que usa No encontradas).</summary>
+    public SearchServices SearchServicesFor(string filePath)
+        => new(_engine.FindCandidatesAsync, _engine.ResolveLinkAsync,
+               () => _engine.IdentifyByFingerprintAsync(filePath));
 
     /// <summary>
     /// Reanaliza UNA fila. Si se pasan términos, se buscan ESOS en vez de deducirlos del nombre del

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System;
 using System.IO;
 using System.Net.Http;
@@ -162,6 +163,45 @@ public sealed class AppEngine
     }
 
     public void ClearAnalysisCache() => Analysis.Clear();
+
+    // --- Servicios del diálogo "Reanalizar…" (los usan Enriquecer y No encontradas por igual) ---
+
+    /// <summary>Coincidencias del catálogo para que el usuario elija a mano.</summary>
+    public Task<IReadOnlyList<Candidate>> FindCandidatesAsync(string artist, string title)
+    {
+        // Si el usuario tiene ambas fuentes apagadas se usa Deezer (no necesita clave) para poder listar.
+        var dz = Config.UseDeezer || !Config.UseItunes;
+        return Candidates.FindAsync(artist, title, dz, Config.UseItunes);
+    }
+
+    /// <summary>Resuelve un enlace de Deezer/Spotify/Apple Music a la canción concreta.</summary>
+    public Task<LinkResolver.Result> ResolveLinkAsync(string url)
+        => Links.ResolveAsync(url, Config.SpotifyId, Config.SpotifySecret);
+
+    /// <summary>
+    /// Identifica por HUELLA ACÚSTICA (AcoustID): no depende del nombre del archivo, así que es la
+    /// última bala para las pistas cuyo nombre no dice nada. Necesita la clave de AcoustID.
+    /// </summary>
+    public async Task<LinkResolver.Result> IdentifyByFingerprintAsync(string filePath)
+    {
+        var key = Config.AcoustIdKey;
+        if (string.IsNullOrWhiteSpace(key))
+            return new LinkResolver.Result(null, "Para identificar por huella hace falta tu clave de AcoustID (pestaña Ajustes).");
+        try
+        {
+            var fp = await Task.Run(() => Fingerprint.GetAsync(filePath, Http)).ConfigureAwait(false);
+            if (fp is not FingerprintResult f || f.Fingerprint.Length == 0)
+                return new LinkResolver.Result(null, "No se pudo calcular la huella de este archivo.");
+
+            var hit = await AcoustId.LookupAsync(f.Duration, f.Fingerprint, key).ConfigureAwait(false);
+            if (hit == null || hit.Title.Length == 0)
+                return new LinkResolver.Result(null, "La huella no coincide con ninguna canción conocida.");
+
+            return new LinkResolver.Result(
+                new Candidate("AcoustID", hit.Artist, hit.Title, hit.Album, hit.Year, (int)f.Duration), "");
+        }
+        catch (Exception e) { return new LinkResolver.Result(null, "Error al identificar por huella: " + e.Message); }
+    }
 
     /// <summary>
     /// Suelta el archivo que esté sonando. OBLIGATORIO antes de escribir tags o renombrar: el
