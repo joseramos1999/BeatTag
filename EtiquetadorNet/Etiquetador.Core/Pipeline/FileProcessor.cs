@@ -149,6 +149,18 @@ public sealed class FileProcessor
         var wantRemix = Regex.IsMatch(descSrc, @"(?i)\b(remix|rmx|bootleg|flip|mashup|vip)\b");
         var wantLive = Regex.IsMatch(descSrc, @"(?i)\b(live|en\s+vivo|en\s+directo|unplugged|ac[uú]stic[oa])\b");
 
+        // Quién firma la versión. Se calcula ANTES de buscar para poder puntuar mejor: si el catálogo
+        // devuelve justo esa versión ("... (Yaniss Remix)"), es la pista correcta y no una coincidencia
+        // a medias. Para un DJ, además, el remixer no puede perderse al limpiar el nombre.
+        var remix = RemixParser.Parse(Path.GetFileNameWithoutExtension(fileName));
+        if (!remix.HasRemixer) remix = RemixParser.Parse(rawForOtros);
+        if (manual && o.SearchTitle.Length > 0)
+        {
+            var manualRemix = RemixParser.Parse(o.SearchTitle);
+            if (manualRemix.HasRemixer) remix = manualRemix;
+        }
+        if (remix.HasRemixer) _log?.Detail($"    remix  -> '{remix.Remixer}' ({remix.Kind})");
+
         const string splitArt = @"(?i)\s*(?:,| x | vs\.?| feat\.?| ft\.?)\s*";
         var firstArtist = fnArtist.Length > 0 ? Regex.Split(fnArtist, splitArt)[0].Trim() : "";
         var firstTitleArtist = fnTitle.Length > 0 ? Regex.Split(fnTitle, splitArt)[0].Trim() : "";
@@ -166,12 +178,12 @@ public sealed class FileProcessor
             if (o.Deezer && !onlyIt && !onlySp)
             {
                 Step("Deezer", 0.15);
-                dz = await _dz.SearchAsync(fnArtist, qTitle, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (dz != null) variant = "nombre";
-                if (dz == null && fnArtist.Length > 0) { dz = await _dz.SearchAsync(fnTitle, fnArtist, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (dz != null) variant = "invertido"; }
-                if (dz == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(tagArtist, tagTitle, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (dz != null) variant = "tag"; }
-                if (dz == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(firstArtist, firstTitle, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (dz != null) variant = "principal"; }
-                if (dz == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { dz = await _dz.SearchAsync(firstTitleArtist, firstArtist, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (dz != null) variant = "principal"; }
-                if (dz == null && firstTitle.Length > 0) { dz = await _dz.SearchAsync("", firstTitle, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (dz != null) variant = "titulo"; }
+                dz = await _dz.SearchAsync(fnArtist, qTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz != null) variant = "nombre";
+                if (dz == null && fnArtist.Length > 0) { dz = await _dz.SearchAsync(fnTitle, fnArtist, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz != null) variant = "invertido"; }
+                if (dz == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(tagArtist, tagTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz != null) variant = "tag"; }
+                if (dz == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(firstArtist, firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz != null) variant = "principal"; }
+                if (dz == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { dz = await _dz.SearchAsync(firstTitleArtist, firstArtist, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz != null) variant = "principal"; }
+                if (dz == null && firstTitle.Length > 0) { dz = await _dz.SearchAsync("", firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz != null) variant = "titulo"; }
             }
             if (o.Itunes && dz == null && !onlyDz && !onlySp)
             {
@@ -222,7 +234,7 @@ public sealed class FileProcessor
                 if (ai != null && ai.Title.Length > 0 && ai.Confidence >= 0.5 && !ai.IsMashup)
                 {
                     var aiA = ai.Artist; var aiT = ai.Title;
-                    if (o.Deezer) { dz = await _dz.SearchAsync(aiA, aiT, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (dz == null && aiA.Length > 0) dz = await _dz.SearchAsync(aiT, aiA, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); }
+                    if (o.Deezer) { dz = await _dz.SearchAsync(aiA, aiT, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz == null && aiA.Length > 0) dz = await _dz.SearchAsync(aiT, aiA, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); }
                     if (dz == null && o.Itunes) { it = await _it.SearchAsync(aiA, aiT, localDur, isEdit, ct).ConfigureAwait(false); if (it == null && aiA.Length > 0) it = await _it.SearchAsync(aiT, aiA, localDur, isEdit, ct).ConfigureAwait(false); }
                     primary = dz ?? it;
                     if (primary != null) variant = "ia";
@@ -309,14 +321,12 @@ public sealed class FileProcessor
         foreach (var tr in titleTrail)
             if (!otros.Any(x => TextUtils.Nk(x) == TextUtils.Nk(tr))) otros.Add(tr);
 
-        // Quién firma la versión. Para un DJ, "Hello (Tiesto Remix)" y "Hello" son pistas distintas,
-        // así que el remixer NO puede perderse al limpiar el nombre. Se busca primero en el nombre
-        // del archivo (lo que puso el pool) y, si no, en el título del catálogo.
-        // OJO con el orden: FileNameParser ya le quita el editor al nombre (RemoveEditorTags), así que
-        // hay que mirar el nombre ORIGINAL para no perder al autor en los casos sin paréntesis.
-        var remix = RemixParser.Parse(Path.GetFileNameWithoutExtension(fileName));
-        if (!remix.HasRemixer) remix = RemixParser.Parse(rawForOtros);
-        if (!remix.HasRemixer && primary != null) remix = RemixParser.Parse(primary.Title);
+        // Si el nombre del archivo no daba autor, se intenta con el título del catálogo.
+        if (!remix.HasRemixer && primary != null)
+        {
+            var fromDb = RemixParser.Parse(primary.Title);
+            if (fromDb.HasRemixer) remix = fromDb;
+        }
 
         if (remix.HasRemixer && !TextUtils.Nk(title).Contains(TextUtils.Nk(remix.Remixer)))
         {
@@ -325,7 +335,6 @@ public sealed class FileProcessor
             var idx = otros.FindIndex(x => TextUtils.Nk(x) == kindKey);
             if (idx >= 0) otros[idx] = remix.Label;
             else otros.Add(remix.Label);
-            _log?.Detail($"    remix  -> '{remix.Remixer}' ({remix.Kind})");
         }
         if (isAcapella && !TextUtils.Nk(title).Contains("acapella") && !otros.Any(x => TextUtils.Nk(x).Contains("acapella")))
             otros.Add("Acapella");

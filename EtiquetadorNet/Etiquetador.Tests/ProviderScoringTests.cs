@@ -107,4 +107,48 @@ public class ProviderScoringTests
     [Fact]  // fiel al .ps1: "Pop" está en la preferencia, así que gana aunque venga en style
     public void GenrePicker_pop_es_preferente()
         => Assert.Equal("Pop", GenrePicker.Pick(new[] { "Pop" }, new[] { "Reggaeton" }));
+
+    // --- Puntuación de las versiones (remixes/edits) ---
+
+    [Fact]
+    public void Sin_artista_en_el_nombre_ya_no_puntua_cero()
+    {
+        // Material de pool: "Bye bye (YANISS Remix).mp3" no trae artista. Antes esta vía elegía la
+        // canción SIN asignar puntuación y salía 0 -> se marcaba como dudosa aunque fuera correcta.
+        var data = Deezer(("T2R", "Bye Bye", 168));
+        var pick = DeezerProvider.SelectBest(data, "", "Bye bye", wantRemix: true, wantLive: false,
+            localDur: 170, isEdit: true, out var sc);
+        Assert.NotNull(pick);
+        Assert.True(sc >= 2, $"debería superar el umbral de revisión, pero fue {sc}");
+    }
+
+    [Fact]
+    public void Prefiere_la_version_del_remixer_que_nombra_el_archivo()
+    {
+        var data = Deezer(("T2R", "Bye Bye", 168), ("T2R", "Bye Bye (Yaniss Remix)", 200));
+        var pick = DeezerProvider.SelectBest(data, "", "Bye bye", wantRemix: true, wantLive: false,
+            localDur: 200, isEdit: true, out var sc, null, expectedRemixer: "Yaniss");
+        Assert.Equal("Bye Bye (Yaniss Remix)", pick!["title"]!.ToString());
+        Assert.True(sc >= 9);
+    }
+
+    [Fact]
+    public void El_remix_pedido_recibe_credito_parcial()
+    {
+        // El catálogo trae el título + el descriptor que el archivo ya pedía: no es un match a medias.
+        var data = Deezer(("Darude", "Feel the Beat (Yaniss Remix)", 200));
+        var pick = DeezerProvider.SelectBest(data, "Darude", "Feel the Beat", wantRemix: true,
+            wantLive: false, localDur: 200, isEdit: true, out var sc, null, expectedRemixer: "Yaniss");
+        Assert.NotNull(pick);
+        Assert.True(sc >= 9, $"esperaba crédito por la versión pedida, fue {sc}");
+    }
+
+    [Fact]
+    public void Un_remix_no_pedido_sigue_penalizado()
+    {
+        var data = Deezer(("Darude", "Sandstorm (Otro Remix)", 200));
+        DeezerProvider.SelectBest(data, "Darude", "Sandstorm", wantRemix: false, wantLive: false,
+            localDur: 200, isEdit: false, out var sc);
+        Assert.True(sc < 2, $"no se pedía remix: debería quedar bajo, fue {sc}");
+    }
 }

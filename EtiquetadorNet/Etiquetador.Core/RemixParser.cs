@@ -37,6 +37,7 @@ public static class RemixParser
         @"hype\s*intro|melodic\s*intro|break\s*intro|drop\s*intro|short\s*intro|long\s*intro|" +
         @"aca(?:pella)?\s*(?:intro|outro|in|out)|open\s*show|quick\s*(?:hit|edit)|short\s*edit|" +
         @"re\s*edit|re\s*drum|vip\s*mix|dub\s*mix|club\s*edit|party\s*starter|" +
+        @"remix\s*pack|rmx\s*pack|edit\s*pack|" +
         // simples
         @"remix|rmx|bootleg|rework|refix|mashup|flip|blend|vip|dub|edit|" +
         @"intro|outro|starter|transition|segue|redrum|loop|percapella|acapella|instrumental" +
@@ -132,6 +133,8 @@ public static class RemixParser
         return k switch
         {
             "rmx" => "Remix",
+            "remix pack" or "remixpack" or "rmx pack" or "rmxpack" => "Remix",
+            "edit pack" or "editpack" => "Edit",
             "re edit" or "reedit" => "Re-Edit",
             "vip mix" => "VIP",
             "dub mix" => "Dub",

@@ -30,6 +30,10 @@ public static class FileNameParser
         b = Rep(b, @"\bwww\.\S+", " ");
         b = Rep(b, @"\b[\w-]+\.(?:com|net|org|io|kz|to|me|vip|club|info|biz)\b", " ");
         b = Rep(b, @"\bextended\s+latino\b", "Extended");
+        // "RemixPack"/"Remix Pack" pegado no casaba con \bremix\b: el pipeline no lo veía como versión
+        // y acababa penalizando la duración de un remix legítimo. Se normaliza a "Remix".
+        b = Rep(b, @"\b(?:remix|rmx)\s*pack\b", "Remix");
+        b = Rep(b, @"\bedit\s*pack\b", "Edit");
         b = Rep(b, Descriptors.PoolRe, " ");
         var rawForOtros = b;
         b = Rep(b, @"\s*\([^()]*$", " ");

@@ -23,7 +23,7 @@ public sealed class DeezerProvider
     public DeezerProvider(ApiClient api) => _api = api;
 
     public async Task<ProviderResult?> SearchAsync(string artist, string title, bool wantRemix, bool wantLive,
-        int localDur = 0, bool isEdit = false, CancellationToken ct = default)
+        int localDur = 0, bool isEdit = false, CancellationToken ct = default, string expectedRemixer = "")
     {
         var kw = Descriptors.BuildKw(artist, title);
         if (kw.Length == 0) kw = Descriptors.CleanKeywords(title);
@@ -35,7 +35,7 @@ public sealed class DeezerProvider
         if (data == null || data.Count == 0) { Log?.Detail("      dz: 0 resultados"); return null; }
 
         var pick = SelectBest(data, artist, title, wantRemix, wantLive, localDur, isEdit, out var bestSc,
-            Log == null ? null : m => Log.Detail("      dz: " + m));
+            Log == null ? null : m => Log.Detail("      dz: " + m), expectedRemixer);
         if (pick == null) { Log?.Detail($"      dz: {data.Count} resultados, ninguno aceptado"); return null; }
 
         // Enriquecido: BPM, año y contribuidores completos vía track/{id}
@@ -95,8 +95,9 @@ public sealed class DeezerProvider
 
     /// <summary>Selección + scoring pura sobre los items de Deezer (data). Devuelve el item elegido o null.</summary>
     public static JsonNode? SelectBest(JsonArray data, string artist, string title, bool wantRemix, bool wantLive,
-        int localDur, bool isEdit, out double bestSc, Action<string>? trace = null)
+        int localDur, bool isEdit, out double bestSc, Action<string>? trace = null, string expectedRemixer = "")
     {
+        var nRemixer = TextUtils.Nk(expectedRemixer);
         var na = TextUtils.Nk(artist);
         var nt = TextUtils.Nk(Descriptors.CleanKeywords(title));
         JsonNode? pick = null;
@@ -119,12 +120,34 @@ public sealed class DeezerProvider
             var rt = J.S(J.P(x, "title"));
             double sc = 0.0;
             var why = new List<string>();
+
+            // La versión que pedíamos: el catálogo trae el mismo título MÁS el descriptor (y a veces el
+            // remixer) que el archivo ya nombraba. Antes esto valía 0 (solo puntuaba el título idéntico),
+            // así que remixes bien identificados se quedaban por debajo del umbral de revisión.
+            var esLaVersionPedida = false;
             if (tn == nt) { sc += 10; why.Add("titulo exacto +10"); }
+            else if (nt.Length > 0 && tn.Contains(nt))
+            {
+                if (nRemixer.Length > 2 && tn.Contains(nRemixer))
+                {
+                    sc += 9; esLaVersionPedida = true; why.Add($"version de '{expectedRemixer}' +9");
+                }
+                else if (wantRemix && Regex.IsMatch(rt, RemixRe, IC))
+                {
+                    sc += 6; esLaVersionPedida = true; why.Add("remix pedido +6");
+                }
+                else if (wantLive && Regex.IsMatch(rt, LiveRe, IC))
+                {
+                    sc += 6; esLaVersionPedida = true; why.Add("live pedido +6");
+                }
+            }
+
             if (Regex.IsMatch(rt, BadRe, IC)) { sc -= 9; why.Add("basura -9"); }
             if (!wantLive && Regex.IsMatch(rt, LiveRe, IC)) { sc -= 9; why.Add("live no pedido -9"); }
             if (!wantRemix && Regex.IsMatch(rt, RemixRe, IC)) { sc -= 6; why.Add("remix no pedido -6"); }
             if (!wantRemix && !wantLive && Regex.IsMatch(rt, VerRe, IC)) { sc -= 2; why.Add("otra version -2"); }
-            var lenPen = Math.Max(0, tn.Length - nt.Length) * 0.03;
+            // Si lo que sobra es justo la versión pedida, no se castiga por ser más largo.
+            var lenPen = esLaVersionPedida ? 0 : Math.Max(0, tn.Length - nt.Length) * 0.03;
             if (lenPen > 0) { sc -= lenPen; why.Add($"largo -{lenPen:0.##}"); }
             var dur = J.I(J.P(x, "duration"));
             if (localDur > 0 && dur > 0)
@@ -150,19 +173,46 @@ public sealed class DeezerProvider
             pick = null;   // solo versiones penalizadas -> mejor no tocar
         }
 
-        // Respaldo sin artista: título exacto (>=2 palabras), prefiriendo versión limpia
+        // Respaldo sin artista: el nombre del archivo no traía artista (muy típico del material de
+        // pool: "Bye bye (YANISS Remix).mp3"). OJO: antes se elegía aquí SIN asignar puntuación, así
+        // que todas estas canciones acababan con confianza 0 y se marcaban como dudosas aunque el
+        // match fuera correcto. Ahora se puntúan, y se prefiere la versión concreta si el catálogo
+        // la tiene (título + el remixer que nombra el archivo).
         if (pick == null && na.Length == 0 && nt.Length > 0 && J.WordCount(title) >= 2)
         {
+            var best = double.NegativeInfinity;
             foreach (var x in data)
-                if (TextUtils.Nk(J.S(J.P(x, "title"))) == nt)
+            {
+                var tnx = TextUtils.Nk(J.S(J.P(x, "title")));
+                var rt = J.S(J.P(x, "title"));
+                var exacto = tnx == nt;
+                var conRemixer = nRemixer.Length > 2 && tnx.Contains(nt) && tnx.Contains(nRemixer);
+                if (!exacto && !conRemixer) continue;
+                if (Regex.IsMatch(rt, BadRe, IC)) continue;
+
+                var why = new List<string>();
+                double sc;
+                if (conRemixer) { sc = 9; why.Add($"titulo + version de '{expectedRemixer}' +9"); }
+                else { sc = 5; why.Add("titulo exacto (sin artista en el nombre) +5"); }
+                if (!wantLive && Regex.IsMatch(rt, LiveRe, IC)) { sc -= 9; why.Add("live no pedido -9"); }
+                if (!wantRemix && Regex.IsMatch(rt, RemixRe, IC)) { sc -= 6; why.Add("remix no pedido -6"); }
+                var dur2 = J.I(J.P(x, "duration"));
+                if (localDur > 0 && dur2 > 0)
                 {
-                    var rt = J.S(J.P(x, "title"));
-                    if (!Regex.IsMatch(rt, BadRe, IC) && (wantLive || !Regex.IsMatch(rt, LiveRe, IC)) && (wantRemix || !Regex.IsMatch(rt, RemixRe, IC)))
-                    { pick = x; break; }
+                    var dd2 = Math.Abs(dur2 - localDur);
+                    if (dd2 <= 2) { sc += 5; why.Add($"dur ={dd2}s +5"); }
+                    else if (dd2 <= 5) { sc += 2; why.Add($"dur ~{dd2}s +2"); }
+                    else if (!isEdit && !conRemixer)
+                    {
+                        if (dd2 > 20) { sc -= 5; why.Add($"dur Δ{dd2}s -5"); }
+                        else if (dd2 > 10) { sc -= 2; why.Add($"dur Δ{dd2}s -2"); }
+                    }
+                    else why.Add($"dur Δ{dd2}s (version)");
                 }
-            if (pick == null)
-                foreach (var x in data)
-                    if (TextUtils.Nk(J.S(J.P(x, "title"))) == nt) { pick = x; break; }
+                trace?.Invoke($"respaldo '{J.S(J.P(x, "artist", "name"))} - {rt}' = {sc:0.##}  [{string.Join(", ", why)}]");
+                if (sc > best) { best = sc; pick = x; }
+            }
+            if (pick != null) bestSc = best;
         }
 
         // Último recurso FUZZY (typos)
