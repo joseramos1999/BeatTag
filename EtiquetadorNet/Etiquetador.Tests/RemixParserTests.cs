@@ -96,10 +96,29 @@ public class RemixParserTests
     [InlineData("Los Yakis (Unlimited Latin Extended 108bpm) - Mamita Molona - 108bpm - DJTOOLSVIP")]
     [InlineData("SHAKE BODY - SKALES (Unlimited Latin Extended 131Bpm) - 131bpm - DJTOOLSVIP")]
     [InlineData("Tema (Latin Box Extended)")]
-    [InlineData("Tema (Try It Mashup)")]
     [InlineData("Cancion - BRGS 2023 Remix")]
     public void Un_record_pool_no_es_el_autor(string input)
         => Assert.False(RemixParser.Parse(input).HasRemixer);
+
+    // "Try It" NO es un pool: es un editor que firma sus edits, y debe conservarse.
+    [Theory]
+    [InlineData("El Alfa - Banda De Camion (Try It Hype Intro)", "Hype Intro")]
+    [InlineData("Myke Towers - DEGENERE (Try It Acapella Intro)", "Acapella Intro")]
+    [InlineData("Tchalalala (Try It Extended)", "Extended")]
+    [InlineData("Calabria x Jordan (Try It Mashup)", "Mashup")]
+    public void Try_it_es_un_editor_no_un_pool(string input, string kind)
+    {
+        var r = RemixParser.Parse(input);
+        Assert.Equal("Try It", r.Remixer);
+        Assert.Equal(kind, r.Kind);
+    }
+
+    [Fact]
+    public void Extended_a_secas_no_inventa_autor()
+    {
+        var r = RemixParser.Parse("Shakira - Monotonia (Extended Mix)");
+        Assert.False(r.HasRemixer);   // lo firma la discográfica, no una persona
+    }
 
     [Fact]
     public void El_editor_sobrevive_aunque_el_pool_venga_detras()

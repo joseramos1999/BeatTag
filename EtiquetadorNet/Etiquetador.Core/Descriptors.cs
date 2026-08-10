@@ -12,7 +12,9 @@ public static class Descriptors
 
     // Pools/record-pools de DJ que ensucian el nombre (equivalente a $PoolRe). Lleva (?i) inline.
     public const string PoolRe =
-        @"(?i)\b(latin\s*box|unlimited\s+latin|intensa|dj\s*tools\s*vip|djtoolsvip|dj\s*tools|bpm\s+supreme|bpm\s+latino|dj\s*city|djcity|zip\s*dj|heavy\s+hits|crooklyn\s+clan|digital\s+dj\s+pool|direct\s+music\s+service|franchise\s+record\s+pool|club\s+killers|late\s+night\s+record\s+pool|mymp3pool|beat\s*junkies|prime\s*djs|smash\s+vision|barba\s+dj|remix\s+planet|latino\s+music\s+pool|latin\s*urbano|latinos\s+unidos|dj\s+pool\s+records|remixes4djs|digiwaxx|club\s+queen|try\s+it|brgs\s+(?:pro\s+)?(?:qatar\s+)?20\d\d|brgs|qatar\s*20\d\d)\b";
+        @"(?i)\b(latin\s*box|unlimited\s+latin|intensa|dj\s*tools\s*vip|djtoolsvip|dj\s*tools|bpm\s+supreme|bpm\s+latino|dj\s*city|djcity|zip\s*dj|heavy\s+hits|crooklyn\s+clan|digital\s+dj\s+pool|direct\s+music\s+service|franchise\s+record\s+pool|club\s+killers|late\s+night\s+record\s+pool|mymp3pool|beat\s*junkies|prime\s*djs|smash\s+vision|barba\s+dj|remix\s+planet|latino\s+music\s+pool|latin\s*urbano|latinos\s+unidos|dj\s+pool\s+records|remixes4djs|digiwaxx|club\s+queen|brgs\s+(?:pro\s+)?(?:qatar\s+)?20\d\d|brgs|qatar\s*20\d\d)\b";
+    // OJO: "Try It" NO es un record pool, es un editor que firma sus edits ("Try It Hype Intro"),
+    // así que no va en esta lista: debe conservarse como autor de la versión.
 
     // Descriptores DJ reconocidos (equivalente a $DescRe). Lleva (?i) inline.
     public const string DescRe =
