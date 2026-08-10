@@ -63,6 +63,8 @@ public class RemixParserTests
     [InlineData("Bad Bunny - Moscow Mule (Juanjo Garcia Open Show)", "Juanjo Garcia", "Open Show")]
     [InlineData("Karol G - Provenza (David Marley Break Intro)", "David Marley", "Break Intro")]
     [InlineData("Tema (DJ Sanchez Transition)", "DJ Sanchez", "Transition")]
+    [InlineData("Tema (Myke Roldan Acapella Starter)", "Myke Roldan", "Acapella Starter")]
+    [InlineData("Tema (DJ Eros Acapella Break)", "DJ Eros", "Acapella Break")]
     [InlineData("Tema - Alex Ferrer Redrum", "Alex Ferrer", "Redrum")]
     public void Detecta_al_editor_en_los_edits_de_pool(string input, string editor, string kind)
     {

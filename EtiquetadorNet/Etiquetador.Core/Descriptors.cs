@@ -18,7 +18,7 @@ public static class Descriptors
 
     // Descriptores DJ reconocidos (equivalente a $DescRe). Lleva (?i) inline.
     public const string DescRe =
-        @"(?i)\b(remix|rmx|vip|bootleg|flip|rework|mashup|blend|redrum|extended(?:\s+mix)?|original(?:\s+[a-z]+)?\s+(?:mix|version)|club\s+mix|radio\s+edit|quick\s+(?:hit|edit)|short\s+edit|hype\s+intro|melodic\s+intro|break\s+intro|acapella(?:\s+(?:in|out|intro|outro|studio))?|aca\s*(?:in|out)|open\s+show|intro|outro|instrumental|transition|segue|starter|live(?:\s+edit)?|clean|dirty|edit|version|remaster(?:ed)?|dub|percapella|loop|hype)\b";
+        @"(?i)\b(remix|rmx|vip|bootleg|flip|rework|mashup|blend|redrum|extended(?:\s+mix)?|original(?:\s+[a-z]+)?\s+(?:mix|version)|club\s+mix|radio\s+edit|quick\s+(?:hit|edit)|short\s+edit|hype\s+intro|melodic\s+intro|break\s+intro|acapella(?:\s+(?:in|out|intro|outro|studio|starter|break|vocals))?|aca\s*(?:in|out)|open\s+show|intro|outro|instrumental|transition|segue|starter|live(?:\s+edit)?|clean|dirty|edit|version|remaster(?:ed)?|dub|percapella|loop|hype)\b";
 
     // Mirror de PowerShell -replace (case-insensitive por defecto).
     private static string Rep(string s, string pat, string rep) => Regex.Replace(s, pat, rep, IC);

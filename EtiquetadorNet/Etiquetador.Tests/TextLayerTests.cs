@@ -69,6 +69,17 @@ public class TextLayerTests
         => Assert.Matches("(?i)extended", string.Join(",", Descriptors.ExtractOtros(Descriptors.CompleteTruncated("Song (YANISS Extended Mi"), "Song")));
     [Fact] public void Eo_no_duplica() => Assert.Equal("", string.Join(",", Descriptors.ExtractOtros("Song (Remix)", "Song Remix")));
 
+    // Los descriptores compuestos son UNA sola cosa: "Acapella Starter" no es "Acapella" + "Starter".
+    [Theory]
+    [InlineData("X (Latin Box Acapella Starter)", "Acapella Starter")]
+    [InlineData("X (Acapella Break)", "Acapella Break")]
+    [InlineData("X (Acapella Intro)", "Acapella Intro")]
+    [InlineData("X (Acapella Out)", "Acapella Out")]
+    [InlineData("X (Acapella Studio)", "Acapella Studio")]
+    [InlineData("X (Acapella Vocals)", "Acapella Vocals")]
+    public void Eo_los_compuestos_de_acapella_no_se_parten(string input, string expected)
+        => Assert.Equal(expected, string.Join(",", Descriptors.ExtractOtros(input, "")));
+
     // --- Clean-Title / Clean-DbTitle ---
     [Fact] public void Clt_quita_descriptores_bpm() => Assert.Equal("Gasolina", Descriptors.CleanTitle("Gasolina (Extended) 128bpm").Trim());
     [Fact] public void Cdt_separa_pegados() => Assert.Matches("(?i)Original Mix", Descriptors.CleanDbTitle("Cola (Robin Schulz OriginalMix)", ""));

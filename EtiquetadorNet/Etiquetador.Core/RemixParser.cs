@@ -35,7 +35,8 @@ public static class RemixParser
     private const string KindRe = @"(?<kind>" +
         // compuestos (edits de pool)
         @"hype\s*intro|melodic\s*intro|break\s*intro|drop\s*intro|short\s*intro|long\s*intro|" +
-        @"aca(?:pella)?\s*(?:intro|outro|in|out)|open\s*show|quick\s*(?:hit|edit)|short\s*edit|" +
+        @"aca(?:pella)?\s*(?:intro|outro|in|out|starter|break|vocals|studio)|" +
+        @"open\s*show|quick\s*(?:hit|edit)|short\s*edit|" +
         @"re\s*edit|re\s*drum|vip\s*mix|dub\s*mix|club\s*edit|party\s*starter|" +
         @"remix\s*pack|rmx\s*pack|edit\s*pack|extended\s*mix|extended|" +
         // simples
