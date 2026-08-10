@@ -123,6 +123,19 @@ public class TextLayerTests
     [Fact] public void Rrf_conserva_invitado_real() => Assert.Equal("Cancion feat. Guest Star", Feat.RemoveRedundantFeat("Cancion feat. Guest Star", "Main Artist").Trim());
     [Fact] public void Rrf_deja_invitado_nuevo() => Assert.Equal("Song feat. New Guy", Feat.RemoveRedundantFeat("Song feat. Bad Bunny, New Guy", "Bad Bunny").Trim());
 
+    // Casos reales: los invitados vienen pegados por espacios, sin coma que los separe.
+    [Fact] public void Rrf_quita_el_artista_pegado_a_otro_invitado()
+        => Assert.Equal("Calabria 2007 feat. Alex Gaudino",
+            Feat.RemoveRedundantFeat("Calabria 2007 feat. Natasja Alex Gaudino", "Enur, Natasja").Trim());
+
+    [Fact] public void Rrf_quita_artista_de_dos_palabras_pegado()
+        => Assert.Equal("Dardos feat. Elias",
+            Feat.RemoveRedundantFeat("Dardos feat. Prince Royce Elias", "Romeo Santos, Prince Royce").Trim());
+
+    [Fact] public void Rrf_no_toca_invitados_que_no_son_el_artista()
+        => Assert.Equal("Lose control feat. Ciara, Fat Man Scoop",
+            Feat.RemoveRedundantFeat("Lose control feat. Ciara, Fat Man Scoop", "Missy Elliott").Trim());
+
     // --- Sanitize y Format-ETA ---
     [Fact] public void San_quita_ilegales() => Assert.Equal("A B C", TextUtils.Sanitize("A/B: C?"));
     [Fact] public void Eta_minutos() => Assert.Equal("2m 5s", TextUtils.FormatEta(125));

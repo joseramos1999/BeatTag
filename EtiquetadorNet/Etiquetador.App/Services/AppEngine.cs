@@ -44,6 +44,9 @@ public sealed class AppEngine
     /// <summary>Caché persistente del resultado del análisis (por archivo + firma de opciones).</summary>
     public AnalysisCache Analysis { get; }
     public IgnoreList Ignored { get; }
+
+    /// <summary>Canciones ya aplicadas: se omiten en "Analizar" (pero no en "Reanalizar todo").</summary>
+    public IgnoreList Applied { get; }
     public CandidateFinder Candidates { get; }
     public LinkResolver Links { get; }
 
@@ -95,6 +98,7 @@ public sealed class AppEngine
         Library = new LibraryStore(Config, SaveConfig, new ScanCache(Paths.ScanCachePath)) { Log = Logger };
         Analysis = new AnalysisCache(Paths.AnalysisCachePath);
         Ignored = new IgnoreList(Paths.IgnoredPath);
+        Applied = new IgnoreList(Paths.AppliedPath);
     }
 
     /// <summary>Opciones de proceso a partir de la config actual.</summary>
@@ -158,6 +162,15 @@ public sealed class AppEngine
     }
 
     public void ClearAnalysisCache() => Analysis.Clear();
+
+    /// <summary>
+    /// Suelta el archivo que esté sonando. OBLIGATORIO antes de escribir tags o renombrar: el
+    /// reproductor mantiene el archivo abierto y, si no, la escritura o el renombrado fallan.
+    /// </summary>
+    public void ReleaseAudio()
+    {
+        try { Preview.Stop(); } catch { }
+    }
 
     /// <summary>Descarta una canción: la olvida del análisis y la excluye de futuras pasadas.</summary>
     public void IgnoreTrack(string filePath)

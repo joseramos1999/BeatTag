@@ -19,6 +19,7 @@ public sealed class AppPaths
     public string ScanCachePath { get; }
     public string AnalysisCachePath { get; }
     public string IgnoredPath { get; }
+    public string AppliedPath { get; }
 
     public AppPaths(string? dataDir = null)
     {
@@ -36,6 +37,7 @@ public sealed class AppPaths
         ScanCachePath = Path.Combine(DataDir, "scan-cache.json");
         AnalysisCachePath = Path.Combine(DataDir, "analysis-cache.json");
         IgnoredPath = Path.Combine(DataDir, "descartadas.json");
+        AppliedPath = Path.Combine(DataDir, "aplicadas.json");
     }
 
     /// <summary>Crea las carpetas de datos si no existen (idempotente).</summary>

@@ -112,6 +112,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         if (row == null || string.IsNullOrEmpty(row.FilePath)) return;
         try
         {
+            _preview.Stop();   // si suena, el archivo está abierto y no se puede mover a la papelera
             FileSystem.DeleteFile(row.FilePath, UIOption.OnlyErrorDialogs, RecycleOption.SendToRecycleBin);
             Store.RemoveTrack(row.FilePath);   // actualiza la biblioteca compartida (dispara Recompute en todas las pestañas)
             Status = $"Enviado a la papelera: {row.FileName}";

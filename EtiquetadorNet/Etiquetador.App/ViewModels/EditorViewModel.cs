@@ -98,6 +98,7 @@ public partial class EditorViewModel : ViewModelBase
         uint bpm = uint.TryParse(Bpm, out var b) ? b : 0;
         try
         {
+            _engine.ReleaseAudio();   // el reproductor mantiene el archivo abierto y la escritura fallaría
             await Task.Run(() => TagEditor.Write(t.FilePath, Title, Artist, Album, Genre, year, bpm, Comment));
             // Refleja los cambios en la biblioteca en memoria (para las demás pestañas).
             t.Title = Title; t.Artist = Artist; t.Album = Album; t.Genre = Genre; t.Year = year; t.Bpm = bpm;

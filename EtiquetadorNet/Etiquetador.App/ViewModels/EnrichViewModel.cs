@@ -208,7 +208,7 @@ public partial class EnrichViewModel : ViewModelBase
             _engine.Logger.Detail($"Firma de opciones: {sig}");
             var seen = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 
-            int i = 0, fromCache = 0;
+            int i = 0, fromCache = 0, alreadyApplied = 0;
             var seenResults = new List<ProcessResult>();   // para el resumen y el informe del final
             foreach (var t in tracks)
             {
@@ -217,6 +217,8 @@ public partial class EnrichViewModel : ViewModelBase
                 i++;
                 seen.Add(t.FilePath);
                 if (_engine.Ignored.Contains(t.FilePath)) continue;   // descartada por el usuario
+                // Ya aplicada: no se vuelve a proponer en el análisis normal ("Reanalizar todo" sí la incluye).
+                if (!force && _engine.Applied.Contains(t.FilePath)) { alreadyApplied++; continue; }
                 Status = $"{(force ? "Reanalizando" : "Analizando")} {i}/{tracks.Count}…  {t.FileName}";
                 Progress = tracks.Count == 0 ? 0 : (double)i / tracks.Count * 100;
                 var per = sw.Elapsed.TotalSeconds / i;
@@ -241,7 +243,9 @@ public partial class EnrichViewModel : ViewModelBase
             _engine.Analysis.Save();
             RowsView.Refresh();
             Progress = 100;
-            Status = $"Analizadas {tracks.Count} · propuestas {Rows.Count} · {fromCache} de caché · en {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}.";
+            Status = $"Analizadas {tracks.Count} · propuestas {Rows.Count} · {fromCache} de caché"
+                   + (alreadyApplied > 0 ? $" · {alreadyApplied} ya aplicadas (omitidas)" : "")
+                   + $" · en {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}.";
             var low = Rows.Count(r => r.RowStatus.StartsWith('⚠'));
             _engine.Logger.Sum($"Análisis terminado: {tracks.Count} revisadas · {Rows.Count} propuestas · {fromCache} de caché · "
                              + $"{low} de baja confianza · {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}");
@@ -287,6 +291,7 @@ public partial class EnrichViewModel : ViewModelBase
         foreach (var t in tracks)
         {
             if (_engine.Ignored.Contains(t.FilePath)) continue;   // descartada por el usuario
+            if (_engine.Applied.Contains(t.FilePath)) continue;   // ya aplicada
             var c = _engine.Analysis.Get(t.FilePath, sig);
             if (c == null || c.Skip) continue;
             if (c.Found || c.CleanOnly) { AddRow(c, t); loaded++; }
@@ -323,6 +328,7 @@ public partial class EnrichViewModel : ViewModelBase
     private async Task ApplyRowsAsync(List<PreviewRow> toApply)
     {
         if (IsBusy) return;
+        _engine.ReleaseAudio();   // si suena la canción, el archivo está abierto y fallaría al escribir
         IsBusy = true;
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
@@ -364,6 +370,9 @@ public partial class EnrichViewModel : ViewModelBase
                     if (res.TagOk && res.RenOk)
                     {
                         applied++; appliedRows.Add(row);
+                        // Queda marcada como aplicada: "Analizar" ya no volverá a proponerla
+                        // (sí lo hará "Reanalizar todo", que ignora estas marcas a propósito).
+                        _engine.Applied.Add(res.FinalPath);
                         _engine.Logger.Detail($"    OK  '{row.Old}' -> '{row.New}'");
                     }
                     else
@@ -382,6 +391,7 @@ public partial class EnrichViewModel : ViewModelBase
                 foreach (var r in appliedRows) Rows.Remove(r);
                 RowsView.Refresh();
             }
+            _engine.Applied.Save();
             _engine.Logger.Sum($"Aplicación terminada: {applied} de {marked} correctas"
                              + (applied < marked ? $" · {marked - applied} con problemas" : "")
                              + (cancelled ? " (cancelada)" : ""));
@@ -401,6 +411,7 @@ public partial class EnrichViewModel : ViewModelBase
     private async Task UndoAsync()
     {
         if (IsBusy) return;
+        _engine.ReleaseAudio();   // deshacer también renombra: el archivo no puede estar sonando
         IsBusy = true;
         Status = "Deshaciendo la última ejecución…";
         _engine.Logger.Head("Deshaciendo la última ejecución…");
@@ -601,6 +612,7 @@ public partial class EnrichViewModel : ViewModelBase
     [RelayCommand]
     private void PlayPreview()
     {
+        if (IsBusy) { Status = "Espera a que termine el proceso en curso para escuchar."; return; }
         var path = SelectedRow?.Result.FilePath;
         if (string.IsNullOrEmpty(path)) return;
         try { _engine.Preview.Toggle(path); }

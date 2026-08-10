@@ -29,9 +29,13 @@ public static class TrackLinkParser
         m = Regex.Match(s, @"^spotify:track:([A-Za-z0-9]+)$", IC);
         if (m.Success) return new TrackLink("Spotify", m.Groups[1].Value);
 
-        // Apple Music / iTunes: el id de la CANCIÓN va en ?i=; sin él, el enlace es de álbum.
+        // Apple Music / iTunes. Dos formas válidas:
+        //   .../song/<slug>/<id>        -> enlace directo a la canción (el que da "Compartir canción")
+        //   .../album/<slug>/<id>?i=<x> -> canción dentro de un álbum
         if (Regex.IsMatch(s, @"(?:music|itunes)\.apple\.com/", IC))
         {
+            m = Regex.Match(s, @"/song/(?:[^/]+/)?(\d+)", IC);
+            if (m.Success) return new TrackLink("iTunes", m.Groups[1].Value);
             m = Regex.Match(s, @"[?&]i=(\d+)", IC);
             if (m.Success) return new TrackLink("iTunes", m.Groups[1].Value);
         }

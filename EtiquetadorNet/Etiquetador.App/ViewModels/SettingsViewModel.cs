@@ -124,4 +124,14 @@ public partial class SettingsViewModel : ViewModelBase
         _engine.ClearIgnored();
         Status = $"Recuperadas {n} canciones descartadas. Vuelve a analizar en Enriquecer para verlas.";
     }
+
+    /// <summary>Olvida qué canciones se aplicaron ya, para que vuelvan a proponerse al analizar.</summary>
+    [RelayCommand]
+    private void ForgetApplied()
+    {
+        var n = _engine.Applied.Count;
+        if (n == 0) { Status = "No hay ninguna canción marcada como aplicada."; return; }
+        _engine.Applied.Clear();
+        Status = $"Olvidadas {n} canciones aplicadas. Volverán a salir al analizar.";
+    }
 }

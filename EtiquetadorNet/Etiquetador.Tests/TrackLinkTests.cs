@@ -44,6 +44,18 @@ public class TrackLinkTests
     public void Enlace_de_album_de_apple_no_vale()   // sin ?i= no apunta a una cancion
         => Assert.Null(TrackLinkParser.Parse("https://music.apple.com/es/album/discovery/697194953"));
 
+    // Forma /song/ : la que da el boton "Compartir canción" de Apple Music.
+    [Theory]
+    [InlineData("https://music.apple.com/py/song/x-100/1774016747", "1774016747")]
+    [InlineData("https://music.apple.com/es/song/1774016747", "1774016747")]
+    public void Reconoce_apple_music_enlace_de_cancion(string url, string id)
+    {
+        var l = TrackLinkParser.Parse(url);
+        Assert.NotNull(l);
+        Assert.Equal("iTunes", l!.Value.Source);
+        Assert.Equal(id, l.Value.Id);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("Daft Punk - One More Time")]

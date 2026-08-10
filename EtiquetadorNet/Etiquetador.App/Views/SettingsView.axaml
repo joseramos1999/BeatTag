@@ -30,6 +30,9 @@
                 <Button Content="Recuperar descartadas" Command="{Binding RestoreIgnoredCommand}"
                         Background="#6B7280" Foreground="White" FontWeight="SemiBold"
                         ToolTip.Tip="Vuelve a tener en cuenta las canciones que quitaste de la lista en Enriquecer." />
+                <Button Content="Olvidar aplicadas" Command="{Binding ForgetAppliedCommand}"
+                        Background="#6B7280" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Las canciones ya aplicadas no vuelven a proponerse al Analizar. Esto borra esa marca." />
                 <Button Content="📁 Ver logs" Command="{Binding OpenLogFolderCommand}"
                         Background="#6B7280" Foreground="White" FontWeight="SemiBold"
                         ToolTip.Tip="Abre la carpeta de registros con el archivo de esta sesión (traza detallada de cada canción)." />
