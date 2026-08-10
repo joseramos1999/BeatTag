@@ -98,7 +98,12 @@ public static class RemixParser
     /// <summary>Analiza el contenido de un paréntesis: "Tiesto Remix" -> (Tiesto, Remix).</summary>
     private static RemixInfo FromFragment(string fragment)
     {
-        var f = fragment.Trim();
+        // El tipo tiene que quedar al final, así que antes se quita la morralla que suelen dejar los
+        // pools detrás: "(Myke Roldan Acapella Intro 145Bpm)" o "(… Intro Clean)".
+        var f = Regex.Replace(fragment, @"\b\d{2,3}\s*bpm\b", " ", IC);
+        f = Regex.Replace(f, @"\b\d{1,2}[AB]\b", " ");            // clave Camelot
+        f = Regex.Replace(f, @"\b(clean|dirty|explicit)\b", " ", IC);
+        f = Regex.Replace(f, @"\s{2,}", " ").Trim();
         var m = Regex.Match(f, $@"^(?<who>.*?)\s*{KindRe}\s*$", IC);
         if (!m.Success) return RemixInfo.None;
         return new RemixInfo(Clean(m.Groups["who"].Value), Norm(m.Groups["kind"].Value));
@@ -118,6 +123,10 @@ public static class RemixParser
 
         // Si TODAS las palabras son genéricas ("Extended", "Radio", "Club"…), no hay autor.
         if (words.All(x => Generic.Contains(x.Trim('.', ',', '&')))) return "";
+
+        // Un record pool NO es el autor de la versión: "…- DJTOOLSVIP" o "(Latin Box Extended)"
+        // no firman nada, solo son quien lo distribuye. Si no, acababan pegados al nombre.
+        if (Regex.IsMatch(w, Descriptors.PoolRe)) return "";
 
         // "DJ" y "MC" van en mayúsculas (TitleCase los dejaría como "Dj"/"Mc").
         var t = TextUtils.TitleCase(w);

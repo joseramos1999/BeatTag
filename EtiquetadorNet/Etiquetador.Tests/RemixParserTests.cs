@@ -90,6 +90,37 @@ public class RemixParserTests
         Assert.Equal(kind, r.Kind);
     }
 
+    // --- Los record pools distribuyen, no firman: nunca deben salir como autor ---
+
+    [Theory]
+    [InlineData("Los Yakis (Unlimited Latin Extended 108bpm) - Mamita Molona - 108bpm - DJTOOLSVIP")]
+    [InlineData("SHAKE BODY - SKALES (Unlimited Latin Extended 131Bpm) - 131bpm - DJTOOLSVIP")]
+    [InlineData("Tema (Latin Box Extended)")]
+    [InlineData("Tema (Try It Mashup)")]
+    [InlineData("Cancion - BRGS 2023 Remix")]
+    public void Un_record_pool_no_es_el_autor(string input)
+        => Assert.False(RemixParser.Parse(input).HasRemixer);
+
+    [Fact]
+    public void El_editor_sobrevive_aunque_el_pool_venga_detras()
+    {
+        // El pool se quita antes; el editor de dentro del paréntesis debe conservarse.
+        var limpio = System.Text.RegularExpressions.Regex.Replace(
+            "Hay Lupita - Lomiiel (Myke Roldan Acapella Intro 145Bpm) - 145bpm - DJTOOLSVIP",
+            Descriptors.PoolRe, " ");
+        var r = RemixParser.Parse(limpio);
+        Assert.Equal("Myke Roldan", r.Remixer);
+        Assert.Equal("Acapella Intro", r.Kind);
+    }
+
+    [Fact]
+    public void El_bpm_final_no_impide_reconocer_el_tipo()
+    {
+        var r = RemixParser.Parse("Tema (Alex Selas Hype Intro 128 Bpm)");
+        Assert.Equal("Alex Selas", r.Remixer);
+        Assert.Equal("Hype Intro", r.Kind);
+    }
+
     [Fact]
     public void Vacio_no_es_remix()
     {

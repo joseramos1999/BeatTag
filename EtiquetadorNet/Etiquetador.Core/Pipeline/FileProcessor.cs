@@ -152,7 +152,10 @@ public sealed class FileProcessor
         // Quién firma la versión. Se calcula ANTES de buscar para poder puntuar mejor: si el catálogo
         // devuelve justo esa versión ("... (Yaniss Remix)"), es la pista correcta y no una coincidencia
         // a medias. Para un DJ, además, el remixer no puede perderse al limpiar el nombre.
-        var remix = RemixParser.Parse(Path.GetFileNameWithoutExtension(fileName));
+        // Se mira el nombre ORIGINAL (FileNameParser ya le quita el editor), pero SIN el record pool:
+        // "DJTOOLSVIP", "Latin Box"… distribuyen, no firman la versión.
+        var nameForRemix = Regex.Replace(Path.GetFileNameWithoutExtension(fileName), Descriptors.PoolRe, " ", IC);
+        var remix = RemixParser.Parse(nameForRemix);
         if (!remix.HasRemixer) remix = RemixParser.Parse(rawForOtros);
         if (manual && o.SearchTitle.Length > 0)
         {
