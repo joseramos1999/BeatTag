@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Collections;
@@ -107,13 +108,21 @@ public partial class EditorViewModel : ViewModelBase
         try
         {
             _engine.ReleaseAudio();   // el reproductor mantiene el archivo abierto y la escritura fallaría
+
+            // Lo de ANTES, para poder deshacerlo: se lee del archivo justo antes de tocarlo.
+            var previo = TagEditor.Read(t.FilePath);
+            var origPath = t.FilePath;
+
             await Task.Run(() => TagEditor.Write(t.FilePath, Title, Artist, Album, Genre, year, bpm, Comment));
             // Refleja los cambios en la biblioteca en memoria (para las demás pestañas).
             t.Title = Title; t.Artist = Artist; t.Album = Album; t.Genre = Genre; t.Year = year; t.Bpm = bpm;
 
             var renamed = TryRename(t, out var renameMsg);
+            WriteUndo(origPath, t.FilePath, renamed, previo, year, bpm);
+
             TracksView.Refresh();
-            Status = $"Guardado: {t.FileName}" + (renameMsg.Length > 0 ? " · " + renameMsg : "");
+            Status = $"Guardado: {t.FileName}" + (renameMsg.Length > 0 ? " · " + renameMsg : "")
+                   + " · se puede deshacer";
             if (renamed) _engine.Logger.Ok($"Editor: renombrado a '{t.FileName}'");
         }
         catch (Exception e) { Status = "Error al guardar: " + e.Message; }
@@ -153,6 +162,45 @@ public partial class EditorViewModel : ViewModelBase
             return false;
         }
     }
+
+    /// <summary>
+    /// Deja constancia del cambio en un manifiesto, con el MISMO formato que usa Enriquecer, para
+    /// que "Deshacer última" pueda revertir también lo editado a mano (tags y renombrado).
+    /// Solo se apunta lo que de verdad cambió.
+    /// </summary>
+    private void WriteUndo(string origPath, string finalPath, bool renamed, TagValues previo, uint year, uint bpm)
+    {
+        try
+        {
+            var campos = new Dictionary<string, FieldChange>();
+            if (previo.Title != Title) campos["Title"] = FieldChange.Str(previo.Title, Title);
+            if (previo.Album != Album) campos["Album"] = FieldChange.Str(previo.Album, Album);
+            // OJO: el deshacer trata Género y Artista como LISTAS (tag.Genres / tag.Performers),
+            // así que hay que apuntarlos como array o no se revierten.
+            if (previo.Genre != Genre)
+                campos["Genre"] = FieldChange.Arr(SplitList(previo.Genre), SplitList(Genre));
+            if (previo.Year != year) campos["Year"] = FieldChange.Num(previo.Year, year);
+            if (previo.Bpm != bpm) campos["Bpm"] = FieldChange.Num(previo.Bpm, bpm);
+            if (previo.Artist != Artist)
+                campos["Artist"] = FieldChange.Arr(SplitArtists(previo.Artist), SplitArtists(Artist));
+
+            if (campos.Count == 0 && !renamed) return;   // no se tocó nada
+
+            var file = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+            Directory.CreateDirectory(_engine.Paths.UndoDir);
+            var rec = new UndoRecord { OrigPath = origPath, FinalPath = finalPath, Renamed = renamed, Fields = campos };
+            File.AppendAllText(file,
+                System.Text.Json.JsonSerializer.Serialize(rec) + Environment.NewLine,
+                System.Text.Encoding.UTF8);
+        }
+        catch (Exception e) { _engine.Logger.Error("No se pudo escribir el manifiesto de deshacer del Editor", e); }
+    }
+
+    /// <summary>Separa por comas para los campos que en el tag son una lista (artistas, géneros).</summary>
+    private static string[] SplitList(string? s)
+        => (s ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static string[] SplitArtists(string? s) => SplitList(s);
 
     /// <summary>Servicios del diálogo "Reanalizar…" (los mismos que en Enriquecer).</summary>
     public SearchServices SearchServicesFor(string filePath)

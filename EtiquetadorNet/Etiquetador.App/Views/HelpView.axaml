@@ -86,6 +86,7 @@
             <TextBlock Classes="li" Text="• Puedes editar también el NOMBRE DEL ARCHIVO: al guardar se renombra (se conserva la extensión y nunca se pisa otro archivo)." />
             <TextBlock Classes="li" Text="• '🔎 Reanalizar…' abre el mismo buscador que Enriquecer y RELLENA el formulario con la propuesta; no se escribe nada hasta que pulses Guardar." />
             <TextBlock Classes="li" Text="• '▶ Escuchar' reproduce un fragmento para comprobar que es la canción correcta." />
+            <TextBlock Classes="li" Text="• Lo que guardes aquí también se puede revertir con 'Deshacer última' desde Enriquecer." />
 
             <!-- REVISIÓN -->
             <TextBlock Classes="h" Text="🔁 Duplicados · 🎚️ Calidad · ⚠️ Incompletas · 🔎 No encontradas" />

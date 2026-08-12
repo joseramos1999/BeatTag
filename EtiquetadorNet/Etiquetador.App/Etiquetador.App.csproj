@@ -8,6 +8,19 @@
     <ApplicationIcon>Assets\beattag.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!--
+    Publicación: UN solo .exe que funcione por sí mismo.
+    - IncludeNativeLibrariesForSelfExtract: mete dentro Skia/HarfBuzz/ANGLE. Sin esto, el exe
+      suelto NO arranca (le faltan los DLL nativos), que es justo lo que le pasaba a la v1.1.0.
+    - EnableCompressionInSingleFile: 121 MB -> 60 MB, sin recortar código (nada que se rompa).
+    - DebugType none: no arrastra los .pdb (105 MB de símbolos nativos que no pintan nada).
+  -->
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
   <ItemGroup>
     <Folder Include="Models\" />
     <AvaloniaResource Include="Assets\**" />
