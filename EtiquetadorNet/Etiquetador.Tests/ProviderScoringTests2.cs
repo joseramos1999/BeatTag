@@ -78,4 +78,19 @@ public class ProviderScoringTests2
     [Fact]
     public void Mb_rechaza_artista_distinto()
         => Assert.Null(MusicBrainzProvider.PickBest(Mb(96, "Gasolina", "Otro Artista", "2004"), "Daddy Yankee"));
+
+    // MusicBrainz trae su propia puntuación: si no se traslada, sus coincidencias (que ya exigen
+    // score >= 85) se quedaban en 0 y se marcaban como dudosas sin motivo.
+    [Theory]
+    [InlineData(96, 8.0)]
+    [InlineData(100, 10.0)]
+    [InlineData(90, 5.0)]
+    [InlineData(85, 2.5)]
+    public void Mb_traslada_su_puntuacion(int mbScore, double esperado)
+    {
+        var pick = MusicBrainzProvider.PickBest(Mb(mbScore, "Gasolina", "Daddy Yankee", "2004"), "Daddy Yankee");
+        Assert.NotNull(pick);
+        Assert.Equal(esperado, pick!.Score, 1);
+        Assert.True(pick.Score >= 2, "no debería quedar por debajo del umbral de revisión");
+    }
 }

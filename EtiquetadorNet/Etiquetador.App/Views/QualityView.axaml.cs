@@ -7,7 +7,11 @@ namespace Etiquetador.App.Views;
 
 public partial class QualityView : UserControl
 {
-    public QualityView() => InitializeComponent();
+    public QualityView()
+    {
+        InitializeComponent();
+        GridBehaviors.EnableWidthMemory(this, "Calidad");
+    }
 
     private void ExpandAll_Click(object? sender, RoutedEventArgs e) => GridBehaviors.SetAllGroups(this.FindDescendantOfType<DataGrid>(), true);
     private void CollapseAll_Click(object? sender, RoutedEventArgs e) => GridBehaviors.SetAllGroups(this.FindDescendantOfType<DataGrid>(), false);

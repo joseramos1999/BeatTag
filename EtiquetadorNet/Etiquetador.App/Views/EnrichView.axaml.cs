@@ -24,6 +24,7 @@ public partial class EnrichView : UserControl
     public EnrichView()
     {
         InitializeComponent();
+        GridBehaviors.EnableWidthMemory(this, "Enriquecer");
         DragDrop.SetAllowDrop(this, true);
         DragDrop.AddDragOverHandler(this, OnDragOver);
         DragDrop.AddDropHandler(this, OnDrop);

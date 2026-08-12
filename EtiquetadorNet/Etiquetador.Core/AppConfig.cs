@@ -13,6 +13,12 @@ public sealed class AppConfig
 {
     // --- Carpetas ---
     public List<string> Folders { get; set; } = new();
+
+    /// <summary>
+    /// Ancho de las columnas que el usuario ha ajustado a mano, por tabla ("Enrich", "Library"…).
+    /// Se recuerda entre sesiones para no tener que recolocarlas cada vez.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, double>> ColumnWidths { get; set; } = new();
     /// <summary>Carpetas presentes pero desmarcadas (no se analizan).</summary>
     public List<string> DisabledFolders { get; set; } = new();
 

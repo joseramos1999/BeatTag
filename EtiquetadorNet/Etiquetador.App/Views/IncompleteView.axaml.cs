@@ -7,7 +7,11 @@ namespace Etiquetador.App.Views;
 
 public partial class IncompleteView : UserControl
 {
-    public IncompleteView() => InitializeComponent();
+    public IncompleteView()
+    {
+        InitializeComponent();
+        GridBehaviors.EnableWidthMemory(this, "Incompletas");
+    }
 
     private void Grid_PointerPressed(object? sender, PointerPressedEventArgs e)
     {

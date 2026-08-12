@@ -74,6 +74,14 @@ public sealed class MusicBrainzProvider
             var my = Regex.Match(J.S(J.P(rel, "date")), @"^(\d{4})");
             if (my.Success) year = my.Groups[1].Value;
         }
-        return new ProviderResult { Title = J.S(J.P(best, "title")), Artist = credit, Album = album, Year = year };
+        // MusicBrainz trae su PROPIA puntuación (0-100) y aquí solo se aceptan las de 85 para arriba,
+        // que ya son coincidencias sólidas. Antes no se trasladaba y se quedaba en 0, así que TODAS
+        // acababan marcadas como "baja confianza" sin motivo. Se lleva 85-100 a nuestra escala 2,5-10.
+        var score = Math.Round((bestScore - 80) / 2.0, 1);
+        return new ProviderResult
+        {
+            Title = J.S(J.P(best, "title")), Artist = credit, Album = album, Year = year,
+            Score = score,
+        };
     }
 }

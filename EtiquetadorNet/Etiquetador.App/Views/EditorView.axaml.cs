@@ -8,7 +8,11 @@ namespace Etiquetador.App.Views;
 
 public partial class EditorView : UserControl
 {
-    public EditorView() => InitializeComponent();
+    public EditorView()
+    {
+        InitializeComponent();
+        GridBehaviors.EnableWidthMemory(this, "Editor");
+    }
 
     // "Reanalizar…": mismo diálogo que en Enriquecer, pero aquí la propuesta solo RELLENA el
     // formulario; no se escribe nada hasta que el usuario pulse Guardar.

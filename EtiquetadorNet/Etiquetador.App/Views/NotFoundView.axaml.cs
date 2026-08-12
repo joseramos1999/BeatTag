@@ -8,7 +8,11 @@ namespace Etiquetador.App.Views;
 
 public partial class NotFoundView : UserControl
 {
-    public NotFoundView() => InitializeComponent();
+    public NotFoundView()
+    {
+        InitializeComponent();
+        GridBehaviors.EnableWidthMemory(this, "NoEncontradas");
+    }
 
     // "Reanalizar…": mismo diálogo que en Enriquecer (corregir la búsqueda, elegir entre las
     // coincidencias, pegar un enlace o identificar por huella). Si aparece, se aplica.

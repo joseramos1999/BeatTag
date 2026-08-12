@@ -58,8 +58,16 @@ public sealed class AppEngine
     public event Action<string>? EditRequested;
     public void RequestEdit(string filePath) => EditRequested?.Invoke(filePath);
 
+    /// <summary>
+    /// Instancia en uso. La app tiene un único motor compartido; esto permite que detalles de la
+    /// interfaz (como recordar el ancho de las columnas) lleguen a la config sin cablearla por
+    /// todos los ViewModels. No usar para lógica de negocio: ahí se pasa el motor por constructor.
+    /// </summary>
+    public static AppEngine? Current { get; private set; }
+
     public AppEngine()
     {
+        Current = this;
         Paths = new AppPaths();
         Paths.EnsureDirectories();
 

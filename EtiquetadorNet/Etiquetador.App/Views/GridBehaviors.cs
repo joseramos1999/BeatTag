@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using Avalonia;
 using Avalonia.Collections;
@@ -5,7 +7,9 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.VisualTree;
+using Etiquetador.Core;
 
 namespace Etiquetador.App.Views;
 
@@ -39,6 +43,60 @@ public static class GridBehaviors
             catch { }
         }
     }
+
+    /// <summary>
+    /// Recuerda el ancho de las columnas que el usuario ajusta a mano: al soltar el ratón se guarda,
+    /// y al abrir la tabla se restaura. Así no hay que recolocarlas en cada sesión.
+    /// Se identifica cada tabla por <paramref name="tableId"/> y cada columna por su cabecera.
+    /// </summary>
+    /// <summary>Activa la memoria de anchos en la tabla de esta vista (se llama en su constructor).</summary>
+    public static void EnableWidthMemory(Control view, string tableId)
+    {
+        view.AttachedToVisualTree += (_, _) =>
+        {
+            var engine = Services.AppEngine.Current;
+            if (engine == null) return;
+            RememberColumnWidths(view.FindDescendantOfType<DataGrid>(), tableId, engine.Config, engine.SaveConfig);
+        };
+    }
+
+    public static void RememberColumnWidths(DataGrid? grid, string tableId, AppConfig config, Action saveConfig)
+    {
+        if (grid == null) return;
+
+        // Restaurar lo guardado.
+        if (config.ColumnWidths.TryGetValue(tableId, out var saved))
+        {
+            foreach (var col in grid.Columns)
+            {
+                var key = col.Header?.ToString();
+                if (key != null && saved.TryGetValue(key, out var w) && w > 20)
+                    col.Width = new DataGridLength(w, DataGridLengthUnitType.Pixel);
+            }
+        }
+
+        // Guardar cuando el usuario suelta el borde de una columna.
+        grid.AddHandler(InputElement.PointerReleasedEvent, (s, _) =>
+        {
+            try
+            {
+                var anchos = new Dictionary<string, double>();
+                foreach (var col in grid.Columns)
+                {
+                    var key = col.Header?.ToString();
+                    if (key != null && col.ActualWidth > 20) anchos[key] = Math.Round(col.ActualWidth);
+                }
+                if (anchos.Count == 0) return;
+                if (config.ColumnWidths.TryGetValue(tableId, out var prev) && SameWidths(prev, anchos)) return;
+                config.ColumnWidths[tableId] = anchos;
+                saveConfig();
+            }
+            catch { /* recordar anchos nunca debe molestar */ }
+        }, RoutingStrategies.Bubble, handledEventsToo: true);
+    }
+
+    private static bool SameWidths(Dictionary<string, double> a, Dictionary<string, double> b)
+        => a.Count == b.Count && a.All(kv => b.TryGetValue(kv.Key, out var v) && Math.Abs(v - kv.Value) < 1);
 
     /// <summary>Doble clic en una cabecera de columna: auto-ajusta TODAS las columnas al contenido.</summary>
     public static bool AutoFitOnHeaderDoubleTap(object? sender, TappedEventArgs e)

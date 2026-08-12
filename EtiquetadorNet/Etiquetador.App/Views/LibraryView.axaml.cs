@@ -13,6 +13,7 @@ public partial class LibraryView : UserControl
     public LibraryView()
     {
         InitializeComponent();
+        GridBehaviors.EnableWidthMemory(this, "Biblioteca");
         DragDrop.SetAllowDrop(this, true);
         DragDrop.AddDragOverHandler(this, OnDragOver);
         DragDrop.AddDropHandler(this, OnDrop);

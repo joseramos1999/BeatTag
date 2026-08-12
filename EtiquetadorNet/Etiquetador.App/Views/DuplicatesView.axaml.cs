@@ -7,7 +7,11 @@ namespace Etiquetador.App.Views;
 
 public partial class DuplicatesView : UserControl
 {
-    public DuplicatesView() => InitializeComponent();
+    public DuplicatesView()
+    {
+        InitializeComponent();
+        GridBehaviors.EnableWidthMemory(this, "Duplicados");
+    }
 
     private void ExpandAll_Click(object? sender, RoutedEventArgs e) => GridBehaviors.SetAllGroups(this.FindDescendantOfType<DataGrid>(), true);
     private void CollapseAll_Click(object? sender, RoutedEventArgs e) => GridBehaviors.SetAllGroups(this.FindDescendantOfType<DataGrid>(), false);
