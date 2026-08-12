@@ -9,6 +9,7 @@ namespace Etiquetador.App.ViewModels;
 public partial class MainViewModel : ViewModelBase
 {
     private const int EditorTabIndex = 2;
+    private const int TrendsTabIndex = 8;
 
     public AppEngine Engine { get; }
 
@@ -68,6 +69,7 @@ public partial class MainViewModel : ViewModelBase
         if (Engine.Library.Folders.Count > 0) await Library.ScanAsync();   // rápido gracias a la caché de escaneo
         Enrich.LoadCached();      // rellena la previsualización con lo que ya haya analizado
         NotFound.LoadFromCache(); // y las que no se identificaron, a su pestaña
+        _ = Trends.EnsureCountriesAsync();   // la lista de paises, lista para cuando abras Tendencias
     }
 
     private void OnChildChanged(object? sender, PropertyChangedEventArgs e)
@@ -90,7 +92,13 @@ public partial class MainViewModel : ViewModelBase
     // Mientras hay una operación larga, no se puede cambiar de pestaña (se vuelve a la ocupada).
     partial void OnSelectedTabIndexChanged(int value)
     {
-        if (_reverting || !Busy || value == _busyTabIndex) return;
+        if (_reverting || !Busy || value == _busyTabIndex)
+        {
+            // Al entrar en Tendencias se cargan los países (una sola vez). Se hace aquí y no en la
+            // vista porque el enganche al árbol visual no llegaba a dispararse con las pestañas.
+            if (!_reverting && value == TrendsTabIndex) _ = Trends.EnsureCountriesAsync();
+            return;
+        }
         _reverting = true;
         SelectedTabIndex = _busyTabIndex;
         _reverting = false;

@@ -77,6 +77,7 @@ public partial class TrendsViewModel : ViewModelBase
         if (Countries.Count > 0 || IsBusy) return;
         IsBusy = true;
         Status = "Cargando países…";
+        _engine.Logger.Detail("Tendencias: pidiendo la lista de países…");
         try
         {
             var paises = await _engine.Charts.GetCountriesAsync();
@@ -84,9 +85,16 @@ public partial class TrendsViewModel : ViewModelBase
             // España por defecto; si no estuviera, el primero.
             SelectedCountry = Countries.FirstOrDefault(c => c.Name.Equals("Spain", StringComparison.OrdinalIgnoreCase))
                               ?? Countries.FirstOrDefault();
-            Status = $"{Countries.Count} países disponibles. Pulsa Ver tendencias.";
+            Status = Countries.Count > 0
+                ? $"{Countries.Count} países disponibles. Pulsa Ver tendencias."
+                : "No se recibió ningún país. ¿Hay conexión a internet?";
+            _engine.Logger.Sum($"Tendencias: {Countries.Count} países cargados.");
         }
-        catch (Exception e) { Status = "No se pudieron cargar los países: " + e.Message; }
+        catch (Exception e)
+        {
+            Status = "No se pudieron cargar los países: " + e.Message;
+            _engine.Logger.Error("Tendencias: fallo al cargar los países", e);
+        }
         finally { IsBusy = false; }
     }
 
@@ -94,6 +102,8 @@ public partial class TrendsViewModel : ViewModelBase
     private async Task LoadAsync()
     {
         if (IsBusy) return;
+        // Red de seguridad: si por lo que sea no se cargaron al abrir la pestaña, se cargan aquí.
+        if (Countries.Count == 0) await EnsureCountriesAsync();
         if (SelectedCountry is not { } pais) { Status = "Elige antes un país."; return; }
         IsBusy = true;
         _cts = new CancellationTokenSource();
