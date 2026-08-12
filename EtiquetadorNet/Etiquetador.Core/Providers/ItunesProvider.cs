@@ -13,9 +13,9 @@ public sealed class ItunesProvider
     private readonly ApiClient _api;
     public ItunesProvider(ApiClient api) => _api = api;
 
-    public async Task<ProviderResult?> SearchAsync(string artist, string title, int localDur = 0, bool isEdit = false, CancellationToken ct = default)
+    public async Task<ProviderResult?> SearchAsync(string artist, string title, int localDur = 0, bool isEdit = false, CancellationToken ct = default, bool verbatim = false)
     {
-        var kw = Descriptors.BuildKw(artist, title);
+        var kw = verbatim ? Descriptors.BuildKwVerbatim(artist, title) : Descriptors.BuildKw(artist, title);
         if (kw.Length == 0) kw = Descriptors.CleanKeywords(title);
         if (kw.Length == 0) return null;
 

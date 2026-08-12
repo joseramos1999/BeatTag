@@ -89,6 +89,21 @@ public class TextLayerTests
     [Fact] public void Ck_no_vacia_numerico() => Assert.Equal("404", Descriptors.CleanKeywords("404"));
     [Fact] public void Ck_quita_numero_suelto() => Assert.Equal("Randy", Descriptors.CleanKeywords("Randy 128"));
 
+    // La "x" solo separa artistas cuando va suelta ENTRE dos palabras.
+    [Theory]
+    [InlineData("Artista A x Artista B", "Artista A Artista B")]   // separador de verdad
+    [InlineData("X.O.X.O.", "X.O.X.O.")]                            // título: se conserva
+    [InlineData("Lil Nas X", "Lil Nas X")]                          // parte del nombre del artista
+    [InlineData("X", "X")]                                          // título de una sola letra
+    public void Ck_la_x_solo_es_separador_entre_palabras(string input, string expected)
+        => Assert.Equal(expected, Descriptors.CleanKeywords(input));
+
+    // Cuando el usuario dicta la búsqueda, se respeta tal cual (limpiarla rompía "X.O.X.O.").
+    [Fact]
+    public void BuildKwVerbatim_no_toca_lo_que_dicta_el_usuario()
+        => Assert.Equal("D' la Crem X.O.X.O. (feat. Rvfv) [Remix]",
+            Descriptors.BuildKwVerbatim("D' la Crem", "X.O.X.O. (feat. Rvfv) [Remix]"));
+
     // El "ft" solo cuenta como "featuring" si va suelto: dentro de una palabra NO debe cortar.
     [Theory]
     [InlineData("Daft Punk", "Daft Punk")]

@@ -43,7 +43,10 @@ public static class Descriptors
         var s2 = Rep(s, @"\b\d{2,3}\b", " ");                            // quita números sueltos (BPM/pista)...
         if (Regex.Replace(s2, @"[^\p{L}\d]", "").Length > 0) s = s2;     // ...salvo que dejara vacío: título numérico ("404")
         s = Rep(s, "[,_/]", " ");
-        s = Rep(s, @"\bx\b", " ");
+        // La "x" solo es separador de artistas cuando va SUELTA entre espacios ("Artista A x Artista B").
+        // Con \b se comía la X de títulos como "X.O.X.O." (quedaba ".O. .O.") o "X" de Nicky Jam.
+        // Además debe haber texto A AMBOS LADOS, o se llevaba por delante la X final de "Lil Nas X".
+        s = Rep(s, @"(?<=\S\s)x(?=\s\S)", " ");
         return Regex.Replace(s, @"\s+", " ").Trim();
     }
 
@@ -52,6 +55,17 @@ public static class Descriptors
     {
         var x = (CleanKeywords(a).Trim() + " " + CleanKeywords(t).Trim()).Trim();
         return x.Length > 0 ? x : CleanKeywords(t);
+    }
+
+    /// <summary>
+    /// Query cuando el usuario dicta qué buscar (eligió una coincidencia, pegó un enlace o lo
+    /// escribió a mano): se respeta TAL CUAL. Limpiarla es justo lo que sobra aquí — llegó a
+    /// convertir "X.O.X.O." en ".O. .O." y a devolver otra canción.
+    /// </summary>
+    public static string BuildKwVerbatim(string? a, string? t)
+    {
+        var s = ((a ?? "").Trim() + " " + (t ?? "").Trim()).Trim();
+        return Regex.Replace(s, @"\s{2,}", " ");
     }
 
     /// <summary>Limpia un título para query: quita corchetes/paréntesis, descriptores, BPM y clean/dirty.</summary>

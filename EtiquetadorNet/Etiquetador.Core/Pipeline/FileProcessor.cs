@@ -181,22 +181,22 @@ public sealed class FileProcessor
             if (o.Deezer && !onlyIt && !onlySp)
             {
                 Step("Deezer", 0.15);
-                dz = await _dz.SearchAsync(fnArtist, qTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz != null) variant = "nombre";
-                if (dz == null && fnArtist.Length > 0) { dz = await _dz.SearchAsync(fnTitle, fnArtist, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz != null) variant = "invertido"; }
-                if (dz == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(tagArtist, tagTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz != null) variant = "tag"; }
-                if (dz == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(firstArtist, firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz != null) variant = "principal"; }
-                if (dz == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { dz = await _dz.SearchAsync(firstTitleArtist, firstArtist, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz != null) variant = "principal"; }
-                if (dz == null && firstTitle.Length > 0) { dz = await _dz.SearchAsync("", firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz != null) variant = "titulo"; }
+                dz = await _dz.SearchAsync(fnArtist, qTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "nombre";
+                if (dz == null && fnArtist.Length > 0) { dz = await _dz.SearchAsync(fnTitle, fnArtist, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "invertido"; }
+                if (dz == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(tagArtist, tagTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "tag"; }
+                if (dz == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(firstArtist, firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "principal"; }
+                if (dz == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { dz = await _dz.SearchAsync(firstTitleArtist, firstArtist, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "principal"; }
+                if (dz == null && firstTitle.Length > 0) { dz = await _dz.SearchAsync("", firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "titulo"; }
             }
             if (o.Itunes && dz == null && !onlyDz && !onlySp)
             {
                 Step("iTunes", 0.3);
-                it = await _it.SearchAsync(fnArtist, qTitle, localDur, isEdit, ct).ConfigureAwait(false); if (it != null) variant = "nombre";
-                if (it == null && fnArtist.Length > 0) { it = await _it.SearchAsync(fnTitle, fnArtist, localDur, isEdit, ct).ConfigureAwait(false); if (it != null) variant = "invertido"; }
-                if (it == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { it = await _it.SearchAsync(tagArtist, tagTitle, localDur, isEdit, ct).ConfigureAwait(false); if (it != null) variant = "tag"; }
-                if (it == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { it = await _it.SearchAsync(firstArtist, firstTitle, localDur, isEdit, ct).ConfigureAwait(false); if (it != null) variant = "principal"; }
-                if (it == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { it = await _it.SearchAsync(firstTitleArtist, firstArtist, localDur, isEdit, ct).ConfigureAwait(false); if (it != null) variant = "principal"; }
-                if (it == null && firstTitle.Length > 0) { it = await _it.SearchAsync("", firstTitle, localDur, isEdit, ct).ConfigureAwait(false); if (it != null) variant = "titulo"; }
+                it = await _it.SearchAsync(fnArtist, qTitle, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it != null) variant = "nombre";
+                if (it == null && fnArtist.Length > 0) { it = await _it.SearchAsync(fnTitle, fnArtist, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it != null) variant = "invertido"; }
+                if (it == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { it = await _it.SearchAsync(tagArtist, tagTitle, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it != null) variant = "tag"; }
+                if (it == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { it = await _it.SearchAsync(firstArtist, firstTitle, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it != null) variant = "principal"; }
+                if (it == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { it = await _it.SearchAsync(firstTitleArtist, firstArtist, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it != null) variant = "principal"; }
+                if (it == null && firstTitle.Length > 0) { it = await _it.SearchAsync("", firstTitle, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it != null) variant = "titulo"; }
             }
             if (o.Spotify && o.SpotifyId.Length > 0 && o.SpotifySecret.Length > 0
                 && ((dz == null && it == null && !forced) || onlySp))
@@ -237,8 +237,8 @@ public sealed class FileProcessor
                 if (ai != null && ai.Title.Length > 0 && ai.Confidence >= 0.5 && !ai.IsMashup)
                 {
                     var aiA = ai.Artist; var aiT = ai.Title;
-                    if (o.Deezer) { dz = await _dz.SearchAsync(aiA, aiT, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); if (dz == null && aiA.Length > 0) dz = await _dz.SearchAsync(aiT, aiA, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer).ConfigureAwait(false); }
-                    if (dz == null && o.Itunes) { it = await _it.SearchAsync(aiA, aiT, localDur, isEdit, ct).ConfigureAwait(false); if (it == null && aiA.Length > 0) it = await _it.SearchAsync(aiT, aiA, localDur, isEdit, ct).ConfigureAwait(false); }
+                    if (o.Deezer) { dz = await _dz.SearchAsync(aiA, aiT, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz == null && aiA.Length > 0) dz = await _dz.SearchAsync(aiT, aiA, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); }
+                    if (dz == null && o.Itunes) { it = await _it.SearchAsync(aiA, aiT, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it == null && aiA.Length > 0) it = await _it.SearchAsync(aiT, aiA, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); }
                     primary = dz ?? it;
                     if (primary != null) variant = "ia";
                     if (primary != null && o.Discogs && dc == null) dc = await _dc.SearchAsync(primary.Artist, primary.Title, AppInfo.UserAgent, o.DiscogsToken, ct).ConfigureAwait(false);
@@ -260,7 +260,7 @@ public sealed class FileProcessor
                     {
                         variant = "acoustid";
                         if (o.Deezer) dz = await _dz.SearchAsync(ac.Artist, ac.Title, false, false, localDur, isEdit, ct).ConfigureAwait(false);
-                        if (dz == null && o.Itunes) it = await _it.SearchAsync(ac.Artist, ac.Title, localDur, isEdit, ct).ConfigureAwait(false);
+                        if (dz == null && o.Itunes) it = await _it.SearchAsync(ac.Artist, ac.Title, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false);
                         if (o.Discogs && dc == null) dc = await _dc.SearchAsync(ac.Artist, ac.Title, AppInfo.UserAgent, o.DiscogsToken, ct).ConfigureAwait(false);
                         primary = dz ?? it;
                         if (primary == null) acHit = ac;
@@ -274,7 +274,7 @@ public sealed class FileProcessor
         // Estrategia POR CAMPO: rellena huecos (album/año/carátula) con una fuente secundaria.
         if (primary != null && !cleanOnly && (primary.Album.Length == 0 || primary.Year.Length == 0 || primary.CoverUrl.Length == 0))
         {
-            if (o.Itunes && it == null) { sec = await _it.SearchAsync(primary.Artist, primary.Title, localDur, isEdit, ct).ConfigureAwait(false); if (sec != null) secSrc = "AppleMusic"; }
+            if (o.Itunes && it == null) { sec = await _it.SearchAsync(primary.Artist, primary.Title, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (sec != null) secSrc = "AppleMusic"; }
             if (sec == null && o.Deezer && dz == null) { sec = await _dz.SearchAsync(primary.Artist, primary.Title, false, false, localDur, isEdit, ct).ConfigureAwait(false); if (sec != null) secSrc = "Deezer"; }
         }
 
@@ -393,6 +393,21 @@ public sealed class FileProcessor
         {
             var tagAdj = Matching.TagCoherence(tagArtist, tagTitle, primary.Artist, primary.Title);
             var finalScore = Math.Round(primary.Score + tagAdj, 1);
+
+            // Si la coincidencia la elegiste TÚ (de la lista, por enlace o por huella), no tiene
+            // sentido marcarla como dudosa: la validaste viéndola. Antes salía con confianza 0 y
+            // se auto-desmarcaba, que es justo lo contrario de lo que quieres.
+            if (manual && o.SearchSource.Length > 0 && finalScore < 10)
+            {
+                _log?.Detail($"    confianza-> {finalScore} -> 10 (coincidencia elegida por el usuario en {o.SearchSource})");
+                finalScore = 10;
+            }
+            else if (manual && finalScore < 4)
+            {
+                // Términos dictados a mano: tampoco debería quedar por debajo del umbral de revisión.
+                _log?.Detail($"    confianza-> {finalScore} -> 4 (búsqueda dictada por el usuario)");
+                finalScore = 4;
+            }
             scoreStr = finalScore.ToString(System.Globalization.CultureInfo.InvariantCulture);
             _log?.Detail($"    confianza-> {primary.Score} (fuente) {(tagAdj >= 0 ? "+" : "")}{tagAdj} (tags) = {scoreStr}"
                        + (finalScore < 2.0 ? "  [BAJA]" : ""));

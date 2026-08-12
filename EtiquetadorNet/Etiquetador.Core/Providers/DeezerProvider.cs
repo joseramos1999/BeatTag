@@ -23,9 +23,9 @@ public sealed class DeezerProvider
     public DeezerProvider(ApiClient api) => _api = api;
 
     public async Task<ProviderResult?> SearchAsync(string artist, string title, bool wantRemix, bool wantLive,
-        int localDur = 0, bool isEdit = false, CancellationToken ct = default, string expectedRemixer = "")
+        int localDur = 0, bool isEdit = false, CancellationToken ct = default, string expectedRemixer = "", bool verbatim = false)
     {
-        var kw = Descriptors.BuildKw(artist, title);
+        var kw = verbatim ? Descriptors.BuildKwVerbatim(artist, title) : Descriptors.BuildKw(artist, title);
         if (kw.Length == 0) kw = Descriptors.CleanKeywords(title);
         if (kw.Length == 0) { Log?.Detail("      dz: query vacía tras limpiar -> no se busca"); return null; }
 
