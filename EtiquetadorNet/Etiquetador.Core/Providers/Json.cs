@@ -23,6 +23,18 @@ internal static class J
         return "";
     }
 
+    /// <summary>Entero largo (los ids de playlist de Deezer no caben en int).</summary>
+    public static long L(JsonNode? n)
+    {
+        if (n is JsonValue v)
+        {
+            if (v.TryGetValue<long>(out var l)) return l;
+            if (v.TryGetValue<double>(out var d)) return (long)d;
+            if (v.TryGetValue<string>(out var s) && long.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var ls)) return ls;
+        }
+        return 0;
+    }
+
     public static int I(JsonNode? n)
     {
         if (n is JsonValue v)

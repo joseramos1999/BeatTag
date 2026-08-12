@@ -35,6 +35,9 @@
         <TabItem Header="Estadísticas">
             <views:StatsView DataContext="{Binding Stats}" />
         </TabItem>
+        <TabItem Header="🌍 Tendencias">
+            <views:TrendsView DataContext="{Binding Trends}" />
+        </TabItem>
         <TabItem Header="Ajustes">
             <views:SettingsView DataContext="{Binding Settings}" />
         </TabItem>
