@@ -10,7 +10,7 @@
     <DockPanel Margin="8">
 
         <StackPanel DockPanel.Dock="Top" Spacing="6">
-            <TextBlock Text="Qué suena ahora, y cuánto de eso tienes ya" FontWeight="Bold" FontSize="15" />
+            <TextBlock Text="Listas de éxitos por país" FontWeight="Bold" FontSize="15" />
 
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBlock Text="País" VerticalAlignment="Center" />
@@ -19,14 +19,14 @@
                 <TextBlock Text="Lista" VerticalAlignment="Center" Margin="8,0,0,0" />
                 <ComboBox ItemsSource="{Binding ListSizes}" SelectedItem="{Binding ListSize}"
                           MinWidth="80" IsEnabled="{Binding !IsBusy}" />
-                <Button Content="🌍 Ver tendencias" Command="{Binding LoadCommand}" IsEnabled="{Binding !IsBusy}"
+                <Button Content="Ver tendencias" Command="{Binding LoadCommand}" IsEnabled="{Binding !IsBusy}"
                         Background="#7C3AED" Foreground="White" FontWeight="SemiBold" />
                 <Button Content="Cancelar" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
-                <CheckBox Content="Solo las que tengo" IsChecked="{Binding SoloLasQueTengo}" VerticalAlignment="Center" />
-                <Button Content="📁 Crear carpeta con las que tengo" Click="CreateFolder_Click"
+                <CheckBox Content="Mostrar solo las disponibles" IsChecked="{Binding SoloLasQueTengo}" VerticalAlignment="Center" />
+                <Button Content="Crear carpeta con las disponibles" Click="CreateFolder_Click"
                         IsEnabled="{Binding !IsBusy}"
                         Background="#16A34A" Foreground="White" FontWeight="SemiBold"
-                        ToolTip.Tip="COPIA (no mueve) a una carpeta nueva las canciones del chart que ya tienes, numeradas por posición." />
+                        ToolTip.Tip="Copia (no mueve) a una carpeta nueva las grabaciones de la lista que ya están en la biblioteca, numeradas por su posición." />
             </StackPanel>
 
             <TextBlock Text="{Binding Status}" Foreground="Gray" TextTrimming="CharacterEllipsis" Margin="0,2,0,4" />
@@ -52,8 +52,8 @@
                 <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="180" MinWidth="100" />
                 <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="220" MinWidth="120" />
                 <DataGridTextColumn Header="Dur." Binding="{Binding DurText}" Width="60" MinWidth="50" />
-                <DataGridTextColumn Header="¿La tienes?" Binding="{Binding Estado}" Width="110" MinWidth="90" />
-                <DataGridTextColumn Header="Tu archivo" Binding="{Binding FileName}" Width="*" MinWidth="140" />
+                <DataGridTextColumn Header="Disponibilidad" Binding="{Binding Estado}" Width="110" MinWidth="90" />
+                <DataGridTextColumn Header="Archivo en la biblioteca" Binding="{Binding FileName}" Width="*" MinWidth="140" />
             </DataGrid.Columns>
         </DataGrid>
     </DockPanel>

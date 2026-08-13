@@ -41,7 +41,7 @@ public partial class TrendsView : UserControl
 
         var carpetas = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "¿Dónde creo la carpeta con las tendencias?",
+            Title = "Selecciona dónde crear la carpeta",
             AllowMultiple = false,
         });
         if (carpetas.Count == 0) return;

@@ -98,20 +98,20 @@
 
             <!-- TENDENCIAS -->
             <TextBlock Classes="h" Text="🌍 Tendencias" />
-            <TextBlock Classes="p" Text="Qué suena ahora mismo en cada país y cuánto de eso tienes ya. Útil para ver qué te falta antes de una sesión." />
-            <TextBlock Classes="li" Text="• Elige el país (hay unos 70) y el tamaño de la lista (20, 50 o 100), y pulsa 'Ver tendencias'." />
-            <TextBlock Classes="li" Text="• Las que ya tienes salen en verde, con el archivo de tu biblioteca al lado; las que te faltan, en blanco." />
-            <TextBlock Classes="li" Text="• 'Crear carpeta con las que tengo' COPIA (no mueve) esas canciones a una carpeta nueva, numeradas por su posición en la lista. Tu biblioteca no se toca." />
+            <TextBlock Classes="p" Text="Listas de éxitos actuales por país, contrastadas con el contenido de la biblioteca. Permite comprobar qué grabaciones de tendencia faltan antes de preparar una sesión." />
+            <TextBlock Classes="li" Text="• Selecciona el país (hay unos 70) y el tamaño de la lista (20, 50 o 100), y pulsa 'Ver tendencias'." />
+            <TextBlock Classes="li" Text="• Las que ya están en la biblioteca aparecen en verde, junto al archivo correspondiente; las que faltan, sin color." />
+            <TextBlock Classes="li" Text="• 'Crear carpeta con las disponibles' copia (no mueve) esas grabaciones a una carpeta nueva, numeradas por su posición en la lista. La biblioteca original no se modifica." />
             <TextBlock Classes="dim" Margin="12,2,0,0" Text="Las listas son las oficiales de Deezer, públicas y sin necesidad de clave. No se usa el Top 50 de Spotify porque Spotify cerró el acceso a sus listas editoriales en noviembre de 2024." />
 
             <!-- VOLUMEN -->
             <TextBlock Classes="h" Text="🔊 Volumen" />
-            <TextBlock Classes="p" Text="Unas canciones están grabadas más fuerte que otras. En una sesión eso se nota: unas se quedan flojas y otras dan un golpe. Esta pestaña te dice cuáles se salen de la norma." />
-            <TextBlock Classes="li" Text="• Elige a qué nivel igualar y pulsa Comprobar. Lo ya comprobado se reutiliza, así que la segunda vez es instantáneo." />
-            <TextBlock Classes="li" Text="• 'Igualar mi música entre sí' es la opción recomendada: toma como referencia el volumen habitual de TU colección, así que solo se corrigen las que se salen. Las otras opciones fijan un nivel concreto (club, plataformas o cine)." />
-            <TextBlock Classes="li" Text="• Verde: suena bien. Ámbar: se queda floja. Rojo: destaca de más. La columna 'Qué hay que hacer' lo dice en palabras." />
-            <TextBlock Classes="li" Text="• Algunas canciones ya vienen grabadas al máximo y no se pueden subir más sin que distorsionen: la app te avisa." />
-            <TextBlock Classes="dim" Margin="12,2,0,0" Text="De momento esta pestaña SOLO MIDE: no modifica ningún archivo." />
+            <TextBlock Classes="p" Text="Las grabaciones no comparten el mismo nivel: durante una sesión, unas se perciben más bajas y otras destacan en exceso. Esta pestaña identifica las que se apartan del resto." />
+            <TextBlock Classes="li" Text="• Elige el nivel de referencia y pulsa Analizar. Los resultados se conservan, por lo que las siguientes veces son inmediatas." />
+            <TextBlock Classes="li" Text="• 'Nivel medio de la biblioteca' es la opción recomendada: la referencia se calcula a partir de la propia colección, de modo que solo se señalan las grabaciones que se apartan de ella. Las demás opciones fijan un nivel concreto (club, plataformas de streaming o cine)." />
+            <TextBlock Classes="li" Text="• Verde: nivel correcto. Ámbar: por debajo. Rojo: por encima. La columna 'Ajuste necesario' indica la corrección que haría falta." />
+            <TextBlock Classes="li" Text="• Algunas grabaciones ya están al máximo y no admiten aumento sin producir distorsión; la columna Observaciones lo indica." />
+            <TextBlock Classes="dim" Margin="12,2,0,0" Text="Por ahora esta pestaña únicamente analiza: no modifica ningún archivo." />
 
             <!-- ESTADÍSTICAS -->
             <TextBlock Classes="h" Text="📊 Estadísticas" />

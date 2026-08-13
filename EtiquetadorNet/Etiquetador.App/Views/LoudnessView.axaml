@@ -9,19 +9,20 @@
     <DockPanel Margin="8">
 
         <StackPanel DockPanel.Dock="Top" Spacing="6">
-            <TextBlock Text="¿Suenan todas tus canciones al mismo volumen?" FontWeight="Bold" FontSize="15" />
+            <TextBlock Text="Uniformidad de volumen" FontWeight="Bold" FontSize="15" />
             <TextBlock Foreground="Gray" TextWrapping="Wrap"
-                       Text="Unas canciones están grabadas más fuerte que otras, y en una sesión se nota: unas se quedan flojas y otras dan un golpe. Aquí se comprueba cuáles se salen de la norma. De momento solo se mide: no se modifica ningún archivo." />
+                       Text="Las grabaciones no comparten el mismo nivel: durante una sesión, unas se perciben más bajas y otras destacan en exceso. Esta pestaña identifica las que se apartan del resto. Por ahora únicamente analiza: no modifica ningún archivo." />
 
             <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
-                <TextBlock Text="Igualar a" VerticalAlignment="Center" />
-                <ComboBox ItemsSource="{Binding Modos}" SelectedItem="{Binding Modo}" MinWidth="290" />
-                <Button Content="🔊 Comprobar" Command="{Binding MeasureCommand}" IsEnabled="{Binding !IsBusy}"
+                <TextBlock Text="Nivel de referencia" VerticalAlignment="Center" />
+                <ComboBox ItemsSource="{Binding Modos}" SelectedItem="{Binding Modo}" MinWidth="300" />
+                <Button Content="Analizar" Command="{Binding MeasureCommand}" IsEnabled="{Binding !IsBusy}"
                         Background="#7C3AED" Foreground="White" FontWeight="SemiBold"
-                        ToolTip.Tip="Analiza las canciones nuevas (lo ya comprobado se reutiliza, así que la segunda vez es instantáneo)." />
-                <Button Content="Volver a comprobar todo" Command="{Binding RemeasureAllCommand}" IsEnabled="{Binding !IsBusy}" />
+                        ToolTip.Tip="Analiza las grabaciones pendientes. Los resultados anteriores se conservan, por lo que las siguientes veces son inmediatas." />
+                <Button Content="Analizar de nuevo" Command="{Binding RemeasureAllCommand}" IsEnabled="{Binding !IsBusy}"
+                        ToolTip.Tip="Repite el análisis completo, sin aprovechar resultados anteriores." />
                 <Button Content="Cancelar" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
-                <CheckBox Content="Ver solo las que se salen" IsChecked="{Binding SoloDesviadas}" VerticalAlignment="Center" />
+                <CheckBox Content="Mostrar solo las desviadas" IsChecked="{Binding SoloDesviadas}" VerticalAlignment="Center" />
             </StackPanel>
 
             <TextBlock Text="{Binding ExplicacionModo}" Foreground="Gray" TextWrapping="Wrap" FontSize="12" />
@@ -48,11 +49,11 @@
             </DataGrid.ContextMenu>
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="*" MinWidth="180" />
-                <DataGridTextColumn Header="Cómo suena" Binding="{Binding Estado}" Width="110" MinWidth="90" />
-                <DataGridTextColumn Header="Qué hay que hacer" Binding="{Binding Accion}" Width="140" MinWidth="110" />
-                <DataGridTextColumn Header="Aviso" Binding="{Binding Aviso}" Width="210" MinWidth="120" />
-                <!-- Las dos últimas son el dato técnico, por si a alguien le interesa. -->
-                <DataGridTextColumn Header="Volumen (LUFS)" Binding="{Binding LufsText}" Width="110" MinWidth="80" />
+                <DataGridTextColumn Header="Estado" Binding="{Binding Estado}" Width="100" MinWidth="80" />
+                <DataGridTextColumn Header="Ajuste necesario" Binding="{Binding Accion}" Width="140" MinWidth="110" />
+                <DataGridTextColumn Header="Observaciones" Binding="{Binding Aviso}" Width="280" MinWidth="140" />
+                <!-- Datos técnicos, al final para no entorpecer la lectura. -->
+                <DataGridTextColumn Header="Nivel (LUFS)" Binding="{Binding LufsText}" Width="100" MinWidth="80" />
                 <DataGridTextColumn Header="Margen (dB)" Binding="{Binding PeakText}" Width="100" MinWidth="80" />
             </DataGrid.Columns>
         </DataGrid>

@@ -28,7 +28,7 @@ public sealed partial class TrendRow : ObservableObject
     public string FilePath { get; init; } = "";
     public string FileName => FilePath.Length > 0 ? Path.GetFileName(FilePath) : "";
     public bool Tengo => FilePath.Length > 0;
-    public string Estado => Tengo ? "✔ la tienes" : "— no la tienes";
+    public string Estado => Tengo ? "En la biblioteca" : "No disponible";
 
     public IBrush StateBrush => Tengo ? TengoBrush : Brushes.Transparent;
 }
@@ -54,7 +54,7 @@ public partial class TrendsViewModel : ViewModelBase
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private bool _soloLasQueTengo;
     [ObservableProperty] private int _listSize = 50;
-    [ObservableProperty] private string _status = "Elige un país y pulsa Ver tendencias.";
+    [ObservableProperty] private string _status = "Selecciona un país y pulsa Ver tendencias.";
     [ObservableProperty] private string _resumen = "";
 
     public int[] ListSizes { get; } = { 20, 50, 100 };
@@ -104,7 +104,7 @@ public partial class TrendsViewModel : ViewModelBase
         if (IsBusy) return;
         // Red de seguridad: si por lo que sea no se cargaron al abrir la pestaña, se cargan aquí.
         if (Countries.Count == 0) await EnsureCountriesAsync();
-        if (SelectedCountry is not { } pais) { Status = "Elige antes un país."; return; }
+        if (SelectedCountry is not { } pais) { Status = "Selecciona antes un país."; return; }
         IsBusy = true;
         _cts = new CancellationTokenSource();
         Status = $"Consultando el Top {ListSize} de {pais.Name}…";
@@ -133,8 +133,8 @@ public partial class TrendsViewModel : ViewModelBase
 
             RowsView.Refresh();
             var tengo = Rows.Count(r => r.Tengo);
-            Resumen = $"Tienes {tengo} de {Rows.Count} ({(Rows.Count == 0 ? 0 : tengo * 100 / Rows.Count)}%)";
-            Status = $"Top {Rows.Count} de {pais.Name}. {Resumen}. Te faltan {Rows.Count - tengo}.";
+            Resumen = $"{tengo} de {Rows.Count} disponibles en la biblioteca ({(Rows.Count == 0 ? 0 : tengo * 100 / Rows.Count)}%)";
+            Status = $"Top {Rows.Count} de {pais.Name}. {Resumen}. Faltan {Rows.Count - tengo}.";
             _engine.Logger.Sum($"Tendencias {pais.Name}: tienes {tengo} de {Rows.Count}");
         }
         catch (OperationCanceledException) { Status = "Consulta cancelada."; }
@@ -178,7 +178,7 @@ public partial class TrendsViewModel : ViewModelBase
     {
         if (IsBusy) return;
         var tengo = Rows.Where(r => r.Tengo).ToList();
-        if (tengo.Count == 0) { Status = "No tienes ninguna de esta lista."; return; }
+        if (tengo.Count == 0) { Status = "Ninguna de esta lista está en la biblioteca."; return; }
 
         IsBusy = true;
         _engine.ReleaseAudio();
@@ -208,7 +208,7 @@ public partial class TrendsViewModel : ViewModelBase
             Status = $"Copiadas {copiadas} en «{Path.GetFileName(destino)}»"
                    + (saltadas > 0 ? $" · {saltadas} ya estaban" : "")
                    + (errores > 0 ? $" · {errores} con error" : "")
-                   + ". Tu biblioteca no se ha tocado.";
+                   + ". La biblioteca original no se modifica.";
             _engine.Logger.Sum($"Tendencias: copiadas {copiadas} a {destino}");
         }
         catch (Exception e) { Status = "No se pudo copiar: " + e.Message; }
@@ -223,7 +223,7 @@ public partial class TrendsViewModel : ViewModelBase
     {
         if (IsBusy) { Status = "Espera a que termine el proceso en curso."; return; }
         var path = SelectedRow?.FilePath;
-        if (string.IsNullOrEmpty(path)) { Status = "Esa canción no está en tu biblioteca."; return; }
+        if (string.IsNullOrEmpty(path)) { Status = "Esa grabación no está en la biblioteca."; return; }
         try { _engine.Preview.Toggle(path); }
         catch (Exception e) { Status = "No se pudo reproducir: " + e.Message; }
     }
@@ -232,7 +232,7 @@ public partial class TrendsViewModel : ViewModelBase
     private async Task OpenContainingFolderAsync()
     {
         var path = SelectedRow?.FilePath;
-        if (string.IsNullOrEmpty(path)) { Status = "Esa canción no está en tu biblioteca."; return; }
+        if (string.IsNullOrEmpty(path)) { Status = "Esa grabación no está en la biblioteca."; return; }
         await Shell.OpenContainingFolderAsync(path);
     }
 }

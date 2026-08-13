@@ -34,24 +34,24 @@ public sealed partial class LoudnessRow : ObservableObject
     /// <summary>Cuánto hay que subir (+) o bajar (−) para llegar al objetivo.</summary>
     public double Gain => Target - Lufs;
 
-    /// <summary>En cristiano: qué le pasa a esta canción respecto a las demás.</summary>
+    /// <summary>Situación de la grabación respecto al nivel de referencia.</summary>
     public string Estado =>
-        Math.Abs(Gain) <= 1.0 ? "✔ Bien" :
-        Gain > 3 ? "🔉 Muy floja" :
-        Gain > 1 ? "🔉 Floja" :
-        Gain < -3 ? "🔊 Muy alta" : "🔊 Alta";
+        Math.Abs(Gain) <= 1.0 ? "Correcto" :
+        Gain > 3 ? "Muy bajo" :
+        Gain > 1 ? "Bajo" :
+        Gain < -3 ? "Muy alto" : "Alto";
 
-    /// <summary>Qué habría que hacerle, en palabras y con la cifra al lado.</summary>
+    /// <summary>Corrección que necesitaría para alcanzar el nivel de referencia.</summary>
     public string Accion =>
         Math.Abs(Gain) <= 1.0 ? "—"
-        : Gain > 0 ? $"Subir {Gain:0.0} dB" : $"Bajar {-Gain:0.0} dB";
+        : Gain > 0 ? $"Aumentar {Gain:0.0} dB" : $"Reducir {-Gain:0.0} dB";
 
     /// <summary>Si al aplicar esa ganancia el pico se pasaría de 0 dBFS (saturaría).</summary>
     public bool Satura => PeakDb + Gain > 0;
 
-    /// <summary>Aviso sin jerga: por qué esta no se puede subir del todo.</summary>
+    /// <summary>Limitación aplicable a esta grabación, expresada sin tecnicismos.</summary>
     public string Aviso => Satura
-        ? "No se puede subir tanto (distorsionaría)"
+        ? "Sin margen suficiente: aumentarla produciría distorsión"
         : "";
 
     public IBrush StateBrush =>
@@ -77,13 +77,13 @@ public partial class LoudnessViewModel : ViewModelBase
     /// </summary>
     public string[] Modos { get; } =
     {
-        "Igualar mi música entre sí (recomendado)",
-        "Nivel de club / sesión de DJ",
-        "Nivel de plataformas (Spotify, YouTube…)",
+        "Nivel medio de la biblioteca (recomendado)",
+        "Nivel de club",
+        "Nivel de plataformas de streaming",
         "Nivel de cine y televisión",
     };
 
-    [ObservableProperty] private string _modo = "Igualar mi música entre sí (recomendado)";
+    [ObservableProperty] private string _modo = "Nivel medio de la biblioteca (recomendado)";
 
     /// <summary>Nivel al que se compara todo. En el modo automático lo calcula la propia música.</summary>
     [ObservableProperty] private double _target = -14;
@@ -91,7 +91,7 @@ public partial class LoudnessViewModel : ViewModelBase
     /// <summary>Explicación del modo elegido, para que se entienda qué va a pasar.</summary>
     [ObservableProperty] private string _explicacionModo = "";
 
-    private bool EsAutomatico => Modo.StartsWith("Igualar", StringComparison.Ordinal);
+    private bool EsAutomatico => Modo.StartsWith("Nivel medio", StringComparison.Ordinal);
 
     partial void OnModoChanged(string value)
     {
@@ -100,7 +100,7 @@ public partial class LoudnessViewModel : ViewModelBase
             var m when m.StartsWith("Nivel de club") => -11,
             var m when m.StartsWith("Nivel de plataformas") => -14,
             var m when m.StartsWith("Nivel de cine") => -23,
-            _ => Rows.Count > 0 ? Mediana() : Target,   // automático: lo dice tu propia música
+            _ => Rows.Count > 0 ? Mediana() : Target,   // el propio contenido fija la referencia
         };
         ExplicarModo();
         Recalcular();
@@ -109,15 +109,15 @@ public partial class LoudnessViewModel : ViewModelBase
     private void ExplicarModo()
     {
         ExplicacionModo = EsAutomatico
-            ? $"Se toma como referencia el volumen típico de tu propia música ({Target:0.0}), así que solo se corrigen las que se salen de la norma."
+            ? $"La referencia se calcula a partir de la propia biblioteca ({Target:0.0} LUFS). Se señalan únicamente las grabaciones que se apartan de ese nivel."
             : Modo.StartsWith("Nivel de club")
-                ? "Nivel alto, pensado para sonar fuerte en un equipo de sala."
+                ? "Nivel elevado, adecuado para equipos de sala."
                 : Modo.StartsWith("Nivel de plataformas")
-                    ? "El nivel al que reproducen Spotify o YouTube. Más bajo que el habitual en música de baile."
-                    : "Nivel de referencia de cine y televisión. Bastante más bajo que la música comercial.";
+                    ? "Nivel de reproducción de Spotify y YouTube. Inferior al habitual en música de baile."
+                    : "Nivel de referencia en cine y televisión. Considerablemente inferior al de la música comercial.";
     }
 
-    /// <summary>Volumen típico de la colección: la mediana aguanta bien los casos extremos.</summary>
+    /// <summary>Nivel representativo de la colección: la mediana no se distorsiona con los extremos.</summary>
     private double Mediana()
     {
         var orden = Rows.Select(r => r.Lufs).OrderBy(x => x).ToList();
@@ -127,7 +127,7 @@ public partial class LoudnessViewModel : ViewModelBase
     [ObservableProperty] private double _progress;
     [ObservableProperty] private bool _soloDesviadas;
     [ObservableProperty] private LoudnessRow? _selectedRow;
-    [ObservableProperty] private string _status = "Pulsa Medir para conocer el volumen real de tu biblioteca.";
+    [ObservableProperty] private string _status = "Pulsa Analizar para comprobar la uniformidad de volumen de la biblioteca.";
     [ObservableProperty] private string _resumen = "";
 
     public LoudnessViewModel(AppEngine engine)
@@ -171,7 +171,7 @@ public partial class LoudnessViewModel : ViewModelBase
     private async Task RunAsync(bool force)
     {
         if (IsBusy) return;
-        if (_engine.Library.Folders.Count == 0) { Status = "Añade carpetas en Biblioteca."; return; }
+        if (_engine.Library.Folders.Count == 0) { Status = "No hay carpetas configuradas. Añádelas en la pestaña Biblioteca."; return; }
         IsBusy = true;
         _cts = new CancellationTokenSource();
         Progress = 0;
@@ -187,7 +187,7 @@ public partial class LoudnessViewModel : ViewModelBase
             var prog = new Progress<(int done, int total, string file)>(p =>
             {
                 Progress = p.total == 0 ? 0 : p.done * 100.0 / p.total;
-                Status = $"Midiendo {p.done}/{p.total}…  {p.file}";
+                Status = $"Analizando {p.done} de {p.total}…  {p.file}";
             });
 
             await _engine.Loudness.MeasureManyAsync(rutas, force, prog, _cts.Token);
@@ -215,31 +215,31 @@ public partial class LoudnessViewModel : ViewModelBase
             AplicarFiltro();
             Resumir();
             Progress = 100;
-            Status = $"Medidas {Rows.Count} de {tracks.Count} en {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}. {Resumen}";
+            Status = $"Analizadas {Rows.Count} de {tracks.Count} en {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}. {Resumen}";
             _engine.Logger.Sum($"Volumen: {Rows.Count} medidas · {Resumen}");
         }
-        catch (OperationCanceledException) { Status = $"Medición cancelada ({Rows.Count} medidas)."; }
+        catch (OperationCanceledException) { Status = $"Análisis cancelado ({Rows.Count} grabaciones analizadas)."; }
         catch (Exception e)
         {
-            Status = "Error al medir: " + e.Message;
+            Status = "Error durante el análisis: " + e.Message;
             _engine.Logger.Error("Volumen: fallo al medir", e);
         }
         finally { IsBusy = false; _engine.Loudness.Save(); _cts?.Dispose(); _cts = null; }
     }
 
-    /// <summary>Resumen en cristiano: cuántas están bien y cuántas se salen de verdad.</summary>
+    /// <summary>Resumen del estado de la biblioteca, sin tecnicismos.</summary>
     private void Resumir()
     {
         if (Rows.Count == 0) { Resumen = ""; return; }
-        var bien = Rows.Count(r => Math.Abs(r.Gain) <= 1.0);
-        var flojas = Rows.Count(r => r.Gain > 1.0);
+        var correctas = Rows.Count(r => Math.Abs(r.Gain) <= 1.0);
+        var bajas = Rows.Count(r => r.Gain > 1.0);
         var altas = Rows.Count(r => r.Gain < -1.0);
-        var muyFuera = Rows.Count(r => Math.Abs(r.Gain) > 2.0);
+        var requierenAjuste = Rows.Count(r => Math.Abs(r.Gain) > 2.0);
 
-        Resumen = muyFuera == 0
-            ? $"Tu música ya suena pareja: las {Rows.Count} están en su sitio."
-            : $"{bien} suenan bien · {flojas} se quedan flojas · {altas} destacan de más. "
-              + $"Merece la pena ajustar {muyFuera}.";
+        Resumen = requierenAjuste == 0
+            ? $"El nivel es uniforme en las {Rows.Count} grabaciones analizadas."
+            : $"{correctas} con el nivel correcto · {bajas} por debajo · {altas} por encima. "
+              + $"{requierenAjuste} requieren ajuste.";
     }
 
     [RelayCommand]
@@ -248,7 +248,7 @@ public partial class LoudnessViewModel : ViewModelBase
     [RelayCommand]
     private void PlayPreview()
     {
-        if (IsBusy) { Status = "Espera a que termine la medición."; return; }
+        if (IsBusy) { Status = "Hay un análisis en curso."; return; }
         var path = SelectedRow?.FilePath;
         if (string.IsNullOrEmpty(path)) return;
         try { _engine.Preview.Toggle(path); }
