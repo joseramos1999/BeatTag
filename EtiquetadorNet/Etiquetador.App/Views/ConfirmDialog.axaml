@@ -1,0 +1,25 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="480" d:DesignHeight="240"
+        x:Class="Etiquetador.App.Views.ConfirmDialog"
+        x:CompileBindings="False"
+        Title="Confirmar"
+        Width="480" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False"
+        ShowInTaskbar="False">
+
+    <StackPanel Margin="20" Spacing="12">
+        <TextBlock x:Name="TituloText" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" />
+        <TextBlock x:Name="CuerpoText" TextWrapping="Wrap" />
+        <TextBlock x:Name="NotaText" TextWrapping="Wrap" Foreground="Gray" FontSize="12" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+            <Button Content="Cancelar" Click="Cancel_Click" MinWidth="100" IsCancel="True" />
+            <Button x:Name="OkBtn" Content="Continuar" Click="Ok_Click" MinWidth="120"
+                    Background="#16A34A" Foreground="White" FontWeight="SemiBold" IsDefault="True" />
+        </StackPanel>
+    </StackPanel>
+</Window>

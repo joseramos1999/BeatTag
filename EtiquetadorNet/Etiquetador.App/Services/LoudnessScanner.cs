@@ -51,6 +51,20 @@ public sealed class LoudnessScanner
         return null;
     }
 
+    /// <summary>
+    /// Actualiza la medida tras haber cambiado el volumen del archivo, sin volver a analizarlo:
+    /// una ganancia conocida desplaza el nivel y el pico en la misma cantidad.
+    /// </summary>
+    public void Update(string path, double lufs, double peak)
+    {
+        if (!Stat(path, out var m, out var s)) return;
+        lock (_lock)
+        {
+            _map[path] = new Entry { M = m, S = s, Lufs = lufs, Peak = peak };
+            _dirty = true;
+        }
+    }
+
     /// <summary>Mide un archivo (o devuelve lo cacheado). Devuelve null si no se pudo leer.</summary>
     public LoudnessResult? Measure(string path, bool force = false, CancellationToken ct = default)
     {

@@ -111,7 +111,9 @@
             <TextBlock Classes="li" Text="• 'Nivel medio de la biblioteca' es la opción recomendada: la referencia se calcula a partir de la propia colección, de modo que solo se señalan las grabaciones que se apartan de ella. Las demás opciones fijan un nivel concreto (club, plataformas de streaming o cine)." />
             <TextBlock Classes="li" Text="• Verde: nivel correcto. Ámbar: por debajo. Rojo: por encima. La columna 'Ajuste necesario' indica la corrección que haría falta." />
             <TextBlock Classes="li" Text="• Algunas grabaciones ya están al máximo y no admiten aumento sin producir distorsión; la columna Observaciones lo indica." />
-            <TextBlock Classes="dim" Margin="12,2,0,0" Text="Por ahora esta pestaña únicamente analiza: no modifica ningún archivo." />
+            <TextBlock Classes="li" Text="• 'Ajustar volumen' corrige las grabaciones que se desvían más de 2 dB. El audio NO se recodifica: se modifica el nivel de reproducción del propio archivo, sin pérdida de calidad y sin cambiar su tamaño." />
+            <TextBlock Classes="li" Text="• Las que no admiten aumento sin distorsionar se suben lo máximo posible, y se indica cuántas quedaron a medias." />
+            <TextBlock Classes="dim" Margin="12,2,0,0" Text="El ajuste queda registrado y se revierte con 'Deshacer última' desde Enriquecer, igual que el resto de cambios." />
 
             <!-- ESTADÍSTICAS -->
             <TextBlock Classes="h" Text="📊 Estadísticas" />

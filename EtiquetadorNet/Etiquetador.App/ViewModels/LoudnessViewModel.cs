@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,6 +11,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Etiquetador.App.Services;
 using Etiquetador.Core;
+using Etiquetador.Core.Analysis;
+using Etiquetador.Core.Pipeline;
 
 namespace Etiquetador.App.ViewModels;
 
@@ -240,6 +244,144 @@ public partial class LoudnessViewModel : ViewModelBase
             ? $"El nivel es uniforme en las {Rows.Count} grabaciones analizadas."
             : $"{correctas} con el nivel correcto · {bajas} por debajo · {altas} por encima. "
               + $"{requierenAjuste} requieren ajuste.";
+    }
+
+    /// <summary>A partir de esta desviación (dB) merece la pena corregir; por debajo no se nota.</summary>
+    public const double UmbralAjuste = 2.0;
+
+    /// <summary>Margen que se deja sin usar para no llegar justo al límite de distorsión.</summary>
+    private const double MargenSeguridad = 0.5;
+
+    /// <summary>Grabaciones que se corregirían con los criterios actuales.</summary>
+    public List<LoudnessRow> ParaAjustar()
+        => Rows.Where(r => Math.Abs(r.Gain) > UmbralAjuste)
+               .Where(r => Mp3Gain.StepsFor(GananciaAplicable(r)) != 0)
+               .ToList();
+
+    /// <summary>
+    /// Ganancia que de verdad se puede aplicar. Bajar siempre cabe; subir está limitado por el pico,
+    /// así que se aplica lo máximo que no llegue a distorsionar (mejor mejorar algo que no tocar).
+    /// </summary>
+    private static double GananciaAplicable(LoudnessRow r)
+    {
+        var deseada = r.Gain;
+        if (deseada <= 0) return deseada;
+        var maxima = -MargenSeguridad - r.PeakDb;   // lo que cabe antes de tocar techo
+        return Math.Min(deseada, Math.Max(0, maxima));
+    }
+
+    /// <summary>
+    /// Ajusta el volumen de las grabaciones desviadas. Modifica los archivos, pero sin recodificar
+    /// (no hay pérdida de calidad) y dejando manifiesto para poder deshacerlo.
+    /// </summary>
+    public async Task ApplyAsync()
+    {
+        if (IsBusy) return;
+        var objetivo = ParaAjustar();
+        if (objetivo.Count == 0) { Status = "No hay ninguna grabación que requiera ajuste."; return; }
+
+        IsBusy = true;
+        _engine.ReleaseAudio();
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+        Progress = 0;
+
+        var manifiesto = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+        _engine.Logger.Head($"Volumen: ajustando {objetivo.Count} grabaciones (referencia {Target:0.0} LUFS)");
+
+        int hechas = 0, parciales = 0, fallidas = 0, i = 0;
+        try
+        {
+            Directory.CreateDirectory(_engine.Paths.UndoDir);
+            foreach (var fila in objetivo)
+            {
+                if (ct.IsCancellationRequested) break;
+                i++;
+                Progress = i * 100.0 / objetivo.Count;
+                Status = $"Ajustando {i} de {objetivo.Count}…  {fila.FileName}";
+
+                var aplicable = GananciaAplicable(fila);
+                var pasos = Mp3Gain.StepsFor(aplicable);
+                if (pasos == 0) continue;
+
+                var res = await Task.Run(() => Mp3Gain.Apply(fila.FilePath, pasos), ct);
+                if (!res.Ok)
+                {
+                    fallidas++;
+                    _engine.Logger.Err($"Volumen: no se pudo ajustar '{fila.FileName}': {res.Error}");
+                    continue;
+                }
+
+                hechas++;
+                if (Math.Abs(aplicable - fila.Gain) > 0.75) parciales++;
+                EscribirManifiesto(manifiesto, fila.FilePath, pasos);
+
+                // El archivo ha cambiado: se actualiza la medida sin volver a analizarlo.
+                _engine.Loudness.Update(fila.FilePath, fila.Lufs + res.Db, fila.PeakDb + res.Db);
+                _engine.Logger.Detail($"    {fila.FileName}: {res.Db:+0.0;-0.0} dB ({res.Frames} tramas)");
+            }
+
+            _engine.Loudness.Save();
+            RecargarDesdeCache();
+
+            Status = $"Ajustadas {hechas} de {objetivo.Count}"
+                   + (parciales > 0 ? $" · {parciales} solo en parte (sin margen para más)" : "")
+                   + (fallidas > 0 ? $" · {fallidas} sin cambios" : "")
+                   + $". Se puede deshacer desde Enriquecer. {Resumen}";
+            _engine.Logger.Sum($"Volumen: ajustadas {hechas}, parciales {parciales}, fallidas {fallidas}");
+        }
+        catch (OperationCanceledException) { Status = $"Ajuste cancelado ({hechas} aplicadas)."; }
+        catch (Exception e)
+        {
+            Status = "Error durante el ajuste: " + e.Message;
+            _engine.Logger.Error("Volumen: fallo al ajustar", e);
+        }
+        finally { IsBusy = false; _cts?.Dispose(); _cts = null; }
+    }
+
+    /// <summary>Anota el cambio con el mismo formato que usa Enriquecer, para poder revertirlo.</summary>
+    private void EscribirManifiesto(string archivo, string ruta, int pasos)
+    {
+        try
+        {
+            // Se guardan como diferencia (Nuevo − Anterior) para que deshacer aplique el inverso.
+            var cambio = pasos >= 0
+                ? FieldChange.Num(0, (uint)pasos)
+                : FieldChange.Num((uint)(-pasos), 0);
+
+            var rec = new UndoRecord
+            {
+                OrigPath = ruta,
+                FinalPath = ruta,
+                Renamed = false,
+                Fields = new Dictionary<string, FieldChange> { [UndoEngine.VolumeField] = cambio },
+            };
+
+            File.AppendAllText(archivo,
+                System.Text.Json.JsonSerializer.Serialize(rec) + Environment.NewLine,
+                System.Text.Encoding.UTF8);
+        }
+        catch (Exception e) { _engine.Logger.Error("Volumen: no se pudo anotar el manifiesto", e); }
+    }
+
+    /// <summary>Rehace la tabla con las medidas actualizadas tras el ajuste.</summary>
+    private void RecargarDesdeCache()
+    {
+        var previas = Rows.ToList();
+        Rows.Clear();
+        foreach (var r in previas)
+        {
+            var m = _engine.Loudness.Get(r.FilePath);
+            var lufs = m is { Ok: true } v ? v.Lufs : r.Lufs;
+            var pico = m is { Ok: true } v2 ? v2.PeakDb : r.PeakDb;
+            Rows.Add(new LoudnessRow
+            {
+                FileName = r.FileName, Folder = r.Folder, FilePath = r.FilePath,
+                Lufs = lufs, PeakDb = pico, Target = Target,
+            });
+        }
+        AplicarFiltro();
+        Resumir();
     }
 
     [RelayCommand]

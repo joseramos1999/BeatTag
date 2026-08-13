@@ -80,6 +80,9 @@ public sealed class UndoEngine
         return new UndoResult(Path.GetFileName(mf), rev, err, missing, manual, clean, false);
     }
 
+    /// <summary>Nombre del campo de manifiesto que guarda un cambio de volumen (no es un tag).</summary>
+    public const string VolumeField = "Volumen";
+
     // ---------- Formato nuevo ----------
     private Outcome ProcessNew(UndoRecord r)
     {
@@ -90,12 +93,26 @@ public sealed class UndoEngine
         var renamedBack = RenameBack(r.Renamed, ref path, r.FinalPath, r.OrigPath);
 
         bool restoredAny = false, skippedAny = false;
+
+        // El volumen no es un tag: se revierte aplicando la ganancia inversa sobre el propio audio.
+        // Va antes que los tags porque reescribe el archivo entero.
+        if (r.Fields is { Count: > 0 } && r.Fields.TryGetValue(VolumeField, out var vol))
+        {
+            var pasos = (int)vol.NewNum - (int)vol.OldNum;
+            if (pasos != 0)
+            {
+                var res = Analysis.Mp3Gain.Apply(path, -pasos);
+                if (res.Ok) { restoredAny = true; _log?.Log($"  deshacer: volumen devuelto ({-pasos * Analysis.Mp3Gain.DbPerStep:+0.0;-0.0} dB) [{Path.GetFileName(path)}]", LogKind.Ok); }
+                else _log?.Log($"  deshacer: NO se pudo devolver el volumen [{Path.GetFileName(path)}]: {res.Error}", LogKind.Err);
+            }
+        }
+
         if (r.Fields is { Count: > 0 })
         {
             var tf = TagLib.File.Create(path);
             foreach (var (name, fc) in r.Fields)
             {
-                if (name == "Cover") continue;
+                if (name is "Cover" or VolumeField) continue;
                 var (restored, skipped) = RestoreField(tf.Tag, name, fc);
                 restoredAny |= restored; skippedAny |= skipped;
             }
