@@ -18,6 +18,7 @@ public sealed class AppPaths
     public string ArtistExceptionsPath { get; }
     public string ScanCachePath { get; }
     public string AnalysisCachePath { get; }
+    public string LoudnessCachePath { get; }
     public string IgnoredPath { get; }
     public string AppliedPath { get; }
 
@@ -36,6 +37,7 @@ public sealed class AppPaths
         ArtistExceptionsPath = Path.Combine(DataDir, "ArtistsExceptions.json");
         ScanCachePath = Path.Combine(DataDir, "scan-cache.json");
         AnalysisCachePath = Path.Combine(DataDir, "analysis-cache.json");
+        LoudnessCachePath = Path.Combine(DataDir, "sonoridad.json");
         IgnoredPath = Path.Combine(DataDir, "descartadas.json");
         AppliedPath = Path.Combine(DataDir, "aplicadas.json");
     }

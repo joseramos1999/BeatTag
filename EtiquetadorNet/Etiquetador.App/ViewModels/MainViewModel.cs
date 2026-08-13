@@ -22,6 +22,7 @@ public partial class MainViewModel : ViewModelBase
     public NotFoundViewModel NotFound { get; }
     public StatsViewModel Stats { get; }
     public TrendsViewModel Trends { get; }
+    public LoudnessViewModel Loudness { get; }
     public SettingsViewModel Settings { get; }
 
     [ObservableProperty] private int _selectedTabIndex;
@@ -45,10 +46,11 @@ public partial class MainViewModel : ViewModelBase
         NotFound = new NotFoundViewModel(engine);
         Stats = new StatsViewModel(engine);
         Trends = new TrendsViewModel(engine);
+        Loudness = new LoudnessViewModel(engine);
         Settings = new SettingsViewModel(engine);
 
         // Bloqueo de pestaña: seguir el estado "ocupado" de cada pestaña con operación larga.
-        foreach (ViewModelBase vm in new ViewModelBase[] { Library, Enrich, Duplicates, Quality, Incomplete, NotFound, Stats, Trends })
+        foreach (ViewModelBase vm in new ViewModelBase[] { Library, Enrich, Duplicates, Quality, Incomplete, NotFound, Stats, Trends, Loudness })
             vm.PropertyChanged += OnChildChanged;
 
         // "Editar esta canción" desde otras pestañas: la selecciona en el Editor y salta a esa pestaña.
@@ -86,6 +88,7 @@ public partial class MainViewModel : ViewModelBase
         else if (Incomplete.IsBusy) { Busy = true; _busyTabIndex = 5; }
         else if (NotFound.IsBusy) { Busy = true; _busyTabIndex = 6; }
         else if (Stats.IsBusy) { Busy = true; _busyTabIndex = 7; }
+        else if (Loudness.IsBusy) { Busy = true; _busyTabIndex = 9; }
         else Busy = false;
     }
 

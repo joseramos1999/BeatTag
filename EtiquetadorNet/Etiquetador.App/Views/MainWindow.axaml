@@ -38,6 +38,9 @@
         <TabItem Header="🌍 Tendencias">
             <views:TrendsView DataContext="{Binding Trends}" />
         </TabItem>
+        <TabItem Header="🔊 Volumen">
+            <views:LoudnessView DataContext="{Binding Loudness}" />
+        </TabItem>
         <TabItem Header="Ajustes">
             <views:SettingsView DataContext="{Binding Settings}" />
         </TabItem>

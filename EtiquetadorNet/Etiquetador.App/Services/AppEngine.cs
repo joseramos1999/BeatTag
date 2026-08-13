@@ -49,6 +49,9 @@ public sealed class AppEngine
     /// <summary>Canciones ya aplicadas: se omiten en "Analizar" (pero no en "Reanalizar todo").</summary>
     public IgnoreList Applied { get; }
     public CandidateFinder Candidates { get; }
+
+    /// <summary>Medida de sonoridad (EBU R128) con cache propia. Solo mide, no toca archivos.</summary>
+    public LoudnessScanner Loudness { get; }
     public ChartsProvider Charts { get; }
     public LinkResolver Links { get; }
 
@@ -91,6 +94,7 @@ public sealed class AppEngine
         Deezer = new DeezerProvider(Api) { Log = Logger };
         Candidates = new CandidateFinder(Api);
         Charts = new ChartsProvider(Api);
+        Loudness = new LoudnessScanner(Paths.LoudnessCachePath, Logger);
         Itunes = new ItunesProvider(Api);
         Spotify = new SpotifyProvider(Api, Logger);
         Links = new LinkResolver(Api, Spotify);

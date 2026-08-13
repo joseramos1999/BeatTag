@@ -1,0 +1,56 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="560"
+             x:Class="Etiquetador.App.Views.LoudnessView"
+             x:CompileBindings="False">
+
+    <DockPanel Margin="8">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="6">
+            <TextBlock Text="Volumen real de tu biblioteca (sonoridad EBU R128)" FontWeight="Bold" FontSize="15" />
+            <TextBlock Foreground="Gray" TextWrapping="Wrap"
+                       Text="Mide el volumen PERCIBIDO de cada canción, no el pico, y te dice cuánto se desvía del objetivo. De momento solo mide: no se modifica ningún archivo." />
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                <TextBlock Text="Objetivo (LUFS)" VerticalAlignment="Center" />
+                <ComboBox ItemsSource="{Binding Targets}" SelectedItem="{Binding Target}" MinWidth="90" />
+                <Button Content="🔊 Medir" Command="{Binding MeasureCommand}" IsEnabled="{Binding !IsBusy}"
+                        Background="#7C3AED" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Mide lo que falte (lo ya medido se reutiliza)." />
+                <Button Content="Volver a medir todo" Command="{Binding RemeasureAllCommand}" IsEnabled="{Binding !IsBusy}" />
+                <Button Content="Cancelar" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
+                <CheckBox Content="Solo las desviadas (más de 1 dB)" IsChecked="{Binding SoloDesviadas}" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}" Height="8"
+                         IsVisible="{Binding IsBusy}" Margin="0,2,0,0" />
+            <TextBlock Text="{Binding Status}" Foreground="Gray" TextTrimming="CharacterEllipsis" Margin="0,2,0,4" />
+        </StackPanel>
+
+        <DataGrid Name="RowsGrid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
+                  AutoGenerateColumns="False" IsReadOnly="True"
+                  CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                  DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
+            <DataGrid.Styles>
+                <Style Selector="DataGridRow">
+                    <Setter Property="Background" Value="{Binding StateBrush}" />
+                </Style>
+            </DataGrid.Styles>
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
+                    <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="*" MinWidth="180" />
+                <DataGridTextColumn Header="Volumen (LUFS)" Binding="{Binding LufsText}" Width="120" MinWidth="90" />
+                <DataGridTextColumn Header="Pico (dB)" Binding="{Binding PeakText}" Width="90" MinWidth="70" />
+                <DataGridTextColumn Header="Ajuste" Binding="{Binding GainText}" Width="90" MinWidth="70" />
+                <DataGridTextColumn Header="Aviso" Binding="{Binding Aviso}" Width="150" MinWidth="90" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>
