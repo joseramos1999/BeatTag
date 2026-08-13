@@ -106,10 +106,11 @@
 
             <!-- VOLUMEN -->
             <TextBlock Classes="h" Text="🔊 Volumen" />
-            <TextBlock Classes="p" Text="Mide el volumen PERCIBIDO de cada canción con el estándar EBU R128 (el que usan streaming y radio), no el pico. Sirve para ver qué temas se te van a quedar flojos o a destacar de más en una sesión." />
-            <TextBlock Classes="li" Text="• Elige el objetivo en LUFS (-14 es el de streaming; más alto = más caliente) y pulsa Medir. Lo ya medido se reutiliza." />
-            <TextBlock Classes="li" Text="• Verde: en su sitio. Ámbar: baja de volumen. Rojo: alta. La columna Ajuste dice cuánto habría que subirla o bajarla." />
-            <TextBlock Classes="li" Text="• El aviso de saturación marca las que, al subirlas, pasarían de 0 dB y distorsionarían." />
+            <TextBlock Classes="p" Text="Unas canciones están grabadas más fuerte que otras. En una sesión eso se nota: unas se quedan flojas y otras dan un golpe. Esta pestaña te dice cuáles se salen de la norma." />
+            <TextBlock Classes="li" Text="• Elige a qué nivel igualar y pulsa Comprobar. Lo ya comprobado se reutiliza, así que la segunda vez es instantáneo." />
+            <TextBlock Classes="li" Text="• 'Igualar mi música entre sí' es la opción recomendada: toma como referencia el volumen habitual de TU colección, así que solo se corrigen las que se salen. Las otras opciones fijan un nivel concreto (club, plataformas o cine)." />
+            <TextBlock Classes="li" Text="• Verde: suena bien. Ámbar: se queda floja. Rojo: destaca de más. La columna 'Qué hay que hacer' lo dice en palabras." />
+            <TextBlock Classes="li" Text="• Algunas canciones ya vienen grabadas al máximo y no se pueden subir más sin que distorsionen: la app te avisa." />
             <TextBlock Classes="dim" Margin="12,2,0,0" Text="De momento esta pestaña SOLO MIDE: no modifica ningún archivo." />
 
             <!-- ESTADÍSTICAS -->

@@ -33,11 +33,26 @@ public sealed partial class LoudnessRow : ObservableObject
 
     /// <summary>Cuánto hay que subir (+) o bajar (−) para llegar al objetivo.</summary>
     public double Gain => Target - Lufs;
-    public string GainText => $"{Gain:+0.0;-0.0;0.0} dB";
+
+    /// <summary>En cristiano: qué le pasa a esta canción respecto a las demás.</summary>
+    public string Estado =>
+        Math.Abs(Gain) <= 1.0 ? "✔ Bien" :
+        Gain > 3 ? "🔉 Muy floja" :
+        Gain > 1 ? "🔉 Floja" :
+        Gain < -3 ? "🔊 Muy alta" : "🔊 Alta";
+
+    /// <summary>Qué habría que hacerle, en palabras y con la cifra al lado.</summary>
+    public string Accion =>
+        Math.Abs(Gain) <= 1.0 ? "—"
+        : Gain > 0 ? $"Subir {Gain:0.0} dB" : $"Bajar {-Gain:0.0} dB";
 
     /// <summary>Si al aplicar esa ganancia el pico se pasaría de 0 dBFS (saturaría).</summary>
     public bool Satura => PeakDb + Gain > 0;
-    public string Aviso => Satura ? $"⚠ saturaría {PeakDb + Gain:+0.0} dB" : "";
+
+    /// <summary>Aviso sin jerga: por qué esta no se puede subir del todo.</summary>
+    public string Aviso => Satura
+        ? "No se puede subir tanto (distorsionaría)"
+        : "";
 
     public IBrush StateBrush =>
         Math.Abs(Gain) <= 1.0 ? OkBrush :
@@ -56,10 +71,58 @@ public partial class LoudnessViewModel : ViewModelBase
     public ObservableCollection<LoudnessRow> Rows { get; } = new();
     public DataGridCollectionView RowsView { get; }
 
-    /// <summary>Objetivos habituales: streaming (-14), algo más caliente para club, y el de radio.</summary>
-    public double[] Targets { get; } = { -23, -16, -14, -12, -9 };
+    /// <summary>
+    /// Modos pensados para que no haya que saber qué es un LUFS. El primero es el recomendado
+    /// porque se adapta SOLO a la colección de cada uno: no impone un número de fuera.
+    /// </summary>
+    public string[] Modos { get; } =
+    {
+        "Igualar mi música entre sí (recomendado)",
+        "Nivel de club / sesión de DJ",
+        "Nivel de plataformas (Spotify, YouTube…)",
+        "Nivel de cine y televisión",
+    };
 
+    [ObservableProperty] private string _modo = "Igualar mi música entre sí (recomendado)";
+
+    /// <summary>Nivel al que se compara todo. En el modo automático lo calcula la propia música.</summary>
     [ObservableProperty] private double _target = -14;
+
+    /// <summary>Explicación del modo elegido, para que se entienda qué va a pasar.</summary>
+    [ObservableProperty] private string _explicacionModo = "";
+
+    private bool EsAutomatico => Modo.StartsWith("Igualar", StringComparison.Ordinal);
+
+    partial void OnModoChanged(string value)
+    {
+        Target = value switch
+        {
+            var m when m.StartsWith("Nivel de club") => -11,
+            var m when m.StartsWith("Nivel de plataformas") => -14,
+            var m when m.StartsWith("Nivel de cine") => -23,
+            _ => Rows.Count > 0 ? Mediana() : Target,   // automático: lo dice tu propia música
+        };
+        ExplicarModo();
+        Recalcular();
+    }
+
+    private void ExplicarModo()
+    {
+        ExplicacionModo = EsAutomatico
+            ? $"Se toma como referencia el volumen típico de tu propia música ({Target:0.0}), así que solo se corrigen las que se salen de la norma."
+            : Modo.StartsWith("Nivel de club")
+                ? "Nivel alto, pensado para sonar fuerte en un equipo de sala."
+                : Modo.StartsWith("Nivel de plataformas")
+                    ? "El nivel al que reproducen Spotify o YouTube. Más bajo que el habitual en música de baile."
+                    : "Nivel de referencia de cine y televisión. Bastante más bajo que la música comercial.";
+    }
+
+    /// <summary>Volumen típico de la colección: la mediana aguanta bien los casos extremos.</summary>
+    private double Mediana()
+    {
+        var orden = Rows.Select(r => r.Lufs).OrderBy(x => x).ToList();
+        return orden.Count == 0 ? -14 : Math.Round(orden[orden.Count / 2], 1);
+    }
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private double _progress;
     [ObservableProperty] private bool _soloDesviadas;
@@ -140,6 +203,15 @@ public partial class LoudnessViewModel : ViewModelBase
                     Lufs = r.Lufs, PeakDb = r.PeakDb, Target = Target,
                 });
             }
+
+            // En el modo automático la referencia sale de la propia música, así que hasta ahora no
+            // se podía saber: se calcula al terminar de medir y se rehace la tabla con ella.
+            if (EsAutomatico && Rows.Count > 0)
+            {
+                Target = Mediana();
+                ExplicarModo();
+                Recalcular();
+            }
             AplicarFiltro();
             Resumir();
             Progress = 100;
@@ -155,16 +227,19 @@ public partial class LoudnessViewModel : ViewModelBase
         finally { IsBusy = false; _engine.Loudness.Save(); _cts?.Dispose(); _cts = null; }
     }
 
+    /// <summary>Resumen en cristiano: cuántas están bien y cuántas se salen de verdad.</summary>
     private void Resumir()
     {
         if (Rows.Count == 0) { Resumen = ""; return; }
-        var media = Rows.Average(r => r.Lufs);
-        var enRango = Rows.Count(r => Math.Abs(r.Gain) <= 1.0);
-        var bajas = Rows.Count(r => r.Gain > 1.0);
+        var bien = Rows.Count(r => Math.Abs(r.Gain) <= 1.0);
+        var flojas = Rows.Count(r => r.Gain > 1.0);
         var altas = Rows.Count(r => r.Gain < -1.0);
-        var saturarian = Rows.Count(r => r.Satura);
-        Resumen = $"media {media:0.0} LUFS · {enRango} en su sitio · {bajas} bajas · {altas} altas"
-                + (saturarian > 0 ? $" · {saturarian} saturarían al subirlas" : "");
+        var muyFuera = Rows.Count(r => Math.Abs(r.Gain) > 2.0);
+
+        Resumen = muyFuera == 0
+            ? $"Tu música ya suena pareja: las {Rows.Count} están en su sitio."
+            : $"{bien} suenan bien · {flojas} se quedan flojas · {altas} destacan de más. "
+              + $"Merece la pena ajustar {muyFuera}.";
     }
 
     [RelayCommand]
