@@ -24,10 +24,18 @@ public sealed class ArtistExceptions
     // clave = NK(ToAscii(nombre)) -> grafía canónica
     private readonly Dictionary<string, string> _map = new();
 
-    public ArtistExceptions(IEnumerable<string>? extra = null)
+    public ArtistExceptions(IEnumerable<string>? extra = null, ArtistAliases? aliases = null)
     {
         foreach (var x in Default) Add(x);
         if (extra != null) foreach (var x in extra) Add(x);
+
+        // Los alias también entran aquí: cuando el catálogo devuelve el nombre antiguo, se escribe
+        // el canónico. Van los últimos para que tengan prioridad sobre la grafía por defecto.
+        foreach (var (alias, canon) in (aliases ?? ArtistAliases.Current).Pairs())
+        {
+            var k = TextUtils.Nk(TextUtils.ToAscii(alias));
+            if (k.Length > 0) _map[k] = canon;
+        }
     }
 
     private void Add(string? name)

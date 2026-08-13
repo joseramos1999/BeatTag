@@ -16,6 +16,7 @@ public sealed class AppPaths
     public string ConfigPath { get; }
     public string DoneLog { get; }
     public string ArtistExceptionsPath { get; }
+    public string ArtistAliasesPath { get; }
     public string ScanCachePath { get; }
     public string AnalysisCachePath { get; }
     public string LoudnessCachePath { get; }
@@ -35,6 +36,7 @@ public sealed class AppPaths
         ConfigPath = Path.Combine(DataDir, "config.net.json");   // propio de la app C#
         DoneLog = Path.Combine(DataDir, "procesadas.net.log");
         ArtistExceptionsPath = Path.Combine(DataDir, "ArtistsExceptions.json");
+        ArtistAliasesPath = Path.Combine(DataDir, "ArtistAliases.json");
         ScanCachePath = Path.Combine(DataDir, "scan-cache.json");
         AnalysisCachePath = Path.Combine(DataDir, "analysis-cache.json");
         LoudnessCachePath = Path.Combine(DataDir, "sonoridad.json");

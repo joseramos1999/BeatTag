@@ -13,6 +13,8 @@ public static class Matching
         if (an.StartsWith(na) || na.StartsWith(an)) return true;
         if (na.Length >= 6 && an.Contains(na)) return true;
         if (an.Length >= 6 && na.Contains(an)) return true;
+        // Mismo artista publicando con otro nombre (p. ej. Cruz Cafuné aparece como "Cruzzi").
+        if (ArtistAliases.Current.SameArtist(na, an)) return true;
         return false;
     }
 

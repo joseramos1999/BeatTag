@@ -109,6 +109,9 @@ public sealed class DeezerProvider
             var tn = TextUtils.Nk(J.S(J.P(x, "title")));
             if (an.Length > 0 && tn.StartsWith(an) && nt.Length > 0 && !nt.StartsWith(an)) continue;
             var aok = Matching.ArtistMatch(na, an);
+            // Que quede constancia: aceptar por alias es una decisión que conviene poder revisar en el log.
+            if (aok && an != na && ArtistAliases.Current.SameArtist(na, an))
+                trace?.Invoke($"alias: '{J.S(J.P(x, "artist", "name"))}' se considera el mismo artista");
             var tok2 = nt.Length > 0 && (tn.Contains(nt) || nt.Contains(tn));
             if (!(aok && tok2))
             {

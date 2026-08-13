@@ -105,6 +105,8 @@ public sealed class AppEngine
         Ai = new OllamaClient(Api, Logger);
         Fingerprint = new Fingerprint(Paths, Logger);
         Covers = new CoverFetcher(Api);
+        // Los alias se cargan ANTES que las excepciones: estas los incorporan para escribir el nombre canónico.
+        ArtistAliases.Current = ArtistAliases.Load(Paths.ArtistAliasesPath);
         ArtistExc = ArtistExceptions.Load(Paths.ArtistExceptionsPath);   // + grafías personalizadas del usuario
 
         Processor = new FileProcessor(Deezer, Itunes, Spotify, MusicBrainz, Discogs, AcoustId, Ai, Fingerprint, Http, ArtistExc, Logger);
