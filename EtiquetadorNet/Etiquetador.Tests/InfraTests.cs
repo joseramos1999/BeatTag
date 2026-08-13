@@ -37,7 +37,7 @@ public class InfraTests
         try
         {
             // Config con un secreto DPAPI ilegible en este perfil.
-            File.WriteAllText(paths.ConfigPath, $$"""{"AiKeyEnc":"{{BadDpapiBlob}}"}""");
+            File.WriteAllText(paths.ConfigPath, $$"""{"AcoustIdKeyEnc":"{{BadDpapiBlob}}"}""");
             var cfg = AppConfig.Load(paths);
             Assert.True(cfg.SecretsUnreadable);
             Assert.False(cfg.Save(paths, out var err));    // no se guarda -> no se pierde el original
@@ -90,7 +90,7 @@ public class InfraTests
                 Folders = { @"D:\Musica" },
                 SpotifyId = "spid-en-claro",
                 SpotifySecret = "sp-secreto",
-                AiKey = "gemini-secreto",
+                AiModel = "llama3.2",
                 AcoustIdKey = "acoustid-secreto",
                 UseDeezer = true,
                 CoverMode = "png",
@@ -101,12 +101,12 @@ public class InfraTests
 
             var raw = File.ReadAllText(paths.ConfigPath);
             Assert.DoesNotContain("sp-secreto", raw);            // el secreto NO aparece en claro
-            Assert.DoesNotContain("gemini-secreto", raw);
+            Assert.Contains("llama3.2", raw);                    // el modelo de IA no es secreto: va en claro
             Assert.Contains("spid-en-claro", raw);               // el id no secreto sí
 
             var back = AppConfig.Load(paths);
             Assert.Equal("sp-secreto", back.SpotifySecret);      // se descifra bien
-            Assert.Equal("gemini-secreto", back.AiKey);
+            Assert.Equal("llama3.2", back.AiModel);
             Assert.Equal("acoustid-secreto", back.AcoustIdKey);
             Assert.Equal("spid-en-claro", back.SpotifyId);
             Assert.Equal("png", back.CoverMode);

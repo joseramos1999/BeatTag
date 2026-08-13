@@ -121,7 +121,8 @@
 
             <!-- AJUSTES -->
             <TextBlock Classes="h" Text="⚙️ Ajustes" />
-            <TextBlock Classes="li" Text="• Claves de API — Deezer y Apple Music funcionan sin nada. Spotify, Discogs, AcoustID y la IA necesitan tu clave. Se guardan cifradas en tu equipo y nunca salen de él." />
+            <TextBlock Classes="li" Text="• Claves de API — Deezer y Apple Music funcionan sin nada. Spotify, Discogs y AcoustID necesitan tu clave. Se guardan cifradas en tu equipo y nunca salen de él." />
+            <TextBlock Classes="li" Text="• IA local — opcional y sin clave. Se ejecuta en tu propio equipo mediante Ollama, de modo que no se envía información a ningún servicio externo. Sirve para interpretar nombres de archivo muy alterados; su propuesta siempre se contrasta con el catálogo antes de aplicarse. Si no la instalas, el resto del análisis funciona igual." />
             <TextBlock Classes="li" Text="• Probar conexión — comprueba que cada fuente responde con tus claves." />
             <TextBlock Classes="li" Text="• Vaciar caché — borra las cachés de red, escaneo y análisis. Se regeneran solas al volver a usar la app." />
             <TextBlock Classes="li" Text="• Recuperar descartadas — vuelve a tener en cuenta las canciones que quitaste de la lista en Enriquecer." />
@@ -152,7 +153,7 @@
 
                     <TextBlock Text="Fuentes de datos" FontWeight="Bold" Margin="0,8,0,0" />
                     <TextBlock TextWrapping="Wrap" Foreground="Gray"
-                               Text="Deezer · Apple Music / iTunes · Spotify · MusicBrainz · Discogs · AcoustID / Chromaprint · IA (opcional)." />
+                               Text="Deezer · Apple Music / iTunes · Spotify · MusicBrainz · Discogs · AcoustID / Chromaprint · IA local vía Ollama (opcional)." />
 
                     <TextBlock Text="Tecnologías" FontWeight="Bold" Margin="0,8,0,0" />
                     <TextBlock TextWrapping="Wrap" Foreground="Gray"

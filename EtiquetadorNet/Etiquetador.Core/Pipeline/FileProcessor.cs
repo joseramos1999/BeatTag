@@ -19,7 +19,8 @@ public sealed class ProcessOptions
     public string SpotifySecret { get; set; } = "";
     public string DiscogsToken { get; set; } = "";
     public string AcoustIdKey { get; set; } = "";
-    public string AiKey { get; set; } = "";
+    /// <summary>Modelo de Ollama a usar (p. ej. "llama3.2"). La IA local no necesita clave.</summary>
+    public string AiModel { get; set; } = "";
 
     public bool CleanOnly { get; set; }
     public bool ForceSkipMix { get; set; }
@@ -41,7 +42,7 @@ public sealed class ProcessOptions
     /// <summary>Huella de las opciones que afectan al RESULTADO del análisis (para validar la caché).</summary>
     public string Signature() =>
         $"{Deezer}{Itunes}{Spotify}{MusicBrainz}{Discogs}{AcoustId}{Ai}|" +
-        $"{SpotifyId.Length > 0}{SpotifySecret.Length > 0}{DiscogsToken.Length > 0}{AcoustIdKey.Length > 0}{AiKey.Length > 0}|" +
+        $"{SpotifyId.Length > 0}{SpotifySecret.Length > 0}{DiscogsToken.Length > 0}{AcoustIdKey.Length > 0}{AiModel}|" +
         $"{CleanOnly}";
 }
 
@@ -60,14 +61,14 @@ public sealed class FileProcessor
     private readonly MusicBrainzProvider _mb;
     private readonly DiscogsProvider _dc;
     private readonly AcoustIdProvider _ac;
-    private readonly GeminiClient _ai;
+    private readonly OllamaClient _ai;
     private readonly Fingerprint _fp;
     private readonly HttpClient _http;
     private readonly ArtistExceptions _artistExc;
     private readonly Logger? _log;
 
     public FileProcessor(DeezerProvider dz, ItunesProvider it, SpotifyProvider sp, MusicBrainzProvider mb,
-        DiscogsProvider dc, AcoustIdProvider ac, GeminiClient ai, Fingerprint fp, HttpClient http,
+        DiscogsProvider dc, AcoustIdProvider ac, OllamaClient ai, Fingerprint fp, HttpClient http,
         ArtistExceptions artistExc, Logger? log = null)
     {
         _dz = dz; _it = it; _sp = sp; _mb = mb; _dc = dc; _ac = ac; _ai = ai; _fp = fp; _http = http;
@@ -229,11 +230,11 @@ public sealed class FileProcessor
             }
             else if (o.Discogs) dc = await _dc.SearchAsync(primary.Artist, primary.Title, AppInfo.UserAgent, o.DiscogsToken, ct).ConfigureAwait(false);
 
-            // IA de rescate: la propuesta se RE-VERIFICA contra Deezer/iTunes; nunca se escribe sin confirmar.
-            if (primary == null && o.Ai && o.AiKey.Length > 0 && !forced)
+            // IA local de rescate: la propuesta se RE-VERIFICA contra Deezer/iTunes; nunca se escribe sin confirmar.
+            if (primary == null && o.Ai && !forced)
             {
-                Step("IA", 0.7);
-                var ai = await _ai.ParseAsync(@base, tagArtist, tagTitle, o.AiKey, ct).ConfigureAwait(false);
+                Step("IA local", 0.7);
+                var ai = await _ai.ParseAsync(@base, tagArtist, tagTitle, o.AiModel, ct).ConfigureAwait(false);
                 if (ai != null && ai.Title.Length > 0 && ai.Confidence >= 0.5 && !ai.IsMashup)
                 {
                     var aiA = ai.Artist; var aiT = ai.Title;
@@ -242,10 +243,10 @@ public sealed class FileProcessor
                     primary = dz ?? it;
                     if (primary != null) variant = "ia";
                     if (primary != null && o.Discogs && dc == null) dc = await _dc.SearchAsync(primary.Artist, primary.Title, AppInfo.UserAgent, o.DiscogsToken, ct).ConfigureAwait(false);
-                    _log?.Log($"        · IA propuso: {aiA} - {aiT} (conf {ai.Confidence}) -> {(primary != null ? "VERIFICADO en " + (dz != null ? "Deezer" : "iTunes") : "no verificado en catalogo")}", LogKind.Dim, true);
+                    _log?.Log($"        · IA local propuso: {aiA} - {aiT} (conf {ai.Confidence}) -> {(primary != null ? "VERIFICADO en " + (dz != null ? "Deezer" : "iTunes") : "no verificado en catalogo")}", LogKind.Dim, true);
                 }
-                else if (ai != null && ai.IsMashup) _log?.Log("        · IA: lo considera un mashup -> no se etiqueta", LogKind.Dim, true);
-                else if (ai != null && ai.Title.Length == 0) _log?.Log("        · IA: no supo identificar la cancion", LogKind.Dim, true);
+                else if (ai != null && ai.IsMashup) _log?.Log("        · IA local: lo considera un mashup -> no se etiqueta", LogKind.Dim, true);
+                else if (ai != null && ai.Title.Length == 0) _log?.Log("        · IA local: no supo identificar la cancion", LogKind.Dim, true);
             }
 
             // AcoustID (último recurso): identificar por audio
@@ -256,9 +257,13 @@ public sealed class FileProcessor
                 if (fpr is FingerprintResult f)
                 {
                     var ac = await _ac.LookupAsync(f.Duration, f.Fingerprint, o.AcoustIdKey, ct).ConfigureAwait(false);
+                    if (ac == null || ac.Title.Length == 0)
+                        // Lo normal en ediciones de DJ y mezclas: AcoustID solo conoce lanzamientos comerciales.
+                        _log?.Detail("      huella: calculada, pero AcoustID no tiene esta grabación");
                     if (ac != null && ac.Title.Length > 0)
                     {
                         variant = "acoustid";
+                        _log?.Detail($"      huella: AcoustID -> {ac.Artist} - {ac.Title}");
                         if (o.Deezer) dz = await _dz.SearchAsync(ac.Artist, ac.Title, false, false, localDur, isEdit, ct).ConfigureAwait(false);
                         if (dz == null && o.Itunes) it = await _it.SearchAsync(ac.Artist, ac.Title, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false);
                         if (o.Discogs && dc == null) dc = await _dc.SearchAsync(ac.Artist, ac.Title, AppInfo.UserAgent, o.DiscogsToken, ct).ConfigureAwait(false);

@@ -29,7 +29,7 @@ public sealed class AppEngine
     public MusicBrainzProvider MusicBrainz { get; }
     public DiscogsProvider Discogs { get; }
     public AcoustIdProvider AcoustId { get; }
-    public GeminiClient Ai { get; }
+    public OllamaClient Ai { get; }
     public Fingerprint Fingerprint { get; }
     public CoverFetcher Covers { get; }
     public ArtistExceptions ArtistExc { get; }
@@ -88,8 +88,9 @@ public sealed class AppEngine
         Logger.Detail($"Config: caché={Config.Cache} · fuentes: deezer={Config.UseDeezer} itunes={Config.UseItunes} "
                     + $"spotify={Config.UseSpotify} discogs={Config.UseDiscogs} mb={Config.UseMusicBrainz} "
                     + $"acoustid={Config.UseAcoustId} ia={Config.UseAi}");
+        var modeloIa = Config.AiModel.Length > 0 ? Config.AiModel : "(automático)";
         Logger.Detail($"Claves presentes: spotify={Config.SpotifyId.Length > 0 && Config.SpotifySecret.Length > 0} "
-                    + $"discogs={Config.DiscogsToken.Length > 0} acoustid={Config.AcoustIdKey.Length > 0} ia={Config.AiKey.Length > 0}");
+                    + $"discogs={Config.DiscogsToken.Length > 0} acoustid={Config.AcoustIdKey.Length > 0} ia-local={modeloIa}");
 
         Deezer = new DeezerProvider(Api) { Log = Logger };
         Candidates = new CandidateFinder(Api);
@@ -101,7 +102,7 @@ public sealed class AppEngine
         MusicBrainz = new MusicBrainzProvider(Api);
         Discogs = new DiscogsProvider(Api);
         AcoustId = new AcoustIdProvider(Api);
-        Ai = new GeminiClient(Api, Logger);
+        Ai = new OllamaClient(Api, Logger);
         Fingerprint = new Fingerprint(Paths, Logger);
         Covers = new CoverFetcher(Api);
         ArtistExc = ArtistExceptions.Load(Paths.ArtistExceptionsPath);   // + grafías personalizadas del usuario
@@ -130,7 +131,7 @@ public sealed class AppEngine
         SpotifySecret = Config.SpotifySecret,
         DiscogsToken = Config.DiscogsToken,
         AcoustIdKey = Config.AcoustIdKey,
-        AiKey = Config.AiKey,
+        AiModel = Config.AiModel,
         CleanOnly = Config.CleanOnly,
     };
 

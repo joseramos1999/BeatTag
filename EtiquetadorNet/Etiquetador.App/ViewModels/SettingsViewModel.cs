@@ -21,8 +21,12 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string _spotifySecret = "";
     [ObservableProperty] private string _discogsToken = "";
     [ObservableProperty] private string _acoustIdKey = "";
-    [ObservableProperty] private string _aiKey = "";
+    [ObservableProperty] private string _aiModel = "";
+    [ObservableProperty] private string _aiStatus = "";
     [ObservableProperty] private bool _cache = true;
+
+    /// <summary>Modelos de IA local detectados en este equipo.</summary>
+    public ObservableCollection<string> AiModels { get; } = new();
     [ObservableProperty] private string _status = "";
     [ObservableProperty] private string _testReport = "";
     [ObservableProperty] private bool _isBusy;
@@ -38,8 +42,9 @@ public partial class SettingsViewModel : ViewModelBase
         _spotifySecret = c.SpotifySecret;
         _discogsToken = c.DiscogsToken;
         _acoustIdKey = c.AcoustIdKey;
-        _aiKey = c.AiKey;
+        _aiModel = c.AiModel;
         _cache = c.Cache;
+        if (_aiModel.Length > 0) AiModels.Add(_aiModel);
 
         // El Logger puede emitir desde hilos de fondo -> marshalizar a la UI.
         _engine.Logger.OnLog += entry =>
@@ -57,8 +62,33 @@ public partial class SettingsViewModel : ViewModelBase
         c.SpotifySecret = SpotifySecret.Trim();
         c.DiscogsToken = DiscogsToken.Trim();
         c.AcoustIdKey = AcoustIdKey.Trim();
-        c.AiKey = AiKey.Trim();
+        c.AiModel = (AiModel ?? "").Trim();
         c.Cache = Cache;
+    }
+
+    /// <summary>Busca Ollama en este equipo y lista los modelos instalados.</summary>
+    [RelayCommand]
+    private async Task DetectAiAsync()
+    {
+        AiStatus = "Buscando…";
+        var modelos = await _engine.Ai.ListModelsAsync();
+        if (modelos == null)
+        {
+            AiStatus = "No se ha encontrado Ollama. Instálalo desde ollama.com y déjalo en marcha.";
+            return;
+        }
+        if (modelos.Count == 0)
+        {
+            AiStatus = $"Ollama está en marcha, pero sin modelos. Ejecuta: ollama pull {Core.Ai.OllamaClient.DefaultModel}";
+            return;
+        }
+
+        var previo = AiModel;
+        AiModels.Clear();
+        foreach (var m in modelos) AiModels.Add(m);
+        // Conserva la elección anterior si sigue instalada; si no, la primera disponible.
+        AiModel = modelos.Contains(previo) ? previo : modelos[0];
+        AiStatus = $"{modelos.Count} modelo(s) disponible(s).";
     }
 
     [RelayCommand]

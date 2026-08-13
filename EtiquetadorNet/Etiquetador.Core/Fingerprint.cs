@@ -62,6 +62,12 @@ public sealed class Fingerprint
         return null;
     }
 
+    private static string Corto(string s)
+    {
+        s = s.Replace("\r", " ").Replace("\n", " ").Trim();
+        return s.Length <= 120 ? s : s[..120];
+    }
+
     // Comprobación de integridad mínima: cabecera PE ('MZ') y tamaño razonable (no ejecutar basura).
     private static bool IsWindowsExecutable(string path)
     {
@@ -79,7 +85,7 @@ public sealed class Fingerprint
     public async Task<FingerprintResult?> GetAsync(string path, HttpClient http, CancellationToken ct = default)
     {
         var fpcalc = await EnsureFpcalcAsync(http, ct).ConfigureAwait(false);
-        if (fpcalc == null) return null;
+        if (fpcalc == null) { _log?.Detail("      huella: fpcalc no disponible"); return null; }
         try
         {
             var psi = new ProcessStartInfo
@@ -93,20 +99,27 @@ public sealed class Fingerprint
             psi.ArgumentList.Add("-json");
             psi.ArgumentList.Add(path);
             using var proc = Process.Start(psi);
-            if (proc == null) return null;
+            if (proc == null) { _log?.Detail("      huella: no se pudo arrancar fpcalc"); return null; }
             // Leer stdout Y stderr en paralelo: si no se vacía stderr, fpcalc puede bloquearse al llenar el búfer.
             var outTask = proc.StandardOutput.ReadToEndAsync(ct);
             var errTask = proc.StandardError.ReadToEndAsync(ct);
             await proc.WaitForExitAsync(ct).ConfigureAwait(false);
             var outText = await outTask.ConfigureAwait(false);
-            await errTask.ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(outText)) return null;
+            var errText = await errTask.ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(outText))
+            {
+                // Causa habitual: audio ilegible o dañado. fpcalc lo explica en stderr.
+                _log?.Detail($"      huella: fpcalc no devolvió nada (código {proc.ExitCode})"
+                           + (string.IsNullOrWhiteSpace(errText) ? "" : $" · {Corto(errText)}"));
+                return null;
+            }
             var j = JsonNode.Parse(outText);
             var fp = j?["fingerprint"]?.GetValue<string>();
-            if (string.IsNullOrEmpty(fp)) return null;
+            if (string.IsNullOrEmpty(fp)) { _log?.Detail("      huella: fpcalc no incluyó huella en la respuesta"); return null; }
             var dur = j?["duration"]?.GetValue<double>() ?? 0;
             return new FingerprintResult(dur, fp);
         }
-        catch { return null; }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception e) { _log?.Detail($"      huella: fallo al calcularla · {e.Message}"); return null; }
     }
 }

@@ -9,9 +9,9 @@ public sealed class ConnectionTester
 {
     private readonly ApiClient _api;
     private readonly SpotifyProvider _sp;
-    private readonly GeminiClient _ai;
+    private readonly OllamaClient _ai;
 
-    public ConnectionTester(ApiClient api, SpotifyProvider sp, GeminiClient ai) { _api = api; _sp = sp; _ai = ai; }
+    public ConnectionTester(ApiClient api, SpotifyProvider sp, OllamaClient ai) { _api = api; _sp = sp; _ai = ai; }
 
     public async Task<string> RunAsync(AppConfig cfg, CancellationToken ct = default)
     {
@@ -68,22 +68,22 @@ public sealed class ConnectionTester
         }
         else sb.AppendLine("AcoustID: sin clave");
 
-        // IA / Gemini (clave)
-        var gk = cfg.AiKey.Trim();
-        if (gk.Length > 0)
+        // IA local (Ollama): no hay clave que validar, solo disponibilidad del servicio y del modelo.
+        var modelos = await _ai.ListModelsAsync(ct);
+        if (modelos == null)
+            sb.AppendLine($"IA local: Ollama no responde en {_ai.Host}. Instálalo desde https://ollama.com y déjalo en marcha.");
+        else if (modelos.Count == 0)
+            sb.AppendLine($"IA local: Ollama responde, pero no hay ningún modelo descargado (ejecuta: ollama pull {OllamaClient.DefaultModel}).");
+        else
         {
-            var mdl = await _ai.ResolveModelAsync(gk, ct);
-            if (mdl == null) sb.AppendLine("IA (Gemini): no se pudo listar modelos (clave inválida o sin acceso)");
+            var eleg = cfg.AiModel.Trim();
+            if (eleg.Length == 0)
+                sb.AppendLine($"IA local: OK — {modelos.Count} modelo(s) disponible(s). Sin modelo seleccionado; se usará «{modelos[0]}».");
+            else if (modelos.Any(m => m == eleg || m.StartsWith(eleg + ":", StringComparison.OrdinalIgnoreCase)))
+                sb.AppendLine($"IA local: OK — modelo {eleg}");
             else
-            {
-                var body = System.Text.Json.JsonSerializer.Serialize(new { contents = new[] { new { role = "user", parts = new[] { new { text = "ping" } } } }, generationConfig = new { maxOutputTokens = 5 } });
-                var raw = await _api.PostJsonAsync($"https://generativelanguage.googleapis.com/v1beta/models/{mdl}:generateContent", body, new Dictionary<string, string> { ["x-goog-api-key"] = gk }, 0, ct);
-                if (raw != null) sb.AppendLine($"IA (Gemini): OK — modelo {mdl}");
-                else if (_api.LastApiError.Contains("429")) sb.AppendLine($"IA (Gemini): modelo {mdl} -> LÍMITE DE CUOTA (429)");
-                else sb.AppendLine($"IA (Gemini): {mdl} -> {_api.LastApiError}");
-            }
+                sb.AppendLine($"IA local: el modelo «{eleg}» no está descargado. Disponibles: {string.Join(", ", modelos)}");
         }
-        else sb.AppendLine("IA (Gemini): sin clave");
 
         return sb.ToString().TrimEnd();
     }

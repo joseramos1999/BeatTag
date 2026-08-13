@@ -15,7 +15,7 @@ public class FileProcessorTests
         return new FileProcessor(
             new DeezerProvider(api), new ItunesProvider(api), new SpotifyProvider(api),
             new MusicBrainzProvider(api), new DiscogsProvider(api), new AcoustIdProvider(api),
-            new GeminiClient(api), new Fingerprint(paths), new HttpClient(), new ArtistExceptions());
+            new OllamaClient(api), new Fingerprint(paths), new HttpClient(), new ArtistExceptions());
     }
 
     [Fact]

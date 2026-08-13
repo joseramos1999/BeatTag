@@ -52,7 +52,8 @@
                     <CheckBox Content="Discogs" IsChecked="{Binding UseDiscogs}" Margin="0,0,12,0" />
                     <CheckBox Content="MusicBrainz" IsChecked="{Binding UseMusicBrainz}" Margin="0,0,12,0" />
                     <CheckBox Content="AcoustID" IsChecked="{Binding UseAcoustId}" Margin="0,0,12,0" />
-                    <CheckBox Content="IA (Gemini)" IsChecked="{Binding UseAi}" Margin="0,0,12,0" />
+                    <CheckBox Content="IA local" IsChecked="{Binding UseAi}" Margin="0,0,12,0"
+                              ToolTip.Tip="Interpreta nombres de archivo muy alterados usando un modelo que se ejecuta en tu equipo. Requiere Ollama (ver Ajustes). Su propuesta siempre se contrasta con el catálogo antes de aplicarse." />
                 </WrapPanel>
                 <TextBlock Text="Campos a escribir" FontWeight="Bold" Margin="0,6,0,0" />
                 <WrapPanel>

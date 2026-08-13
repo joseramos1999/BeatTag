@@ -21,8 +21,18 @@
             <TextBox Text="{Binding DiscogsToken}" PasswordChar="•" />
             <TextBlock Text="Clave de AcoustID" />
             <TextBox Text="{Binding AcoustIdKey}" PasswordChar="•" />
-            <TextBlock Text="Clave de Gemini (IA)" />
-            <TextBox Text="{Binding AiKey}" PasswordChar="•" />
+            <TextBlock Text="IA local (Ollama)" Margin="0,6,0,0" />
+            <TextBlock Foreground="Gray" TextWrapping="Wrap" FontSize="12"
+                       Text="Funciona en tu equipo, sin clave ni envío de datos a internet. Ayuda a interpretar nombres de archivo muy alterados. Es opcional: si no está instalada, el resto del análisis funciona igual. Requiere instalar Ollama." />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <ComboBox ItemsSource="{Binding AiModels}" SelectedItem="{Binding AiModel}"
+                          MinWidth="240"
+                          ToolTip.Tip="Modelo que se usará. Si se deja vacío, se emplea el primero disponible." />
+                <Button Content="Detectar" Command="{Binding DetectAiCommand}"
+                        Background="#6B7280" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Busca Ollama en este equipo y lista los modelos instalados." />
+                <TextBlock Text="{Binding AiStatus}" Foreground="Gray" VerticalAlignment="Center" TextWrapping="Wrap" />
+            </StackPanel>
 
             <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
                 <CheckBox Content="Usar caché de respuestas (recomendado)" IsChecked="{Binding Cache}" VerticalAlignment="Center" />
