@@ -88,7 +88,7 @@ public partial class SettingsViewModel : ViewModelBase
         }
     }
 
-    partial void OnAiModelChanged(string? value) => OnPropertyChanged(nameof(AiModelNota));
+    partial void OnAiModelChanged(string value) => OnPropertyChanged(nameof(AiModelNota));
     [ObservableProperty] private string _status = "";
     [ObservableProperty] private string _testReport = "";
     [ObservableProperty] private bool _isBusy;
