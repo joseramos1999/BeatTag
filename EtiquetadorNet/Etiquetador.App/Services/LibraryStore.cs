@@ -58,6 +58,25 @@ public sealed class LibraryStore
         if (removed) Changed?.Invoke();
     }
 
+    /// <summary>
+    /// Quita varias canciones de una vez y avisa UNA sola vez al terminar. Hacerlo con RemoveTrack
+    /// en bucle dispararía un recálculo completo por cada archivo, y como a Changed están suscritas
+    /// todas las pestañas que analizan la biblioteca, borrar unos cientos dejaría la aplicación
+    /// clavada un buen rato.
+    /// </summary>
+    public int RemoveTracks(IEnumerable<string> filePaths)
+    {
+        var quitar = new HashSet<string>(filePaths, StringComparer.OrdinalIgnoreCase);
+        if (quitar.Count == 0) return 0;
+
+        var quitados = 0;
+        for (int i = Tracks.Count - 1; i >= 0; i--)
+            if (quitar.Contains(Tracks[i].FilePath)) { Tracks.RemoveAt(i); quitados++; }
+
+        if (quitados > 0) Changed?.Invoke();
+        return quitados;
+    }
+
     /// <summary>Vacía la caché de escaneo (memoria + archivo), para que el próximo escaneo relea todo.</summary>
     public void ClearScanCache() => _cache.Clear();
 

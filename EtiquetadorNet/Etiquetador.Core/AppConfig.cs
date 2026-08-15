@@ -19,6 +19,19 @@ public sealed class AppConfig
     /// Se recuerda entre sesiones para no tener que recolocarlas cada vez.
     /// </summary>
     public Dictionary<string, Dictionary<string, double>> ColumnWidths { get; set; } = new();
+
+    // --- Duplicados ---
+    /// <summary>
+    /// Carpetas cuyas copias se prefieren conservar. Sirve para separar la colección buena de las
+    /// descargas sueltas: ante dos copias iguales, se marca como mejor la que está aquí.
+    /// </summary>
+    public List<string> PriorityFolders { get; set; } = new();
+
+    /// <summary>Carpetas que no se tienen en cuenta al buscar duplicados (acapellas, packs…).</summary>
+    public List<string> ExcludedDupFolders { get; set; } = new();
+
+    /// <summary>Criterio para decidir qué copia es la mejor de cada grupo.</summary>
+    public string DupKeepCriterion { get; set; } = "";
     /// <summary>Carpetas presentes pero desmarcadas (no se analizan).</summary>
     public List<string> DisabledFolders { get; set; } = new();
 

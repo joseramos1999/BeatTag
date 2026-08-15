@@ -12,24 +12,68 @@
         <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,8">
             <TextBlock Classes="titulo" Text="Duplicados" />
             <TextBlock Classes="desc"
-                       Text="Localiza canciones repetidas aunque el nombre del archivo no coincida. Se agrupan por artista y título, de modo que también detecta las que están guardadas con nombres distintos." />
+                       Text="Localiza canciones repetidas aunque el nombre del archivo no coincida. La copia que conviene conservar aparece en verde; puedes marcar el resto y enviarlas a la papelera de una vez." />
         </StackPanel>
 
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
             <Button Content="Analizar" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding !IsBusy}"
                     Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
-            <TextBlock Text="Criterio:" VerticalAlignment="Center" />
-            <ComboBox ItemsSource="{Binding ModeOptions}" SelectedItem="{Binding SelectedMode}" MinWidth="240" />
+            <TextBlock Text="Agrupar por" VerticalAlignment="Center" />
+            <ComboBox ItemsSource="{Binding ModeOptions}" SelectedItem="{Binding SelectedMode}" MinWidth="230" />
+            <TextBlock Text="Conservar" VerticalAlignment="Center" />
+            <ComboBox ItemsSource="{Binding KeepOptions}" SelectedItem="{Binding SelectedKeep}" MinWidth="230"
+                      ToolTip.Tip="Qué copia se considera la mejor de cada grupo. Es la que se marca en verde y la que no se marca al pulsar «Marcar sobrantes»." />
             <Button Content="⯆ Desplegar" Click="ExpandAll_Click" />
             <Button Content="⯈ Cerrar" Click="CollapseAll_Click" />
+        </StackPanel>
+
+        <!-- Carpetas: prioritaria = de ahí sale la copia buena; excluida = ni se mira. -->
+        <Expander DockPanel.Dock="Top" Header="Carpetas prioritarias y excluidas" Margin="0,0,0,6">
+            <StackPanel Spacing="4" Margin="4">
+                <TextBlock Classes="desc"
+                           Text="Marca como prioritaria la carpeta donde vive tu colección buena: ante dos copias iguales se conservará la de ahí. Excluye las que no quieras que participen, como acapellas o packs de remezclas." />
+                <ItemsControl ItemsSource="{Binding Folders}" MaxHeight="150">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid ColumnDefinitions="110,110,*" Margin="0,1">
+                                <CheckBox Grid.Column="0" Content="Prioritaria" IsChecked="{Binding Prioritaria}" />
+                                <CheckBox Grid.Column="1" Content="Excluir"     IsChecked="{Binding Excluida}" />
+                                <TextBlock Grid.Column="2" Text="{Binding Path}" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Path}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Expander>
+
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
+            <Button Content="Marcar sobrantes" Command="{Binding MarkAllButBestCommand}"
+                    Background="#D97706" Foreground="White" FontWeight="SemiBold"
+                    ToolTip.Tip="Marca todas las copias menos la mejor de cada grupo, de modo que siempre queda un ejemplar de cada canción." />
+            <Button Content="Quitar marcas" Command="{Binding ClearMarksCommand}"
+                    Background="#6B7280" Foreground="White" FontWeight="SemiBold" />
+            <Button Content="🗑 Enviar marcadas a la papelera" Click="TrashMarked_Click"
+                    Background="#DC2626" Foreground="White" FontWeight="SemiBold"
+                    ToolTip.Tip="Los archivos van a la Papelera de Windows, así que se pueden recuperar desde ahí." />
+            <TextBlock VerticalAlignment="Center" Foreground="Gray"
+                       Text="{Binding Marcadas, StringFormat='{}{0} marcadas'}" />
             <TextBlock Text="{Binding Status}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
         </StackPanel>
         <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="4" Margin="0,0,0,6" />
 
+        <!-- IsReadOnly="False" solo para que la casilla se pueda pulsar; las columnas de datos van
+             marcadas una a una como solo lectura. Es el mismo montaje que usa Enriquecer. -->
         <DataGrid Name="Grid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
-                  x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
+                  x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="False"
                   CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
-                  PointerPressed="Grid_PointerPressed" DoubleTapped="Grid_DoubleTapped">
+                  PointerPressed="Grid_PointerPressed" DoubleTapped="Grid_DoubleTapped"
+                  CellEditEnded="Cell_EditEnded">
+            <DataGrid.Styles>
+                <Style Selector="DataGridRow">
+                    <Setter Property="Background" Value="{Binding Fondo}" />
+                </Style>
+            </DataGrid.Styles>
             <DataGrid.ContextMenu>
                 <ContextMenu>
                     <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
@@ -38,10 +82,12 @@
                 </ContextMenu>
             </DataGrid.ContextMenu>
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="2*" MinWidth="140" />
-                <DataGridTextColumn Header="Calidad" Binding="{Binding Quality}" Width="90" MinWidth="70" />
-                <DataGridTextColumn Header="Dur." Binding="{Binding Duration}" Width="70" MinWidth="55" />
-                <DataGridTextColumn Header="Carpeta" Binding="{Binding Folder}" Width="2*" MinWidth="120" />
+                <DataGridCheckBoxColumn Header="Borrar" Binding="{Binding Marcada}" Width="70" MinWidth="60" />
+                <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="2*" MinWidth="140" IsReadOnly="True" />
+                <DataGridTextColumn Header="Conservar" Binding="{Binding Motivo}" Width="170" MinWidth="110" IsReadOnly="True" />
+                <DataGridTextColumn Header="Calidad" Binding="{Binding Quality}" Width="90" MinWidth="70" IsReadOnly="True" />
+                <DataGridTextColumn Header="Dur." Binding="{Binding Duration}" Width="70" MinWidth="55" IsReadOnly="True" />
+                <DataGridTextColumn Header="Carpeta" Binding="{Binding Folder}" Width="2*" MinWidth="120" IsReadOnly="True" />
             </DataGrid.Columns>
         </DataGrid>
     </DockPanel>
