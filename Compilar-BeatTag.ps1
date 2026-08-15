@@ -86,6 +86,16 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exe)) {
     Read-Host "Enter para salir"; exit 1
 }
 
+# Los paquetes de Skia y HarfBuzz dejan sus simbolos de depuracion (.pdb) junto al ejecutable:
+# unos 100 MB que no sirven para nada en una version publicada y que, si se comparte la carpeta,
+# se irian detras. El ejecutable es autonomo y no los necesita.
+$pdb = Get-ChildItem $salida -Filter *.pdb -File -ErrorAction SilentlyContinue
+if ($pdb) {
+    $pdbMb = [math]::Round((($pdb | Measure-Object Length -Sum).Sum / 1MB), 1)
+    $pdb | Remove-Item -Force -ErrorAction SilentlyContinue
+    Write-Host "  ($($pdb.Count) archivos de simbolos eliminados, $pdbMb MB)" -ForegroundColor DarkGray
+}
+
 $crono.Stop()
 $mb = [math]::Round((Get-Item $exe).Length / 1MB, 1)
 
@@ -97,6 +107,9 @@ Write-Host ""
 if ($Ejecutar) {
     Write-Host "Abriendo BeatTag..." -ForegroundColor Cyan
     Start-Process $exe
-} else {
+}
+elseif ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+    # Solo si hay alguien delante: lanzado desde un script o una tarea automatica, esperar una
+    # tecla hacia fallar la ejecucion entera pese a haber compilado correctamente.
     Read-Host "Enter para salir"
 }
