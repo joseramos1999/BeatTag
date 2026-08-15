@@ -51,13 +51,23 @@ public partial class SettingsViewModel : ViewModelBase
         ("gemma2:2b",   "~1,6 GB · el más liviano"),
     };
 
+    // Ollama devuelve los modelos con etiqueta ("llama3.2:latest") mientras que los sugeridos se
+    // escriben sin ella ("llama3.2"). Son el mismo modelo: sin esto aparecerían por duplicado en el
+    // desplegable y uno ya descargado se anunciaría como no instalado.
+    private static string SinEtiquetaLatest(string m)
+        => m.EndsWith(":latest", StringComparison.OrdinalIgnoreCase) ? m[..^":latest".Length] : m;
+
+    private bool EstaInstalado(string modelo)
+        => _instalados.Any(x => string.Equals(SinEtiquetaLatest(x), SinEtiquetaLatest(modelo),
+                                              StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Rehace la lista del desplegable conservando la elección actual si sigue siendo válida.</summary>
     private void RefrescarOpciones()
     {
         var elegido = AiModel ?? "";
         AiOpciones.Clear();
         foreach (var m in _instalados.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) AiOpciones.Add(m);
-        foreach (var (m, _) in Sugeridos) if (!_instalados.Contains(m)) AiOpciones.Add(m);
+        foreach (var (m, _) in Sugeridos) if (!EstaInstalado(m)) AiOpciones.Add(m);
         // El valor guardado puede no estar ni instalado ni entre los sugeridos: se conserva igualmente.
         if (elegido.Length > 0 && !AiOpciones.Contains(elegido)) AiOpciones.Insert(0, elegido);
         AiModel = elegido;
@@ -70,7 +80,7 @@ public partial class SettingsViewModel : ViewModelBase
         {
             var m = (AiModel ?? "").Trim();
             if (m.Length == 0) return "";
-            if (_instalados.Contains(m)) return "Instalado y listo para usarse.";
+            if (EstaInstalado(m)) return "Instalado y listo para usarse.";
             var s = Sugeridos.FirstOrDefault(x => x.Modelo == m);
             return s.Modelo != null
                 ? $"No instalado ({s.Nota}). Pulsa «Descargar modelo»."
@@ -144,7 +154,7 @@ public partial class SettingsViewModel : ViewModelBase
         _instalados.Clear();
         foreach (var m in modelos) _instalados.Add(m);
         // Conserva la elección anterior si sigue instalada; si no, la primera disponible.
-        AiModel = _instalados.Contains(previo) ? previo : modelos[0];
+        AiModel = previo.Length > 0 && EstaInstalado(previo) ? previo : modelos[0];
         RefrescarOpciones();
         AiStatus = $"Preparada. {modelos.Count} modelo(s) instalado(s).";
     }
