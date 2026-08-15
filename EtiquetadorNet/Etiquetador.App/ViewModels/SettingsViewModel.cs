@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using System.Linq;
 
+using Avalonia.Media;
 using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -12,6 +13,27 @@ using Etiquetador.App.Services;
 using Etiquetador.Core;
 
 namespace Etiquetador.App.ViewModels;
+
+/// <summary>
+/// Una línea del registro en pantalla. Se guarda el tipo, no solo el texto, para poder colorearla
+/// y filtrarla: en una tirada larga pasan miles de líneas y sin distinguirlas no se ve nada.
+/// </summary>
+public sealed record LogLine(DateTime Time, string Message, LogKind Kind)
+{
+    public string Hora => Time.ToString("HH:mm:ss");
+
+    public IBrush Color => Kind switch
+    {
+        LogKind.Err => new SolidColorBrush(Avalonia.Media.Color.FromRgb(0xDC, 0x26, 0x26)),   // rojo
+        LogKind.No => new SolidColorBrush(Avalonia.Media.Color.FromRgb(0xD9, 0x77, 0x06)),    // ámbar
+        LogKind.Ok => new SolidColorBrush(Avalonia.Media.Color.FromRgb(0x16, 0xA3, 0x4A)),    // verde
+        LogKind.Sum or LogKind.Head => new SolidColorBrush(Avalonia.Media.Color.FromRgb(0x25, 0x63, 0xEB)), // azul
+        LogKind.Dim => new SolidColorBrush(Avalonia.Media.Color.FromRgb(0x9C, 0xA3, 0xAF)),   // gris
+        _ => Brushes.Gray,
+    };
+
+    public FontWeight Peso => Kind is LogKind.Sum or LogKind.Head ? FontWeight.SemiBold : FontWeight.Normal;
+}
 
 /// <summary>Pestaña Ajustes: claves de API (cifradas DPAPI), caché, prueba de conexión y registro (log).</summary>
 public partial class SettingsViewModel : ViewModelBase
@@ -94,7 +116,35 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private bool _isBusy;
 
     /// <summary>Registro en vivo (mensajes del motor: proveedores, IA, fpcalc, deshacer…).</summary>
-    public ObservableCollection<string> Log { get; } = new();
+    public ObservableCollection<LogLine> Log { get; } = new();
+
+    /// <summary>Deja solo lo importante: errores, avisos y resúmenes.</summary>
+    [ObservableProperty] private bool _soloImportante;
+
+    /// <summary>Todo lo recibido, para poder rehacer la lista al cambiar el filtro.</summary>
+    private readonly List<LogLine> _todoElLog = new();
+
+    /// <summary>Ruta del archivo de registro de esta sesión, para saber dónde mirar.</summary>
+    public string LogFilePath => _engine.Logger.LogFile ?? "(sin archivo)";
+
+    private static bool EsImportante(LogKind k) => k is LogKind.Err or LogKind.No or LogKind.Sum or LogKind.Head;
+
+    partial void OnSoloImportanteChanged(bool value)
+    {
+        Log.Clear();
+        foreach (var l in _todoElLog.Where(l => !value || EsImportante(l.Kind))) Log.Add(l);
+    }
+
+    private void Anotar(LogEntry entry)
+    {
+        var linea = new LogLine(entry.Time, entry.Message, entry.Kind);
+        _todoElLog.Add(linea);
+        while (_todoElLog.Count > MaxLogLines) _todoElLog.RemoveAt(0);
+
+        if (SoloImportante && !EsImportante(entry.Kind)) return;
+        Log.Add(linea);
+        while (Log.Count > MaxLogLines) Log.RemoveAt(0);
+    }
 
     public SettingsViewModel(AppEngine engine)
     {
@@ -110,12 +160,7 @@ public partial class SettingsViewModel : ViewModelBase
         RefrescarOpciones();
 
         // El Logger puede emitir desde hilos de fondo -> marshalizar a la UI.
-        _engine.Logger.OnLog += entry =>
-            Dispatcher.UIThread.Post(() =>
-            {
-                Log.Add($"{entry.Time:HH:mm:ss}  {entry.Message}");
-                while (Log.Count > MaxLogLines) Log.RemoveAt(0);
-            });
+        _engine.Logger.OnLog += entry => Dispatcher.UIThread.Post(() => Anotar(entry));
     }
 
     private void PushToConfig()
@@ -326,6 +371,93 @@ public partial class SettingsViewModel : ViewModelBase
             Status = $"Caché vaciada ({n} respuestas + escaneo + análisis). Se regenerará al usar la app.";
         }
         catch (Exception e) { Status = "No se pudo vaciar del todo la caché: " + e.Message; }
+    }
+
+    /// <summary>
+    /// Qué se borraría al limpiar la carpeta de datos, con su tamaño. Se calcula antes de preguntar
+    /// para que la confirmación diga cifras concretas y no un "¿seguro?" a ciegas.
+    /// </summary>
+    public (string Resumen, long Bytes, List<string> Rutas) InspeccionarLimpieza()
+    {
+        var p = _engine.Paths;
+        var rutas = new List<string>();
+        var partes = new List<string>();
+        long total = 0;
+
+        void Mirar(string ruta, string nombre)
+        {
+            try
+            {
+                if (Directory.Exists(ruta))
+                {
+                    var ficheros = Directory.EnumerateFiles(ruta, "*", SearchOption.AllDirectories).ToList();
+                    if (ficheros.Count == 0) return;
+                    var bytes = ficheros.Sum(f => { try { return new FileInfo(f).Length; } catch { return 0L; } });
+                    partes.Add($"{nombre}: {ficheros.Count} archivos ({Tam(bytes)})");
+                    total += bytes; rutas.Add(ruta);
+                }
+                else if (File.Exists(ruta))
+                {
+                    var bytes = new FileInfo(ruta).Length;
+                    partes.Add($"{nombre} ({Tam(bytes)})");
+                    total += bytes; rutas.Add(ruta);
+                }
+            }
+            catch { }
+        }
+
+        Mirar(p.LogsDir, "Registros");
+        Mirar(p.ReportsDir, "Informes CSV");
+        Mirar(p.CacheDir, "Caché de red");
+        Mirar(p.ScanCachePath, "Caché de escaneo");
+        Mirar(p.AnalysisCachePath, "Caché de análisis");
+        Mirar(p.LoudnessCachePath, "Mediciones de volumen");
+
+        return (partes.Count == 0 ? "No hay nada que limpiar." : string.Join("\n", partes), total, rutas);
+    }
+
+    private static string Tam(long b)
+        => b >= 1L << 30 ? $"{b / (double)(1L << 30):0.#} GB"
+         : b >= 1L << 20 ? $"{b / (double)(1L << 20):0.#} MB"
+         : $"{b / 1024.0:0.#} KB";
+
+    /// <summary>
+    /// Borra lo regenerable de la carpeta de datos. NO toca la configuración, las listas de artista
+    /// ni los manifiestos de deshacer: esos son la única forma de revertir cambios ya aplicados a
+    /// los archivos, y perderlos sería irreversible de verdad.
+    /// </summary>
+    public void LimpiarCarpetaDatos()
+    {
+        var (_, _, rutas) = InspeccionarLimpieza();
+        int borrados = 0;
+        foreach (var r in rutas)
+        {
+            try
+            {
+                if (Directory.Exists(r))
+                {
+                    foreach (var f in Directory.EnumerateFiles(r, "*", SearchOption.AllDirectories))
+                        try { File.Delete(f); borrados++; } catch { }
+                    foreach (var d in Directory.EnumerateDirectories(r))
+                        try { Directory.Delete(d, true); } catch { }
+                }
+                else if (File.Exists(r)) { File.Delete(r); borrados++; }
+            }
+            catch { }
+        }
+
+        // Las cachés viven además en memoria: sin esto seguirían sirviendo datos ya borrados.
+        try { _engine.Library.ClearScanCache(); _engine.ClearAnalysisCache(); } catch { }
+
+        Status = $"Carpeta de datos limpiada: {borrados} archivo(s). Se conservan ajustes, listas de artista y el historial de deshacer.";
+    }
+
+    /// <summary>Abre la carpeta de datos, para poder mirarla a mano.</summary>
+    [RelayCommand]
+    private async Task OpenDataFolderAsync()
+    {
+        await Shell.OpenFolderAsync(_engine.Paths.DataDir);
+        Status = "Carpeta de datos: " + _engine.Paths.DataDir;
     }
 
     /// <summary>Abre la carpeta de logs de esta sesión.</summary>

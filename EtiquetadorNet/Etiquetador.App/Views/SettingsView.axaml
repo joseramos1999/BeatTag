@@ -109,6 +109,11 @@
                             ToolTip.Tip="Las canciones ya aplicadas no vuelven a proponerse al Analizar. Esto borra esa marca." />
                     <Button Content="📁 Ver logs" Command="{Binding OpenLogFolderCommand}" Classes="gris"
                             ToolTip.Tip="Abre la carpeta de registros con el archivo de esta sesión (traza detallada de cada canción)." />
+                    <Button Content="📂 Carpeta de datos" Command="{Binding OpenDataFolderCommand}" Classes="gris"
+                            ToolTip.Tip="Abre la carpeta de Documentos donde la aplicación guarda todo." />
+                    <Button Content="🧹 Limpiar carpeta de datos" Click="CleanData_Click"
+                            Background="#B45309" Foreground="White" FontWeight="SemiBold"
+                            ToolTip.Tip="Borra registros, informes y cachés. No toca los ajustes, las listas de artista ni el historial para deshacer." />
                 </WrapPanel>
 
                 <!-- ================= ACCIONES ================= -->
@@ -131,11 +136,32 @@
 
         <DockPanel Grid.Column="1">
             <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
-                <TextBlock Text="Registro (log)" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                <TextBlock Text="Registro" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                <CheckBox Content="Solo lo importante" IsChecked="{Binding SoloImportante}" VerticalAlignment="Center"
+                          ToolTip.Tip="Deja únicamente errores, avisos y resúmenes. En una tirada larga pasan miles de líneas de detalle." />
+                <CheckBox Name="AutoScroll" Content="Seguir el final" IsChecked="True" VerticalAlignment="Center"
+                          ToolTip.Tip="Mantiene a la vista la última línea. Desmárcalo para poder leer hacia atrás sin que salte." />
+                <Button Content="Copiar" Click="CopyLog_Click" Classes="gris"
+                        ToolTip.Tip="Copia al portapapeles lo que se ve, para pegarlo donde haga falta." />
                 <Button Content="Limpiar" Command="{Binding ClearLogCommand}" Classes="gris" />
             </StackPanel>
+
+            <TextBlock DockPanel.Dock="Bottom" Text="{Binding LogFilePath}" Foreground="Gray" FontSize="11"
+                       TextTrimming="CharacterEllipsis" Margin="0,4,0,0"
+                       ToolTip.Tip="Archivo de registro de esta sesión. Contiene mucho más detalle que lo que cabe en pantalla." />
+
             <Border BorderBrush="Gray" BorderThickness="1" CornerRadius="4">
-                <ListBox ItemsSource="{Binding Log}" FontFamily="Consolas,monospace" FontSize="12" />
+                <ListBox Name="LogList" ItemsSource="{Binding Log}" FontFamily="Consolas,monospace" FontSize="12">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="{Binding Hora}" Foreground="#9CA3AF" />
+                                <TextBlock Text="{Binding Message}" Foreground="{Binding Color}"
+                                           FontWeight="{Binding Peso}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
             </Border>
         </DockPanel>
     </Grid>

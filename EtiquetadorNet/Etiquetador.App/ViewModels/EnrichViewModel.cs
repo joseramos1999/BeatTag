@@ -197,6 +197,11 @@ public partial class EnrichViewModel : ViewModelBase
             StepInfo = p.Phase;
             StepProgress = p.Fraction * 100;
         });
+
+        // Fuera del try a propósito: si la tirada se cancela, el catch necesita lo acumulado para
+        // poder escribir igualmente el resumen.
+        var seenResults = new List<ProcessResult>();
+
         try
         {
             if (!_engine.Library.IsScanned) { Status = "Escaneando biblioteca…"; await _engine.Library.ScanAsync(); }
@@ -210,7 +215,6 @@ public partial class EnrichViewModel : ViewModelBase
             var seen = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 
             int i = 0, fromCache = 0, alreadyApplied = 0;
-            var seenResults = new List<ProcessResult>();   // para el resumen y el informe del final
             foreach (var t in tracks)
             {
                 ct.ThrowIfCancellationRequested();
@@ -259,6 +263,10 @@ public partial class EnrichViewModel : ViewModelBase
             _engine.Analysis.Save(); RowsView.Refresh();
             Status = $"Análisis cancelado ({Rows.Count} propuestas hasta ahora).";
             _engine.Logger.Err($"Análisis cancelado por el usuario ({Rows.Count} propuestas hasta ahora).");
+            // El resumen también se escribe al cancelar: es lo que hace comparable una tirada con
+            // otra, y una pasada larga que se corta a medias no debe dejar el registro sin cifras.
+            _engine.Logger.Sum("(tirada CANCELADA: las cifras siguientes son parciales)");
+            WriteAnalysisReport(seenResults);
         }
         finally
         {
@@ -467,13 +475,17 @@ public partial class EnrichViewModel : ViewModelBase
         var skipped = res.Where(r => r.Skip).ToList();
 
         log.Sum("── Resumen para afinar el algoritmo ─────────────");
+        log.Sum($"   BeatTag {AppInfo.Version}   ({DateTime.Now:yyyy-MM-dd HH:mm})");
         log.Sum($"   Identificadas {found.Count} · sin resultado {noRes.Count} · saltadas como mezcla {skipped.Count}");
 
         // Reparto por fuente y por estrategia de búsqueda (qué variante acertó).
         foreach (var g in found.GroupBy(r => r.Source).OrderByDescending(g => g.Count()))
             log.Sum($"   fuente {g.Key,-14} {g.Count(),6}");
+
+        // La vía es lo que dice cuánto aportan la IA local ("ia") y la huella ("acoustid"), que es
+        // justo lo que hay que comparar entre tiradas. Va como resumen, no como detalle.
         foreach (var g in found.Where(r => r.Variant.Length > 0).GroupBy(r => r.Variant).OrderByDescending(g => g.Count()))
-            log.Detail($"   via {g.Key,-16} {g.Count(),6}");
+            log.Sum($"   via {g.Key,-16} {g.Count(),6}");
 
         // Confianza: dónde se concentra y cuántas quedan por debajo del umbral.
         var scores = found
@@ -496,6 +508,15 @@ public partial class EnrichViewModel : ViewModelBase
         // Versiones detectadas (remix/edit y quién las firma).
         var vers = found.Where(r => r.RemixKind.Length > 0).ToList();
         log.Sum($"   versiones: {vers.Count} detectadas · {vers.Count(r => r.Remixer.Length > 0)} con autor identificado");
+
+        // Una sola línea con las cifras que se comparan entre tiradas, en formato fijo. Buscarla en
+        // dos registros distintos basta para ver si un cambio ha mejorado o empeorado las cosas,
+        // sin tener que recontar a mano.
+        var dudosas = scores.Count(v => v < LowConfidence);
+        var porIa = found.Count(r => r.Variant == "ia");
+        var porHuella = found.Count(r => r.Variant == "acoustid");
+        log.Sum($"COMPARA|v{AppInfo.Version}|revisadas={res.Count}|identificadas={found.Count}"
+              + $"|sinresultado={noRes.Count}|dudosas={dudosas}|ia={porIa}|huella={porHuella}");
 
         // Lo más accionable: los casos que fallaron, para leerlos y sacar patrones.
         if (noRes.Count > 0)
