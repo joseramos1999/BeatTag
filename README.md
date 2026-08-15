@@ -15,15 +15,20 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
 ## ✨ Qué hace
 
 - **Enriquecer**: identifica cada tema contra **Deezer, iTunes, Spotify, MusicBrainz, Discogs y
-  AcoustID** (huella acústica), con IA opcional de rescate. Propone tags y un nombre de archivo, y
-  puntúa la **confianza** de cada propuesta (incluida la coherencia con los tags que ya trae el
-  archivo). Las propuestas dudosas se auto-desmarcan para que las revises.
+  AcoustID** (huella acústica), con **IA local opcional** para interpretar nombres muy alterados.
+  Propone tags y un nombre de archivo, y puntúa la **confianza** de cada propuesta (incluida la
+  coherencia con los tags que ya trae el archivo). Las propuestas dudosas se auto-desmarcan para
+  que las revises.
 - **Editor**: edición manual de título y tags, con reproducción de un fragmento para comprobar.
 - **Duplicados**: agrupa copias (por artista+título, solo título, o +duración) y permite enviarlas a
   la papelera.
 - **Calidad**: clasifica el audio por bitrate/formato y filtra el de baja calidad.
 - **Incompletas / No encontradas**: temas a los que les falta algún tag o que ninguna fuente
   identifica.
+- **Volumen**: mide la sonoridad de cada grabación según **EBU R128** y corrige las que se apartan
+  del resto. El audio **no se recodifica** —se ajusta la ganancia del propio MP3—, así que no hay
+  pérdida de calidad, los archivos mantienen su tamaño y el cambio es reversible.
+- **Tendencias**: listas de éxitos de más de 70 países, marcando lo que ya tienes en la biblioteca.
 - **Estadísticas**: reparto de la biblioteca por BPM, género, calidad, década y Clean/Explícito.
 - **Importar rekordbox**: trae BPM y clave musical desde un XML de rekordbox.
 - **Caché persistente** en tres niveles (respuestas de red, escaneo y análisis): no se reprocesa lo
@@ -38,12 +43,35 @@ Requisitos: **Windows 10/11 (x64)**.
 
 ## 🔑 Claves de API (opcional)
 
-BeatTag funciona con Deezer e iTunes sin configuración. Para usar **Spotify, Discogs, AcoustID** o la
-**IA**, introduce tus claves en la pestaña **Ajustes**. Se guardan **cifradas** en tu equipo con
-DPAPI (Windows Data Protection, por usuario) — **nunca** salen del equipo ni se incluyen en el repo.
+BeatTag funciona con Deezer e iTunes sin configuración. Para usar **Spotify, Discogs o AcoustID**,
+introduce tus claves en la pestaña **Ajustes**. Se guardan **cifradas** en tu equipo con DPAPI
+(Windows Data Protection, por usuario) — **nunca** salen del equipo ni se incluyen en el repo.
 
 Los datos de la app (config, cachés, logs) se guardan en
 `Documentos\Etiquetador de Musica\`.
+
+## 🤖 IA local (opcional)
+
+Cuando ninguna fuente identifica un tema, un modelo de lenguaje puede interpretar nombres de archivo
+muy alterados (etiquetas de record pool, BPM, tonalidad, nombres de editor) y convertirlos en una
+búsqueda aprovechable.
+
+Se ejecuta **en tu propio equipo** mediante [Ollama](https://ollama.com): **no necesita clave** y no
+envía información a ningún servicio externo. Desde **Ajustes** puedes instalarlo, descargar un modelo
+y elegir cuál usar; si Ollama está instalado pero parado, BeatTag lo arranca solo.
+
+Su propuesta **siempre se contrasta contra el catálogo** antes de escribir nada, de modo que una
+invención del modelo no llega a tus archivos. Es opcional: sin ella, el resto del análisis funciona
+igual.
+
+## 👤 Nombres de artista
+
+Dos listas ampliables desde **Ajustes**, en `Documentos\Etiquetador de Musica\`:
+
+- **Alias** (`ArtistAliases.json`): nombres distintos de un mismo artista, para que una coincidencia
+  correcta no se descarte. Un artista puede figurar en el catálogo con un nombre anterior.
+- **Grafías** (`ArtistsExceptions.json`): nombres cuya escritura no debe alterarse (`deadmau5`,
+  `AC/DC`, `Tiësto`).
 
 ## 🛠️ Compilar desde el código
 
