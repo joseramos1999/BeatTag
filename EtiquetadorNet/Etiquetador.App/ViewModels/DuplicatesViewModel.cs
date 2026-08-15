@@ -88,6 +88,24 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     /// <summary>Carpetas de la biblioteca, para marcarlas como prioritarias o excluidas.</summary>
     public ObservableCollection<DupFolderOption> Folders { get; } = new();
 
+    /// <summary>
+    /// Cabecera del desplegable de carpetas. Con muchas carpetas conviene poder ver de un vistazo
+    /// qué hay configurado sin tener que abrirlo.
+    /// </summary>
+    public string ResumenCarpetas
+    {
+        get
+        {
+            var p = Folders.Count(f => f.Prioritaria);
+            var x = Folders.Count(f => f.Excluida);
+            if (p == 0 && x == 0) return $"Carpetas prioritarias y excluidas  ·  {Folders.Count} carpetas, ninguna configurada";
+            var partes = new List<string>();
+            if (p > 0) partes.Add($"{p} prioritaria{(p == 1 ? "" : "s")}");
+            if (x > 0) partes.Add($"{x} excluida{(x == 1 ? "" : "s")}");
+            return $"Carpetas prioritarias y excluidas  ·  {string.Join(" · ", partes)}";
+        }
+    }
+
     public DupModeOption[] ModeOptions { get; } =
     {
         new(DuplicateMode.ArtistTitle, "Artista + título"),
@@ -150,6 +168,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
             }
         }
         finally { _cargando = false; }
+        OnPropertyChanged(nameof(ResumenCarpetas));
     }
 
     private void GuardarCarpetasYRecalcular()
@@ -159,6 +178,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         cfg.PriorityFolders = Folders.Where(f => f.Prioritaria).Select(f => f.Path).ToList();
         cfg.ExcludedDupFolders = Folders.Where(f => f.Excluida).Select(f => f.Path).ToList();
         _engine.SaveConfig();
+        OnPropertyChanged(nameof(ResumenCarpetas));
         if (Store.IsScanned) Recompute();
     }
 

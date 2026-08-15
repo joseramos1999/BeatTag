@@ -28,22 +28,27 @@
         </StackPanel>
 
         <!-- Carpetas: prioritaria = de ahí sale la copia buena; excluida = ni se mira. -->
-        <Expander DockPanel.Dock="Top" Header="Carpetas prioritarias y excluidas" Margin="0,0,0,6">
+        <Expander DockPanel.Dock="Top" Header="{Binding ResumenCarpetas}" Margin="0,0,0,6">
             <StackPanel Spacing="4" Margin="4">
                 <TextBlock Classes="desc"
                            Text="Marca como prioritaria la carpeta donde vive tu colección buena: ante dos copias iguales se conservará la de ahí. Excluye las que no quieras que participen, como acapellas o packs de remezclas." />
-                <ItemsControl ItemsSource="{Binding Folders}" MaxHeight="150">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Grid ColumnDefinitions="110,110,*" Margin="0,1">
-                                <CheckBox Grid.Column="0" Content="Prioritaria" IsChecked="{Binding Prioritaria}" />
-                                <CheckBox Grid.Column="1" Content="Excluir"     IsChecked="{Binding Excluida}" />
-                                <TextBlock Grid.Column="2" Text="{Binding Path}" VerticalAlignment="Center"
-                                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Path}" />
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <!-- El ItemsControl no se desplaza por su cuenta: sin este ScrollViewer las carpetas
+                     que pasan del alto quedan recortadas y no hay forma de llegar a ellas. -->
+                <ScrollViewer MaxHeight="300" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Folders}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnDefinitions="110,110,*" Margin="0,1">
+                                    <CheckBox Grid.Column="0" Content="Prioritaria" IsChecked="{Binding Prioritaria}" />
+                                    <CheckBox Grid.Column="1" Content="Excluir"     IsChecked="{Binding Excluida}" />
+                                    <TextBlock Grid.Column="2" Text="{Binding Path}" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Path}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
             </StackPanel>
         </Expander>
 
