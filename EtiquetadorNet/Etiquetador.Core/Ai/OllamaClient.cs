@@ -73,6 +73,57 @@ public sealed class OllamaClient
     public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
         => await ListModelsAsync(ct).ConfigureAwait(false) is { Count: > 0 };
 
+    /// <summary>true si Ollama responde, tenga modelos o no.</summary>
+    public async Task<bool> IsRunningAsync(CancellationToken ct = default)
+        => await ListModelsAsync(ct).ConfigureAwait(false) != null;
+
+    /// <summary>
+    /// Descarga un modelo. Son varios GB, así que informa del avance: Ollama responde con una línea
+    /// JSON por cada actualización de estado. Devuelve el error, o "" si fue bien.
+    /// </summary>
+    public async Task<string> PullModelAsync(string model, IProgress<(string Estado, double Fraccion)>? progreso,
+                                             CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(model)) return "No se ha indicado ningún modelo.";
+        try
+        {
+            var body = JsonSerializer.Serialize(new { model, stream = true });
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{Host}/api/pull")
+            { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+
+            // Sin esto se esperaría a tener el cuerpo entero: hay que leerlo según llega para ver el avance.
+            using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var det = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                return $"Ollama respondió {(int)resp.StatusCode}. {Trim(det)}";
+            }
+
+            using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var sr = new StreamReader(stream);
+            string? linea;
+            var ultimo = "";
+            while ((linea = await sr.ReadLineAsync(ct).ConfigureAwait(false)) != null)
+            {
+                if (linea.Length == 0) continue;
+                JsonNode? j;
+                try { j = JsonNode.Parse(linea); } catch { continue; }
+
+                var err = J.S(J.P(j, "error"));
+                if (err.Length > 0) return err;
+
+                var estado = J.S(J.P(j, "status"));
+                if (estado.Length > 0) ultimo = estado;
+
+                double total = J.D(J.P(j, "total")), hecho = J.D(J.P(j, "completed"));
+                progreso?.Report((ultimo, total > 0 ? Math.Clamp(hecho / total, 0, 1) : 0));
+            }
+            return "";   // la secuencia terminó sin error
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { return "Descarga cancelada."; }
+        catch (Exception e) { return $"No se pudo contactar con Ollama en {Host}. {e.Message}"; }
+    }
+
     public async Task<AiParse?> ParseAsync(string name, string tagA, string tagT, string model, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(name) || AiBlocked) return null;

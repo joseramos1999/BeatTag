@@ -7,67 +7,128 @@
              x:Class="Etiquetador.App.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
 
+    <UserControl.Styles>
+        <!-- Encabezado de sección -->
+        <Style Selector="TextBlock.sec">
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Margin" Value="0,14,0,0" />
+        </Style>
+        <!-- Texto explicativo bajo el encabezado -->
+        <Style Selector="TextBlock.ayuda">
+            <Setter Property="Foreground" Value="Gray" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+        <Style Selector="Button.gris">
+            <Setter Property="Background" Value="#6B7280" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </UserControl.Styles>
+
     <Grid ColumnDefinitions="*,*" Margin="12">
-        <StackPanel Grid.Column="0" Spacing="8" Margin="0,0,12,0">
-            <TextBlock Text="Claves de API" FontWeight="Bold" FontSize="15" />
-            <TextBlock Text="Se guardan cifradas con DPAPI (solo tu usuario de Windows puede leerlas)."
-                       Foreground="Gray" TextWrapping="Wrap" />
+        <!-- Columna izquierda: los ajustes son ya bastantes, así que va con desplazamiento propio. -->
+        <ScrollViewer Grid.Column="0" Margin="0,0,12,0" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="6">
 
-            <TextBlock Text="Spotify Client ID" Margin="0,6,0,0" />
-            <TextBox Text="{Binding SpotifyId}" />
-            <TextBlock Text="Spotify Client Secret" />
-            <TextBox Text="{Binding SpotifySecret}" PasswordChar="•" />
-            <TextBlock Text="Token de Discogs" />
-            <TextBox Text="{Binding DiscogsToken}" PasswordChar="•" />
-            <TextBlock Text="Clave de AcoustID" />
-            <TextBox Text="{Binding AcoustIdKey}" PasswordChar="•" />
-            <TextBlock Text="IA local (Ollama)" Margin="0,6,0,0" />
-            <TextBlock Foreground="Gray" TextWrapping="Wrap" FontSize="12"
-                       Text="Funciona en tu equipo, sin clave ni envío de datos a internet. Ayuda a interpretar nombres de archivo muy alterados. Es opcional: si no está instalada, el resto del análisis funciona igual. Requiere instalar Ollama." />
-            <StackPanel Orientation="Horizontal" Spacing="8">
-                <ComboBox ItemsSource="{Binding AiModels}" SelectedItem="{Binding AiModel}"
-                          MinWidth="240"
-                          ToolTip.Tip="Modelo que se usará. Si se deja vacío, se emplea el primero disponible." />
-                <Button Content="Detectar" Command="{Binding DetectAiCommand}"
-                        Background="#6B7280" Foreground="White" FontWeight="SemiBold"
-                        ToolTip.Tip="Busca Ollama en este equipo y lista los modelos instalados." />
-                <TextBlock Text="{Binding AiStatus}" Foreground="Gray" VerticalAlignment="Center" TextWrapping="Wrap" />
+                <!-- ================= IA LOCAL ================= -->
+                <TextBlock Classes="sec" Text="IA local" Margin="0,0,0,0" />
+                <TextBlock Classes="ayuda"
+                           Text="Se ejecuta en tu equipo mediante Ollama: no necesita clave y no envía información a ningún servicio externo. Ayuda a interpretar nombres de archivo muy alterados (etiquetas de pool, BPM, tonalidad) para poder buscarlos en el catálogo. Es opcional: si no la instalas, el resto del análisis funciona igual." />
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Instalar Ollama" Command="{Binding InstallAiCommand}" IsEnabled="{Binding !AiBusy}"
+                            Background="#2563EB" Foreground="White" FontWeight="SemiBold"
+                            ToolTip.Tip="Lo instala mediante winget, el gestor de paquetes de Windows. Windows pedirá confirmación de administrador." />
+                    <Button Content="Detectar" Command="{Binding DetectAiCommand}" IsEnabled="{Binding !AiBusy}" Classes="gris"
+                            ToolTip.Tip="Comprueba si Ollama está en marcha y lista los modelos instalados." />
+                    <Button Content="Descargar modelo" Command="{Binding PullModelCommand}" IsEnabled="{Binding !AiBusy}" Classes="gris"
+                            ToolTip.Tip="Descarga en tu equipo el modelo seleccionado. Son varios GB y solo hace falta una vez." />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Modelo" VerticalAlignment="Center" Width="60" />
+                    <ComboBox ItemsSource="{Binding AiOpciones}" SelectedItem="{Binding AiModel}"
+                              MinWidth="220" IsEnabled="{Binding !AiBusy}"
+                              ToolTip.Tip="Primero los modelos instalados; después los recomendados, que hay que descargar." />
+                    <TextBlock Text="{Binding AiModelNota}" Foreground="Gray" VerticalAlignment="Center" TextWrapping="Wrap" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Dirección" VerticalAlignment="Center" Width="60" />
+                    <TextBox Text="{Binding AiHost}" Width="240" Watermark="http://localhost:11434"
+                             ToolTip.Tip="Solo hace falta cambiarlo si Ollama no está en este equipo o usa otro puerto." />
+                </StackPanel>
+
+                <ProgressBar Minimum="0" Maximum="100" Value="{Binding AiProgress}" Height="8"
+                             IsVisible="{Binding AiShowProgress}" />
+                <TextBlock Text="{Binding AiStatus}" Foreground="Gray" TextWrapping="Wrap" />
+
+                <!-- ================= CLAVES ================= -->
+                <TextBlock Classes="sec" Text="Claves de API" />
+                <TextBlock Classes="ayuda"
+                           Text="Deezer y Apple Music funcionan sin ninguna clave. Las demás fuentes son opcionales y mejoran los resultados. Se guardan cifradas con DPAPI: solo tu usuario de Windows puede leerlas." />
+
+                <Grid ColumnDefinitions="140,*" RowDefinitions="Auto,Auto,Auto,Auto" >
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Spotify Client ID" VerticalAlignment="Center" Margin="0,2" />
+                    <TextBox   Grid.Row="0" Grid.Column="1" Text="{Binding SpotifyId}" Margin="0,2" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Spotify Client Secret" VerticalAlignment="Center" Margin="0,2" />
+                    <TextBox   Grid.Row="1" Grid.Column="1" Text="{Binding SpotifySecret}" PasswordChar="•" Margin="0,2" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Token de Discogs" VerticalAlignment="Center" Margin="0,2" />
+                    <TextBox   Grid.Row="2" Grid.Column="1" Text="{Binding DiscogsToken}" PasswordChar="•" Margin="0,2" />
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Clave de AcoustID" VerticalAlignment="Center" Margin="0,2" />
+                    <TextBox   Grid.Row="3" Grid.Column="1" Text="{Binding AcoustIdKey}" PasswordChar="•" Margin="0,2" />
+                </Grid>
+
+                <!-- ================= NOMBRES DE ARTISTA ================= -->
+                <TextBlock Classes="sec" Text="Nombres de artista" />
+                <TextBlock Classes="ayuda"
+                           Text="Dos listas que puedes ampliar. Los alias agrupan nombres distintos de un mismo artista, para que una coincidencia correcta no se descarte (por ejemplo, Cruz Cafuné aparece en el catálogo como Cruzzi). Las grafías fijan cómo debe escribirse un nombre. Se aplican al arrancar la aplicación." />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Alias de artista" Command="{Binding OpenAliasesFileCommand}" Classes="gris"
+                            ToolTip.Tip="Abre la carpeta con ArtistAliases.json. Formato: [[&quot;Nombre bueno&quot;, &quot;alias&quot;]]. El primero es el que se escribe." />
+                    <Button Content="Grafías especiales" Command="{Binding OpenExceptionsFileCommand}" Classes="gris"
+                            ToolTip.Tip="Abre la carpeta con ArtistsExceptions.json: nombres cuya escritura no debe alterarse (deadmau5, AC/DC…)." />
+                </StackPanel>
+
+                <!-- ================= MANTENIMIENTO ================= -->
+                <TextBlock Classes="sec" Text="Mantenimiento" />
+                <CheckBox Content="Usar caché de respuestas (recomendado)" IsChecked="{Binding Cache}"
+                          ToolTip.Tip="Guarda las respuestas de las fuentes para que volver a analizar sea inmediato." />
+                <WrapPanel Orientation="Horizontal" ItemSpacing="8" LineSpacing="6">
+                    <Button Content="Vaciar caché" Command="{Binding ClearCacheCommand}" Classes="gris" />
+                    <Button Content="Recuperar descartadas" Command="{Binding RestoreIgnoredCommand}" Classes="gris"
+                            ToolTip.Tip="Vuelve a tener en cuenta las canciones que quitaste de la lista en Enriquecer." />
+                    <Button Content="Olvidar aplicadas" Command="{Binding ForgetAppliedCommand}" Classes="gris"
+                            ToolTip.Tip="Las canciones ya aplicadas no vuelven a proponerse al Analizar. Esto borra esa marca." />
+                    <Button Content="📁 Ver logs" Command="{Binding OpenLogFolderCommand}" Classes="gris"
+                            ToolTip.Tip="Abre la carpeta de registros con el archivo de esta sesión (traza detallada de cada canción)." />
+                </WrapPanel>
+
+                <!-- ================= ACCIONES ================= -->
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,14,0,0">
+                    <Button Content="Guardar" Command="{Binding SaveCommand}"
+                            Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
+                    <Button Content="Probar conexión" Command="{Binding TestConnectionCommand}" IsEnabled="{Binding !IsBusy}"
+                            Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Status}" VerticalAlignment="Center" Foreground="Gray" TextWrapping="Wrap" />
+                </StackPanel>
+
+                <TextBlock Text="Resultado de la prueba" FontWeight="Bold" Margin="0,10,0,0" />
+                <Border BorderBrush="Gray" BorderThickness="1" CornerRadius="4" Padding="8" MinHeight="90">
+                    <ScrollViewer>
+                        <SelectableTextBlock Text="{Binding TestReport}" FontFamily="Consolas,monospace" />
+                    </ScrollViewer>
+                </Border>
             </StackPanel>
-
-            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
-                <CheckBox Content="Usar caché de respuestas (recomendado)" IsChecked="{Binding Cache}" VerticalAlignment="Center" />
-                <Button Content="Vaciar caché" Command="{Binding ClearCacheCommand}" Background="#6B7280" Foreground="White" FontWeight="SemiBold" />
-                <Button Content="Recuperar descartadas" Command="{Binding RestoreIgnoredCommand}"
-                        Background="#6B7280" Foreground="White" FontWeight="SemiBold"
-                        ToolTip.Tip="Vuelve a tener en cuenta las canciones que quitaste de la lista en Enriquecer." />
-                <Button Content="Olvidar aplicadas" Command="{Binding ForgetAppliedCommand}"
-                        Background="#6B7280" Foreground="White" FontWeight="SemiBold"
-                        ToolTip.Tip="Las canciones ya aplicadas no vuelven a proponerse al Analizar. Esto borra esa marca." />
-                <Button Content="📁 Ver logs" Command="{Binding OpenLogFolderCommand}"
-                        Background="#6B7280" Foreground="White" FontWeight="SemiBold"
-                        ToolTip.Tip="Abre la carpeta de registros con el archivo de esta sesión (traza detallada de cada canción)." />
-            </StackPanel>
-
-            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-                <Button Content="Guardar" Command="{Binding SaveCommand}"
-                        Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
-                <Button Content="Probar conexión" Command="{Binding TestConnectionCommand}" IsEnabled="{Binding !IsBusy}"
-                        Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding Status}" VerticalAlignment="Center" Foreground="Gray" />
-            </StackPanel>
-
-            <TextBlock Text="Resultado de la prueba" FontWeight="Bold" Margin="0,10,0,0" />
-            <Border BorderBrush="Gray" BorderThickness="1" CornerRadius="4" Padding="8" MinHeight="90">
-                <ScrollViewer>
-                    <SelectableTextBlock Text="{Binding TestReport}" FontFamily="Consolas,monospace" />
-                </ScrollViewer>
-            </Border>
-        </StackPanel>
+        </ScrollViewer>
 
         <DockPanel Grid.Column="1">
             <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
                 <TextBlock Text="Registro (log)" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
-                <Button Content="Limpiar" Command="{Binding ClearLogCommand}" Background="#6B7280" Foreground="White" />
+                <Button Content="Limpiar" Command="{Binding ClearLogCommand}" Classes="gris" />
             </StackPanel>
             <Border BorderBrush="Gray" BorderThickness="1" CornerRadius="4">
                 <ListBox ItemsSource="{Binding Log}" FontFamily="Consolas,monospace" FontSize="12" />

@@ -40,6 +40,19 @@ public static class Shell
         catch { }
     }
 
+    /// <summary>Abre una dirección web en el navegador del sistema.</summary>
+    public static async Task OpenUrlAsync(string url)
+    {
+        try
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return;
+            if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return;
+            var top = MainTopLevel();
+            if (top?.Launcher is { } launcher) await launcher.LaunchUriAsync(uri);
+        }
+        catch { }
+    }
+
     private static TopLevel? MainTopLevel()
         => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime d
             ? d.MainWindow

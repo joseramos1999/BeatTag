@@ -31,6 +31,9 @@ public sealed class AppConfig
     /// <summary>Modelo de la IA local (Ollama). No es un secreto: se guarda en claro.</summary>
     public string AiModel { get; set; } = "";
 
+    /// <summary>Dirección de Ollama. Vacío = la de siempre (http://localhost:11434).</summary>
+    public string AiHost { get; set; } = "";
+
     // --- Opciones de ejecución ---
     public bool Apply { get; set; }
     public bool Overwrite { get; set; }

@@ -103,6 +103,7 @@ public sealed class AppEngine
         Discogs = new DiscogsProvider(Api);
         AcoustId = new AcoustIdProvider(Api);
         Ai = new OllamaClient(Api, Logger);
+        if (Config.AiHost.Length > 0) Ai.Host = Config.AiHost;
         Fingerprint = new Fingerprint(Paths, Logger);
         Covers = new CoverFetcher(Api);
         // Los alias se cargan ANTES que las excepciones: estas los incorporan para escribir el nombre canónico.
