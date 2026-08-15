@@ -413,8 +413,13 @@ public sealed class FileProcessor
                 _log?.Detail($"    confianza-> {finalScore} -> 4 (búsqueda dictada por el usuario)");
                 finalScore = 4;
             }
-            scoreStr = finalScore.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            _log?.Detail($"    confianza-> {primary.Score} (fuente) {(tagAdj >= 0 ? "+" : "")}{tagAdj} (tags) = {scoreStr}"
+            // Todo el renglón en cultura invariante: mezclar coma y punto decimal en la misma línea
+            // (la fuente con la del sistema, el total invariante) hace que al analizar los registros
+            // se lean mal los números.
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            scoreStr = finalScore.ToString(inv);
+            _log?.Detail($"    confianza-> {primary.Score.ToString(inv)} (fuente) "
+                       + $"{(tagAdj >= 0 ? "+" : "")}{tagAdj.ToString(inv)} (tags) = {scoreStr}"
                        + (finalScore < 2.0 ? "  [BAJA]" : ""));
         }
         _log?.Detail($"    -> {(primary != null || acHit != null || genreOnly || cleanOnly ? "OK" : "SIN RESULTADO")} · fuente={srcLabel} · nuevo='{newBase + ext}'");

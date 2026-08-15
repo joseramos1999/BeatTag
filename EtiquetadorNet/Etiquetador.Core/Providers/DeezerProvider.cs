@@ -145,10 +145,36 @@ public sealed class DeezerProvider
                 }
             }
 
-            if (Regex.IsMatch(rt, BadRe, IC)) { sc -= 9; why.Add("basura -9"); }
-            if (!wantLive && Regex.IsMatch(rt, LiveRe, IC)) { sc -= 9; why.Add("live no pedido -9"); }
-            if (!wantRemix && Regex.IsMatch(rt, RemixRe, IC)) { sc -= 6; why.Add("remix no pedido -6"); }
+            var tituloPuntuo = sc > 0.0;
+
+            // Estas descartan la pista a propósito: el catálogo trae una versión que NO se pedía.
+            var esVersionNoPedida = false;
+            if (Regex.IsMatch(rt, BadRe, IC)) { sc -= 9; esVersionNoPedida = true; why.Add("basura -9"); }
+            if (!wantLive && Regex.IsMatch(rt, LiveRe, IC)) { sc -= 9; esVersionNoPedida = true; why.Add("live no pedido -9"); }
+            if (!wantRemix && Regex.IsMatch(rt, RemixRe, IC)) { sc -= 6; esVersionNoPedida = true; why.Add("remix no pedido -6"); }
             if (!wantRemix && !wantLive && Regex.IsMatch(rt, VerRe, IC)) { sc -= 2; why.Add("otra version -2"); }
+
+            // El título no puntuó por ninguna vía, pero uno contiene al otro: comparten el núcleo.
+            // Es el caso corriente en una biblioteca de DJ ("Groovejet" frente a "Groovejet (If This
+            // Ain't Love)"), y valía CERO, de modo que la coincidencia correcta se quedaba por debajo
+            // del umbral de revisión pese a ser la buena.
+            //
+            // Se puntúa en proporción a cuánto del título más largo explica el más corto, y se queda
+            // por debajo de lo que vale una versión reconocida (+6): es un indicio, no una certeza.
+            //
+            // NO se aplica si lo que sobra es justo una versión no pedida: ahí el texto de más es
+            // precisamente el motivo del descarte, y premiarlo rescataría por encima del umbral la
+            // pista que se acaba de rechazar (un remix ajeno con la duración parecida).
+            if (!tituloPuntuo && !esVersionNoPedida && nt.Length > 0 && tn.Length > 0)
+            {
+                var comun = tn.Contains(nt) || nt.Contains(tn);
+                var frac = (double)Math.Min(tn.Length, nt.Length) / Math.Max(tn.Length, nt.Length);
+                if (comun && frac >= 0.34)
+                {
+                    var p = Math.Round(1.5 + 4.0 * frac, 1);
+                    sc += p; why.Add($"nucleo del titulo +{p:0.##}");
+                }
+            }
             // Si lo que sobra es justo la versión pedida, no se castiga por ser más largo.
             var lenPen = esLaVersionPedida ? 0 : Math.Max(0, tn.Length - nt.Length) * 0.03;
             if (lenPen > 0) { sc -= lenPen; why.Add($"largo -{lenPen:0.##}"); }
