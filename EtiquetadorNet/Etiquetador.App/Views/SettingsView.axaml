@@ -62,7 +62,7 @@
 
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <TextBlock Text="Dirección" VerticalAlignment="Center" Width="60" />
-                    <TextBox Text="{Binding AiHost}" Width="240" Watermark="http://localhost:11434"
+                    <TextBox Text="{Binding AiHost}" Width="240" PlaceholderText="http://localhost:11434"
                              ToolTip.Tip="Solo hace falta cambiarlo si Ollama no está en este equipo o usa otro puerto." />
                 </StackPanel>
 
