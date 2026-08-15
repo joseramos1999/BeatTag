@@ -26,55 +26,69 @@
             </StackPanel>
         </Border>
 
+        <!--
+            Primeros pasos. Sin biblioteca preparada, las pestañas que trabajan sobre ella quedan
+            fuera de alcance; sin este aviso el usuario solo vería la mayoría en gris sin saber
+            por qué. Siguen accesibles Biblioteca, Ajustes y Ayuda.
+        -->
+        <Border DockPanel.Dock="Bottom" IsVisible="{Binding ShowSetupHint}"
+                Background="#DBEAFE" BorderBrush="#3B82F6" BorderThickness="0,1,0,0" Padding="10,6">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="👋" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding SetupHint}" VerticalAlignment="Center"
+                           Foreground="#1E3A8A" TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
         <TabControl SelectedIndex="{Binding SelectedTabIndex}">
             <TabItem Header="📚 Biblioteca"
-                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=0}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=0}">
                 <views:LibraryView DataContext="{Binding Library}" />
             </TabItem>
             <TabItem Header="✨ Enriquecer"
-                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=1}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=1}">
                 <views:EnrichView DataContext="{Binding Enrich}" />
             </TabItem>
             <TabItem Header="✏ Editor"
-                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=2}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=2}">
                 <views:EditorView DataContext="{Binding Editor}" />
             </TabItem>
             <TabItem Header="👥 Duplicados"
-                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=3}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=3}">
                 <views:DuplicatesView DataContext="{Binding Duplicates}" />
             </TabItem>
             <TabItem Header="🎧 Calidad"
-                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=4}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=4}">
                 <views:QualityView DataContext="{Binding Quality}" />
             </TabItem>
             <TabItem Header="⚠ Incompletas"
-                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=5}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=5}">
                 <views:IncompleteView DataContext="{Binding Incomplete}" />
             </TabItem>
             <TabItem Header="❓ No encontradas"
-                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=6}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=6}">
                 <views:NotFoundView DataContext="{Binding NotFound}" />
             </TabItem>
             <TabItem Header="📊 Estadísticas"
-                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=7}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=7}">
                 <views:StatsView DataContext="{Binding Stats}" />
             </TabItem>
             <TabItem Header="🌍 Tendencias"
-                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=8}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=8}">
                 <views:TrendsView DataContext="{Binding Trends}" />
             </TabItem>
             <TabItem Header="🔊 Volumen"
-                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=9}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=9}">
                 <views:LoudnessView DataContext="{Binding Loudness}" />
             </TabItem>
             <TabItem Header="⚙ Ajustes"
-                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=10}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=10}">
                 <views:SettingsView DataContext="{Binding Settings}" />
             </TabItem>
             <!-- Ayuda no altera nada, pero también se bloquea: dejarla accesible daría a entender
                  que se puede navegar durante un proceso. -->
             <TabItem Header="ℹ Ayuda"
-                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=11}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=11}">
                 <views:HelpView />
             </TabItem>
         </TabControl>

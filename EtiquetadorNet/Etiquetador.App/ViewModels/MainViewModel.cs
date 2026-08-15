@@ -11,8 +11,12 @@ namespace Etiquetador.App.ViewModels;
 /// <summary>Shell de la app: agrupa las pestañas y comparte el motor (AppEngine).</summary>
 public partial class MainViewModel : ViewModelBase
 {
+    // Índices de los TabItem de MainWindow.axaml.
+    private const int LibraryTabIndex = 0;
     private const int EditorTabIndex = 2;
     private const int TrendsTabIndex = 8;
+    private const int SettingsTabIndex = 10;
+    private const int HelpTabIndex = 11;
 
     public AppEngine Engine { get; }
 
@@ -42,6 +46,27 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>Qué se está haciendo, para explicar al usuario por qué no puede tocar nada.</summary>
     [ObservableProperty] private string _busyWhat = "";
+
+    /// <summary>
+    /// La biblioteca está lista: hay carpetas y ya se han escaneado. Hasta entonces el resto de
+    /// pestañas no tiene nada sobre lo que trabajar, así que se mantienen fuera de alcance para
+    /// no mostrar tablas vacías que hacen pensar que la aplicación no funciona.
+    /// </summary>
+    public bool LibraryReady => Engine.Library.Folders.Count > 0 && Engine.Library.IsScanned;
+
+    /// <summary>Hay que explicar por qué está casi todo en gris (no basta con deshabilitarlo).</summary>
+    public bool ShowSetupHint => !Busy && !LibraryReady;
+
+    /// <summary>Siguiente paso concreto, según si ya hay carpetas o todavía no.</summary>
+    public string SetupHint => Engine.Library.Folders.Count == 0
+        ? "Empieza por añadir tus carpetas de música en esta pestaña. El resto de la aplicación se activará en cuanto la biblioteca esté preparada."
+        : "Pulsa «Escanear» para preparar la biblioteca. El resto de la aplicación se activará al terminar.";
+
+    /// <summary>
+    /// Pestañas disponibles, un bit por pestaña (bit N = pestaña N). Se calcula en un solo sitio
+    /// para que las reglas de bloqueo no queden repartidas por el XAML.
+    /// </summary>
+    [ObservableProperty] private int _enabledTabs = -1;
 
     private bool _reverting;
 
@@ -93,6 +118,13 @@ public partial class MainViewModel : ViewModelBase
                  { Library, Enrich, Editor, Duplicates, Quality, Incomplete, NotFound, Stats, Trends, Loudness, Settings })
             vm.PropertyChanged += OnChildChanged;
 
+        // La biblioteca avisa al escanearse y al cambiar las carpetas: es lo que abre el resto de
+        // pestañas. Folders es una ObservableCollection, así que también hay que seguirla: quitar
+        // todas las carpetas debe volver a bloquear.
+        Engine.Library.Changed += RecomputeTabs;
+        Engine.Library.Folders.CollectionChanged += (_, _) => RecomputeTabs();
+        RecomputeTabs();
+
         // "Editar esta canción" desde otras pestañas: la selecciona en el Editor y salta a esa pestaña.
         engine.EditRequested += path =>
         {
@@ -132,12 +164,43 @@ public partial class MainViewModel : ViewModelBase
         BusyTabIndex = -1;
     }
 
-    partial void OnBusyTabIndexChanged(int value) => OnPropertyChanged(nameof(Busy));
+    partial void OnBusyTabIndexChanged(int value)
+    {
+        OnPropertyChanged(nameof(Busy));
+        RecomputeTabs();
+    }
 
-    // Mientras hay una operación larga, no se puede cambiar de pestaña (se vuelve a la ocupada).
+    /// <summary>Decide qué pestañas quedan disponibles. Único sitio donde vive esa regla.</summary>
+    private void RecomputeTabs()
+    {
+        OnPropertyChanged(nameof(LibraryReady));
+        OnPropertyChanged(nameof(ShowSetupHint));
+        OnPropertyChanged(nameof(SetupHint));
+
+        if (BusyTabIndex >= 0)
+            // Proceso en curso: solo la que lo ejecuta, para ver el avance y poder cancelar.
+            EnabledTabs = 1 << BusyTabIndex;
+        else if (!LibraryReady)
+            // Sin biblioteca: solo lo necesario para prepararla y entender cómo empezar.
+            EnabledTabs = (1 << LibraryTabIndex) | (1 << SettingsTabIndex) | (1 << HelpTabIndex);
+        else
+            EnabledTabs = ~0;
+
+        // Si la pestaña abierta acaba de quedarse fuera, devolver a una que sí esté disponible.
+        if ((EnabledTabs & (1 << SelectedTabIndex)) == 0)
+        {
+            _reverting = true;
+            SelectedTabIndex = BusyTabIndex >= 0 ? BusyTabIndex : LibraryTabIndex;
+            _reverting = false;
+        }
+    }
+
+    // No se puede saltar a una pestaña que está fuera de alcance (por proceso en curso o por no
+    // haber biblioteca todavía). Los TabItem ya salen deshabilitados; esto cubre además los saltos
+    // hechos desde código, como "Editar esta canción".
     partial void OnSelectedTabIndexChanged(int value)
     {
-        if (_reverting || !Busy || value == BusyTabIndex)
+        if (_reverting || (EnabledTabs & (1 << value)) != 0)
         {
             // Al entrar en Tendencias se cargan los países (una sola vez). Se hace aquí y no en la
             // vista porque el enganche al árbol visual no llegaba a dispararse con las pestañas.
@@ -145,13 +208,13 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
         _reverting = true;
-        SelectedTabIndex = BusyTabIndex;
+        SelectedTabIndex = BusyTabIndex >= 0 ? BusyTabIndex : LibraryTabIndex;
         _reverting = false;
     }
 
     /// <summary>
-    /// Habilita una pestaña solo si no hay ninguna operación en curso, o si es justo la que la
-    /// está ejecutando (para poder seguir el avance y cancelarla). El parámetro es su índice.
+    /// Comprueba el bit de esta pestaña en <see cref="EnabledTabs"/>. El parámetro es su índice.
+    /// Toda la decisión vive en RecomputeTabs; esto solo la consulta.
     /// </summary>
     public static readonly IValueConverter TabEnabled = new PestanaHabilitada();
 
@@ -159,10 +222,12 @@ public partial class MainViewModel : ViewModelBase
     {
         public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
         {
-            var ocupada = value as int? ?? -1;
-            if (ocupada < 0) return true;                       // nada en marcha: todo disponible
-            return int.TryParse(parameter as string, NumberStyles.Integer, CultureInfo.InvariantCulture, out var propia)
-                   && propia == ocupada;
+            var mascara = value as int? ?? 0;
+            // Ante un parámetro ausente o ilegible, bloquear: nunca dejar accesible por error una
+            // pestaña que podría tocar archivos en uso.
+            if (!int.TryParse(parameter as string, NumberStyles.Integer, CultureInfo.InvariantCulture, out var propia)
+                || propia is < 0 or > 31) return false;
+            return (mascara & (1 << propia)) != 0;
         }
 
         public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
