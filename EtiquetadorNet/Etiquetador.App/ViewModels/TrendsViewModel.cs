@@ -52,6 +52,12 @@ public partial class TrendsViewModel : ViewModelBase
     [ObservableProperty] private ChartCountry? _selectedCountry;
     [ObservableProperty] private TrendRow? _selectedRow;
     [ObservableProperty] private bool _isBusy;
+
+    /// <summary>
+    /// Cierto solo mientras se descarga la lista de países. Es una precarga que arranca sola con
+    /// la aplicación, así que no cuenta como proceso a efectos de bloquear el resto de pestañas.
+    /// </summary>
+    [ObservableProperty] private bool _loadingCountries;
     [ObservableProperty] private bool _soloLasQueTengo;
     [ObservableProperty] private int _listSize = 50;
     [ObservableProperty] private string _status = "Selecciona un país y pulsa Ver tendencias.";
@@ -75,6 +81,9 @@ public partial class TrendsViewModel : ViewModelBase
     public async Task EnsureCountriesAsync()
     {
         if (Countries.Count > 0 || IsBusy) return;
+        // Se marca ANTES que IsBusy: es una precarga de fondo que se lanza al arrancar la
+        // aplicación, y no debe bloquear el resto de pestañas como sí hace un proceso del usuario.
+        LoadingCountries = true;
         IsBusy = true;
         Status = "Cargando países…";
         _engine.Logger.Detail("Tendencias: pidiendo la lista de países…");
@@ -95,7 +104,7 @@ public partial class TrendsViewModel : ViewModelBase
             Status = "No se pudieron cargar los países: " + e.Message;
             _engine.Logger.Error("Tendencias: fallo al cargar los países", e);
         }
-        finally { IsBusy = false; }
+        finally { IsBusy = false; LoadingCountries = false; }
     }
 
     [RelayCommand]

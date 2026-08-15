@@ -10,42 +10,73 @@
         Icon="/Assets/beattag.ico"
         Title="BeatTag — Etiquetador DJ" Width="1000" Height="640">
 
-    <TabControl SelectedIndex="{Binding SelectedTabIndex}">
-        <TabItem Header="📚 Biblioteca">
-            <views:LibraryView DataContext="{Binding Library}" />
-        </TabItem>
-        <TabItem Header="✨ Enriquecer">
-            <views:EnrichView DataContext="{Binding Enrich}" />
-        </TabItem>
-        <TabItem Header="✏ Editor">
-            <views:EditorView DataContext="{Binding Editor}" />
-        </TabItem>
-        <TabItem Header="👥 Duplicados">
-            <views:DuplicatesView DataContext="{Binding Duplicates}" />
-        </TabItem>
-        <TabItem Header="🎧 Calidad">
-            <views:QualityView DataContext="{Binding Quality}" />
-        </TabItem>
-        <TabItem Header="⚠ Incompletas">
-            <views:IncompleteView DataContext="{Binding Incomplete}" />
-        </TabItem>
-        <TabItem Header="❓ No encontradas">
-            <views:NotFoundView DataContext="{Binding NotFound}" />
-        </TabItem>
-        <TabItem Header="📊 Estadísticas">
-            <views:StatsView DataContext="{Binding Stats}" />
-        </TabItem>
-        <TabItem Header="🌍 Tendencias">
-            <views:TrendsView DataContext="{Binding Trends}" />
-        </TabItem>
-        <TabItem Header="🔊 Volumen">
-            <views:LoudnessView DataContext="{Binding Loudness}" />
-        </TabItem>
-        <TabItem Header="⚙ Ajustes">
-            <views:SettingsView DataContext="{Binding Settings}" />
-        </TabItem>
-        <TabItem Header="ℹ Ayuda">
-            <views:HelpView />
-        </TabItem>
-    </TabControl>
+    <DockPanel>
+
+        <!--
+            Aviso de bloqueo. Mientras hay un proceso en marcha, las demás pestañas se deshabilitan
+            (ver TabEnabled): tocar archivos que otro proceso está usando hace fallar la operación.
+            La pestaña que trabaja sigue activa para poder ver el avance y cancelar.
+        -->
+        <Border DockPanel.Dock="Bottom" IsVisible="{Binding Busy}"
+                Background="#FEF3C7" BorderBrush="#F59E0B" BorderThickness="0,1,0,0" Padding="10,6">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="⏳" VerticalAlignment="Center" />
+                <TextBlock VerticalAlignment="Center" Foreground="#78350F" TextWrapping="Wrap"
+                           Text="{Binding BusyWhat, StringFormat='Proceso en curso en «{0}». El resto de la aplicación permanece bloqueado hasta que termine, para no alterar archivos que se están usando.'}" />
+            </StackPanel>
+        </Border>
+
+        <TabControl SelectedIndex="{Binding SelectedTabIndex}">
+            <TabItem Header="📚 Biblioteca"
+                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=0}">
+                <views:LibraryView DataContext="{Binding Library}" />
+            </TabItem>
+            <TabItem Header="✨ Enriquecer"
+                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=1}">
+                <views:EnrichView DataContext="{Binding Enrich}" />
+            </TabItem>
+            <TabItem Header="✏ Editor"
+                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=2}">
+                <views:EditorView DataContext="{Binding Editor}" />
+            </TabItem>
+            <TabItem Header="👥 Duplicados"
+                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=3}">
+                <views:DuplicatesView DataContext="{Binding Duplicates}" />
+            </TabItem>
+            <TabItem Header="🎧 Calidad"
+                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=4}">
+                <views:QualityView DataContext="{Binding Quality}" />
+            </TabItem>
+            <TabItem Header="⚠ Incompletas"
+                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=5}">
+                <views:IncompleteView DataContext="{Binding Incomplete}" />
+            </TabItem>
+            <TabItem Header="❓ No encontradas"
+                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=6}">
+                <views:NotFoundView DataContext="{Binding NotFound}" />
+            </TabItem>
+            <TabItem Header="📊 Estadísticas"
+                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=7}">
+                <views:StatsView DataContext="{Binding Stats}" />
+            </TabItem>
+            <TabItem Header="🌍 Tendencias"
+                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=8}">
+                <views:TrendsView DataContext="{Binding Trends}" />
+            </TabItem>
+            <TabItem Header="🔊 Volumen"
+                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=9}">
+                <views:LoudnessView DataContext="{Binding Loudness}" />
+            </TabItem>
+            <TabItem Header="⚙ Ajustes"
+                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=10}">
+                <views:SettingsView DataContext="{Binding Settings}" />
+            </TabItem>
+            <!-- Ayuda no altera nada, pero también se bloquea: dejarla accesible daría a entender
+                 que se puede navegar durante un proceso. -->
+            <TabItem Header="ℹ Ayuda"
+                     IsEnabled="{Binding BusyTabIndex, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=11}">
+                <views:HelpView />
+            </TabItem>
+        </TabControl>
+    </DockPanel>
 </Window>

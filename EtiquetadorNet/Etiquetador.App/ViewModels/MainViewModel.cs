@@ -1,3 +1,6 @@
+using System;
+using System.Globalization;
+using Avalonia.Data.Converters;
 using System.ComponentModel;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -26,11 +29,28 @@ public partial class MainViewModel : ViewModelBase
     public SettingsViewModel Settings { get; }
 
     [ObservableProperty] private int _selectedTabIndex;
-    /// <summary>Alguna operación larga en curso: se bloquea el cambio de pestaña.</summary>
-    [ObservableProperty] private bool _busy;
 
-    private int _busyTabIndex;
+    /// <summary>
+    /// Pestaña que está ejecutando una operación larga, o -1 si no hay ninguna. Mientras vale
+    /// distinto de -1 el resto de la aplicación queda bloqueada: no se puede cambiar de pestaña
+    /// ni actuar sobre las demás, porque tocar archivos que otro proceso está usando falla.
+    /// </summary>
+    [ObservableProperty] private int _busyTabIndex = -1;
+
+    /// <summary>Hay una operación larga en curso.</summary>
+    public bool Busy => BusyTabIndex >= 0;
+
+    /// <summary>Qué se está haciendo, para explicar al usuario por qué no puede tocar nada.</summary>
+    [ObservableProperty] private string _busyWhat = "";
+
     private bool _reverting;
+
+    // Cada entrada dice si esa pestaña está ocupada y cómo se llama. El ÍNDICE de la lista debe
+    // coincidir con el orden de los TabItem de MainWindow.axaml.
+    // Va como lista y no como una cadena de "if" a propósito: la versión anterior se escribía a
+    // mano y se habían quedado fuera Editor, Tendencias y Ajustes, de modo que sus procesos no
+    // bloqueaban nada.
+    private (Func<bool> Ocupada, string Nombre)[] _pestanas = Array.Empty<(Func<bool>, string)>();
 
     public MainViewModel() : this(new AppEngine()) { }
 
@@ -49,8 +69,28 @@ public partial class MainViewModel : ViewModelBase
         Loudness = new LoudnessViewModel(engine);
         Settings = new SettingsViewModel(engine);
 
-        // Bloqueo de pestaña: seguir el estado "ocupado" de cada pestaña con operación larga.
-        foreach (ViewModelBase vm in new ViewModelBase[] { Library, Enrich, Duplicates, Quality, Incomplete, NotFound, Stats, Trends, Loudness })
+        // El orden debe coincidir con los TabItem de MainWindow.axaml. Ayuda (la última) no tiene
+        // proceso propio, así que no aparece.
+        _pestanas = new (Func<bool>, string)[]
+        {
+            (() => Library.IsBusy,    "Biblioteca"),
+            (() => Enrich.IsBusy,     "Enriquecer"),
+            (() => Editor.IsBusy,     "Editor"),
+            (() => Duplicates.IsBusy, "Duplicados"),
+            (() => Quality.IsBusy,    "Calidad"),
+            (() => Incomplete.IsBusy, "Incompletas"),
+            (() => NotFound.IsBusy,   "No encontradas"),
+            (() => Stats.IsBusy,      "Estadísticas"),
+            // La carga de países no cuenta: es una precarga de fondo, no un proceso del usuario.
+            (() => Trends.IsBusy && !Trends.LoadingCountries, "Tendencias"),
+            (() => Loudness.IsBusy,   "Volumen"),
+            // En Ajustes cuenta también la IA: instalar Ollama o descargar un modelo tarda mucho.
+            (() => Settings.IsBusy || Settings.AiBusy, "Ajustes"),
+        };
+
+        // Bloqueo global: seguir el estado "ocupado" de todas las pestañas con operación larga.
+        foreach (ViewModelBase vm in new ViewModelBase[]
+                 { Library, Enrich, Editor, Duplicates, Quality, Incomplete, NotFound, Stats, Trends, Loudness, Settings })
             vm.PropertyChanged += OnChildChanged;
 
         // "Editar esta canción" desde otras pestañas: la selecciona en el Editor y salta a esa pestaña.
@@ -76,26 +116,28 @@ public partial class MainViewModel : ViewModelBase
 
     private void OnChildChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == "IsBusy") RecomputeBusy();
+        if (e.PropertyName is "IsBusy" or "AiBusy" or "LoadingCountries") RecomputeBusy();
     }
 
     private void RecomputeBusy()
     {
-        if (Library.IsBusy) { Busy = true; _busyTabIndex = 0; }
-        else if (Enrich.IsBusy) { Busy = true; _busyTabIndex = 1; }
-        else if (Duplicates.IsBusy) { Busy = true; _busyTabIndex = 3; }
-        else if (Quality.IsBusy) { Busy = true; _busyTabIndex = 4; }
-        else if (Incomplete.IsBusy) { Busy = true; _busyTabIndex = 5; }
-        else if (NotFound.IsBusy) { Busy = true; _busyTabIndex = 6; }
-        else if (Stats.IsBusy) { Busy = true; _busyTabIndex = 7; }
-        else if (Loudness.IsBusy) { Busy = true; _busyTabIndex = 9; }
-        else Busy = false;
+        for (int i = 0; i < _pestanas.Length; i++)
+        {
+            if (!_pestanas[i].Ocupada()) continue;
+            BusyWhat = _pestanas[i].Nombre;
+            BusyTabIndex = i;
+            return;
+        }
+        BusyWhat = "";
+        BusyTabIndex = -1;
     }
+
+    partial void OnBusyTabIndexChanged(int value) => OnPropertyChanged(nameof(Busy));
 
     // Mientras hay una operación larga, no se puede cambiar de pestaña (se vuelve a la ocupada).
     partial void OnSelectedTabIndexChanged(int value)
     {
-        if (_reverting || !Busy || value == _busyTabIndex)
+        if (_reverting || !Busy || value == BusyTabIndex)
         {
             // Al entrar en Tendencias se cargan los países (una sola vez). Se hace aquí y no en la
             // vista porque el enganche al árbol visual no llegaba a dispararse con las pestañas.
@@ -103,7 +145,27 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
         _reverting = true;
-        SelectedTabIndex = _busyTabIndex;
+        SelectedTabIndex = BusyTabIndex;
         _reverting = false;
+    }
+
+    /// <summary>
+    /// Habilita una pestaña solo si no hay ninguna operación en curso, o si es justo la que la
+    /// está ejecutando (para poder seguir el avance y cancelarla). El parámetro es su índice.
+    /// </summary>
+    public static readonly IValueConverter TabEnabled = new PestanaHabilitada();
+
+    private sealed class PestanaHabilitada : IValueConverter
+    {
+        public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        {
+            var ocupada = value as int? ?? -1;
+            if (ocupada < 0) return true;                       // nada en marcha: todo disponible
+            return int.TryParse(parameter as string, NumberStyles.Integer, CultureInfo.InvariantCulture, out var propia)
+                   && propia == ocupada;
+        }
+
+        public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+            => throw new NotSupportedException();
     }
 }
