@@ -19,6 +19,13 @@
     </UserControl.Styles>
 
     <DockPanel Margin="8">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,8">
+            <TextBlock Classes="titulo" Text="Enriquecer" />
+            <TextBlock Classes="desc"
+                       Text="Busca cada canción en los catálogos musicales y propone el nombre de archivo y las etiquetas correctas. Nada se modifica hasta que apliques los cambios, y siempre se pueden deshacer." />
+        </StackPanel>
+
         <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
             <Button Content="Añadir carpeta…" Click="AddFolder_Click" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#0D9488" />
             <Button Content="Vaciar carpetas" Command="{Binding ClearFoldersCommand}" Classes="act" Background="#6B7280" Margin="0,0,12,4"

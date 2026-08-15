@@ -8,6 +8,13 @@
              x:DataType="vm:DuplicatesViewModel">
 
     <DockPanel Margin="8">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,8">
+            <TextBlock Classes="titulo" Text="Duplicados" />
+            <TextBlock Classes="desc"
+                       Text="Localiza canciones repetidas aunque el nombre del archivo no coincida. Se agrupan por artista y título, de modo que también detecta las que están guardadas con nombres distintos." />
+        </StackPanel>
+
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
             <Button Content="Analizar" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding !IsBusy}"
                     Background="#2563EB" Foreground="White" FontWeight="SemiBold" />

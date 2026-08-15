@@ -10,7 +10,9 @@
     <DockPanel Margin="8">
 
         <StackPanel DockPanel.Dock="Top" Spacing="6">
-            <TextBlock Text="Listas de éxitos por país" FontWeight="Bold" FontSize="15" />
+            <TextBlock Classes="titulo" Text="Listas de éxitos por país" />
+            <TextBlock Classes="desc"
+                       Text="Qué se está escuchando ahora mismo en cada país. Se marca lo que ya tienes en la biblioteca, de modo que se ve de un vistazo lo que te falta." />
 
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBlock Text="País" VerticalAlignment="Center" />

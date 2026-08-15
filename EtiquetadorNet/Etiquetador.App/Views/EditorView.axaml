@@ -7,9 +7,16 @@
              x:Class="Etiquetador.App.Views.EditorView"
              x:DataType="vm:EditorViewModel">
 
-    <Grid ColumnDefinitions="2*,4,3*" Margin="8">
+    <Grid ColumnDefinitions="2*,4,3*" RowDefinitions="Auto,*" Margin="8">
+
+        <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Spacing="2" Margin="0,0,0,8">
+            <TextBlock Classes="titulo" Text="Editor" />
+            <TextBlock Classes="desc"
+                       Text="Revisión y corrección manual de una canción concreta: etiquetas, nombre de archivo y carátula. Para los casos que conviene ajustar a mano." />
+        </StackPanel>
+
         <!-- Lista de canciones de la biblioteca -->
-        <DockPanel Grid.Column="0">
+        <DockPanel Grid.Row="1" Grid.Column="0">
             <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,6">
                 <Button Content="⯆ Desplegar" Click="ExpandAll_Click" />
                 <Button Content="⯈ Cerrar" Click="CollapseAll_Click" />
@@ -28,10 +35,10 @@
             </DataGrid>
         </DockPanel>
 
-        <GridSplitter Grid.Column="1" Width="4" Background="#33888888" ResizeDirection="Columns" />
+        <GridSplitter Grid.Row="1" Grid.Column="1" Width="4" Background="#33888888" ResizeDirection="Columns" />
 
         <!-- Formulario de edición -->
-        <ScrollViewer Grid.Column="2" Margin="8,0,0,0">
+        <ScrollViewer Grid.Row="1" Grid.Column="2" Margin="8,0,0,0">
             <StackPanel Spacing="6" IsEnabled="{Binding CanEdit}">
                 <TextBlock Text="Editar canción" FontWeight="Bold" FontSize="15" />
 
@@ -76,7 +83,7 @@
             </StackPanel>
         </ScrollViewer>
 
-        <TextBlock Grid.Column="2" VerticalAlignment="Bottom" Text="{Binding Status}"
+        <TextBlock Grid.Row="1" Grid.Column="2" VerticalAlignment="Bottom" Text="{Binding Status}"
                    Foreground="Gray" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
     </Grid>
 </UserControl>

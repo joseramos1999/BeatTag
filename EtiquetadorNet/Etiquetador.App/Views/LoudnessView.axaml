@@ -9,8 +9,8 @@
     <DockPanel Margin="8">
 
         <StackPanel DockPanel.Dock="Top" Spacing="6">
-            <TextBlock Text="Uniformidad de volumen" FontWeight="Bold" FontSize="15" />
-            <TextBlock Foreground="Gray" TextWrapping="Wrap"
+            <TextBlock Classes="titulo" Text="Uniformidad de volumen" />
+            <TextBlock Classes="desc"
                        Text="Las grabaciones no comparten el mismo nivel: durante una sesión, unas se perciben más bajas y otras destacan en exceso. Esta pestaña identifica las que se apartan del resto y permite corregirlas." />
 
             <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">

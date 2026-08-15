@@ -33,6 +33,10 @@
         <ScrollViewer Grid.Column="0" Margin="0,0,12,0" VerticalScrollBarVisibility="Auto">
             <StackPanel Spacing="6">
 
+                <TextBlock Classes="titulo" Text="Ajustes" />
+                <TextBlock Classes="desc" Margin="0,0,0,6"
+                           Text="Configuración de la aplicación: la IA local, las claves de las fuentes musicales, las listas de nombres de artista y el mantenimiento de los datos guardados." />
+
                 <!-- ================= IA LOCAL ================= -->
                 <TextBlock Classes="sec" Text="IA local" Margin="0,0,0,0" />
                 <TextBlock Classes="ayuda"

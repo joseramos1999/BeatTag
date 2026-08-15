@@ -8,6 +8,13 @@
              x:DataType="vm:IncompleteViewModel">
 
     <DockPanel Margin="8">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,8">
+            <TextBlock Classes="titulo" Text="Fichas incompletas" />
+            <TextBlock Classes="desc"
+                       Text="Canciones a las que les falta alguna etiqueta: artista, título, álbum, año, género o carátula. Son las que aparecen sin datos en los reproductores." />
+        </StackPanel>
+
         <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
             <Button Content="Analizar" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding !IsBusy}"
                     Background="#2563EB" Foreground="White" FontWeight="SemiBold" Margin="0,0,12,4" />

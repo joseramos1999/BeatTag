@@ -8,6 +8,13 @@
              x:DataType="vm:QualityViewModel">
 
     <DockPanel Margin="8">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,8">
+            <TextBlock Classes="titulo" Text="Calidad de audio" />
+            <TextBlock Classes="desc"
+                       Text="Ordena las grabaciones por calidad para localizar las que están en baja resolución y convendría reemplazar. En un equipo de sonido grande la diferencia se nota." />
+        </StackPanel>
+
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,6">
             <Button Content="Analizar" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding !IsBusy}"
                     Background="#2563EB" Foreground="White" FontWeight="SemiBold" />

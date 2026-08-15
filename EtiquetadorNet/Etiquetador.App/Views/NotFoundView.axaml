@@ -8,6 +8,13 @@
              x:DataType="vm:NotFoundViewModel">
 
     <DockPanel Margin="8">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,8">
+            <TextBlock Classes="titulo" Text="No encontradas" />
+            <TextBlock Classes="desc"
+                       Text="Canciones que ningún catálogo ha sabido identificar, normalmente por llevar el nombre muy alterado. Desde aquí puedes indicar a mano qué debe buscarse y elegir entre las coincidencias." />
+        </StackPanel>
+
         <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
             <Button Content="Analizar" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding !IsBusy}"
                     Background="#2563EB" Foreground="White" FontWeight="SemiBold" Margin="0,0,6,4"

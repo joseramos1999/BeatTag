@@ -12,5 +12,21 @@
     <Application.Styles>
         <FluentTheme />
         <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
+
+        <!--
+            Cabecera de pestaña. Se define aquí, y no en cada vista, para que todas se vean
+            igual: cambiar el aspecto en un sitio lo cambia en las doce.
+            Uso:  <TextBlock Classes="titulo" Text="…" />
+                  <TextBlock Classes="desc"   Text="…" />
+        -->
+        <Style Selector="TextBlock.titulo">
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="FontSize" Value="15" />
+        </Style>
+        <Style Selector="TextBlock.desc">
+            <Setter Property="Foreground" Value="Gray" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,0,0,2" />
+        </Style>
     </Application.Styles>
 </Application>

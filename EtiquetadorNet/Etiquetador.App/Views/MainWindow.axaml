@@ -11,28 +11,28 @@
         Title="BeatTag — Etiquetador DJ" Width="1000" Height="640">
 
     <TabControl SelectedIndex="{Binding SelectedTabIndex}">
-        <TabItem Header="Biblioteca">
+        <TabItem Header="📚 Biblioteca">
             <views:LibraryView DataContext="{Binding Library}" />
         </TabItem>
-        <TabItem Header="Enriquecer">
+        <TabItem Header="✨ Enriquecer">
             <views:EnrichView DataContext="{Binding Enrich}" />
         </TabItem>
-        <TabItem Header="Editor">
+        <TabItem Header="✏ Editor">
             <views:EditorView DataContext="{Binding Editor}" />
         </TabItem>
-        <TabItem Header="Duplicados">
+        <TabItem Header="👥 Duplicados">
             <views:DuplicatesView DataContext="{Binding Duplicates}" />
         </TabItem>
-        <TabItem Header="Calidad">
+        <TabItem Header="🎧 Calidad">
             <views:QualityView DataContext="{Binding Quality}" />
         </TabItem>
-        <TabItem Header="Incompletas">
+        <TabItem Header="⚠ Incompletas">
             <views:IncompleteView DataContext="{Binding Incomplete}" />
         </TabItem>
-        <TabItem Header="No encontradas">
+        <TabItem Header="❓ No encontradas">
             <views:NotFoundView DataContext="{Binding NotFound}" />
         </TabItem>
-        <TabItem Header="Estadísticas">
+        <TabItem Header="📊 Estadísticas">
             <views:StatsView DataContext="{Binding Stats}" />
         </TabItem>
         <TabItem Header="🌍 Tendencias">
@@ -41,7 +41,7 @@
         <TabItem Header="🔊 Volumen">
             <views:LoudnessView DataContext="{Binding Loudness}" />
         </TabItem>
-        <TabItem Header="Ajustes">
+        <TabItem Header="⚙ Ajustes">
             <views:SettingsView DataContext="{Binding Settings}" />
         </TabItem>
         <TabItem Header="ℹ Ayuda">
