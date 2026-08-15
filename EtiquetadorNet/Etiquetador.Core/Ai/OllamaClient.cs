@@ -78,6 +78,32 @@ public sealed class OllamaClient
         => await ListModelsAsync(ct).ConfigureAwait(false) != null;
 
     /// <summary>
+    /// Espera a que Ollama responda, hasta el tope indicado. Recién arrancado tarda unos segundos
+    /// en aceptar peticiones, así que preguntarle una sola vez daría un "no está" equivocado.
+    /// </summary>
+    public async Task<bool> WaitUntilRunningAsync(TimeSpan tope, CancellationToken ct = default)
+    {
+        var hasta = DateTime.UtcNow + tope;
+        while (true)
+        {
+            if (await IsRunningAsync(ct).ConfigureAwait(false)) return true;
+            if (DateTime.UtcNow >= hasta) return false;
+            await Task.Delay(700, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Vuelve a habilitar la IA tras haberse desactivado sola. Necesario cuando Ollama no estaba
+    /// en marcha al empezar y se arranca después: si no, seguiría descartada el resto de la tirada.
+    /// </summary>
+    public void Reset()
+    {
+        AiBlocked = false;
+        _probed = false;
+        _autoModel = null;
+    }
+
+    /// <summary>
     /// Descarga un modelo. Son varios GB, así que informa del avance: Ollama responde con una línea
     /// JSON por cada actualización de estado. Devuelve el error, o "" si fue bien.
     /// </summary>

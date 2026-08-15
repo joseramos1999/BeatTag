@@ -132,16 +132,50 @@ public partial class SettingsViewModel : ViewModelBase
         _engine.Ai.Host = c.AiHost.Length > 0 ? c.AiHost : Core.Ai.OllamaClient.DefaultHost;
     }
 
-    /// <summary>Busca Ollama en este equipo y lista los modelos instalados.</summary>
+    /// <summary>
+    /// Se asegura de que Ollama esté respondiendo: si está instalado pero parado, lo arranca y
+    /// espera. Sin esto, la comprobación diría "no está instalado" cuando en realidad solo estaba
+    /// apagado, que es justo lo que más despista.
+    /// </summary>
+    private async Task<bool> AsegurarOllamaAsync()
+    {
+        if (await _engine.Ai.IsRunningAsync()) return true;
+        if (!OllamaInstaller.EstaInstalado()) return false;
+
+        AiStatus = "Ollama está instalado pero no en marcha. Arrancándolo…";
+        if (!OllamaInstaller.Lanzar(m => _engine.Logger.Detail("  " + m))) return false;
+
+        // Recién arrancado tarda unos segundos en aceptar peticiones.
+        var listo = await _engine.Ai.WaitUntilRunningAsync(TimeSpan.FromSeconds(20));
+        if (listo) _engine.Ai.Reset();   // pudo haberse desactivado sola por no encontrarlo antes
+        return listo;
+    }
+
+    /// <summary>Busca Ollama en este equipo, arrancándolo si hace falta, y lista sus modelos.</summary>
     [RelayCommand]
     private async Task DetectAiAsync()
     {
         PushToConfig();
+        AiBusy = true;
+        try { await DetectarAsync(); }
+        finally { AiBusy = false; }
+    }
+
+    private async Task DetectarAsync()
+    {
         AiStatus = "Buscando…";
+        if (!await AsegurarOllamaAsync())
+        {
+            AiStatus = OllamaInstaller.EstaInstalado()
+                ? "Ollama está instalado pero no responde. Ábrelo una vez a mano y vuelve a pulsar «Detectar»."
+                : "No se ha encontrado Ollama en este equipo. Puedes instalarlo con el botón «Instalar Ollama».";
+            return;
+        }
+
         var modelos = await _engine.Ai.ListModelsAsync();
         if (modelos == null)
         {
-            AiStatus = "No se ha encontrado Ollama en este equipo. Puedes instalarlo con el botón «Instalar Ollama».";
+            AiStatus = "Ollama dejó de responder mientras se consultaban sus modelos.";
             return;
         }
         if (modelos.Count == 0)
@@ -186,7 +220,7 @@ public partial class SettingsViewModel : ViewModelBase
             for (int i = 0; i < 10 && !await _engine.Ai.IsRunningAsync(); i++)
                 await Task.Delay(1500);
 
-            if (await _engine.Ai.IsRunningAsync()) await DetectAiAsync();
+            if (await _engine.Ai.IsRunningAsync()) await DetectarAsync();
             else AiStatus = "Ollama se instaló, pero el servicio aún no responde. Ábrelo una vez y pulsa «Detectar».";
         }
         finally { AiBusy = false; }
@@ -223,7 +257,7 @@ public partial class SettingsViewModel : ViewModelBase
             if (err.Length > 0) { AiStatus = "No se pudo descargar: " + err; return; }
 
             AiStatus = $"Modelo «{modelo}» listo.";
-            await DetectAiAsync();
+            await DetectarAsync();
             AiModel = modelo;
         }
         finally { AiBusy = false; AiShowProgress = false; }
@@ -262,6 +296,8 @@ public partial class SettingsViewModel : ViewModelBase
         IsBusy = true;
         Status = "Probando servicios…";
         TestReport = "";
+        // Arrancar Ollama antes de la prueba: si no, informaría de que no está por estar apagado.
+        await AsegurarOllamaAsync();
         try { TestReport = await _engine.Tester.RunAsync(_engine.Config); Status = "Prueba terminada."; }
         catch (System.Exception e) { TestReport = "Error: " + e.Message; Status = "Falló la prueba."; }
         finally { IsBusy = false; }

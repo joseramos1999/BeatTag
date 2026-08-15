@@ -144,6 +144,36 @@ public partial class MainViewModel : ViewModelBase
         Enrich.LoadCached();      // rellena la previsualización con lo que ya haya analizado
         NotFound.LoadFromCache(); // y las que no se identificaron, a su pestaña
         _ = Trends.EnsureCountriesAsync();   // la lista de paises, lista para cuando abras Tendencias
+        _ = ArrancarIaLocalAsync();          // que Ollama este listo cuando haga falta
+    }
+
+    /// <summary>
+    /// Deja Ollama en marcha desde el principio si está instalado y la IA local está activada.
+    /// Arrancarlo tarda unos segundos y cargar el modelo la primera vez bastante más, así que
+    /// hacerlo ahora evita esa espera justo cuando el análisis lo necesita.
+    ///
+    /// Solo si la IA está activada: levantar un servicio que consume memoria a quien la tiene
+    /// desactivada sería tomarse una libertad que no toca.
+    /// </summary>
+    private async Task ArrancarIaLocalAsync()
+    {
+        try
+        {
+            if (!Engine.Config.UseAi) return;
+            if (await Engine.Ai.IsRunningAsync()) return;
+            if (!OllamaInstaller.EstaInstalado()) return;
+
+            Engine.Logger.Detail("IA local: Ollama está instalado pero parado; arrancándolo…");
+            if (!OllamaInstaller.Lanzar(m => Engine.Logger.Detail("  " + m))) return;
+
+            if (await Engine.Ai.WaitUntilRunningAsync(TimeSpan.FromSeconds(30)))
+            {
+                Engine.Ai.Reset();
+                Engine.Logger.Detail("IA local: Ollama preparado.");
+            }
+            else Engine.Logger.Detail("IA local: Ollama no respondió a tiempo; se intentará al usarla.");
+        }
+        catch { /* que la IA no arranque nunca debe impedir abrir la aplicación */ }
     }
 
     private void OnChildChanged(object? sender, PropertyChangedEventArgs e)

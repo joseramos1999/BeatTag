@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,6 +24,63 @@ public static class OllamaInstaller
 {
     public const string PaqueteWinget = "Ollama.Ollama";
     public const string PaginaDescarga = "https://ollama.com/download";
+
+    /// <summary>
+    /// Ruta del ejecutable de Ollama, o null si no está instalado. Se prefiere «ollama app.exe»,
+    /// que es el que levanta el servicio y deja el icono en la bandeja, igual que si lo abriera
+    /// el usuario a mano. «ollama.exe» sirve de recambio (arranca el servicio con «serve»).
+    /// </summary>
+    public static string? RutaEjecutable()
+    {
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var programas = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        string[] candidatos =
+        {
+            Path.Combine(local, "Programs", "Ollama", "ollama app.exe"),
+            Path.Combine(programas, "Ollama", "ollama app.exe"),
+            Path.Combine(local, "Programs", "Ollama", "ollama.exe"),
+            Path.Combine(programas, "Ollama", "ollama.exe"),
+        };
+        foreach (var c in candidatos)
+            try { if (File.Exists(c)) return c; } catch { }
+
+        // Último recurso: que esté en el PATH.
+        try
+        {
+            foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
+            {
+                if (dir.Length == 0) continue;
+                var c = Path.Combine(dir.Trim(), "ollama.exe");
+                if (File.Exists(c)) return c;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>true si Ollama está instalado en este equipo (aunque no esté en marcha).</summary>
+    public static bool EstaInstalado() => RutaEjecutable() != null;
+
+    /// <summary>
+    /// Lanza el servicio de Ollama. Devuelve false si no está instalado o no se pudo arrancar.
+    /// No espera a que responda: de eso se encarga quien llama.
+    /// </summary>
+    public static bool Lanzar(Action<string>? traza = null)
+    {
+        var exe = RutaEjecutable();
+        if (exe == null) { traza?.Invoke("Ollama no está instalado en este equipo."); return false; }
+        try
+        {
+            var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true };
+            // «ollama.exe» a secas es la herramienta de línea de órdenes: hay que pedirle el servicio.
+            if (Path.GetFileName(exe).Equals("ollama.exe", StringComparison.OrdinalIgnoreCase))
+                psi.ArgumentList.Add("serve");
+            Process.Start(psi);
+            traza?.Invoke($"Ollama lanzado desde {exe}");
+            return true;
+        }
+        catch (Exception e) { traza?.Invoke($"No se pudo arrancar Ollama: {e.Message}"); return false; }
+    }
 
     /// <summary>true si este Windows trae winget.</summary>
     public static bool HayWinget()
