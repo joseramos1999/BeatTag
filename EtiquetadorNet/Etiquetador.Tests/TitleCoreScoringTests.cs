@@ -102,4 +102,61 @@ public class TitleCoreScoringTests
         DeezerProvider.SelectBest(data, "Quevedo", "Gasolina", false, false, 200, false, out var sc);
         Assert.True(sc < 2.0, $"un remix no pedido no deberia superar el umbral, y saco {sc}");
     }
+
+    // ---- Casos sacados de una tirada real de 12.629 canciones ----
+
+    // El catalogo anade "(feat. X)", que no forma parte de la identidad del tema. Sin ese sufijo
+    // los titulos son identicos. Eran 36 de 139 coincidencias dudosas sin credito.
+    [Fact]
+    public void El_sufijo_feat_del_catalogo_no_debe_penalizar()
+    {
+        var data = Deezer(("Jordin Sparks", "No Air (feat. Chris Brown)", 260));
+        DeezerProvider.SelectBest(data, "Jordin Sparks", "No Air", false, false, 260, false, out var sc);
+        Assert.True(sc > 2.0, $"es la misma cancion, deberia superar el umbral, y saco {sc}");
+    }
+
+    [Fact]
+    public void Un_subtitulo_del_catalogo_tampoco()
+    {
+        var data = Deezer(("Eiffel 65", "Blue (Da Ba Dee)", 225));
+        DeezerProvider.SelectBest(data, "Eiffel 65", "Blue", false, false, 225, false, out var sc);
+        Assert.True(sc > 2.0, $"deberia superar el umbral, y saco {sc}");
+    }
+
+    // Los record pool cortan el nombre: el titulo del archivo es el PRINCIPIO del real.
+    // Eran otros 58 de aquellas 139.
+    [Fact]
+    public void Un_titulo_truncado_por_el_pool_se_reconoce()
+    {
+        var data = Deezer(("MC Fioti", "Bum Bum Tam Tam", 175));
+        DeezerProvider.SelectBest(data, "MC Fioti", "Bu", false, false, 175, false, out var sc);
+        Assert.True(sc > 2.0, $"'Bu' es el principio de 'Bum Bum Tam Tam', y saco {sc}");
+    }
+
+    [Fact]
+    public void Otro_truncado_real()
+    {
+        var data = Deezer(("Tokischa", "Bandidaje", 190));
+        DeezerProvider.SelectBest(data, "Tokischa", "Bandi", false, false, 190, false, out var sc);
+        Assert.True(sc > 2.0, $"deberia superar el umbral, y saco {sc}");
+    }
+
+    // Guarda: quitar el sufijo NO puede rescatar una version que no se pedia. Sin parentesis
+    // "Complicated (Fareoh Remix)" es "Complicated", pero sigue siendo otra version.
+    [Fact]
+    public void Quitar_el_sufijo_no_rescata_un_remix_ajeno()
+    {
+        var data = Deezer(("Dimitri Vegas & Like Mike", "Complicated (Fareoh Remix)", 177));
+        DeezerProvider.SelectBest(data, "Dimitri Vegas & Like Mike", "Complicated", false, false, 186, false, out var sc);
+        Assert.True(sc < 2.0, $"es otra version, no deberia superar el umbral, y saco {sc}");
+    }
+
+    // Guarda: un prefijo de una sola letra es demasiado poco para afirmar nada.
+    [Fact]
+    public void Un_prefijo_de_una_letra_no_basta()
+    {
+        var data = Deezer(("Alguien", "Bailando toda la noche entera", 200));
+        DeezerProvider.SelectBest(data, "Alguien", "B", false, false, 0, false, out var sc);
+        Assert.True(sc < 2.0, $"una sola letra no identifica nada, y saco {sc}");
+    }
 }

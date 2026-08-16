@@ -167,12 +167,33 @@ public sealed class DeezerProvider
             // pista que se acaba de rechazar (un remix ajeno con la duración parecida).
             if (!tituloPuntuo && !esVersionNoPedida && nt.Length > 0 && tn.Length > 0)
             {
-                var comun = tn.Contains(nt) || nt.Contains(tn);
-                var frac = (double)Math.Min(tn.Length, nt.Length) / Math.Max(tn.Length, nt.Length);
-                if (comun && frac >= 0.34)
+                // El catálogo añade a menudo un sufijo entre paréntesis que no forma parte de la
+                // identidad del tema: "(feat. X)", "(Radio Edit)", el subtítulo. Comparando sin él,
+                // muchos de estos títulos resultan ser exactamente el mismo. Medido sobre una tirada
+                // real: 36 de 139 coincidencias dudosas sin crédito eran justo este caso.
+                var nucleoCat = TextUtils.Nk(Regex.Replace(rt, @"\s*[\(\[].*$", ""));
+                if (nucleoCat.Length > 0 && nucleoCat == nt)
                 {
-                    var p = Math.Round(1.5 + 4.0 * frac, 1);
-                    sc += p; why.Add($"nucleo del titulo +{p:0.##}");
+                    sc += 8; why.Add("titulo exacto sin el sufijo +8");
+                }
+                else
+                {
+                    var comun = tn.Contains(nt) || nt.Contains(tn);
+                    var frac = (double)Math.Min(tn.Length, nt.Length) / Math.Max(tn.Length, nt.Length);
+
+                    // Los record pool cortan el nombre del archivo por la mitad, así que su título
+                    // es el PRINCIPIO del real ("Bu" de "Bum Bum Tam Tam"). Un prefijo es mucho
+                    // menos casual que una coincidencia en cualquier punto, y para llegar aquí el
+                    // artista YA ha casado, así que se admite con bastante menos parecido. Otros 58
+                    // de aquellas 139 eran de este tipo.
+                    var esPrefijo = tn.StartsWith(nt) || nt.StartsWith(tn);
+                    var minimo = esPrefijo ? 0.15 : 0.34;
+
+                    if (comun && frac >= minimo && Math.Min(tn.Length, nt.Length) >= 2)
+                    {
+                        var p = Math.Round(1.5 + 4.0 * frac, 1);
+                        sc += p; why.Add($"{(esPrefijo ? "principio" : "nucleo")} del titulo +{p:0.##}");
+                    }
                 }
             }
             // Si lo que sobra es justo la versión pedida, no se castiga por ser más largo.
