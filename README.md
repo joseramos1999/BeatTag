@@ -20,8 +20,10 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   coherencia con los tags que ya trae el archivo). Las propuestas dudosas se auto-desmarcan para
   que las revises.
 - **Editor**: edición manual de título y tags, con reproducción de un fragmento para comprobar.
-- **Duplicados**: agrupa copias (por artista+título, solo título, o +duración) y permite enviarlas a
-  la papelera.
+- **Duplicados**: agrupa copias (por artista+título, solo título, o +duración) y **marca en verde la
+  que conviene conservar**, según el criterio que elijas: carpeta prioritaria, mejor calidad o mayor
+  duración. Puedes marcar las sobrantes de todos los grupos a la vez y enviarlas a la papelera de
+  una sola pasada, conservando siempre un ejemplar de cada canción.
 - **Calidad**: clasifica el audio por bitrate/formato y filtra el de baja calidad.
 - **Incompletas / No encontradas**: temas a los que les falta algún tag o que ninguna fuente
   identifica.
@@ -33,6 +35,15 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
 - **Importar rekordbox**: trae BPM y clave musical desde un XML de rekordbox.
 - **Caché persistente** en tres niveles (respuestas de red, escaneo y análisis): no se reprocesa lo
   ya hecho salvo que lo pidas.
+
+### Mezclas y mashups
+
+No se identifican: no existen como lanzamiento, así que buscarlos en el catálogo solo puede dar una
+identificación equivocada. Se detectan por el nombre del archivo y **por la carpeta**: si el nombre
+de una carpeta contiene «mashup», se salta todo lo que hay dentro, incluidas sus subcarpetas.
+
+Si pides reanalizar una canción concreta, se busca igualmente — cuando lo pides expresamente, mandas
+tú.
 
 ## 📥 Descargar
 

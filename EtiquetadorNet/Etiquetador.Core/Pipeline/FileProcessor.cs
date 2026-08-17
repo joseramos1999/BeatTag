@@ -133,6 +133,16 @@ public sealed class FileProcessor
             _log?.Detail($"    tags   -> artista='{tagArtist}' titulo='{tagTitle}'");
         _log?.Detail($"    audio  -> {localDur}s · edit={isEdit}");
 
+        // Carpeta de mashups: se salta TODO lo que hay dentro, se llame como se llame el archivo.
+        // Va antes que la comprobación por nombre porque no depende de cómo esté escrito el archivo.
+        // Igual que abajo, una búsqueda manual manda: si el usuario pide identificar ESTE tema, se
+        // busca aunque esté ahí guardado.
+        if (!manual && Matching.IsMashupFolder(Path.GetDirectoryName(filePath)))
+        {
+            _log?.Detail("    -> SALTADA (está en una carpeta de mashups)");
+            return new ProcessResult { FilePath = filePath, Old = fileName, New = fileName, Source = "Mezcla", Skip = true, Kw = kwUsed, DurLocal = localDur };
+        }
+
         // En búsqueda manual no se descarta como mezcla: el usuario pide expresamente identificar ESTE tema.
         if (!manual && Matching.IsSkipMix(@base, fnTitle, fnArtist))
         {

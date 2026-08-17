@@ -83,6 +83,17 @@ public static class Matching
     /// de DJ (edición propia que no existe en catálogo). Se EXCLUYEN las ediciones de catálogo
     /// (radio/extended/short/quick/club/melodic/original edit), que sí se etiquetan.
     /// </summary>
+    /// <summary>
+    /// La canción vive dentro de una carpeta de mashups. Todo lo que hay ahí es material mezclado,
+    /// así que no tiene sentido buscarlo en el catálogo: no existe como lanzamiento.
+    ///
+    /// Se mira la ruta ENTERA de la carpeta, no solo la última: quien guarda mashups suele
+    /// organizarlos en subcarpetas por año o por estilo dentro de una carpeta "Mashups".
+    /// </summary>
+    public static bool IsMashupFolder(string? folderPath)
+        => !string.IsNullOrEmpty(folderPath)
+           && Regex.IsMatch(folderPath, @"\b(mashups?|mash\s*ups?|mash-ups?)\b", RegexOptions.IgnoreCase);
+
     public static bool IsSkipMix(string? baseName, string? fnTitle, string? fnArtist)
     {
         baseName ??= ""; fnTitle ??= ""; fnArtist ??= "";
