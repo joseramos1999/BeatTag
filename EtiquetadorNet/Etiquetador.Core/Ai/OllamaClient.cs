@@ -269,13 +269,26 @@ public sealed class OllamaClient
         "archivo de DJ. Recibes un nombre sucio, con erratas, etiquetas de record pool, nombres de editor, BPM y " +
         "tonalidad, y deduces la CANCION ORIGINAL real.\n" +
         "Responde SOLO con un objeto JSON con estas claves exactas: \"artist\" (string), \"title\" (string), " +
-        "\"version\" (string: descriptor tipo Extended/Intro/Remix/Acapella, o \"\"), \"is_mashup\" (boolean: true " +
-        "si combina 2 o mas canciones distintas), \"confidence\" (numero 0.0 a 1.0).\n" +
-        "Reglas: descarta BPM, tonalidad y nombres de pool o editor. No inventes: si no reconoces una cancion real, " +
-        "devuelve artist y title vacios y confidence 0.\n" +
+        "\"version\" (string), \"is_mashup\" (boolean), \"confidence\" (numero 0.0 a 1.0).\n" +
+        "\n" +
+        "REGLAS IMPORTANTES:\n" +
+        "1. \"title\" es SOLO el titulo original, LIMPIO. Todo lo que sea descriptor de edicion (Intro, Extended, " +
+        "Hype Intro, Break, Acapella, Remix, Dirty, Clean, Starter) va en \"version\", NUNCA dentro de \"title\". " +
+        "El titulo tiene que poder buscarse tal cual en un catalogo de musica.\n" +
+        "2. \"artist\" es el INTERPRETE de la cancion, no quien hizo la edicion. Los nombres de DJ o editor que " +
+        "acompanan a un descriptor (por ejemplo 'X Hype Intro', 'Y Extended', 'Intro Z') NO son el artista: " +
+        "descartalos. Si el interprete real aparece en otra parte del nombre, usa ese.\n" +
+        "3. Descarta BPM, tonalidad y etiquetas de record pool.\n" +
+        "4. No inventes: si no reconoces una cancion real, devuelve artist y title vacios y confidence 0.\n" +
+        "5. \"is_mashup\" es true solo si combina 2 o mas canciones DISTINTAS.\n" +
+        "\n" +
         "Ejemplos:\n" +
         "Nombre: Bichota Karol G Dj Masa Intro Ronca Break 95 Bpm - - bpm - DJTOOLSVIP.mp3\n" +
-        "{\"artist\":\"Karol G\",\"title\":\"Bichota\",\"version\":\"Intro\",\"is_mashup\":false,\"confidence\":0.9}\n" +
+        "{\"artist\":\"Karol G\",\"title\":\"Bichota\",\"version\":\"Intro Break\",\"is_mashup\":false,\"confidence\":0.9}\n" +
+        "Nombre: Bad Bunny x Jhay Cortez x Pablo Chill-E - Resentia (IVAN RF Hype Intro).mp3\n" +
+        "{\"artist\":\"Bad Bunny, Jhay Cortez, Pablo Chill-E\",\"title\":\"Resentia\",\"version\":\"Hype Intro\",\"is_mashup\":false,\"confidence\":0.9}\n" +
+        "Nombre: TORA - Alex Selas Hype Intro (Dirty) - Rvfv.mp3\n" +
+        "{\"artist\":\"Rvfv\",\"title\":\"Tora\",\"version\":\"Hype Intro Dirty\",\"is_mashup\":false,\"confidence\":0.8}\n" +
         "Nombre: CALLE BOTICA Con la primavera (Version 2017).mp3\n" +
         "{\"artist\":\"Calle Botica\",\"title\":\"Con la primavera\",\"version\":\"\",\"is_mashup\":false,\"confidence\":0.8}\n" +
         "Nombre: THE-FINAL-CONTDOWN-X-FEEL-GOOD-_GUERZON-AT-MASHUP_-FINALLY.mp3\n" +

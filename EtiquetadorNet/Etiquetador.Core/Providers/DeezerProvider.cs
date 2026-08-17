@@ -280,15 +280,32 @@ public sealed class DeezerProvider
                 if (!wantLive && Regex.IsMatch(rt, LiveRe, IC)) continue;
                 var aStrict = Matching.ArtistMatch(na, an);
                 var tStrict = tn.Contains(nt) || nt.Contains(tn);
+                // El artista puede ir algo más suelto porque esta vía exige además que el título
+                // coincida por inclusión, que ya es una guarda fuerte.
                 var aFuzzy = na.Length >= 5 && an.Length >= 5 && Matching.JaroWinkler(na, an) >= 0.90;
-                var tFuzzy = nt.Length >= 5 && tn.Length >= 5 && Matching.JaroWinkler(nt, tn) >= 0.90;
+                // El título, no: aquí el artista casa siempre (es el mismo intérprete con varios
+                // temas), así que el parecido del título es lo único que decide. A 0,90 entraban
+                // canciones distintas del mismo artista que empiezan igual.
+                var tFuzzy = nt.Length >= 5 && tn.Length >= 5 && Matching.JaroWinkler(nt, tn) >= 0.95;
                 var dur = J.I(J.P(x, "duration"));
                 var durOk = localDur > 0 && dur > 0 && Math.Abs(dur - localDur) <= 4;
                 if ((aFuzzy && tStrict) || (aStrict && tFuzzy && durOk && !isEdit)) { pick = x; bestSc = 5; break; }
+                // Mismo artista y un título PARECIDO pero no incluido: erratas del nombre del
+                // archivo ("Prrum" por "Prrrum", "CUENTA REGREVISA" por "Cuenta Regresiva").
+                //
+                // El umbral estaba en 0,88 y era demasiado laxo. Medido sobre una tirada real de
+                // 12.428 canciones, en la franja 0,88-0,95 lo que entra son temas DISTINTOS que
+                // empiezan igual: "Carnavalito Style" contra "Carnavalito Soleado" (0,93), "Dodo
+                // Suga" contra "Dodo Siya" (0,90). Y como este camino asigna confianza 4, por
+                // encima del umbral de revisión, esos errores se aplicaban sin que nadie los mirara.
+                //
+                // A 0,95 entran las erratas de verdad y ninguno de esos. Se pierde algún acierto
+                // aislado, pero equivocar una etiqueta es peor que dejar una canción sin
+                // identificar: lo segundo se ve en la lista, lo primero no.
                 if (aStrict && !tStrict && nt.Length >= 6 && tn.Length >= 6)
                 {
                     var jw = Matching.JaroWinkler(nt, tn);
-                    if (jw >= 0.88 && jw > bestFzJw) { bestFzJw = jw; bestFz = x; }
+                    if (jw >= 0.95 && jw > bestFzJw) { bestFzJw = jw; bestFz = x; }
                 }
             }
             if (pick == null && bestFz != null) { pick = bestFz; bestSc = 4; }
