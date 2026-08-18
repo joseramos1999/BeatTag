@@ -20,6 +20,7 @@ public sealed class AppPaths
     public string ScanCachePath { get; }
     public string AnalysisCachePath { get; }
     public string LoudnessCachePath { get; }
+    public string FingerprintCachePath { get; }
     public string IgnoredPath { get; }
     public string AppliedPath { get; }
 
@@ -40,6 +41,7 @@ public sealed class AppPaths
         ScanCachePath = Path.Combine(DataDir, "scan-cache.json");
         AnalysisCachePath = Path.Combine(DataDir, "analysis-cache.json");
         LoudnessCachePath = Path.Combine(DataDir, "sonoridad.json");
+        FingerprintCachePath = Path.Combine(DataDir, "huellas.json");
         IgnoredPath = Path.Combine(DataDir, "descartadas.json");
         AppliedPath = Path.Combine(DataDir, "aplicadas.json");
     }

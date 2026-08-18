@@ -9,6 +9,8 @@ public enum DuplicateMode
     ArtistTitle,
     /// <summary>Mismo artista, título y duración parecida (≤5 s de diferencia). El más estricto.</summary>
     ArtistTitleDuration,
+    /// <summary>Mismo AUDIO, por huella acústica. Ignora nombres y tags por completo.</summary>
+    Fingerprint,
 }
 
 /// <summary>Un grupo de posibles duplicados (misma canción según el criterio elegido).</summary>

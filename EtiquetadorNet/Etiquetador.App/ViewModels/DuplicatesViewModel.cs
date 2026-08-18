@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using System.Threading;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -111,6 +112,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         new(DuplicateMode.ArtistTitle, "Artista + título"),
         new(DuplicateMode.TitleOnly, "Solo título (más agresivo)"),
         new(DuplicateMode.ArtistTitleDuration, "Artista + título + duración (estricto)"),
+        new(DuplicateMode.Fingerprint, "Mismo audio (huella acústica)"),
     };
 
     public DupKeepOption[] KeepOptions { get; } =
@@ -182,7 +184,15 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         if (Store.IsScanned) Recompute();
     }
 
-    partial void OnSelectedModeChanged(DupModeOption value) { if (Store.IsScanned) Recompute(); }
+    /// <summary>El criterio elegido es el de audio: solo entonces hacen falta las huellas.</summary>
+    public bool EsPorHuella => SelectedMode?.Value == DuplicateMode.Fingerprint;
+
+    partial void OnSelectedModeChanged(DupModeOption value)
+    {
+        OnPropertyChanged(nameof(EsPorHuella));
+        OnPropertyChanged(nameof(ResumenHuellas));
+        if (Store.IsScanned) Recompute();
+    }
 
     partial void OnSelectedKeepChanged(DupKeepOption value)
     {
@@ -223,7 +233,9 @@ public partial class DuplicatesViewModel : ScanViewModelBase
             : Store.Tracks.Where(t => !excluidas.Contains(t.Folder, StringComparer.OrdinalIgnoreCase));
 
         var lista = fuente.ToList();
-        var groups = DuplicateFinder.Find(lista, SelectedMode.Value);
+        var groups = SelectedMode.Value == DuplicateMode.Fingerprint
+            ? FingerprintDuplicates.Find(lista, t => _engine.Fingerprints.Get(t.FilePath))
+            : DuplicateFinder.Find(lista, SelectedMode.Value);
 
         Rows.Clear();
         int copies = 0, conPrioridad = 0;
@@ -267,6 +279,69 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         var prio = conPrioridad > 0 ? $" · {conPrioridad} grupo(s) resueltos por carpeta prioritaria" : "";
         Status = $"{groups.Count} grupo(s) de duplicados · {copies} archivos implicados{excl}{prio}.";
     }
+
+
+    // ---- Huellas acústicas ----
+
+    /// <summary>Avance del cálculo de huellas (0-100) y si conviene enseñar la barra.</summary>
+    [ObservableProperty] private double _fpProgress;
+    [ObservableProperty] private bool _fpBusy;
+
+    /// <summary>Estado de las huellas, para saber si hace falta calcularlas antes de agrupar.</summary>
+    public string ResumenHuellas
+    {
+        get
+        {
+            if (!_engine.Fingerprints.FpcalcDisponible) return "No está disponible el analizador de audio (fpcalc).";
+            var total = Store.Tracks.Count;
+            if (total == 0) return "";
+            var hechas = _engine.Fingerprints.Contar(Store.Tracks.Select(t => t.FilePath));
+            if (hechas == 0) return $"Sin calcular. Hay que analizar el audio de las {total} canciones (tarda un buen rato la primera vez).";
+            if (hechas < total) return $"{hechas} de {total} analizadas. Faltan {total - hechas}.";
+            return $"Las {total} analizadas.";
+        }
+    }
+
+    private CancellationTokenSource? _fpCts;
+
+    /// <summary>
+    /// Calcula las huellas que falten. Es lo único de la pestaña que tarda: se hace bajo petición
+    /// expresa y no al abrir, porque la primera vez son horas.
+    /// </summary>
+    [RelayCommand]
+    private async Task ScanFingerprintsAsync()
+    {
+        if (FpBusy) return;
+        if (!_engine.Fingerprints.FpcalcDisponible)
+        {
+            Status = "No está disponible el analizador de audio (fpcalc). Se descarga solo al usar AcoustID en Enriquecer.";
+            return;
+        }
+        if (!Store.IsScanned || Store.Tracks.Count == 0) { Status = "Escanea antes la biblioteca."; return; }
+
+        _fpCts = new CancellationTokenSource();
+        FpBusy = true; IsBusy = true; FpProgress = 0;
+        try
+        {
+            var rutas = Store.Tracks.Select(t => t.FilePath).ToList();
+            var avance = new Progress<(int Hechas, int Total, string Archivo)>(p =>
+            {
+                FpProgress = p.Total > 0 ? p.Hechas * 100.0 / p.Total : 0;
+                Status = $"Analizando el audio: {p.Hechas} de {p.Total}… {p.Archivo}";
+            });
+            await _engine.Fingerprints.ScanAsync(rutas, force: false, avance, _fpCts.Token);
+            OnPropertyChanged(nameof(ResumenHuellas));
+            Status = _fpCts.IsCancellationRequested
+                ? "Análisis interrumpido. Lo calculado queda guardado; puedes retomarlo cuando quieras."
+                : "Audio analizado.";
+            if (SelectedMode.Value == DuplicateMode.Fingerprint) Recompute();
+        }
+        catch (Exception e) { Status = "No se pudo analizar el audio: " + e.Message; }
+        finally { FpBusy = false; IsBusy = false; FpProgress = 0; _fpCts?.Dispose(); _fpCts = null; }
+    }
+
+    [RelayCommand]
+    private void CancelFingerprints() => _fpCts?.Cancel();
 
     private void RecontarMarcadas() => Marcadas = Rows.Count(r => r.Marcada);
 

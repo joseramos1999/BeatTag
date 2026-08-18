@@ -52,6 +52,7 @@ public sealed class AppEngine
 
     /// <summary>Medida de sonoridad (EBU R128) con cache propia. Solo mide, no toca archivos.</summary>
     public LoudnessScanner Loudness { get; }
+    public FingerprintScanner Fingerprints { get; }
     public ChartsProvider Charts { get; }
     public LinkResolver Links { get; }
 
@@ -105,6 +106,8 @@ public sealed class AppEngine
         Ai = new OllamaClient(Api, Logger);
         if (Config.AiHost.Length > 0) Ai.Host = Config.AiHost;
         Fingerprint = new Fingerprint(Paths, Logger);
+        // Detrás de Fingerprint a propósito: necesita su ruta de fpcalc, y antes estaría a null.
+        Fingerprints = new FingerprintScanner(Paths.FingerprintCachePath, Fingerprint.FpcalcPath, Logger);
         Covers = new CoverFetcher(Api);
         // Los alias se cargan ANTES que las excepciones: estas los incorporan para escribir el nombre canónico.
         ArtistAliases.Current = ArtistAliases.Load(Paths.ArtistAliasesPath);

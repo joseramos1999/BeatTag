@@ -52,6 +52,23 @@
             </StackPanel>
         </Expander>
 
+        <!-- Huellas: solo aparece con el criterio de audio, que es el unico que las necesita. -->
+        <Border DockPanel.Dock="Top" IsVisible="{Binding EsPorHuella}" Margin="0,0,0,6" Padding="8,6"
+                Background="#EFF6FF" BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="4">
+            <StackPanel Spacing="4">
+                <TextBlock Classes="desc" Margin="0"
+                           Text="Compara el AUDIO, así que encuentra la misma canción aunque tenga títulos distintos o no esté etiquetada. Hay que analizar antes cada archivo: la primera vez tarda un buen rato, pero queda guardado y las siguientes son inmediatas." />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Analizar audio" Command="{Binding ScanFingerprintsCommand}" IsEnabled="{Binding !FpBusy}"
+                            Background="#7C3AED" Foreground="White" FontWeight="SemiBold" />
+                    <Button Content="Cancelar" Command="{Binding CancelFingerprintsCommand}" IsVisible="{Binding FpBusy}"
+                            Background="#DC2626" Foreground="White" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding ResumenHuellas}" Foreground="Gray" VerticalAlignment="Center" TextWrapping="Wrap" />
+                </StackPanel>
+                <ProgressBar Minimum="0" Maximum="100" Value="{Binding FpProgress}" Height="6" IsVisible="{Binding FpBusy}" />
+            </StackPanel>
+        </Border>
+
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
             <Button Content="Marcar sobrantes" Command="{Binding MarkAllButBestCommand}"
                     Background="#D97706" Foreground="White" FontWeight="SemiBold"
