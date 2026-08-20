@@ -33,7 +33,7 @@
             <Button Content="Analizar" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#2563EB"
                     ToolTip.Tip="Rápido: usa la caché y solo reprocesa lo nuevo o modificado." />
             <Button Content="Reanalizar todo" Command="{Binding ReanalyzeAllCommand}" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#7C3AED"
-                    ToolTip.Tip="Ignora la caché y vuelve a analizar toda la biblioteca." />
+                    ToolTip.Tip="Ignora la caché guardada y vuelve a consultarlo todo desde cero. Las canciones que ya aplicaste siguen sin aparecer: para recuperarlas, usa «Olvidar aplicadas» en Ajustes." />
             <Button Content="{Binding IsPaused, Converter={x:Static vm:EnrichViewModel.PauseLabel}}"
                     Command="{Binding PauseCommand}" IsVisible="{Binding IsBusy}" Classes="act" Background="#D97706" />
             <Button Content="Cancelar" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" Classes="act" Background="#DC2626" />

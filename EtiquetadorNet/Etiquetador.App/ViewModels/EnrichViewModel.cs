@@ -222,8 +222,11 @@ public partial class EnrichViewModel : ViewModelBase
                 i++;
                 seen.Add(t.FilePath);
                 if (_engine.Ignored.Contains(t.FilePath)) continue;   // descartada por el usuario
-                // Ya aplicada: no se vuelve a proponer en el análisis normal ("Reanalizar todo" sí la incluye).
-                if (!force && _engine.Applied.Contains(t.FilePath)) { alreadyApplied++; continue; }
+                // Ya aplicada: no se vuelve a proponer, tampoco al reanalizar. Son dos cosas distintas:
+                // "Reanalizar todo" sirve para ignorar la CACHÉ y recalcular, no para volver a ofrecer
+                // canciones que el usuario ya dio por terminadas. Para recuperarlas está
+                // "Olvidar aplicadas", en Ajustes, que es una decisión explícita.
+                if (_engine.Applied.Contains(t.FilePath)) { alreadyApplied++; continue; }
                 Status = $"{(force ? "Reanalizando" : "Analizando")} {i}/{tracks.Count}…  {t.FileName}";
                 Progress = tracks.Count == 0 ? 0 : (double)i / tracks.Count * 100;
                 var per = sw.Elapsed.TotalSeconds / i;
@@ -252,6 +255,8 @@ public partial class EnrichViewModel : ViewModelBase
                    + (alreadyApplied > 0 ? $" · {alreadyApplied} ya aplicadas (omitidas)" : "")
                    + $" · en {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}.";
             var low = Rows.Count(r => r.RowStatus.StartsWith('⚠'));
+            if (alreadyApplied > 0)
+                _engine.Logger.Detail($"    {alreadyApplied} ya aplicadas, omitidas (se recuperan con «Olvidar aplicadas» en Ajustes).");
             _engine.Logger.Sum($"Análisis terminado: {tracks.Count} revisadas · {Rows.Count} propuestas · {fromCache} de caché · "
                              + $"{low} de baja confianza · {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}");
             _engine.Logger.Detail($"Caché de red: {_engine.Api.CacheHits} aciertos / {_engine.Api.CacheMiss} peticiones nuevas");
