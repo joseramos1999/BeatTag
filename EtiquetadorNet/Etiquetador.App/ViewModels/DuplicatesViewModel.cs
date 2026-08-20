@@ -125,6 +125,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     private readonly AudioPreview _preview;
     private readonly AppEngine _engine;
     private bool _cargando;
+    private bool _agrupando;
 
     [ObservableProperty] private DupRow? _selectedRow;
     [ObservableProperty] private DupModeOption _selectedMode;
@@ -233,10 +234,18 @@ public partial class DuplicatesViewModel : ScanViewModelBase
             : Store.Tracks.Where(t => !excluidas.Contains(t.Folder, StringComparer.OrdinalIgnoreCase));
 
         var lista = fuente.ToList();
-        var groups = SelectedMode.Value == DuplicateMode.Fingerprint
-            ? FingerprintDuplicates.Find(lista, t => _engine.Fingerprints.Get(t.FilePath))
-            : DuplicateFinder.Find(lista, SelectedMode.Value);
 
+        // Agrupar por audio es caro y NO puede hacerse aquí: Recompute corre en el hilo de la
+        // interfaz y la dejaría congelada. Se desvía a un método propio en segundo plano.
+        if (SelectedMode.Value == DuplicateMode.Fingerprint) { _ = RecomputePorHuellaAsync(lista); return; }
+
+        Pintar(DuplicateFinder.Find(lista, SelectedMode.Value));
+    }
+
+    /// <summary>Vuelca los grupos en la tabla. Compartido por los dos caminos de agrupación.</summary>
+    private void Pintar(IReadOnlyList<DuplicateGroup> groups)
+    {
+        var excluidas = _engine.Config.ExcludedDupFolders;
         Rows.Clear();
         int copies = 0, conPrioridad = 0;
         foreach (var g in groups)
@@ -342,6 +351,41 @@ public partial class DuplicatesViewModel : ScanViewModelBase
 
     [RelayCommand]
     private void CancelFingerprints() => _fpCts?.Cancel();
+
+
+    /// <summary>
+    /// Agrupa por audio FUERA del hilo de la interfaz. Con 12.927 huellas la comparación son
+    /// millones de parejas: hacerlo en Recompute dejaba la aplicación congelada sin previo aviso.
+    /// </summary>
+    private async Task RecomputePorHuellaAsync(List<Track> lista)
+    {
+        if (_agrupando) return;
+        _agrupando = true;
+        IsBusy = true;
+        Status = "Comparando el audio…";
+        _fpCts ??= new CancellationTokenSource();
+        var ct = _fpCts.Token;
+
+        try
+        {
+            var avance = new Progress<(int Hechas, int Total)>(p =>
+                Status = $"Comparando el audio: {p.Hechas} de {p.Total} parejas…");
+
+            var groups = await Task.Run(
+                () => FingerprintDuplicates.Find(lista, t => _engine.Fingerprints.Get(t.FilePath),
+                                                 AudioFingerprint.UmbralIgual, avance, ct), ct);
+
+            // El usuario puede haber cambiado de criterio mientras esto corría: no pisar la tabla.
+            if (SelectedMode.Value != DuplicateMode.Fingerprint) return;
+
+            Pintar(groups);
+            var copias = groups.Sum(g => g.Tracks.Count);
+            Status = $"{groups.Count} grupo(s) con el mismo audio · {copias} archivos implicados.";
+        }
+        catch (OperationCanceledException) { Status = "Comparación cancelada."; }
+        catch (Exception e) { Status = "No se pudo comparar el audio: " + e.Message; }
+        finally { _agrupando = false; IsBusy = false; }
+    }
 
     private void RecontarMarcadas() => Marcadas = Rows.Count(r => r.Marcada);
 
