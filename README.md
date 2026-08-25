@@ -18,7 +18,8 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   AcoustID** (huella acústica), con **IA local opcional** para interpretar nombres muy alterados.
   Propone tags y un nombre de archivo, y puntúa la **confianza** de cada propuesta (incluida la
   coherencia con los tags que ya trae el archivo). Las propuestas dudosas se auto-desmarcan para
-  que las revises.
+  que las revises. Cada propuesta lleva un **índice de cambio de 0 a 10**: lo que apenas cambiaría
+  el archivo se aparta de la lista, para que solo tengas delante lo que merece un vistazo.
 - **Editor**: edición manual de título y tags, con reproducción de un fragmento para comprobar.
 - **Duplicados**: agrupa copias (por artista+título, solo título, o +duración) y **marca en verde la
   que conviene conservar**, según el criterio que elijas: carpeta prioritaria, mejor calidad o mayor
@@ -32,7 +33,8 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   identifica.
 - **Volumen**: mide la sonoridad de cada grabación según **EBU R128** y corrige las que se apartan
   del resto. El audio **no se recodifica** —se ajusta la ganancia del propio MP3—, así que no hay
-  pérdida de calidad, los archivos mantienen su tamaño y el cambio es reversible.
+  pérdida de calidad, los archivos mantienen su tamaño y el cambio es reversible. Ese ajuste sin
+  pérdida solo existe para MP3: un FLAC, un WAV o un M4A **se miden pero no se tocan**.
 - **Tendencias**: listas de éxitos de más de 70 países, marcando lo que ya tienes en la biblioteca.
 - **Tonalidad**: muestra la clave de cada tema y su código **Camelot**, para mezclar en armónico.
   Se lee de los tags (la escriben rekordbox y similares); BeatTag no la deduce del audio.

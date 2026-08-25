@@ -129,6 +129,7 @@
             <TextBlock Classes="li" Text="• Algunas grabaciones ya están al máximo y no admiten aumento sin producir distorsión; la columna Observaciones lo indica." />
             <TextBlock Classes="li" Text="• 'Ajustar volumen' corrige las grabaciones que se desvían más de 2 dB. El audio NO se recodifica: se modifica el nivel de reproducción del propio archivo, sin pérdida de calidad y sin cambiar su tamaño." />
             <TextBlock Classes="li" Text="• Las que no admiten aumento sin distorsionar se suben lo máximo posible, y se indica cuántas quedaron a medias." />
+            <TextBlock Classes="li" Text="• Ese ajuste sin pérdida solo existe para los MP3, porque consiste en retocar un dato del propio archivo. Un FLAC, un WAV o un M4A se miden igual de bien, pero no se tocan: cambiarles el volumen obligaría a reescribir el audio. Aparecen en la lista con esa indicación en Observaciones." />
             <TextBlock Classes="dim" Margin="12,2,0,0" Text="El ajuste queda registrado y se revierte con 'Deshacer última' desde Enriquecer, igual que el resto de cambios." />
 
             <!-- ESTADÍSTICAS -->
