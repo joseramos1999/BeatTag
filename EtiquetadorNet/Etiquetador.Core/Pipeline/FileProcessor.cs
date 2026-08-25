@@ -173,6 +173,8 @@ public sealed class FileProcessor
         ProviderResult? sp = null, it = null, dz = null, mb = null, dc = null, primary = null, sec = null;
         ProviderResult? acHit = null;
         string variant = "", secSrc = "";
+        // Propuesta de la IA local que ningun catalogo confirmo: no se escribe, se sugiere.
+        string sugA = "", sugT = "", sugV = "";
 
         // Los descriptores también se leen de lo tecleado: buscar "Tema (Live)" pide la versión en directo.
         var descSrc = manual ? $"{rawForOtros} {o.SearchTitle}" : rawForOtros;
@@ -273,6 +275,20 @@ public sealed class FileProcessor
                     if (primary != null) variant = "ia";
                     if (primary != null && o.Discogs && dc == null) dc = await _dc.SearchAsync(primary.Artist, primary.Title, AppInfo.UserAgent, o.DiscogsToken, ct).ConfigureAwait(false);
                     _log?.Log($"        · IA local propuso: {aiA} - {aiT} (conf {ai.Confidence}) -> {(primary != null ? "VERIFICADO en " + (dz != null ? "Deezer" : "iTunes") : "no verificado en catalogo")}", LogKind.Dim, true);
+
+                    // Sin confirmar no se escribe nada, pero la propuesta tampoco se tira: si se
+                    // limita a reordenar lo que ya había en el nombre, viaja a "No encontradas"
+                    // como sugerencia para que decida el usuario. Lo que la IA se inventa se
+                    // descarta aquí, porque eso es lo que una persona no puede cazar de un vistazo.
+                    // Los tags cuentan como material de origen igual que el nombre: muchos archivos
+                    // llegan con el nombre cortado a 43 caracteres y el título entero dentro del
+                    // tag. Completar eso NO es inventar, y mirando solo el nombre se perdían 174
+                    // sugerencias buenas de una tirada real (de 56 invenciones a 228 descartes).
+                    if (primary == null && Matching.SoloReordena($"{fileName} {tagArtist} {tagTitle}", aiA, aiT))
+                    {
+                        sugA = aiA; sugT = aiT; sugV = ai.Version;
+                        _log?.Log("        · guardada como sugerencia para 'No encontradas'", LogKind.Dim, true);
+                    }
                 }
                 else if (ai is { IsMashup: true })
                 {
@@ -505,6 +521,9 @@ public sealed class FileProcessor
             Score = scoreStr,
             Remixer = remix.Remixer,
             RemixKind = remix.Kind,
+            AiArtist = sugA,
+            AiTitle = sugT,
+            AiVersion = sugV,
             DurLocal = localDur,
             DurMatch = primary != null ? primary.Dur.ToString() : "",
         };

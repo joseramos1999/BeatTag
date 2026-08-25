@@ -108,6 +108,8 @@
             <TextBlock Classes="li" Text="• Calidad — clasifica el audio por bitrate y formato para localizar lo que conviene resustituir." />
             <TextBlock Classes="li" Text="• Incompletas — canciones a las que les falta algún tag; con el clic derecho puedes Editar o Reanalizar." />
             <TextBlock Classes="li" Text="• No encontradas — las que ninguna fuente ha sabido identificar. Buenas candidatas para el buscador por enlace." />
+            <TextBlock Classes="li" Text="   · La columna «Sugerencia de la IA» muestra cómo entiende el nombre la IA local cuando ningún catálogo confirma la canción. Repásala y, si es correcta, «Aceptar sugerencia» renombra el archivo y escribe artista y título." />
+            <TextBlock Classes="li" Text="   · Es la única parte de la aplicación donde se escribe algo sin confirmación de un catálogo, y por eso lo decides tú canción a canción. Se filtra antes lo que la IA se inventa: solo se sugiere lo que reordena o completa datos que ya estaban en el nombre o en los tags. Como cualquier otro cambio, se puede deshacer desde el historial." />
 
             <!-- TENDENCIAS -->
             <TextBlock Classes="h" Text="🌍 Tendencias" />

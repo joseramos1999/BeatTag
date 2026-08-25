@@ -81,6 +81,15 @@ Su propuesta **siempre se contrasta contra el catálogo** antes de escribir nada
 invención del modelo no llega a tus archivos. Es opcional: sin ella, el resto del análisis funciona
 igual.
 
+También decide los casos que ninguna regla resuelve: cuando el nombre une varias canciones o varios
+artistas con una «x», la IA distingue el mashup de la colaboración y aparta el primero.
+
+Y cuando entiende el nombre pero **ningún catálogo lo confirma**, la propuesta no se tira: aparece en
+**No encontradas**, en la columna «Sugerencia de la IA», para que la revises y la apliques de un clic
+si es correcta. Antes se filtra lo que el modelo se inventa, así que solo se sugiere lo que reordena
+o completa datos que ya estaban en el nombre o en los tags. Es el único sitio donde se escribe sin
+confirmación de un catálogo, y siempre lo decides tú, canción a canción.
+
 ## 🎛️ rekordbox y los cue points
 
 rekordbox guarda los cue points y el beatgrid en su base de datos, **ligados a la ruta del archivo**.

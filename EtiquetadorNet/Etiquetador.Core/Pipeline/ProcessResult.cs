@@ -44,6 +44,16 @@ public sealed class ProcessResult
 
     /// <summary>Tipo de versión detectada ("Remix", "Bootleg", "Edit"…). Vacío = original.</summary>
     public string RemixKind { get; set; } = "";
+    /// <summary>
+    /// Lo que la IA local propuso cuando NINGÚN catálogo confirmó la canción. No se escribe nunca
+    /// por su cuenta: viaja hasta la pestaña "No encontradas" para enseñárselo al usuario como
+    /// sugerencia de un clic. Vacío si no hubo propuesta o si sí quedó verificada (entonces los
+    /// datos buenos son los del catálogo, que están en Artist/Title).
+    /// </summary>
+    public string AiArtist { get; set; } = "";
+    public string AiTitle { get; set; } = "";
+    public string AiVersion { get; set; } = "";
+
     public int DurLocal { get; set; }
     public string DurMatch { get; set; } = "";
     public string FieldSrc { get; set; } = "";

@@ -128,6 +128,50 @@ public static class Matching
         return false;
     }
 
+    /// <summary>
+    /// Palabras de relleno que no aportan identidad a una canción. Se ignoran al comprobar si la
+    /// IA se ha inventado algo: que sobre o falte un "la" no dice nada sobre si acertó.
+    /// </summary>
+    private static readonly HashSet<string> Relleno = new(StringComparer.Ordinal)
+    {
+        "el", "la", "los", "las", "un", "una", "de", "del", "y", "e", "o", "al", "en", "con",
+        "the", "of", "and", "feat", "ft", "featuring", "vs", "remix", "mix", "edit",
+        "intro", "extended", "version", "original", "radio", "clean", "dirty", "break", "acapella",
+    };
+
+    /// <summary>
+    /// ¿La propuesta de la IA se limita a REORDENAR y LIMPIAR lo que ya había en el nombre, sin
+    /// añadir datos que no estuvieran?
+    ///
+    /// Es la guarda que decide qué sugerencias se le enseñan al usuario. Cuando la IA no reconoce
+    /// una canción tiende a rellenar el hueco con algo plausible -un artista famoso del estilo, un
+    /// título parecido-, y ese error es justo el que una persona NO puede cazar de un vistazo,
+    /// porque el resultado suena verosímil. En cambio intercambiar artista y título salta a la
+    /// vista. Por eso aquí se filtra lo inventado y se deja pasar lo reordenado.
+    ///
+    /// La comparación tolera erratas (Jaro-Winkler ≥ 0,85): corregir "Resentia" a "Resentía" es
+    /// justo para lo que sirve la IA, y no debe contar como invención.
+    /// </summary>
+    public static bool SoloReordena(string? original, string? artist, string? title)
+    {
+        var origen = Palabras(original);
+        if (origen.Count == 0) return false;
+
+        foreach (var palabra in Palabras(artist).Concat(Palabras(title)))
+            if (!origen.Any(o => o == palabra || JaroWinkler(o, palabra) >= 0.85))
+                return false;
+
+        return true;
+    }
+
+    /// <summary>Palabras con contenido de un nombre: normalizadas, sin relleno y sin extensión.</summary>
+    private static List<string> Palabras(string? s)
+        => Regex.Split(Regex.Replace(s ?? "", @"\.(mp3|flac|wav|m4a|aiff?|ogg)$", "", RegexOptions.IgnoreCase),
+                       @"[^\p{L}\p{N}]+")
+                .Select(TextUtils.Nk)
+                .Where(w => w.Length >= 2 && !Relleno.Contains(w))
+                .ToList();
+
     public static bool IsSkipMix(string? baseName, string? fnTitle, string? fnArtist)
     {
         baseName ??= ""; fnTitle ??= ""; fnArtist ??= "";

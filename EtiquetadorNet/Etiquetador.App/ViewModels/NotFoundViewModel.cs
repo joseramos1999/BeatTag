@@ -10,6 +10,8 @@ using Avalonia.Collections;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Etiquetador.App.Services;
+using Etiquetador.Core;
+using Etiquetador.Core.Ai;
 using Etiquetador.Core.Pipeline;
 
 namespace Etiquetador.App.ViewModels;
@@ -21,6 +23,13 @@ public sealed partial class NotFoundRow : ObservableObject
     public string Query { get; init; } = "";
     public string Folder { get; init; } = "";
     public string FilePath { get; init; } = "";
+
+    /// <summary>Nombre que propone la IA local (sin extensión), o "" si no propuso nada aprovechable.</summary>
+    public string Suggestion { get; init; } = "";
+    public string AiArtist { get; init; } = "";
+    public string AiTitle { get; init; } = "";
+    public string AiVersion { get; init; } = "";
+    public bool HasSuggestion => Suggestion.Length > 0;
 }
 
 /// <summary>Pestaña No encontradas: procesa la biblioteca y lista las que ninguna fuente identifica.</summary>
@@ -68,7 +77,7 @@ public partial class NotFoundViewModel : ViewModelBase
             var r = _engine.Analysis.Get(t.FilePath, sig);
             if (r == null || r.Skip) continue;
             if (!r.Found && !r.CleanOnly)
-                Rows.Add(new NotFoundRow { FileName = r.Old, Query = r.Kw, Folder = t.Folder, FilePath = t.FilePath });
+                Rows.Add(MakeRow(r, t));
         }
         RowsView.Refresh();
         if (Rows.Count > 0) Status = $"{Rows.Count} sin identificar (del último análisis).";
@@ -103,7 +112,7 @@ public partial class NotFoundViewModel : ViewModelBase
                 catch { continue; }
                 if (r.Skip) continue;
                 if (!r.Found && !r.CleanOnly)
-                    Rows.Add(new NotFoundRow { FileName = r.Old, Query = r.Kw, Folder = t.Folder, FilePath = t.FilePath });
+                    Rows.Add(MakeRow(r, t));
             }
             _engine.Analysis.Save();
             RowsView.Refresh();
@@ -111,6 +120,78 @@ public partial class NotFoundViewModel : ViewModelBase
         }
         catch (OperationCanceledException) { _engine.Analysis.Save(); RowsView.Refresh(); Status = $"Cancelado ({Rows.Count} no encontradas hasta ahora)."; }
         finally { IsBusy = false; _cts.Dispose(); _cts = null; }
+    }
+
+    /// <summary>Una fila de la tabla, con la sugerencia de la IA local si la hubo.</summary>
+    private static NotFoundRow MakeRow(ProcessResult r, Track t) => new()
+    {
+        FileName = r.Old,
+        Query = r.Kw,
+        Folder = t.Folder,
+        FilePath = t.FilePath,
+        Suggestion = AiSuggestion.For(r),
+        AiArtist = r.AiArtist,
+        AiTitle = r.AiTitle,
+        AiVersion = r.AiVersion,
+    };
+
+    /// <summary>
+    /// Acepta la propuesta de la IA local: renombra el archivo y escribe artista y título.
+    ///
+    /// Estas propuestas NO están confirmadas por ningún catálogo, y por eso la aplicación no las
+    /// escribe sola en ningún momento. Aquí las escribe porque el usuario acaba de leerlas en la
+    /// tabla y ha pulsado el botón: es él quien las verifica. Como cualquier otro cambio, queda
+    /// registrado en el historial y se puede deshacer.
+    /// </summary>
+    [RelayCommand]
+    private async Task AcceptSuggestionAsync()
+    {
+        var row = SelectedRow;
+        if (row == null) { Status = "Selecciona antes una canción de la lista."; return; }
+        if (!row.HasSuggestion) { Status = "Esa canción no tiene sugerencia de la IA."; return; }
+        if (IsBusy) { Status = "Hay un proceso en curso; espera a que termine."; return; }
+
+        _engine.ReleaseAudio();   // el reproductor mantiene el archivo abierto y el renombrado fallaría
+        IsBusy = true;
+        Status = $"Aplicando «{row.Suggestion}»…";
+        _engine.Logger.Head($"Sugerencia de la IA aceptada por el usuario: '{row.FileName}' -> '{row.Suggestion}'");
+        try
+        {
+            var titulo = row.AiVersion.Trim().Length > 0 ? $"{row.AiTitle} ({row.AiVersion.Trim()})" : row.AiTitle;
+            var info = new ProcessResult
+            {
+                FilePath = row.FilePath,
+                Old = row.FileName,
+                New = row.Suggestion + Path.GetExtension(row.FilePath),
+                Artist = row.AiArtist,
+                Title = titulo,
+                Found = true,
+                Source = "IA (aceptada)",
+            };
+
+            // Solo artista y título: lo demás (álbum, año, género, BPM) no lo sabe la IA, y
+            // sobrescribir a ciegas se pisa: el usuario ha aceptado un NOMBRE, no una ficha entera.
+            var campos = new FieldFlags { Title = true, Artist = true, Album = false, Genre = false, Year = false, Bpm = false };
+            var undo = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+            var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(info, over: true, campos, "keep", null, undo, _engine.Paths.DoneLog));
+            await _engine.Library.ScanAsync();
+
+            if (res.TagOk || res.DidRename)
+            {
+                Rows.Remove(row);
+                RowsView.Refresh();
+                _engine.Applied.Add(res.FinalPath);   // ya aplicada: no reaparecerá al analizar
+                _engine.Applied.Save();
+                Status = $"Aplicada la sugerencia: {row.Suggestion}";
+            }
+            else
+            {
+                row.RowStatus = "⚠ no se pudo escribir: " + res.TagErr;
+                Status = "No se pudo escribir: " + row.FileName;
+            }
+        }
+        catch (Exception e) { Status = "Error al aplicar la sugerencia: " + e.Message; }
+        finally { IsBusy = false; }
     }
 
     [RelayCommand]
