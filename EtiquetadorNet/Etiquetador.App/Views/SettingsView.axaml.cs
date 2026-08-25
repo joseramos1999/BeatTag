@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 
 namespace Etiquetador.App.Views;
 
@@ -76,5 +77,36 @@ public partial class SettingsView : UserControl
             "Limpiar");
 
         if (ok) vm.LimpiarCarpetaDatos();
+    }
+
+    // Reparar la coleccion de rekordbox: se lee el XML exportado y se escribe una copia con las
+    // rutas al dia. El original NO se toca, para que el usuario conserve el de partida.
+    private async void RepairRekordbox_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.SettingsViewModel vm) return;
+        var top = TopLevel.GetTopLevel(this);
+        if (top is null) return;
+
+        var abrir = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Selecciona la colección exportada de rekordbox",
+            AllowMultiple = false,
+            FileTypeFilter = new[] { new FilePickerFileType("Colección de rekordbox") { Patterns = new[] { "*.xml" } } },
+        });
+        if (abrir.Count == 0) return;
+        var origen = abrir[0].TryGetLocalPath();
+        if (string.IsNullOrEmpty(origen)) return;
+
+        var guardar = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Guardar la colección reparada",
+            SuggestedFileName = "collection_reparada",
+            DefaultExtension = "xml",
+            FileTypeChoices = new[] { new FilePickerFileType("Colección de rekordbox") { Patterns = new[] { "*.xml" } } },
+        });
+        var destino = guardar?.TryGetLocalPath();
+        if (string.IsNullOrEmpty(destino)) return;
+
+        vm.RepararRekordbox(origen, destino);
     }
 }

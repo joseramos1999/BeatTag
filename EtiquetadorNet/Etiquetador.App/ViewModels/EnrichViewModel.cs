@@ -260,6 +260,7 @@ public partial class EnrichViewModel : ViewModelBase
             _engine.Logger.Sum($"Análisis terminado: {tracks.Count} revisadas · {Rows.Count} propuestas · {fromCache} de caché · "
                              + $"{low} de baja confianza · {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}");
             _engine.Logger.Detail($"Caché de red: {_engine.Api.CacheHits} aciertos / {_engine.Api.CacheMiss} peticiones nuevas");
+            RecontarRenombrados();
             WriteAnalysisReport(seenResults);
             AnalysisCompleted?.Invoke();   // las no encontradas van solas a su pestaña
         }
@@ -320,6 +321,24 @@ public partial class EnrichViewModel : ViewModelBase
 
     [RelayCommand]
     private void Cancel() { IsPaused = false; _cts?.Cancel(); }
+
+    /// <summary>
+    /// Cuántas propuestas marcadas van a RENOMBRAR el archivo. Importa avisarlo: rekordbox guarda
+    /// los cue points y el beatgrid en su base de datos ligados a la ruta, así que al renombrar los
+    /// da por perdidos. Se puede reparar después (Ajustes → Reparar colección de rekordbox), pero
+    /// más vale saberlo antes que descubrirlo en cabina.
+    /// </summary>
+    [ObservableProperty] private int _renombradosPendientes;
+
+    public bool HayRenombrados => RenombradosPendientes > 0;
+
+    partial void OnRenombradosPendientesChanged(int value) => OnPropertyChanged(nameof(HayRenombrados));
+
+    /// <summary>Recuenta los renombrados pendientes. Se llama tras analizar y tras aplicar.</summary>
+    public void RecontarRenombrados()
+        => RenombradosPendientes = Rows.Count(r => r.Apply
+                                                && r.New.Length > 0
+                                                && !string.Equals(r.New, r.Old, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Aplica todas las filas marcadas.</summary>
     [RelayCommand]
@@ -407,6 +426,7 @@ public partial class EnrichViewModel : ViewModelBase
                 RowsView.Refresh();
             }
             _engine.Applied.Save();
+            RecontarRenombrados();
             _engine.Logger.Sum($"Aplicación terminada: {applied} de {marked} correctas"
                              + (applied < marked ? $" · {marked - applied} con problemas" : "")
                              + (cancelled ? " (cancelada)" : ""));

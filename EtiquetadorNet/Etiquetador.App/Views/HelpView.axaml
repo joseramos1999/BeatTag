@@ -139,6 +139,7 @@
             <TextBlock Classes="li" Text="• Recuperar descartadas — vuelve a tener en cuenta las canciones que quitaste de la lista en Enriquecer. Y «Olvidar aplicadas» hace lo propio con las que ya se aplicaron." />
             <TextBlock Classes="li" Text="• Nombres de artista — dos listas ampliables: los alias agrupan nombres distintos de un mismo artista (un artista puede figurar en el catálogo con un nombre anterior) y las grafías fijan cómo debe escribirse un nombre." />
             <TextBlock Classes="li" Text="• Limpiar carpeta de datos — borra registros, informes y cachés, diciendo antes cuánto ocupa cada cosa. No toca los ajustes, ni las listas de artista, ni el historial para deshacer." />
+            <TextBlock Classes="li" Text="• Reparar colección de rekordbox — rekordbox guarda los cue points y el beatgrid en su base de datos, ligados a la ruta del archivo, así que al renombrar los da por perdidos. BeatTag anota cada renombrado y puede devolvérselos: exporta tu colección desde rekordbox, repárala aquí y vuelve a importarla. El archivo original no se toca." />
             <TextBlock Classes="li" Text="• A la derecha tienes el registro en vivo de lo que va haciendo la app, coloreado por tipo. Con «Solo lo importante» se queda con errores, avisos y resúmenes; con «Seguir el final» se mantiene a la vista la última línea." />
 
             <!-- CÓMO SE COMPORTA -->

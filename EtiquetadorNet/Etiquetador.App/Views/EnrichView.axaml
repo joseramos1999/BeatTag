@@ -89,6 +89,14 @@
             </StackPanel>
         </Expander>
 
+        <!-- Renombrar rompe las referencias de rekordbox y con ellas los cue points. Conviene
+             saberlo ANTES de aplicar, no descubrirlo en cabina. -->
+        <Border DockPanel.Dock="Top" IsVisible="{Binding HayRenombrados}" Margin="0,0,0,6" Padding="8,6"
+                Background="#FEF3C7" BorderBrush="#F59E0B" BorderThickness="1" CornerRadius="4">
+            <TextBlock Foreground="#78350F" TextWrapping="Wrap" FontSize="12"
+                       Text="{Binding RenombradosPendientes, StringFormat='Se van a renombrar {0} archivos. Si usas rekordbox, al cambiar el nombre pierde sus cue points y su beatgrid, porque los guarda ligados a la ruta. Puedes devolvérselos después con «Reparar colección de rekordbox», en Ajustes.'}" />
+        </Border>
+
         <TextBlock DockPanel.Dock="Top" Text="{Binding Status}" Margin="0,0,0,4" TextTrimming="CharacterEllipsis" />
         <StackPanel DockPanel.Dock="Top" Margin="0,0,0,6" Spacing="3" IsVisible="{Binding IsBusy}">
             <!-- Barra 1: progreso global (canciones procesadas) -->

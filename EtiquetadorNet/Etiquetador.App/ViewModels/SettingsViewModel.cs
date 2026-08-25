@@ -452,6 +452,27 @@ public partial class SettingsViewModel : ViewModelBase
         Status = $"Carpeta de datos limpiada: {borrados} archivo(s). Se conservan ajustes, listas de artista y el historial de deshacer.";
     }
 
+    /// <summary>Cuántos renombrados hay anotados y podrían repararse en rekordbox.</summary>
+    public int RenombradosAnotados => RekordboxRelocator.ReadRenames(_engine.Paths.UndoDir).Count;
+
+    /// <summary>
+    /// Reescribe las rutas de una colección de rekordbox exportada, para que vuelva a encontrar los
+    /// archivos que BeatTag ha renombrado y NO pierda sus cue points.
+    /// </summary>
+    public void RepararRekordbox(string xmlOrigen, string destino)
+    {
+        var mapa = RekordboxRelocator.ReadRenames(_engine.Paths.UndoDir);
+        if (mapa.Count == 0) { Status = "No hay ningún renombrado anotado que reparar."; return; }
+
+        var r = RekordboxRelocator.Repair(xmlOrigen, destino, mapa);
+        if (!r.Ok) { Status = "No se pudo reparar: " + r.Error; return; }
+
+        Status = r.Reparadas > 0
+            ? $"{r.Reparadas} rutas reparadas. Importa el archivo generado en rekordbox para recuperar los cue points."
+            : "No había ninguna ruta que reparar en esa colección.";
+        _engine.Logger.Sum($"rekordbox: {r.Reparadas} reparadas · {r.SinCambio} sin cambio · {r.NoEncontradas} no encontradas.");
+    }
+
     /// <summary>Abre la carpeta de datos, para poder mirarla a mano.</summary>
     [RelayCommand]
     private async Task OpenDataFolderAsync()

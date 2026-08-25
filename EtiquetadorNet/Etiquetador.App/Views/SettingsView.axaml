@@ -97,6 +97,17 @@
                             ToolTip.Tip="Abre la carpeta con ArtistsExceptions.json: nombres cuya escritura no debe alterarse (deadmau5, AC/DC…)." />
                 </StackPanel>
 
+                <!-- ================= REKORDBOX ================= -->
+                <TextBlock Classes="sec" Text="rekordbox" />
+                <TextBlock Classes="ayuda"
+                           Text="rekordbox guarda los cue points y el beatgrid en su base de datos, ligados a la ruta del archivo. Al renombrar, los da por perdidos. BeatTag anota cada renombrado, así que puede devolvérselos: exporta tu colección desde rekordbox (Archivo → Exportar colección en formato xml), repárala aquí y vuelve a importarla. El archivo original no se toca." />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Reparar colección de rekordbox" Click="RepairRekordbox_Click"
+                            Background="#0D9488" Foreground="White" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding RenombradosAnotados, StringFormat='{}{0} renombrados anotados'}"
+                               Foreground="Gray" VerticalAlignment="Center" />
+                </StackPanel>
+
                 <!-- ================= MANTENIMIENTO ================= -->
                 <TextBlock Classes="sec" Text="Mantenimiento" />
                 <CheckBox Content="Usar caché de respuestas (recomendado)" IsChecked="{Binding Cache}"

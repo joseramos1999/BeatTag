@@ -81,6 +81,15 @@ Su propuesta **siempre se contrasta contra el catálogo** antes de escribir nada
 invención del modelo no llega a tus archivos. Es opcional: sin ella, el resto del análisis funciona
 igual.
 
+## 🎛️ rekordbox y los cue points
+
+rekordbox guarda los cue points y el beatgrid en su base de datos, **ligados a la ruta del archivo**.
+Al renombrar, los da por perdidos — y renombrar es justo lo que hace BeatTag.
+
+Por eso cada renombrado queda anotado, y desde **Ajustes → Reparar colección de rekordbox** puedes
+devolvérselos: exporta tu colección desde rekordbox, repárala y vuelve a importarla. El archivo
+original no se modifica.
+
 ## 👤 Nombres de artista
 
 Dos listas ampliables desde **Ajustes**, en `Documentos\Etiquetador de Musica\`:
