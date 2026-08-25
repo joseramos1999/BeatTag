@@ -35,6 +35,12 @@ public partial class DupRow : ObservableObject
     /// <summary>Por qué se considera la mejor (o qué le falta para serlo).</summary>
     [ObservableProperty] private string _motivo = "";
 
+    /// <summary>
+    /// Descriptor de edición del archivo ("Aca Out", "Melodic Intro"…), o vacío si es el original.
+    /// Al agrupar por audio es lo que distingue una copia sobrante de una herramienta distinta.
+    /// </summary>
+    public string Version { get; init; } = "";
+
     /// <summary>Verde para la copia a conservar. El resto sin fondo, para que destaque una sola.</summary>
     public IBrush? Fondo => EsMejor ? new SolidColorBrush(Color.FromRgb(0xDC, 0xFC, 0xE7)) : null;
 
@@ -246,37 +252,52 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     private void Pintar(IReadOnlyList<DuplicateGroup> groups)
     {
         var excluidas = _engine.Config.ExcludedDupFolders;
+        var porAudio = SelectedMode.Value == DuplicateMode.Fingerprint;
         Rows.Clear();
         int copies = 0, conPrioridad = 0;
         foreach (var g in groups)
         {
             var label = $"{(string.IsNullOrWhiteSpace(g.Artist) ? "¿?" : g.Artist)} - {g.Title}   ({g.Tracks.Count} copias)";
 
-            // La mejor del grupo según el criterio elegido.
-            Track? mejor = null;
-            double mejorPunt = double.NegativeInfinity;
-            foreach (var t in g.Tracks)
-            {
-                var p = Puntuar(t);
-                if (p > mejorPunt) { mejorPunt = p; mejor = t; }
-            }
-            if (mejor != null && EsPrioritaria(mejor.Folder)) conPrioridad++;
+            // Al agrupar por AUDIO, un grupo reúne el original con sus ediciones de DJ: comparten la
+            // grabación pero no son copias sobrantes, son herramientas distintas para pinchar. Por
+            // eso cada versión conserva SU ejemplar: se elige la mejor dentro de cada descriptor,
+            // no una sola para todo el grupo. Con los demás criterios no aplica: ahí un grupo son
+            // copias del mismo archivo y solo debe quedar una.
+            var porVersion = g.Tracks
+                .GroupBy(t => porAudio ? VersionDe(t) : "", StringComparer.OrdinalIgnoreCase);
 
-            foreach (var t in g.Tracks)
+            foreach (var v in porVersion)
             {
-                copies++;
-                var esMejor = ReferenceEquals(t, mejor);
-                Rows.Add(new DupRow
+                Track? mejor = null;
+                double mejorPunt = double.NegativeInfinity;
+                foreach (var t in v)
                 {
-                    Group = label,
-                    FileName = t.FileName,
-                    Quality = t.Quality,
-                    Duration = t.Duration,
-                    Folder = t.Folder,
-                    FilePath = t.FilePath,
-                    EsMejor = esMejor,
-                    Motivo = esMejor ? MotivoDe(t) : "",
-                });
+                    var p = Puntuar(t);
+                    if (p > mejorPunt) { mejorPunt = p; mejor = t; }
+                }
+                if (mejor != null && EsPrioritaria(mejor.Folder)) conPrioridad++;
+
+                foreach (var t in v)
+                {
+                    copies++;
+                    var esMejor = ReferenceEquals(t, mejor);
+                    var version = porAudio ? VersionDe(t) : "";
+                    Rows.Add(new DupRow
+                    {
+                        Group = label,
+                        FileName = t.FileName,
+                        Quality = t.Quality,
+                        Duration = t.Duration,
+                        Folder = t.Folder,
+                        FilePath = t.FilePath,
+                        Version = version,
+                        EsMejor = esMejor,
+                        Motivo = esMejor
+                            ? (version.Length > 0 ? $"Se conserva ({version})" : MotivoDe(t))
+                            : "",
+                    });
+                }
             }
         }
 
@@ -285,8 +306,19 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         Marcadas = 0;
 
         var excl = excluidas.Count > 0 ? $" · {excluidas.Count} carpeta(s) excluida(s)" : "";
-        var prio = conPrioridad > 0 ? $" · {conPrioridad} grupo(s) resueltos por carpeta prioritaria" : "";
-        Status = $"{groups.Count} grupo(s) de duplicados · {copies} archivos implicados{excl}{prio}.";
+        var prio = conPrioridad > 0 ? $" · {conPrioridad} resueltos por carpeta prioritaria" : "";
+        var nota = porAudio ? " · cada versión conserva un ejemplar" : "";
+        Status = $"{groups.Count} grupo(s) de duplicados · {copies} archivos implicados{excl}{prio}{nota}.";
+    }
+
+    /// <summary>
+    /// Descriptor de edición sacado del nombre del archivo ("Aca Out", "Melodic Intro"…). Vacío si
+    /// es el original. Es lo que separa una copia sobrante de una edición que el usuario quiere.
+    /// </summary>
+    private static string VersionDe(Track t)
+    {
+        var info = RemixParser.Parse(System.IO.Path.GetFileNameWithoutExtension(t.FilePath));
+        return info.IsVersion ? info.Label.Trim() : "";
     }
 
 

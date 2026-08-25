@@ -53,4 +53,27 @@ public partial class TrendsView : UserControl
         var destino = System.IO.Path.Combine(baseDir, Etiquetador.Core.TextUtils.Sanitize(nombre));
         await vm.CopyToFolderAsync(destino);
     }
+
+    // Guardar la lista no copia archivos: apunta a los que ya tienes donde estan.
+    private async void ExportM3u_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not TrendsViewModel vm) return;
+        var top = TopLevel.GetTopLevel(this);
+        if (top is null) return;
+
+        var sugerido = $"Tendencias {vm.SelectedCountry?.Name} {System.DateTime.Now:yyyy-MM-dd}";
+        var archivo = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Guardar lista de reproducción",
+            SuggestedFileName = Etiquetador.Core.TextUtils.Sanitize(sugerido),
+            DefaultExtension = "m3u8",
+            FileTypeChoices = new[]
+            {
+                new FilePickerFileType("Lista de reproducción") { Patterns = new[] { "*.m3u8" } },
+            },
+        });
+        var destino = archivo?.TryGetLocalPath();
+        if (string.IsNullOrEmpty(destino)) return;
+        vm.ExportarM3u(destino);
+    }
 }

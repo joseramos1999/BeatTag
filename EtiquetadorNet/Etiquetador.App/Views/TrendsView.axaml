@@ -25,6 +25,9 @@
                         Background="#7C3AED" Foreground="White" FontWeight="SemiBold" />
                 <Button Content="Cancelar" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
                 <CheckBox Content="Mostrar solo las disponibles" IsChecked="{Binding SoloLasQueTengo}" VerticalAlignment="Center" />
+                <Button Content="Guardar como lista (M3U8)" Click="ExportM3u_Click"
+                        Background="#0D9488" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Guarda las canciones que ya tienes como una lista M3U8, en el orden del top. Se abre directamente en rekordbox, Engine DJ o Serato, sin copiar archivos." />
                 <Button Content="Crear carpeta con las disponibles" Click="CreateFolder_Click"
                         IsEnabled="{Binding !IsBusy}"
                         Background="#16A34A" Foreground="White" FontWeight="SemiBold"

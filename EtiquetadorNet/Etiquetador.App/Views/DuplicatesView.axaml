@@ -59,7 +59,7 @@
                 <TextBlock Classes="desc" Margin="0"
                            Text="Compara el AUDIO, así que encuentra la misma canción aunque tenga títulos distintos o no esté etiquetada. Hay que analizar antes cada archivo: la primera vez tarda un buen rato, pero queda guardado y las siguientes son inmediatas." />
                 <TextBlock Foreground="#B45309" TextWrapping="Wrap" FontSize="12"
-                           Text="⚠ Ojo: tus ediciones de DJ (Aca Out, Melodic Intro, Extended…) comparten el audio del original, así que aparecerán juntas. NO son copias sobrantes. Revisa cada grupo antes de marcar y enviar a la papelera." />
+                           Text="Tus ediciones de DJ (Aca Out, Melodic Intro, Extended…) comparten el audio del original, así que aparecen en el mismo grupo. Cada una conserva su propio ejemplar y «Marcar sobrantes» respeta esa distinción: solo marca copias de la MISMA versión. Aun así, revisa antes de enviar nada a la papelera." />
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button Content="Analizar audio" Command="{Binding ScanFingerprintsCommand}" IsEnabled="{Binding !FpBusy}"
                             Background="#7C3AED" Foreground="White" FontWeight="SemiBold" />
@@ -108,6 +108,7 @@
             <DataGrid.Columns>
                 <DataGridCheckBoxColumn Header="Borrar" Binding="{Binding Marcada}" Width="70" MinWidth="60" />
                 <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="2*" MinWidth="140" IsReadOnly="True" />
+                <DataGridTextColumn Header="Versión" Binding="{Binding Version}" Width="140" MinWidth="90" IsReadOnly="True" />
                 <DataGridTextColumn Header="Conservar" Binding="{Binding Motivo}" Width="170" MinWidth="110" IsReadOnly="True" />
                 <DataGridTextColumn Header="Calidad" Binding="{Binding Quality}" Width="90" MinWidth="70" IsReadOnly="True" />
                 <DataGridTextColumn Header="Dur." Binding="{Binding Duration}" Width="70" MinWidth="55" IsReadOnly="True" />

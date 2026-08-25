@@ -182,6 +182,23 @@ public partial class TrendsViewModel : ViewModelBase
         => System.Text.RegularExpressions.Regex.Split(s ?? "", @"(?i)\s*(?:,| x | vs\.?| feat\.?| ft\.?|&)\s*")
                  .FirstOrDefault()?.Trim() ?? "";
 
+
+    /// <summary>
+    /// Guarda como lista M3U8 las canciones del chart que ya tienes, en el orden del top. Sirve
+    /// para abrirla directamente en rekordbox o Engine sin tener que copiar archivos.
+    /// </summary>
+    public string ExportarM3u(string destino)
+    {
+        var tengo = Rows.Where(r => r.Tengo).OrderBy(r => r.Position).ToList();
+        if (tengo.Count == 0) { Status = "Ninguna de esta lista está en la biblioteca."; return "vacio"; }
+
+        var items = tengo.Select(r => new PlaylistItem(r.FilePath, r.Artist, r.Title, 0));
+        var err = PlaylistWriter.Write(destino, items);
+        Status = err.Length == 0
+            ? $"Lista guardada con {tengo.Count} canciones: {System.IO.Path.GetFileName(destino)}"
+            : "No se pudo guardar la lista: " + err;
+        return err;
+    }
     /// <summary>Copia a una carpeta las canciones del chart que ya tienes (no las mueve).</summary>
     public async Task CopyToFolderAsync(string destino)
     {
