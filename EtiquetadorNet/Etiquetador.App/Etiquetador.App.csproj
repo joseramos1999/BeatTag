@@ -6,6 +6,12 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>BeatTag</AssemblyName>
     <ApplicationIcon>Assets\beattag.ico</ApplicationIcon>
+    <!--
+      Version del ejecutable: es la que ve Windows en las propiedades del archivo. Sin esto ponia
+      1.0.0 en todas las publicaciones mientras la aplicacion decia otra cosa por dentro.
+      Tiene que ir a la par con AppInfo.Version; hay una prueba que lo comprueba.
+    -->
+    <Version>1.5.0</Version>
   </PropertyGroup>
 
   <!--
