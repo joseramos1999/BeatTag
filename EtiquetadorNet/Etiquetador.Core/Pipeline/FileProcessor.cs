@@ -150,6 +150,25 @@ public sealed class FileProcessor
             return new ProcessResult { FilePath = filePath, Old = fileName, New = fileName, Source = "Mezcla", Skip = true, Kw = kwUsed, DurLocal = localDur };
         }
 
+        // Nombre ambiguo: la misma "x" une colaboradores en "Nicky Jam x J. Balvin - X (EQUIS)" y
+        // canciones distintas en "Ella Me Levanto x Gulevando". Ninguna expresión regular resuelve
+        // eso, pero la IA local sí juzga si son dos temas o uno con varios artistas.
+        //
+        // Se pregunta ANTES de buscar en el catálogo: si es un mashup no existe como lanzamiento, y
+        // seguir adelante solo puede acabar en una identificación equivocada. Son pocos archivos
+        // (41 en una tirada de 12.428), así que el coste es despreciable.
+        if (!manual && o.Ai && Matching.LooksAmbiguousMix(@base))
+        {
+            Step("IA local: ¿es una mezcla?", 0.1);
+            var juicio = await _ai.ParseAsync(@base, tagArtist, tagTitle, o.AiModel, ct).ConfigureAwait(false);
+            if (juicio is { IsMashup: true })
+            {
+                _log?.Detail("    -> SALTADA (la IA local la considera una mezcla de varios temas)");
+                return new ProcessResult { FilePath = filePath, Old = fileName, New = fileName, Source = "Mezcla", Skip = true, Kw = kwUsed, DurLocal = localDur };
+            }
+            if (juicio != null) _log?.Detail("    IA local: no es una mezcla, se sigue buscando");
+        }
+
         var cleanOnly = o.CleanOnly;
         ProviderResult? sp = null, it = null, dz = null, mb = null, dc = null, primary = null, sec = null;
         ProviderResult? acHit = null;
@@ -255,7 +274,14 @@ public sealed class FileProcessor
                     if (primary != null && o.Discogs && dc == null) dc = await _dc.SearchAsync(primary.Artist, primary.Title, AppInfo.UserAgent, o.DiscogsToken, ct).ConfigureAwait(false);
                     _log?.Log($"        · IA local propuso: {aiA} - {aiT} (conf {ai.Confidence}) -> {(primary != null ? "VERIFICADO en " + (dz != null ? "Deezer" : "iTunes") : "no verificado en catalogo")}", LogKind.Dim, true);
                 }
-                else if (ai != null && ai.IsMashup) _log?.Log("        · IA local: lo considera un mashup -> no se etiqueta", LogKind.Dim, true);
+                else if (ai is { IsMashup: true })
+                {
+                    // Antes esto solo se anotaba en el registro y el archivo seguía adelante hasta
+                    // acabar en "No encontradas". Si la IA dice que son varios temas, lo que
+                    // corresponde es apartarlo como mezcla, igual que hacen los demás detectores.
+                    _log?.Detail("    -> SALTADA (la IA local la considera una mezcla de varios temas)");
+                    return new ProcessResult { FilePath = filePath, Old = fileName, New = fileName, Source = "Mezcla", Skip = true, Kw = kwUsed, DurLocal = localDur };
+                }
                 else if (ai != null && ai.Title.Length == 0) _log?.Log("        · IA local: no supo identificar la cancion", LogKind.Dim, true);
             }
 

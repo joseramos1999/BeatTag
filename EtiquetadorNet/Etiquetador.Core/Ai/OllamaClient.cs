@@ -280,7 +280,20 @@ public sealed class OllamaClient
         "descartalos. Si el interprete real aparece en otra parte del nombre, usa ese.\n" +
         "3. Descarta BPM, tonalidad y etiquetas de record pool.\n" +
         "4. No inventes: si no reconoces una cancion real, devuelve artist y title vacios y confidence 0.\n" +
-        "5. \"is_mashup\" es true solo si combina 2 o mas canciones DISTINTAS.\n" +
+        // La regla del mashup va tan explicada a propósito. Con la versión corta ("true si combina
+        // dos canciones") el modelo acertaba 3 de 7 sobre casos reales, confundiendo una lista de
+        // colaboradores con una mezcla. Diciéndole DÓNDE mirar -el título, no los artistas- y con
+        // ejemplos de las dos formas, sube a 6 de 7.
+        "5. \"is_mashup\": decide asi, y SOLO asi. Mira el TITULO (lo que va DESPUES del guion). Si el " +
+        "titulo contiene DOS NOMBRES DE CANCION distintos unidos por \"x\", \"vs\" o \"&\", es un mashup: " +
+        "true. Si el titulo es UNA sola cancion, es false, DA IGUAL cuantos artistas haya antes del " +
+        "guion. Varios artistas separados por \"x\" ANTES del guion son colaboradores de una misma " +
+        "cancion, nunca un mashup.\n" +
+        "Ejemplos de esta regla:\n" +
+        "\"Tokischa x July Queen x Liss Doll RD - Bandidaje\" -> titulo \"Bandidaje\", UNA cancion -> false\n" +
+        "\"Daddy Yankee x SHAQI - Ella Me Levanto x Gulevando\" -> titulo \"Ella Me Levanto x Gulevando\", DOS canciones -> true\n" +
+        "\"Quevedo x Panic - Columbia x Bohemian\" -> titulo \"Columbia x Bohemian\", DOS canciones -> true\n" +
+        "\"Delincuente - Tokischa x Anuel AA x Nengo Flow\" -> titulo \"Delincuente\", UNA cancion -> false\n" +
         "\n" +
         "Ejemplos:\n" +
         "Nombre: Bichota Karol G Dj Masa Intro Ronca Break 95 Bpm - - bpm - DJTOOLSVIP.mp3\n" +

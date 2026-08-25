@@ -94,6 +94,40 @@ public static class Matching
         => !string.IsNullOrEmpty(folderPath)
            && Regex.IsMatch(folderPath, @"\b(mashups?|mash\s*ups?|mash-ups?)\b", RegexOptions.IgnoreCase);
 
+    /// <summary>
+    /// El nombre PODRÍA ser una mezcla, pero no está claro. Sirve para decidir a quién preguntar:
+    /// estos casos no los resuelve una expresión regular, porque la misma "x" separa colaboradores
+    /// en "Nicky Jam x J. Balvin - X (EQUIS)" y canciones distintas en "Ella Me Levanto x Gul".
+    /// Incluso puede ser parte del título, como en "ROSALÍA - Yo x Ti, Tu x Mi".
+    ///
+    /// No decide nada por su cuenta: solo marca los que merece la pena consultar con la IA local,
+    /// que sí puede juzgar si son dos canciones o una con varios artistas.
+    /// </summary>
+    public static bool LooksAmbiguousMix(string? baseName)
+    {
+        var s = baseName ?? "";
+        if (s.Length == 0) return false;
+
+        // Los que ya resuelve IsSkipMix no son ambiguos: esos se saltan sin preguntar a nadie.
+        if (Regex.IsMatch(s, @"\b(mashup|mash\s*up|mash-up|transition|segue|blend)\b", RegexOptions.IgnoreCase))
+            return false;
+
+        // Dos o más "x" sueltas entre palabras: puede ser lista de artistas o unión de temas.
+        // A los lados tiene que haber letra o número: sin eso, el título "X (EQUIS)" de
+        // "Nicky Jam x J. Balvin - X (EQUIS)" contaba como un separador más y lo marcaba.
+        var equis = Regex.Matches(s, @"(?<=[\p{L}\p{N}])\s+x\s+(?=[\p{L}\p{N}])", RegexOptions.IgnoreCase).Count;
+        if (equis >= 2) return true;
+
+        // Una "x" a cada lado del guion separador: sospechoso de unir dos canciones.
+        var partes = Regex.Split(s, @"\s+-\s+");
+        if (partes.Length >= 2
+            && Regex.IsMatch(partes[0], @"(?<=[\p{L}\p{N}])\s+x\s+(?=[\p{L}\p{N}])", RegexOptions.IgnoreCase)
+            && Regex.IsMatch(partes[^1], @"(?<=[\p{L}\p{N}])\s+x\s+(?=[\p{L}\p{N}])", RegexOptions.IgnoreCase))
+            return true;
+
+        return false;
+    }
+
     public static bool IsSkipMix(string? baseName, string? fnTitle, string? fnArtist)
     {
         baseName ??= ""; fnTitle ??= ""; fnArtist ??= "";

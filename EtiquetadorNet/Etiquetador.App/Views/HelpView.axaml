@@ -65,6 +65,7 @@
             <TextBlock Classes="p" FontWeight="Bold" Margin="0,8,0,0" Text="Qué se salta y por qué" />
             <TextBlock Classes="li" Text="• Las mezclas y mashups no se identifican: no existen como lanzamiento, así que buscarlos en el catálogo solo puede dar una identificación equivocada. Se detectan por el nombre del archivo (mashup, bootleg, transition, blend, «X vs Y») y por la carpeta." />
             <TextBlock Classes="li" Text="• Si el nombre de una carpeta contiene «mashup», se salta TODO lo que hay dentro, incluidas sus subcarpetas, se llame como se llame cada archivo. Es la forma más fiable de apartar una colección entera de mezclas." />
+            <TextBlock Classes="li" Text="• Cuando el nombre es ambiguo -varias canciones o varios artistas unidos por «x»-, se le pregunta a la IA local, si la tienes activada: distinguir «Nicky Jam x J. Balvin - X (EQUIS)», que es una colaboración, de «Ella Me Levanto x Gulevando», que son dos temas, no lo resuelve ninguna regla fija." />
             <TextBlock Classes="li" Text="• Excepción: si pides «Reanalizar…» sobre una canción concreta, se busca igualmente aunque esté guardada ahí. Cuando lo pides expresamente, mandas tú." />
 
             <TextBlock Classes="p" FontWeight="Bold" Margin="0,8,0,0" Text="Menú del clic derecho (sobre una canción)" />
