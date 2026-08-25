@@ -24,6 +24,9 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   que conviene conservar**, según el criterio que elijas: carpeta prioritaria, mejor calidad o mayor
   duración. Puedes marcar las sobrantes de todos los grupos a la vez y enviarlas a la papelera de
   una sola pasada, conservando siempre un ejemplar de cada canción.
+  También puede agrupar **por el audio** (huella acústica), lo que encuentra la misma canción
+  aunque tenga títulos distintos o no esté etiquetada. En ese modo cada versión conserva su propio
+  ejemplar: tus ediciones de DJ no se marcan como sobrantes.
 - **Calidad**: clasifica el audio por bitrate/formato y filtra el de baja calidad.
 - **Incompletas / No encontradas**: temas a los que les falta algún tag o que ninguna fuente
   identifica.
@@ -31,6 +34,9 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   del resto. El audio **no se recodifica** —se ajusta la ganancia del propio MP3—, así que no hay
   pérdida de calidad, los archivos mantienen su tamaño y el cambio es reversible.
 - **Tendencias**: listas de éxitos de más de 70 países, marcando lo que ya tienes en la biblioteca.
+- **Tonalidad**: muestra la clave de cada tema y su código **Camelot**, para mezclar en armónico.
+  Se lee de los tags (la escriben rekordbox y similares); BeatTag no la deduce del audio.
+- **Listas M3U8**: exporta lo que hayas filtrado a una lista que abren rekordbox, Engine DJ o Serato.
 - **Estadísticas**: reparto de la biblioteca por BPM, género, calidad, década y Clean/Explícito.
 - **Importar rekordbox**: trae BPM y clave musical desde un XML de rekordbox.
 - **Caché persistente** en tres niveles (respuestas de red, escaneo y análisis): no se reprocesa lo
