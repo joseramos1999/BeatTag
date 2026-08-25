@@ -214,7 +214,7 @@ public partial class EnrichViewModel : ViewModelBase
             _engine.Logger.Detail($"Firma de opciones: {sig}");
             var seen = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 
-            int i = 0, fromCache = 0, alreadyApplied = 0;
+            int i = 0, fromCache = 0, alreadyApplied = 0, sinCambio = 0;
             foreach (var t in tracks)
             {
                 ct.ThrowIfCancellationRequested();
@@ -245,7 +245,7 @@ public partial class EnrichViewModel : ViewModelBase
                 }
                 seenResults.Add(r);
                 if (r.Skip) continue;
-                if (r.Found || r.CleanOnly) AddRow(r, t);
+                if (r.Found || r.CleanOnly) { if (!AddRow(r, t)) sinCambio++; }
             }
             _engine.Analysis.Prune(seen);
             _engine.Analysis.Save();
@@ -253,10 +253,13 @@ public partial class EnrichViewModel : ViewModelBase
             Progress = 100;
             Status = $"Analizadas {tracks.Count} · propuestas {Rows.Count} · {fromCache} de caché"
                    + (alreadyApplied > 0 ? $" · {alreadyApplied} ya aplicadas (omitidas)" : "")
+                   + (sinCambio > 0 ? $" · {sinCambio} ya estaban bien" : "")
                    + $" · en {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}.";
             var low = Rows.Count(r => r.RowStatus.StartsWith('⚠'));
             if (alreadyApplied > 0)
                 _engine.Logger.Detail($"    {alreadyApplied} ya aplicadas, omitidas (se recuperan con «Olvidar aplicadas» en Ajustes).");
+            if (sinCambio > 0)
+                _engine.Logger.Detail($"    {sinCambio} no se muestran porque aplicarlas no cambiaría nada del archivo.");
             _engine.Logger.Sum($"Análisis terminado: {tracks.Count} revisadas · {Rows.Count} propuestas · {fromCache} de caché · "
                              + $"{low} de baja confianza · {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}");
             _engine.Logger.Detail($"Caché de red: {_engine.Api.CacheHits} aciertos / {_engine.Api.CacheMiss} peticiones nuevas");
@@ -282,9 +285,15 @@ public partial class EnrichViewModel : ViewModelBase
         }
     }
 
-    // Crea la fila de previsualización; auto-desmarca y marca "baja confianza" si el score es muy bajo.
-    private void AddRow(ProcessResult r, Track t)
+    /// <summary>
+    /// Crea la fila de previsualización. Devuelve false si la propuesta no cambiaría NADA del
+    /// archivo, en cuyo caso no se añade: en una biblioteca ya ordenada esas filas son la mayoría y
+    /// solo entorpecen la revisión de lo que sí hay que mirar.
+    /// </summary>
+    private bool AddRow(ProcessResult r, Track t)
     {
+        if (!Tagging.WouldChange(r, t, _engine.Config.Overwrite, _engine.BuildFields())) return false;
+
         var row = new PreviewRow { Result = r, Old = r.Old, Folder = t.Folder, Duration = t.Duration, Quality = t.Quality };
         row.UpdateFrom(r);
         if (double.TryParse(r.Score, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sc) && sc < LowConfidence)
@@ -293,6 +302,7 @@ public partial class EnrichViewModel : ViewModelBase
             row.RowStatus = "⚠ baja confianza — revisar";
         }
         Rows.Add(row);
+        return true;
     }
 
     /// <summary>Al iniciar: rellena la previsualización SOLO con lo que ya hay en la caché (sin red).</summary>
@@ -310,7 +320,7 @@ public partial class EnrichViewModel : ViewModelBase
             if (_engine.Applied.Contains(t.FilePath)) continue;   // ya aplicada
             var c = _engine.Analysis.Get(t.FilePath, sig);
             if (c == null || c.Skip) continue;
-            if (c.Found || c.CleanOnly) { AddRow(c, t); loaded++; }
+            if (c.Found || c.CleanOnly) { if (AddRow(c, t)) loaded++; }
         }
         RowsView.Refresh();
         if (loaded > 0) Status = $"{loaded} propuestas cargadas de la caché. Pulsa Analizar para completar el resto.";

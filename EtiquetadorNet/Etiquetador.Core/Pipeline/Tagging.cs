@@ -67,4 +67,46 @@ public static class Tagging
         f.Dispose();
         return log;
     }
+
+    /// <summary>
+    /// ¿Aplicar esta propuesta cambiaría algo de verdad? Si no, no merece la pena enseñarla: en una
+    /// biblioteca ya ordenada la lista se llena de filas que dejan el archivo exactamente igual.
+    ///
+    /// Replica las mismas condiciones que <see cref="ApplyTags"/>: un campo solo cuenta si se iba a
+    /// escribir. Con "Sobrescribir" desactivado, una diferencia en un campo que YA tiene valor no se
+    /// llega a aplicar, así que tampoco es un cambio.
+    ///
+    /// Va aquí, junto a ApplyTags, para que las dos reglas se lean de un vistazo y no se separen.
+    /// </summary>
+    public static bool WouldChange(ProcessResult info, Track actual, bool overwrite, FieldFlags fields)
+    {
+        // Renombrado: lo que se compara es el nombre, no la ruta.
+        var nombreActual = Path.GetFileName(actual.FilePath);
+        if (info.New.Length > 0 && !string.Equals(info.New.Trim(), nombreActual, StringComparison.Ordinal))
+            return true;
+
+        if (Escribe(fields.Title, info.Title, actual.Title, overwrite)
+            && !string.Equals(info.Title, actual.Title ?? "", StringComparison.Ordinal)) return true;
+
+        if (Escribe(fields.Artist, info.Artist, actual.Artist, overwrite)
+            && !string.Equals(info.Artist, actual.Artist ?? "", StringComparison.Ordinal)) return true;
+
+        if (Escribe(fields.Album, info.Album, actual.Album, overwrite)
+            && !string.Equals(info.Album, actual.Album ?? "", StringComparison.Ordinal)) return true;
+
+        if (Escribe(fields.Genre, info.Genre, actual.Genre, overwrite)
+            && !string.Equals(info.Genre, actual.Genre ?? "", StringComparison.Ordinal)) return true;
+
+        if (fields.Year && Regex.IsMatch(info.Year, @"^\d{4}$") && (overwrite || actual.Year == 0)
+            && uint.Parse(info.Year) != actual.Year) return true;
+
+        if (fields.Bpm && Regex.IsMatch(info.Bpm, @"^\d+$") && (overwrite || actual.Bpm == 0)
+            && uint.Parse(info.Bpm) != actual.Bpm) return true;
+
+        return false;
+    }
+
+    /// <summary>Si ese campo se llegaría a escribir, con las mismas reglas que ApplyTags.</summary>
+    private static bool Escribe(bool activado, string propuesto, string? actual, bool overwrite)
+        => activado && propuesto.Length > 0 && (overwrite || string.IsNullOrEmpty(actual));
 }

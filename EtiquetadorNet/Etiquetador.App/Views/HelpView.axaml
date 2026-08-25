@@ -56,6 +56,7 @@
             <TextBlock Classes="li" Text="• Analizar aprovecha la caché: solo procesa lo nuevo o lo que ha cambiado, así que es muy rápido a partir de la segunda vez." />
             <TextBlock Classes="li" Text="• Reanalizar todo ignora la caché y lo vuelve a consultar todo desde cero." />
             <TextBlock Classes="li" Text="• Durante el análisis puedes Pausar y Cancelar. La lista va bajando sola con lo que se va identificando." />
+            <TextBlock Classes="li" Text="• Las canciones que ya están bien no aparecen en la lista: si aplicar la propuesta dejaría el archivo exactamente igual, no hay nada que revisar. El resumen dice cuántas se han omitido por eso." />
             <TextBlock Classes="li" Text="• Cualquier celda de la tabla es editable: si prefieres otro título o nombre de archivo, escríbelo antes de aplicar." />
             <TextBlock Classes="li" Text="• Aplicar seleccionados escribe los cambios de todas las canciones marcadas. Las que se aplican bien desaparecen de la lista." />
             <TextBlock Classes="li" Text="• Deshacer última revierte la aplicación anterior, respetando lo que hayas cambiado a mano por tu cuenta." />
