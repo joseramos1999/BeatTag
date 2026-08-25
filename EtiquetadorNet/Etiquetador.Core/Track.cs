@@ -19,6 +19,36 @@ public class Track
     public uint Year { get; set; }
     public uint Bpm { get; set; }
 
+    /// <summary>
+    /// Tonalidad tal como viene en el tag ("Am", "Dbm", "8A"…). La escriben rekordbox y programas
+    /// similares; BeatTag la lee y la muestra, pero no la deduce del audio.
+    /// </summary>
+    public string? Key { get; set; }
+
+    // La conversión a Camelot se guarda calculada: la rejilla la pide una vez por fila visible y
+    // al ordenar por esa columna, por todas, y no merece la pena repetir el análisis del texto.
+    private string? _keyLeida;
+    private string _keyNombre = "";
+    private string _keyCamelot = "";
+
+    private void AsegurarKey()
+    {
+        if (_keyLeida == Key) return;
+        _keyLeida = Key;
+        var k = Analysis.MusicalKey.Parse(Key);
+        _keyNombre = k?.Name ?? "";
+        _keyCamelot = k?.Camelot ?? "";
+    }
+
+    /// <summary>Tonalidad normalizada ("Am", "C#m"), o vacío si el tag no trae nada legible.</summary>
+    public string KeyName { get { AsegurarKey(); return _keyNombre; } }
+
+    /// <summary>
+    /// Código Camelot ("8A"), que es con el que se mezcla en armónico: encajan los temas del mismo
+    /// número y los de un paso a cada lado.
+    /// </summary>
+    public string KeyCamelot { get { AsegurarKey(); return _keyCamelot; } }
+
     public int DurationSeconds { get; set; }
     public int Bitrate { get; set; }      // kbps
     public int SampleRate { get; set; }   // Hz

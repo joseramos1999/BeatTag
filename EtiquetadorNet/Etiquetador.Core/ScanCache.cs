@@ -21,6 +21,7 @@ public sealed class ScanCache
         public string? Ge { get; set; }
         public uint Yr { get; set; }
         public uint Bp { get; set; }
+        public string? Ke { get; set; }
         public int Du { get; set; }
         public int Br { get; set; }
         public int Sr { get; set; }
@@ -48,7 +49,7 @@ public sealed class ScanCache
             {
                 FilePath = path,
                 Title = e.Ti, Artist = e.Ar, Album = e.Al, Genre = e.Ge,
-                Year = e.Yr, Bpm = e.Bp, DurationSeconds = e.Du,
+                Year = e.Yr, Bpm = e.Bp, Key = e.Ke, DurationSeconds = e.Du,
                 Bitrate = e.Br, SampleRate = e.Sr, Channels = e.Ch,
             };
 
@@ -56,7 +57,7 @@ public sealed class ScanCache
         _map[path] = new Entry
         {
             M = m, S = s, Ti = t.Title, Ar = t.Artist, Al = t.Album, Ge = t.Genre,
-            Yr = t.Year, Bp = t.Bpm, Du = t.DurationSeconds, Br = t.Bitrate, Sr = t.SampleRate, Ch = t.Channels,
+            Yr = t.Year, Bp = t.Bpm, Ke = t.Key, Du = t.DurationSeconds, Br = t.Bitrate, Sr = t.SampleRate, Ch = t.Channels,
         };
         _dirty = true;
         return t;

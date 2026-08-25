@@ -44,6 +44,7 @@ public static class LibraryScanner
                 Genre = file.Tag.JoinedGenres,
                 Year = file.Tag.Year,
                 Bpm = file.Tag.BeatsPerMinute,
+                Key = file.Tag.InitialKey,
                 DurationSeconds = (int)file.Properties.Duration.TotalSeconds,
                 Bitrate = file.Properties.AudioBitrate,
                 SampleRate = file.Properties.AudioSampleRate,

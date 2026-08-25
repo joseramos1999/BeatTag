@@ -13,7 +13,7 @@
         <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,8">
             <TextBlock Classes="titulo" Text="Biblioteca" />
             <TextBlock Classes="desc"
-                       Text="Carpetas de música que analiza la aplicación. Puedes desmarcar las que quieras dejar fuera sin necesidad de quitarlas de la lista." />
+                       Text="Carpetas de música que analiza la aplicación. Puedes desmarcar las que quieras dejar fuera sin necesidad de quitarlas de la lista. Las columnas Clave y Camelot muestran la tonalidad leída de los tags: encajan para mezclar los temas del mismo número Camelot y los de un paso a cada lado." />
         </StackPanel>
 
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
@@ -52,6 +52,8 @@
                 <DataGridTextColumn Header="Género"  Binding="{Binding Genre}"    Width="1*" MinWidth="70" />
                 <DataGridTextColumn Header="Año"     Binding="{Binding Year}"     Width="60" MinWidth="50" />
                 <DataGridTextColumn Header="BPM"     Binding="{Binding Bpm}"      Width="60" MinWidth="50" />
+                <DataGridTextColumn Header="Clave"   Binding="{Binding KeyName}"    Width="60" MinWidth="50" />
+                <DataGridTextColumn Header="Camelot" Binding="{Binding KeyCamelot}" Width="70" MinWidth="55" />
                 <DataGridTextColumn Header="Dur."    Binding="{Binding Duration}" Width="70" MinWidth="55" />
                 <DataGridTextColumn Header="Calidad" Binding="{Binding Quality}"  Width="90" MinWidth="70" />
                 <DataGridTextColumn Header="Explícito" Binding="{Binding Explicit}" Width="80" MinWidth="60" />
