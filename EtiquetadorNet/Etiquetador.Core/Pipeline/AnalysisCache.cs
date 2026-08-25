@@ -48,6 +48,23 @@ public sealed class AnalysisCache
         if (_map.Remove(path)) _dirty = true;
     }
 
+    /// <summary>
+    /// Cambia una firma antigua por la equivalente actual en todo lo guardado, y devuelve cuántas
+    /// entradas se han actualizado.
+    ///
+    /// Sirve para cuando cambia el FORMATO de la firma sin cambiar lo que de verdad afecta al
+    /// resultado. Sin esto, un retoque de formato tira la caché entera y obliga a reanalizar toda
+    /// la biblioteca para acabar exactamente en el mismo sitio.
+    /// </summary>
+    public int MigrarFirma(string vieja, string nueva)
+    {
+        if (vieja == nueva) return 0;
+        var n = 0;
+        foreach (var e in _map.Values.Where(e => e.Sig == vieja)) { e.Sig = nueva; n++; }
+        if (n > 0) _dirty = true;
+        return n;
+    }
+
     public void Prune(ISet<string> livePaths)
     {
         foreach (var k in _map.Keys.Where(k => !livePaths.Contains(k)).ToList()) { _map.Remove(k); _dirty = true; }

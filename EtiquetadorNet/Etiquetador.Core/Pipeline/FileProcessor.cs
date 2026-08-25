@@ -42,6 +42,33 @@ public sealed class ProcessOptions
     /// <summary>Huella de las opciones que afectan al RESULTADO del análisis (para validar la caché).</summary>
     public string Signature() =>
         $"{Deezer}{Itunes}{Spotify}{MusicBrainz}{Discogs}{AcoustId}{Ai}|" +
+        $"{Credenciales()}{AiModel}|" +
+        $"{CleanOnly}";
+
+    /// <summary>
+    /// Resumen de las credenciales en uso. Antes solo se anotaba SI había clave, no CUÁL, así que
+    /// cambiar un token de Discogs o unas credenciales de Spotify -normalmente porque las anteriores
+    /// no funcionaban- dejaba intacta la caché: se seguían viendo los resultados obtenidos con las
+    /// viejas hasta reanalizar a la fuerza.
+    ///
+    /// Se guarda un hash recortado, nunca la clave: este texto acaba escrito en la caché de análisis.
+    /// </summary>
+    private string Credenciales()
+    {
+        var material = $"{SpotifyId}|{SpotifySecret}|{DiscogsToken}|{AcoustIdKey}";
+        if (material.Length == 3) return "sin-claves";   // solo los separadores: no hay ninguna
+        var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(material));
+        return Convert.ToHexString(bytes, 0, 6);
+    }
+
+    /// <summary>
+    /// La firma tal y como se escribia antes de distinguir QUE credenciales se usan. Solo sirve
+    /// para reconocer lo que ya hay guardado y ponerle la firma nueva: sin esto, el cambio de
+    /// formato invalidaria la cache entera de golpe y habria que reanalizar toda la biblioteca
+    /// (en la del autor, 12.428 canciones y horas de consultas) para acabar en el mismo sitio.
+    /// </summary>
+    public string SignatureLegacy() =>
+        $"{Deezer}{Itunes}{Spotify}{MusicBrainz}{Discogs}{AcoustId}{Ai}|" +
         $"{SpotifyId.Length > 0}{SpotifySecret.Length > 0}{DiscogsToken.Length > 0}{AcoustIdKey.Length > 0}{AiModel}|" +
         $"{CleanOnly}";
 }

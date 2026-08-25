@@ -121,6 +121,18 @@ public sealed class AppEngine
         Analysis = new AnalysisCache(Paths.AnalysisCachePath);
         Ignored = new IgnoreList(Paths.IgnoredPath);
         Applied = new IgnoreList(Paths.AppliedPath);
+
+        // La firma de la caché pasó a distinguir QUÉ credenciales se usan, no solo si las hay. Lo
+        // ya analizado con las mismas claves sigue siendo válido, así que se le pone la firma nueva
+        // en vez de tirarlo: de otro modo, el primer arranque tras actualizar reanalizaría la
+        // biblioteca entera sin que nada hubiera cambiado de verdad.
+        var opts = BuildOptions();
+        var migradas = Analysis.MigrarFirma(opts.SignatureLegacy(), opts.Signature());
+        if (migradas > 0)
+        {
+            Analysis.Save();
+            Logger.Detail($"Caché de análisis: {migradas} entradas conservadas al cambiar el formato de la firma.");
+        }
     }
 
     /// <summary>Opciones de proceso a partir de la config actual.</summary>

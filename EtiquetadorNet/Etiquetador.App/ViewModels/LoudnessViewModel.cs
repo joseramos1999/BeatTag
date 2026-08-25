@@ -53,9 +53,17 @@ public sealed partial class LoudnessRow : ObservableObject
     /// <summary>Si al aplicar esa ganancia el pico se pasaría de 0 dBFS (saturaría).</summary>
     public bool Satura => PeakDb + Gain > 0;
 
+    /// <summary>
+    /// El ajuste sin recodificar solo existe para MP3: consiste en retocar un campo de cada trama.
+    /// Un FLAC o un WAV se miden igual de bien, pero cambiarles el volumen exigiría reescribir el
+    /// audio, y eso ni es reversible ni se hace a espaldas del usuario. Se miden y se dejan.
+    /// </summary>
+    public bool Ajustable => Mp3Gain.EsAjustable(FilePath);
+
     /// <summary>Limitación aplicable a esta grabación, expresada sin tecnicismos.</summary>
-    public string Aviso => Satura
-        ? "Sin margen suficiente: aumentarla produciría distorsión"
+    public string Aviso =>
+        !Ajustable ? "Se mide, pero no se ajusta: solo los MP3 admiten el cambio sin pérdida"
+        : Satura ? "Sin margen suficiente: aumentarla produciría distorsión"
         : "";
 
     public IBrush StateBrush =>
@@ -254,7 +262,8 @@ public partial class LoudnessViewModel : ViewModelBase
 
     /// <summary>Grabaciones que se corregirían con los criterios actuales.</summary>
     public List<LoudnessRow> ParaAjustar()
-        => Rows.Where(r => Math.Abs(r.Gain) > UmbralAjuste)
+        => Rows.Where(r => r.Ajustable)   // un FLAC o un WAV se miden, pero no se tocan
+               .Where(r => Math.Abs(r.Gain) > UmbralAjuste)
                .Where(r => Mp3Gain.StepsFor(GananciaAplicable(r)) != 0)
                .ToList();
 
@@ -278,7 +287,16 @@ public partial class LoudnessViewModel : ViewModelBase
     {
         if (IsBusy) return;
         var objetivo = ParaAjustar();
-        if (objetivo.Count == 0) { Status = "No hay ninguna grabación que requiera ajuste."; return; }
+        if (objetivo.Count == 0)
+        {
+            // Que no haya nada que ajustar y que lo desviado no sea ajustable son dos cosas
+            // distintas, y el usuario merece saber cuál de las dos le está pasando.
+            var noMp3 = Rows.Count(r => !r.Ajustable && Math.Abs(r.Gain) > UmbralAjuste);
+            Status = noMp3 > 0
+                ? $"No hay ningún MP3 que ajustar. {noMp3} grabaciones están desviadas, pero no son MP3: se miden, no se ajustan."
+                : "No hay ninguna grabación que requiera ajuste.";
+            return;
+        }
 
         IsBusy = true;
         _engine.ReleaseAudio();
@@ -290,6 +308,7 @@ public partial class LoudnessViewModel : ViewModelBase
         _engine.Logger.Head($"Volumen: ajustando {objetivo.Count} grabaciones (referencia {Target:0.0} LUFS)");
 
         int hechas = 0, parciales = 0, fallidas = 0, i = 0;
+        var sinHistorial = false;
         try
         {
             Directory.CreateDirectory(_engine.Paths.UndoDir);
@@ -314,7 +333,15 @@ public partial class LoudnessViewModel : ViewModelBase
 
                 hechas++;
                 if (Math.Abs(aplicable - fila.Gain) > 0.75) parciales++;
-                EscribirManifiesto(manifiesto, fila.FilePath, pasos);
+
+                // El ajuste se anuncia como reversible. Si el historial no se puede escribir, esa
+                // promesa deja de ser cierta a partir de aquí, así que se para: seguir tocando
+                // archivos que ya no se podrían devolver a su sitio no es decisión de la máquina.
+                if (!EscribirManifiesto(manifiesto, fila.FilePath, pasos))
+                {
+                    sinHistorial = true;
+                    break;
+                }
 
                 // El archivo ha cambiado: se actualiza la medida sin volver a analizarlo.
                 _engine.Loudness.Update(fila.FilePath, fila.Lufs + res.Db, fila.PeakDb + res.Db);
@@ -327,7 +354,10 @@ public partial class LoudnessViewModel : ViewModelBase
             Status = $"Ajustadas {hechas} de {objetivo.Count}"
                    + (parciales > 0 ? $" · {parciales} solo en parte (sin margen para más)" : "")
                    + (fallidas > 0 ? $" · {fallidas} sin cambios" : "")
-                   + $". Se puede deshacer desde Enriquecer. {Resumen}";
+                   + (sinHistorial
+                        ? ". ⚠ SE DETUVO: no se pudo escribir el historial para deshacer, y la última canción ajustada NO se puede revertir automáticamente. Revisa que la carpeta de datos tenga permiso de escritura."
+                        : $". Se puede deshacer desde Enriquecer. {Resumen}");
+            if (sinHistorial) _engine.Logger.Err($"Volumen: detenido tras {hechas} por no poder escribir el manifiesto de deshacer");
             _engine.Logger.Sum($"Volumen: ajustadas {hechas}, parciales {parciales}, fallidas {fallidas}");
         }
         catch (OperationCanceledException) { Status = $"Ajuste cancelado ({hechas} aplicadas)."; }
@@ -339,8 +369,12 @@ public partial class LoudnessViewModel : ViewModelBase
         finally { IsBusy = false; _cts?.Dispose(); _cts = null; }
     }
 
-    /// <summary>Anota el cambio con el mismo formato que usa Enriquecer, para poder revertirlo.</summary>
-    private void EscribirManifiesto(string archivo, string ruta, int pasos)
+    /// <summary>
+    /// Anota el cambio con el mismo formato que usa Enriquecer, para poder revertirlo. Devuelve
+    /// false si no se pudo anotar: sin esa línea el ajuste ya NO se puede deshacer, y quien llama
+    /// tiene que enterarse en vez de seguir modificando archivos con una promesa que no se cumple.
+    /// </summary>
+    private bool EscribirManifiesto(string archivo, string ruta, int pasos)
     {
         try
         {
@@ -360,8 +394,9 @@ public partial class LoudnessViewModel : ViewModelBase
             File.AppendAllText(archivo,
                 System.Text.Json.JsonSerializer.Serialize(rec) + Environment.NewLine,
                 System.Text.Encoding.UTF8);
+            return true;
         }
-        catch (Exception e) { _engine.Logger.Error("Volumen: no se pudo anotar el manifiesto", e); }
+        catch (Exception e) { _engine.Logger.Error("Volumen: no se pudo anotar el manifiesto", e); return false; }
     }
 
     /// <summary>Rehace la tabla con las medidas actualizadas tras el ajuste.</summary>

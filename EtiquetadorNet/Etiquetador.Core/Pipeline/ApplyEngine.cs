@@ -11,7 +11,13 @@ namespace Etiquetador.Core.Pipeline;
 
 public sealed record ApplyOneResult(
     string FinalPath, bool DidRename, Dictionary<string, FieldChange>? Fields,
-    bool TagOk, string TagErr, bool RenOk, string RenErr);
+    bool TagOk, string TagErr, bool RenOk, string RenErr,
+    /// <summary>
+    /// Motivo por el que el cambio NO quedó anotado en el historial de deshacer, o "" si sí quedó.
+    /// El archivo ya está modificado cuando esto pasa, así que no se puede tratar como un detalle:
+    /// la aplicación promete que todo se puede deshacer, y aquí es donde esa promesa se rompe.
+    /// </summary>
+    string UndoErr = "");
 
 /// <summary>
 /// Aplica UN resultado a disco: escribe tags, renombra (validado + dedupe + caso solo-mayús/minús),
@@ -54,6 +60,13 @@ public sealed class ApplyEngine
         try { log = Tagging.ApplyTags(info, over, fields, cov); tagOk = true; }
         catch (Exception e) { tagErr = e.Message; }
 
+        // Si los tags no se pudieron escribir, NO se renombra. Antes se renombraba igualmente y el
+        // resultado quedaba marcado como error: el archivo ya se llamaba como el catálogo pero
+        // seguía con los datos viejos dentro, y quien mirase la lista lo daba por fallido mientras
+        // la ruta ya había cambiado. Media aplicación es peor que ninguna: se deja el archivo tal
+        // como estaba y quien llama decide si reintentar.
+        if (!tagOk) return new ApplyOneResult(origPath, false, null, false, tagErr, true, "");
+
         // 4) Renombrar (el destino ya está validado)
         if (target != null)
         {
@@ -80,6 +93,7 @@ public sealed class ApplyEngine
             catch (Exception e) { renOk = false; renErr = e.Message; }
         }
 
+        var undoErr = "";
         if (undoFile != null && ((log != null && log.Count > 0) || didRename))
         {
             try
@@ -87,10 +101,16 @@ public sealed class ApplyEngine
                 var rec = new UndoRecord { OrigPath = origPath, FinalPath = finalPath, Renamed = didRename, Fields = log };
                 File.AppendAllText(undoFile, JsonSerializer.Serialize(rec, Json) + Environment.NewLine, Encoding.UTF8);
             }
-            catch { /* el manifiesto es best-effort, pero el fallo no debe romper el aplicado */ }
+            catch (Exception e)
+            {
+                // El archivo YA está cambiado; no se puede deshacer el cambio por no haber podido
+                // anotarlo. Lo que sí se puede es no callarlo: sube al resultado y quien llama lo
+                // muestra, en vez de dejar al usuario creyendo que tiene marcha atrás.
+                undoErr = e.Message;
+            }
         }
         try { File.AppendAllText(doneLogPath, finalPath + Environment.NewLine, Encoding.UTF8); } catch { }
 
-        return new ApplyOneResult(finalPath, didRename, log, tagOk, tagErr, renOk, renErr);
+        return new ApplyOneResult(finalPath, didRename, log, tagOk, tagErr, renOk, renErr, undoErr);
     }
 }

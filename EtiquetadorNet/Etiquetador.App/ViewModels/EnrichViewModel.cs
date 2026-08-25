@@ -414,6 +414,7 @@ public partial class EnrichViewModel : ViewModelBase
             }
 
             int applied = 0, marked = toApply.Count, done = 0;
+            int sinHistorial = 0;   // cambios que ya están en disco pero no se pudieron anotar
             _engine.Logger.Head($"Aplicando {marked} canción(es) · manifiesto {Path.GetFileName(undoFile)}");
             Progress = 0; TimeInfo = "";
             var sw = Stopwatch.StartNew();
@@ -429,7 +430,15 @@ public partial class EnrichViewModel : ViewModelBase
                 {
                     row.SyncToResult();   // respeta lo editado en la tabla (nombre y tags)
                     var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(row.Result, Overwrite, fields, CoverMode, png, undoFile, doneLog, ct), ct);
-                    row.RowStatus = res is { TagOk: true, RenOk: true } ? "✔ aplicado" : $"⚠ {res.TagErr}{res.RenErr}";
+                    row.RowStatus = res is { TagOk: true, RenOk: true }
+                        ? (res.UndoErr.Length > 0 ? "✔ aplicado (sin marcha atrás)" : "✔ aplicado")
+                        : $"⚠ {res.TagErr}{res.RenErr}";
+                    if (res.UndoErr.Length > 0)
+                    {
+                        // El archivo ya está cambiado y no ha quedado anotado: hay que decirlo.
+                        sinHistorial++;
+                        _engine.Logger.Err($"'{row.Old}' se aplicó pero NO se pudo anotar para deshacer: {res.UndoErr}");
+                    }
                     if (res.TagOk && res.RenOk)
                     {
                         applied++; appliedRows.Add(row);
@@ -467,6 +476,8 @@ public partial class EnrichViewModel : ViewModelBase
                         ? $"Aplicada «{toApply[0].Old}». Manifiesto: {Path.GetFileName(undoFile)}"
                         : $"No se pudo aplicar «{toApply[0].Old}»: {toApply[0].RowStatus}")
                     : $"Aplicados {applied} de {marked}. Biblioteca actualizada. Manifiesto: {Path.GetFileName(undoFile)}";
+            if (sinHistorial > 0)
+                Status += $"  ⚠ {sinHistorial} no se pudieron anotar en el historial: esos cambios NO se pueden deshacer desde la aplicación.";
         }
         finally { IsBusy = false; _cts.Dispose(); _cts = null; }
     }

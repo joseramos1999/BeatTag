@@ -22,12 +22,28 @@ public static class Mp3Gain
     /// <summary>Cada unidad de global_gain equivale a 1,5 dB.</summary>
     public const double DbPerStep = 1.5;
 
+    /// <summary>
+    /// Solo se puede tocar un MP3, y hay que comprobarlo ANTES de mirar el contenido.
+    ///
+    /// El recorrido de tramas busca la marca de sincronismo byte a byte por todo el archivo, así
+    /// que en un FLAC, un WAV o un M4A puede dar con una secuencia que la imite por casualidad y
+    /// creerse que ha encontrado audio MP3. Si eso pasara al aplicar, se reescribirían bytes en
+    /// mitad de un archivo que no es un MP3: se corrompe la grabación del usuario. Con la
+    /// extensión delante, ese camino no existe.
+    /// </summary>
+    public static bool EsAjustable(string path)
+        => Path.GetExtension(path).Equals(".mp3", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Motivo, en claro, por el que un archivo no se puede ajustar (o "" si sí se puede).</summary>
+    public const string MotivoNoAjustable = "solo se puede ajustar el volumen de los MP3 sin recodificar";
+
     /// <summary>Pasos necesarios para acercarse a <paramref name="db"/> (redondeando al más cercano).</summary>
     public static int StepsFor(double db) => (int)Math.Round(db / DbPerStep, MidpointRounding.AwayFromZero);
 
     /// <summary>Comprueba que el archivo se puede procesar y cuenta sus tramas, sin modificar nada.</summary>
     public static Mp3GainResult Analyze(string path)
     {
+        if (!EsAjustable(path)) return new Mp3GainResult(false, 0, 0, MotivoNoAjustable);
         try
         {
             var bytes = File.ReadAllBytes(path);
@@ -45,6 +61,7 @@ public static class Mp3Gain
     /// </summary>
     public static Mp3GainResult Apply(string path, int steps)
     {
+        if (!EsAjustable(path)) return new Mp3GainResult(false, 0, 0, MotivoNoAjustable);
         if (steps == 0) return new Mp3GainResult(true, 0, 0, "");
         try
         {

@@ -39,6 +39,9 @@ public sealed class FingerprintScanner
     /// </summary>
     private const int SegundosAnalizados = 120;
 
+    /// <summary>Tiempo maximo por archivo. Pasado esto, fpcalc esta colgado y se mata.</summary>
+    private const int TiempoLimiteMs = 60_000;
+
     private readonly string _cacheFile;
     private readonly string _fpcalc;
     private readonly Logger? _log;
@@ -138,10 +141,24 @@ public sealed class FingerprintScanner
             using var p = Process.Start(psi);
             if (p == null) return null;
 
-            // Vaciar los DOS flujos: si el de errores se llena, fpcalc se queda bloqueado.
-            var salida = p.StandardOutput.ReadToEnd();
-            p.StandardError.ReadToEnd();
-            p.WaitForExit(60_000);
+            // Vaciar los DOS flujos A LA VEZ: si el de errores se llena mientras se espera al de
+            // salida, fpcalc se bloquea al escribir y aquí no se vuelve nunca. Leerlos en fila,
+            // como se hacía antes, tenía además el efecto de que el límite de tiempo de abajo no
+            // llegaba a evaluarse jamás: la espera ya había ocurrido dentro de la lectura.
+            var salidaTask = p.StandardOutput.ReadToEndAsync(ct);
+            var errorTask = p.StandardError.ReadToEndAsync(ct);
+
+            if (!p.WaitForExit(TiempoLimiteMs))
+            {
+                // Colgado de verdad: no queda otra que matarlo, o el análisis entero se para aquí.
+                try { p.Kill(entireProcessTree: true); } catch { }
+                _log?.Detail($"      huella: fpcalc no respondió en {TiempoLimiteMs / 1000}s · {Path.GetFileName(path)}");
+                return null;
+            }
+            p.WaitForExit();   // deja que los lectores acaben de vaciar los búferes
+
+            var salida = salidaTask.GetAwaiter().GetResult();
+            errorTask.GetAwaiter().GetResult();
             if (string.IsNullOrWhiteSpace(salida)) return null;
 
             using var doc = JsonDocument.Parse(salida);

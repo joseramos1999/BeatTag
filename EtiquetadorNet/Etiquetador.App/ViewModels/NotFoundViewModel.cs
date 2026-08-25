@@ -182,7 +182,9 @@ public partial class NotFoundViewModel : ViewModelBase
                 RowsView.Refresh();
                 _engine.Applied.Add(res.FinalPath);   // ya aplicada: no reaparecerá al analizar
                 _engine.Applied.Save();
-                Status = $"Aplicada la sugerencia: {row.Suggestion}";
+                Status = res.UndoErr.Length > 0
+                    ? $"Aplicada la sugerencia: {row.Suggestion}  ⚠ el cambio NO quedó anotado, no se podrá deshacer ({res.UndoErr})"
+                    : $"Aplicada la sugerencia: {row.Suggestion}";
             }
             else
             {
@@ -266,7 +268,9 @@ public partial class NotFoundViewModel : ViewModelBase
                 RowsView.Refresh();
                 _engine.Applied.Add(res.FinalPath);   // ya aplicada: no reaparecerá al analizar
                 _engine.Applied.Save();
-                Status = $"¡Encontrada y actualizada!: {row.FileName}";
+                Status = res.UndoErr.Length > 0
+                    ? $"¡Encontrada y actualizada!: {row.FileName}  ⚠ el cambio NO quedó anotado, no se podrá deshacer ({res.UndoErr})"
+                    : $"¡Encontrada y actualizada!: {row.FileName}";
             }
             else
             {

@@ -106,7 +106,9 @@ public partial class IncompleteViewModel : ScanViewModelBase
             var undo = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
             var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog));
             await _engine.Library.ScanAsync();   // Recompute quitará la que ya esté completa
-            Status = res.TagOk ? $"Actualizada: {row.FileName}" : $"⚠ {res.TagErr}";
+            Status = !res.TagOk ? $"⚠ {res.TagErr}"
+                   : res.UndoErr.Length > 0 ? $"Actualizada: {row.FileName}  ⚠ el cambio NO quedó anotado, no se podrá deshacer ({res.UndoErr})"
+                   : $"Actualizada: {row.FileName}";
         }
         catch (Exception e) { Status = "Error al reanalizar: " + e.Message; }
         finally { IsBusy = false; }

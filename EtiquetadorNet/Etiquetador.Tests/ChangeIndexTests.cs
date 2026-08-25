@@ -59,7 +59,10 @@ public class ChangeIndexTests
         Assert.True(acento < 1.0, $"un espacio de mas deberia puntuar casi nada, y sale {acento}");
     }
 
-    // Con el umbral por defecto (5), lo cosmetico se aparta y lo importante se queda.
+    // Lo cosmetico se aparta y lo importante se queda. Se comprueba con 5 aunque el umbral que
+    // trae la aplicacion sea 3 (AppConfig.MinChangeIndex): asi queda margen por si alguien lo sube,
+    // y sigue valiendo si baja. Medido: "pista01.mp3" -> "Bad Bunny - Titi Me Pregunto.mp3" da 9
+    // (6 si solo cambia el nombre y los tags ya estaban bien); un espacio de mas da 0.
     [Fact]
     public void El_umbral_por_defecto_separa_bien_los_dos_casos()
     {

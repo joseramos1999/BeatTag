@@ -92,7 +92,7 @@ public sealed class UndoEngine
 
         var renamedBack = RenameBack(r.Renamed, ref path, r.FinalPath, r.OrigPath);
 
-        bool restoredAny = false, skippedAny = false;
+        bool restoredAny = false, skippedAny = false, volumenFallido = false;
 
         // El volumen no es un tag: se revierte aplicando la ganancia inversa sobre el propio audio.
         // Va antes que los tags porque reescribe el archivo entero.
@@ -103,7 +103,14 @@ public sealed class UndoEngine
             {
                 var res = Analysis.Mp3Gain.Apply(path, -pasos);
                 if (res.Ok) { restoredAny = true; _log?.Log($"  deshacer: volumen devuelto ({-pasos * Analysis.Mp3Gain.DbPerStep:+0.0;-0.0} dB) [{Path.GetFileName(path)}]", LogKind.Ok); }
-                else _log?.Log($"  deshacer: NO se pudo devolver el volumen [{Path.GetFileName(path)}]: {res.Error}", LogKind.Err);
+                else
+                {
+                    // El audio sigue con el volumen cambiado. Antes esto solo se anotaba y el
+                    // registro se contaba como revertido: el manifiesto se archivaba y ya no había
+                    // forma de reintentarlo. Marcándolo como error, el manifiesto se conserva.
+                    volumenFallido = true;
+                    _log?.Log($"  deshacer: NO se pudo devolver el volumen [{Path.GetFileName(path)}]: {res.Error}", LogKind.Err);
+                }
             }
         }
 
@@ -120,6 +127,9 @@ public sealed class UndoEngine
             tf.Dispose();
         }
 
+        // El volumen manda sobre el resto: si el audio no se pudo devolver a su sitio, este registro
+        // NO está deshecho, aunque el nombre y los tags sí hayan vuelto.
+        if (volumenFallido) return Outcome.Error;
         if (renamedBack || restoredAny) return Outcome.Reverted;
         if (skippedAny) { _log?.Log($"  deshacer: cambios manuales conservados [{Path.GetFileName(r.OrigPath)}]", LogKind.No); return Outcome.Manual; }
         return Outcome.Reverted;

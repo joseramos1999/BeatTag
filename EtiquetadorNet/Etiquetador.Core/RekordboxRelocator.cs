@@ -45,9 +45,7 @@ public static class RekordboxRelocator
             foreach (var linea in File.ReadLines(mf.FullName))
             {
                 if (string.IsNullOrWhiteSpace(linea)) continue;
-                UndoRecord? r;
-                try { r = System.Text.Json.JsonSerializer.Deserialize<UndoRecord>(linea); }
-                catch { continue; }
+                var r = LeerRenombrado(linea);
                 if (r == null || !r.Renamed) continue;
                 if (string.IsNullOrEmpty(r.OrigPath) || string.IsNullOrEmpty(r.FinalPath)) continue;
                 if (string.Equals(r.OrigPath, r.FinalPath, StringComparison.OrdinalIgnoreCase)) continue;
@@ -69,6 +67,42 @@ public static class RekordboxRelocator
 
         return mapa;
     }
+
+    /// <summary>
+    /// Una línea de manifiesto, venga del formato actual o del antiguo.
+    ///
+    /// Deshacer siempre entendió los dos, pero esto solo leía el nuevo, así que los renombrados más
+    /// viejos -justo los que llevan más tiempo rotos en rekordbox- no se reparaban. El formato
+    /// antiguo guarda la ruta ACTUAL en "new" y solo el NOMBRE original en "orig", de modo que la
+    /// ruta de partida se reconstruye con la carpeta de la actual.
+    /// </summary>
+    private static UndoRecord? LeerRenombrado(string linea)
+    {
+        try
+        {
+            var nodo = System.Text.Json.Nodes.JsonNode.Parse(linea);
+            if (nodo is not System.Text.Json.Nodes.JsonObject o) return null;
+
+            if (o.ContainsKey("OrigPath"))
+                return System.Text.Json.JsonSerializer.Deserialize<UndoRecord>(linea);
+
+            var actual = o["new"]?.GetValue<string>() ?? "";
+            var nombreOriginal = o["orig"]?.GetValue<string>() ?? "";
+            if (actual.Length == 0 || nombreOriginal.Length == 0) return null;
+
+            var renombrado = o["renamed"] is System.Text.Json.Nodes.JsonValue v
+                             && v.TryGetValue<bool>(out var b) && b;
+
+            return new UndoRecord
+            {
+                OrigPath = Path.Combine(Path.GetDirectoryName(actual) ?? "", nombreOriginal),
+                FinalPath = actual,
+                Renamed = renombrado,
+            };
+        }
+        catch { return null; }
+    }
+
     /// <summary>Convierte una ruta local en la Location que escribe rekordbox.</summary>
     public static string PathToLocation(string path)
     {

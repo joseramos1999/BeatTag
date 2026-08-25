@@ -20,6 +20,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Etiquetador.Core\Etiquetador.Core.csproj" />
+    <!-- La aplicacion tambien se prueba: en sus vistas estan los flujos que tocan los archivos. -->
+    <ProjectReference Include="..\Etiquetador.App\Etiquetador.App.csproj" />
   </ItemGroup>
 
 </Project>

@@ -6,7 +6,7 @@ namespace Etiquetador.Tests;
 public class InfraTests
 {
     // --- DPAPI ---
-    [Fact]
+    [DpapiFact]
     public void Dpapi_roundtrip()
     {
         var secret = "mi-clave-secreta-123";
@@ -78,7 +78,7 @@ public class InfraTests
     }
 
     // --- AppConfig round-trip con secretos cifrados ---
-    [Fact]
+    [DpapiFact]
     public void Config_roundtrip_cifra_secretos_en_disco()
     {
         var dir = Path.Combine(Path.GetTempPath(), "etq-cfg-" + Guid.NewGuid().ToString("N"));
