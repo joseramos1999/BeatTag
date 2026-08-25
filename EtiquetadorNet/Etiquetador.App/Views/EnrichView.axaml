@@ -71,6 +71,13 @@
                     <CheckBox Content="Año" IsChecked="{Binding WriteYear}" Margin="0,0,12,0" />
                     <CheckBox Content="BPM" IsChecked="{Binding WriteBpm}" Margin="0,0,12,0" />
                 </WrapPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                    <TextBlock Text="Mostrar solo cambios de al menos" VerticalAlignment="Center" />
+                    <ComboBox ItemsSource="{Binding UmbralesCambio}" SelectedItem="{Binding MinChangeIndex}" MinWidth="70"
+                              ToolTip.Tip="Índice de 0 a 10 de cuánto cambia el archivo. Los retoques por debajo del umbral no se listan: renombrar de «pista01» a «Artista - Título» puntúa alto; corregir un acento, casi nada. Pon 0 para verlo todo." />
+                    <TextBlock Text="de 10" VerticalAlignment="Center" Foreground="Gray" />
+                </StackPanel>
+
                 <WrapPanel Margin="0,6,0,0">
                     <CheckBox Content="Sobrescribir tags existentes" IsChecked="{Binding Overwrite}" Margin="0,0,12,0" />
                     <CheckBox Content="Solo limpiar nombre (sin buscar)" IsChecked="{Binding CleanOnly}" Margin="0,0,12,0" />
@@ -155,6 +162,7 @@
                 <DataGridTextColumn Header="Remix / versión" Binding="{Binding Remixer}" Width="140" MinWidth="90" IsReadOnly="True" />
                 <DataGridTextColumn Header="Dur." Binding="{Binding Duration}" Width="60" MinWidth="50" IsReadOnly="True" />
                 <DataGridTextColumn Header="Calidad" Binding="{Binding Quality}" Width="80" MinWidth="60" IsReadOnly="True" />
+                <DataGridTextColumn Header="Cambio" Binding="{Binding Cambio}" Width="60" MinWidth="50" IsReadOnly="True" />
                 <DataGridTextColumn Header="Conf." Binding="{Binding Score}" Width="55" MinWidth="45" IsReadOnly="True" />
                 <DataGridTextColumn Header="Fuente" Binding="{Binding Source}" Width="100" MinWidth="70" IsReadOnly="True" />
                 <DataGridTextColumn Header="Estado" Binding="{Binding RowStatus}" Width="110" MinWidth="70" IsReadOnly="True" />

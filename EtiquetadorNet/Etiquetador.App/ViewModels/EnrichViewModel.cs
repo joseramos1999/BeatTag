@@ -52,6 +52,10 @@ public partial class PreviewRow : ObservableObject
     public string Folder { get; init; } = "";
     public string Duration { get; init; } = "";   // propiedad de audio (no cambia)
     public string Quality { get; init; } = "";
+
+    /// <summary>Cuánto cambia el archivo si se aplica, de 0 a 10 (ver Tagging.ChangeIndex).</summary>
+    public double Cambio { get; init; }
+
     public required ProcessResult Result { get; set; }
 
     public void Toggle() => Apply = !Apply;
@@ -113,6 +117,18 @@ public partial class EnrichViewModel : ViewModelBase
     [ObservableProperty] private bool _cleanOnly;
     [ObservableProperty] private string _coverMode = "keep";
     [ObservableProperty] private string _coverPath = "";
+
+    /// <summary>
+    /// Índice de cambio mínimo para listar una propuesta. Por debajo se considera cosmético y se
+    /// aparta: en una biblioteca ya ordenada esas filas tapan las que sí hay que revisar.
+    /// </summary>
+    [ObservableProperty] private double _minChangeIndex = 5.0;
+
+    public double[] UmbralesCambio { get; } = { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+
+    // Cambiar el umbral rehace la lista al momento: es un filtro de lo ya analizado, no hace falta
+    // volver a consultar nada.
+    partial void OnMinChangeIndexChanged(double value) { if (!IsBusy) LoadCached(); }
     [ObservableProperty] private string _status = "Añade o arrastra carpetas y pulsa Analizar.";
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private bool _isPaused;
@@ -128,7 +144,7 @@ public partial class EnrichViewModel : ViewModelBase
         nameof(UseDeezer), nameof(UseItunes), nameof(UseSpotify), nameof(UseDiscogs), nameof(UseMusicBrainz),
         nameof(UseAcoustId), nameof(UseAi), nameof(WriteTitle), nameof(WriteArtist), nameof(WriteAlbum),
         nameof(WriteGenre), nameof(WriteYear), nameof(WriteBpm), nameof(Overwrite), nameof(CleanOnly),
-        nameof(CoverMode), nameof(CoverPath),
+        nameof(CoverMode), nameof(CoverPath), nameof(MinChangeIndex),
     };
 
     public EnrichViewModel(AppEngine engine)
@@ -140,6 +156,7 @@ public partial class EnrichViewModel : ViewModelBase
         _writeTitle = c.WriteTitle; _writeArtist = c.WriteArtist; _writeAlbum = c.WriteAlbum;
         _writeGenre = c.WriteGenre; _writeYear = c.WriteYear; _writeBpm = c.WriteBpm;
         _overwrite = c.Overwrite; _cleanOnly = c.CleanOnly; _coverMode = c.CoverMode; _coverPath = c.CoverPath;
+        _minChangeIndex = c.MinChangeIndex;
 
         RowsView = new DataGridCollectionView(Rows);
         RowsView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(PreviewRow.Folder)));
@@ -167,6 +184,7 @@ public partial class EnrichViewModel : ViewModelBase
         c.WriteTitle = WriteTitle; c.WriteArtist = WriteArtist; c.WriteAlbum = WriteAlbum;
         c.WriteGenre = WriteGenre; c.WriteYear = WriteYear; c.WriteBpm = WriteBpm;
         c.Overwrite = Overwrite; c.CleanOnly = CleanOnly; c.CoverMode = CoverMode; c.CoverPath = CoverPath;
+        c.MinChangeIndex = MinChangeIndex;
         _engine.SaveConfig();   // las carpetas las persiste el LibraryStore
     }
 
@@ -292,9 +310,10 @@ public partial class EnrichViewModel : ViewModelBase
     /// </summary>
     private bool AddRow(ProcessResult r, Track t)
     {
-        if (!Tagging.WouldChange(r, t, _engine.Config.Overwrite, _engine.BuildFields())) return false;
+        var indice = Tagging.ChangeIndex(r, t, _engine.Config.Overwrite, _engine.BuildFields());
+        if (indice < MinChangeIndex) return false;
 
-        var row = new PreviewRow { Result = r, Old = r.Old, Folder = t.Folder, Duration = t.Duration, Quality = t.Quality };
+        var row = new PreviewRow { Result = r, Old = r.Old, Folder = t.Folder, Duration = t.Duration, Quality = t.Quality, Cambio = indice };
         row.UpdateFrom(r);
         if (double.TryParse(r.Score, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sc) && sc < LowConfidence)
         {
