@@ -34,7 +34,7 @@ public sealed class AppConfig
     /// Índice de cambio mínimo (0-10) para que una propuesta aparezca en Enriquecer. Por debajo se
     /// considera un retoque cosmético y se aparta, para no tapar lo que sí hay que revisar.
     /// </summary>
-    public double MinChangeIndex { get; set; } = 5.0;
+    public double MinChangeIndex { get; set; } = 3.0;
 
     /// <summary>Criterio para decidir qué copia es la mejor de cada grupo.</summary>
     public string DupKeepCriterion { get; set; } = "";

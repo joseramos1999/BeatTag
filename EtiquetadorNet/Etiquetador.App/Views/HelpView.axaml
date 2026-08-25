@@ -57,7 +57,7 @@
             <TextBlock Classes="li" Text="• Reanalizar todo ignora la caché y lo vuelve a consultar todo desde cero." />
             <TextBlock Classes="li" Text="• Durante el análisis puedes Pausar y Cancelar. La lista va bajando sola con lo que se va identificando." />
             <TextBlock Classes="li" Text="• La columna «Cambio» puntúa de 0 a 10 cuánto cambia el archivo si aplicas la propuesta: renombrar de «pista01» a «Artista - Título» puntúa alto; corregir un acento, casi nada. Las que quedan por debajo del umbral no se listan, porque no hay nada que revisar en ellas." />
-            <TextBlock Classes="li" Text="• El umbral se ajusta en Opciones («Mostrar solo cambios de al menos»). Con 5, se filtran también algunos cambios menores pero útiles, como añadir «(Extended)» o un artista invitado; bájalo a 2 o 3 si quieres verlos. Con 0 se muestra todo." />
+            <TextBlock Classes="li" Text="• El umbral se ajusta en Opciones («Mostrar solo cambios de al menos»). Viene en 3, que aparta lo cosmético y deja pasar los cambios de fondo. Bájalo a 2 si además quieres ver los menores, como añadir «(Extended)» o corregir el orden artista/título. Con 0 se muestra todo." />
             <TextBlock Classes="li" Text="• Cualquier celda de la tabla es editable: si prefieres otro título o nombre de archivo, escríbelo antes de aplicar." />
             <TextBlock Classes="li" Text="• Aplicar seleccionados escribe los cambios de todas las canciones marcadas. Las que se aplican bien desaparecen de la lista." />
             <TextBlock Classes="li" Text="• Deshacer última revierte la aplicación anterior, respetando lo que hayas cambiado a mano por tu cuenta." />

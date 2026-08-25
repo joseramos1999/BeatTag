@@ -122,7 +122,7 @@ public partial class EnrichViewModel : ViewModelBase
     /// Índice de cambio mínimo para listar una propuesta. Por debajo se considera cosmético y se
     /// aparta: en una biblioteca ya ordenada esas filas tapan las que sí hay que revisar.
     /// </summary>
-    [ObservableProperty] private double _minChangeIndex = 5.0;
+    [ObservableProperty] private double _minChangeIndex = 3.0;
 
     public double[] UmbralesCambio { get; } = { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
 
