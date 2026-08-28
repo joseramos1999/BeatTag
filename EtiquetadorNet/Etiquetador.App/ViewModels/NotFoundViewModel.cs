@@ -1,5 +1,6 @@
 using Etiquetador.App.Views;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
 using System.IO;
@@ -46,12 +47,48 @@ public partial class NotFoundViewModel : ViewModelBase
     [ObservableProperty] private double _progress;
     [ObservableProperty] private string _status = "Pulsa Analizar para buscar las que ninguna fuente identifica.";
 
+    /// <summary>Cuadro de búsqueda de la tabla: filtra lo ya listado, sin volver a analizar nada.</summary>
+    [ObservableProperty] private string _busqueda = "";
+
+    /// <summary>Cuántas quedan a la vista mientras hay búsqueda. Vacío si no se está filtrando.</summary>
+    [ObservableProperty] private string _filtroInfo = "";
+
+    /// <summary>Cuántas hay seleccionadas, para que se vea que hay acciones para el bloque entero.</summary>
+    [ObservableProperty] private string _seleccionadasInfo = "";
+
+    private IReadOnlyList<NotFoundRow> _seleccion = Array.Empty<NotFoundRow>();
+
     public NotFoundViewModel(AppEngine engine)
     {
         _engine = engine;
         RowsView = new DataGridCollectionView(Rows);
         RowsView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(NotFoundRow.Folder)));
     }
+
+    partial void OnBusquedaChanged(string value)
+    {
+        RowsView.Filter = Busqueda.Trim().Length == 0
+            ? null
+            : o => o is NotFoundRow r && BusquedaTexto.Coincide(Busqueda, r.FileName, r.Query, r.Suggestion, r.Folder);
+        RowsView.Refresh();
+        FiltroInfo = Busqueda.Trim().Length == 0 ? "" : $"{RowsView.Count} de {Rows.Count}";
+    }
+
+    /// <summary>
+    /// Filas seleccionadas en la tabla, que mantiene al día la vista: el DataGrid de Avalonia no
+    /// permite enlazar SelectedItems.
+    /// </summary>
+    public void SetSelection(IEnumerable<NotFoundRow> filas)
+    {
+        _seleccion = filas.ToList();
+        SeleccionadasInfo = _seleccion.Count > 1 ? $"{_seleccion.Count} seleccionadas" : "";
+    }
+
+    /// <summary>Sobre qué actúa una acción: lo seleccionado, y si no hay nada, la fila en curso.</summary>
+    private List<NotFoundRow> Objetivo()
+        => _seleccion.Count > 0 ? _seleccion.ToList()
+         : SelectedRow != null ? new List<NotFoundRow> { SelectedRow }
+         : new List<NotFoundRow>();
 
     [RelayCommand]
     private Task AnalyzeAsync() => RunAnalyzeAsync(force: false);
@@ -146,51 +183,72 @@ public partial class NotFoundViewModel : ViewModelBase
     [RelayCommand]
     private async Task AcceptSuggestionAsync()
     {
-        var row = SelectedRow;
-        if (row == null) { Status = "Selecciona antes una canción de la lista."; return; }
-        if (!row.HasSuggestion) { Status = "Esa canción no tiene sugerencia de la IA."; return; }
+        var filas = Objetivo().Where(f => f.HasSuggestion).ToList();
+        if (filas.Count == 0)
+        {
+            Status = Objetivo().Count == 0
+                ? "Selecciona antes una o varias canciones."
+                : "Ninguna de las seleccionadas tiene sugerencia de la IA.";
+            return;
+        }
         if (IsBusy) { Status = "Hay un proceso en curso; espera a que termine."; return; }
 
         _engine.ReleaseAudio();   // el reproductor mantiene el archivo abierto y el renombrado fallaría
         IsBusy = true;
-        Status = $"Aplicando «{row.Suggestion}»…";
-        _engine.Logger.Head($"Sugerencia de la IA aceptada por el usuario: '{row.FileName}' -> '{row.Suggestion}'");
+        Status = filas.Count == 1 ? $"Aplicando «{filas[0].Suggestion}»…" : $"Aplicando {filas.Count} sugerencias…";
+        _engine.Logger.Head($"Sugerencias de la IA aceptadas por el usuario: {filas.Count}");
+
+        // Un solo manifiesto para todo el lote: deshacerlo devuelve las mismas canciones que se
+        // aceptaron juntas, en vez de obligar a deshacer una por una.
+        var undo = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+        var campos = new FieldFlags { Title = true, Artist = true, Album = false, Genre = false, Year = false, Bpm = false };
+        int hechas = 0, fallidas = 0, sinHistorial = 0;
+
         try
         {
-            var titulo = row.AiVersion.Trim().Length > 0 ? $"{row.AiTitle} ({row.AiVersion.Trim()})" : row.AiTitle;
-            var info = new ProcessResult
+            foreach (var row in filas)
             {
-                FilePath = row.FilePath,
-                Old = row.FileName,
-                New = row.Suggestion + Path.GetExtension(row.FilePath),
-                Artist = row.AiArtist,
-                Title = titulo,
-                Found = true,
-                Source = "IA (aceptada)",
-            };
+                var titulo = row.AiVersion.Trim().Length > 0 ? $"{row.AiTitle} ({row.AiVersion.Trim()})" : row.AiTitle;
+                var info = new ProcessResult
+                {
+                    FilePath = row.FilePath,
+                    Old = row.FileName,
+                    New = row.Suggestion + Path.GetExtension(row.FilePath),
+                    Artist = row.AiArtist,
+                    Title = titulo,
+                    Found = true,
+                    Source = "IA (aceptada)",
+                };
 
-            // Solo artista y título: lo demás (álbum, año, género, BPM) no lo sabe la IA, y
-            // sobrescribir a ciegas se pisa: el usuario ha aceptado un NOMBRE, no una ficha entera.
-            var campos = new FieldFlags { Title = true, Artist = true, Album = false, Genre = false, Year = false, Bpm = false };
-            var undo = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
-            var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(info, over: true, campos, "keep", null, undo, _engine.Paths.DoneLog));
+                // Solo artista y título: lo demás (álbum, año, género, BPM) no lo sabe la IA, y
+                // sobrescribir a ciegas se pisa: el usuario ha aceptado un NOMBRE, no una ficha entera.
+                var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(info, over: true, campos, "keep", null, undo, _engine.Paths.DoneLog));
+
+                if (res.TagOk || res.DidRename)
+                {
+                    hechas++;
+                    if (res.UndoErr.Length > 0) sinHistorial++;
+                    Rows.Remove(row);
+                    _engine.Applied.Add(res.FinalPath);   // ya aplicada: no reaparecerá al analizar
+                    _engine.Logger.Detail($"    '{row.FileName}' -> '{row.Suggestion}'");
+                }
+                else
+                {
+                    fallidas++;
+                    row.RowStatus = "⚠ no se pudo escribir: " + res.TagErr;
+                    _engine.Logger.Err($"No se pudo aplicar la sugerencia en '{row.FileName}': {res.TagErr}");
+                }
+            }
+
+            _engine.Applied.Save();
+            RowsView.Refresh();
+            SetSelection(Array.Empty<NotFoundRow>());
             await _engine.Library.ScanAsync();
 
-            if (res.TagOk || res.DidRename)
-            {
-                Rows.Remove(row);
-                RowsView.Refresh();
-                _engine.Applied.Add(res.FinalPath);   // ya aplicada: no reaparecerá al analizar
-                _engine.Applied.Save();
-                Status = res.UndoErr.Length > 0
-                    ? $"Aplicada la sugerencia: {row.Suggestion}  ⚠ el cambio NO quedó anotado, no se podrá deshacer ({res.UndoErr})"
-                    : $"Aplicada la sugerencia: {row.Suggestion}";
-            }
-            else
-            {
-                row.RowStatus = "⚠ no se pudo escribir: " + res.TagErr;
-                Status = "No se pudo escribir: " + row.FileName;
-            }
+            Status = (hechas == 1 && fallidas == 0
+                        ? $"Aplicada la sugerencia: {filas[0].Suggestion}"
+                        : $"Aplicadas {hechas} de {filas.Count}" + (fallidas > 0 ? $" · {fallidas} sin poder escribir" : ""))
+                   + (sinHistorial > 0 ? $"  ⚠ {sinHistorial} no quedaron anotadas: esos cambios no se pueden deshacer." : "");
         }
         catch (Exception e) { Status = "Error al aplicar la sugerencia: " + e.Message; }
         finally { IsBusy = false; }
@@ -209,13 +267,20 @@ public partial class NotFoundViewModel : ViewModelBase
     [RelayCommand]
     private void DiscardSelected()
     {
-        var row = SelectedRow;
-        if (row == null) { Status = "Selecciona antes una canción de la lista."; return; }
-        _engine.IgnoreTrack(row.FilePath);
-        _engine.Logger.Log($"Descartada '{row.FileName}' (total descartadas: {_engine.Ignored.Count})");
-        Rows.Remove(row);
+        var filas = Objetivo();
+        if (filas.Count == 0) { Status = "Selecciona antes una o varias canciones."; return; }
+
+        _engine.IgnoreTracks(filas.Select(f => f.FilePath));
+        foreach (var f in filas) Rows.Remove(f);
         RowsView.Refresh();
-        Status = $"Descartada «{row.FileName}». No volverá a aparecer (puedes recuperarlas en Ajustes).";
+        SetSelection(Array.Empty<NotFoundRow>());
+
+        _engine.Logger.Log($"Descartadas {filas.Count} (total descartadas: {_engine.Ignored.Count})");
+        foreach (var f in filas) _engine.Logger.Detail($"    descartada '{f.FileName}'");
+
+        Status = filas.Count == 1
+            ? $"Descartada «{filas[0].FileName}». No volverá a aparecer (puedes recuperarlas en Ajustes)."
+            : $"Descartadas {filas.Count} canciones. No volverán a aparecer (puedes recuperarlas en Ajustes).";
     }
 
     [RelayCommand]

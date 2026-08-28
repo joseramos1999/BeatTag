@@ -19,7 +19,12 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   Propone tags y un nombre de archivo, y puntúa la **confianza** de cada propuesta (incluida la
   coherencia con los tags que ya trae el archivo). Las propuestas dudosas se auto-desmarcan para
   que las revises. Cada propuesta lleva un **índice de cambio de 0 a 10**: lo que apenas cambiaría
-  el archivo se aparta de la lista, para que solo tengas delante lo que merece un vistazo.
+  el archivo se aparta de la lista, para que solo tengas delante lo que merece un vistazo. Y la
+  columna **«Por qué»** explica en claro qué hizo ganar a cada coincidencia, para poder decidir
+  sobre las dudosas sin salir de la aplicación.
+- **Buscador en cada tabla**: filtra por palabras sueltas y en cualquier orden, sin acentos ni
+  mayúsculas. Selección múltiple con Ctrl+clic y Mayús+clic para marcar, aplicar o descartar por
+  bloques.
 - **Editor**: edición manual de título y tags, con reproducción de un fragmento para comprobar.
 - **Duplicados**: agrupa copias (por artista+título, solo título, o +duración) y **marca en verde la
   que conviene conservar**, según el criterio que elijas: carpeta prioritaria, mejor calidad o mayor

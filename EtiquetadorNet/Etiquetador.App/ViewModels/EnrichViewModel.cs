@@ -53,6 +53,13 @@ public partial class PreviewRow : ObservableObject
     public string Duration { get; init; } = "";   // propiedad de audio (no cambia)
     public string Quality { get; init; } = "";
 
+    /// <summary>
+    /// Por qué se propuso esto, en claro. Hasta ahora ese razonamiento solo existía en el registro:
+    /// en pantalla se veía un número de confianza y poco más, y para juzgar una propuesta dudosa
+    /// había que salir de la aplicación a leer un archivo de texto.
+    /// </summary>
+    public string Why { get; init; } = "";
+
     /// <summary>Cuánto cambia el archivo si se aplica, de 0 a 10 (ver Tagging.ChangeIndex).</summary>
     public double Cambio { get; init; }
 
@@ -138,6 +145,26 @@ public partial class EnrichViewModel : ViewModelBase
     [ObservableProperty] private string _stepInfo = "";     // fase en curso (Deezer, iTunes, IA…)
     [ObservableProperty] private string? _selectedFolder;
     [ObservableProperty] private PreviewRow? _selectedRow;
+
+    /// <summary>
+    /// Cuadro de búsqueda de la tabla. Filtra lo YA analizado, sin volver a consultar nada: en una
+    /// lista de cientos de propuestas, dar con una canción concreta no puede ser bajar con la rueda.
+    /// </summary>
+    [ObservableProperty] private string _busqueda = "";
+
+    partial void OnBusquedaChanged(string value) => AplicarFiltro();
+
+    private void AplicarFiltro()
+    {
+        RowsView.Filter = Busqueda.Trim().Length == 0
+            ? null
+            : o => o is PreviewRow r && BusquedaTexto.Coincide(Busqueda, r.Old, r.New, r.Artist, r.Title, r.Album, r.Genre);
+        RowsView.Refresh();
+        FiltroInfo = Busqueda.Trim().Length == 0 ? "" : $"{RowsView.Count} de {Rows.Count}";
+    }
+
+    /// <summary>Cuántas quedan a la vista mientras hay búsqueda. Vacío si no se está filtrando.</summary>
+    [ObservableProperty] private string _filtroInfo = "";
 
     private static readonly HashSet<string> OptionProps = new()
     {
@@ -267,6 +294,7 @@ public partial class EnrichViewModel : ViewModelBase
             }
             _engine.Analysis.Prune(seen);
             _engine.Analysis.Save();
+            _engine.Marks.Save();
             RowsView.Refresh();
             Progress = 100;
             Status = $"Analizadas {tracks.Count} · propuestas {Rows.Count} · {fromCache} de caché"
@@ -313,15 +341,30 @@ public partial class EnrichViewModel : ViewModelBase
         var indice = Tagging.ChangeIndex(r, t, _engine.Config.Overwrite, _engine.BuildFields());
         if (indice < MinChangeIndex) return false;
 
-        var row = new PreviewRow { Result = r, Old = r.Old, Folder = t.Folder, Duration = t.Duration, Quality = t.Quality, Cambio = indice };
+        var row = new PreviewRow { Result = r, Old = r.Old, Folder = t.Folder, Duration = t.Duration, Quality = t.Quality, Cambio = indice, Why = r.Why };
         row.UpdateFrom(r);
         if (double.TryParse(r.Score, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sc) && sc < LowConfidence)
         {
             row.Apply = false;
             row.RowStatus = "⚠ baja confianza — revisar";
         }
+
+        // Si el usuario ya decidió sobre esta canción, manda su decisión sobre el valor por defecto:
+        // revisar cientos de propuestas lleva su rato y cerrar la aplicación no puede tirarlo.
+        var decidida = _engine.Marks.Get(r.FilePath);
+        if (decidida is bool v) row.Apply = v;
+
+        // A partir de aquí, cualquier cambio de la casilla es cosa del usuario (la casilla de la
+        // tabla escribe directamente en la propiedad, sin pasar por ningún comando).
+        row.PropertyChanged += RowApplyChanged;
         Rows.Add(row);
         return true;
+    }
+
+    private void RowApplyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PreviewRow.Apply) || sender is not PreviewRow row) return;
+        _engine.Marks.Set(row.Result.FilePath, row.Apply);
     }
 
     /// <summary>Al iniciar: rellena la previsualización SOLO con lo que ya hay en la caché (sin red).</summary>
@@ -445,6 +488,7 @@ public partial class EnrichViewModel : ViewModelBase
                         // Queda marcada como aplicada: "Analizar" ya no volverá a proponerla
                         // (sí lo hará "Reanalizar todo", que ignora estas marcas a propósito).
                         _engine.Applied.Add(res.FinalPath);
+                        _engine.Marks.Forget(row.Result.FilePath);   // ya aplicada: su marca deja de tener sentido
                         _engine.Logger.Detail($"    OK  '{row.Old}' -> '{row.New}'");
                     }
                     else
@@ -464,6 +508,7 @@ public partial class EnrichViewModel : ViewModelBase
                 RowsView.Refresh();
             }
             _engine.Applied.Save();
+            _engine.Marks.Save();
             RecontarRenombrados();
             _engine.Logger.Sum($"Aplicación terminada: {applied} de {marked} correctas"
                              + (applied < marked ? $" · {marked - applied} con problemas" : "")
@@ -587,6 +632,8 @@ public partial class EnrichViewModel : ViewModelBase
         if (filas.Count == 0) { Status = "Selecciona antes una o varias canciones."; return; }
 
         _engine.IgnoreTracks(filas.Select(f => f.Result.FilePath));
+        foreach (var f in filas) _engine.Marks.Forget(f.Result.FilePath);
+        _engine.Marks.Save();
         foreach (var f in filas) Rows.Remove(f);
         RowsView.Refresh();
         RecontarRenombrados();

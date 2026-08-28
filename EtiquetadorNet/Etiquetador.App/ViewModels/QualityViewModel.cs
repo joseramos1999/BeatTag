@@ -2,6 +2,7 @@ using System.Threading.Tasks;
 using System.Collections.ObjectModel;
 
 using Avalonia.Collections;
+using Etiquetador.Core;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Etiquetador.App.Services;
@@ -38,10 +39,29 @@ public partial class QualityViewModel : ScanViewModelBase
         if (Store.IsScanned) Recompute();
     }
 
-    partial void OnOnlyPoorChanged(bool value)
+    /// <summary>Cuadro de búsqueda de la tabla. Se combina con el filtro de «solo baja calidad».</summary>
+    [ObservableProperty] private string _busqueda = "";
+
+    /// <summary>Cuántas quedan a la vista mientras hay búsqueda. Vacío si no se está filtrando.</summary>
+    [ObservableProperty] private string _filtroInfo = "";
+
+    partial void OnOnlyPoorChanged(bool value) => AplicarFiltro();
+    partial void OnBusquedaChanged(string value) => AplicarFiltro();
+
+    /// <summary>
+    /// Los dos filtros a la vez. Se combinan en vez de pisarse: buscar dentro de lo que ya está
+    /// acotado a baja calidad es exactamente lo que se quiere hacer.
+    /// </summary>
+    private void AplicarFiltro()
     {
-        RowsView.Filter = value ? o => o is QualRow r && r.IsPoor : null;
+        var buscando = Busqueda.Trim().Length > 0;
+        RowsView.Filter = !OnlyPoor && !buscando
+            ? null
+            : o => o is QualRow r
+                   && (!OnlyPoor || r.IsPoor)
+                   && (!buscando || BusquedaTexto.Coincide(Busqueda, r.FileName, r.Folder, r.QualityLabel));
         RowsView.Refresh();
+        FiltroInfo = buscando ? $"{RowsView.Count} de {Rows.Count}" : "";
     }
 
     protected override void Recompute()

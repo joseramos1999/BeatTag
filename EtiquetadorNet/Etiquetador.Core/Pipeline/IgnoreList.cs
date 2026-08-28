@@ -20,6 +20,9 @@ public sealed class IgnoreList
 
     public int Count => _set.Count;
 
+    /// <summary>Las rutas descartadas, ordenadas por nombre de archivo. Para poder elegir cual recuperar.</summary>
+    public IReadOnlyList<string> Items => _set.OrderBy(System.IO.Path.GetFileName, System.StringComparer.OrdinalIgnoreCase).ToList();
+
     public bool Contains(string path) => _set.Contains(path);
 
     public void Add(string path)

@@ -95,6 +95,37 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     /// <summary>Carpetas de la biblioteca, para marcarlas como prioritarias o excluidas.</summary>
     public ObservableCollection<DupFolderOption> Folders { get; } = new();
 
+    /// <summary>Cuadro de búsqueda de la tabla.</summary>
+    [ObservableProperty] private string _busqueda = "";
+
+    /// <summary>Cuántos grupos quedan a la vista mientras hay búsqueda. Vacío si no se filtra.</summary>
+    [ObservableProperty] private string _filtroInfo = "";
+
+    /// <summary>
+    /// Aquí el filtro trabaja por GRUPOS enteros, no por filas sueltas. Un duplicado solo significa
+    /// algo al lado de su pareja: dejar a la vista la copia que casa con lo buscado y esconder las
+    /// otras convertiría la tabla en una lista de canciones sueltas donde no se puede decidir nada.
+    /// Basta con que UNA copia del grupo coincida para que se vea el grupo completo.
+    /// </summary>
+    partial void OnBusquedaChanged(string value)
+    {
+        if (Busqueda.Trim().Length == 0)
+        {
+            RowsView.Filter = null;
+            RowsView.Refresh();
+            FiltroInfo = "";
+            return;
+        }
+
+        var grupos = Rows.Where(r => BusquedaTexto.Coincide(Busqueda, r.FileName, r.Folder, r.Group))
+                         .Select(r => r.Group)
+                         .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        RowsView.Filter = o => o is DupRow r && grupos.Contains(r.Group);
+        RowsView.Refresh();
+        FiltroInfo = $"{grupos.Count} grupos";
+    }
+
     /// <summary>
     /// Cabecera del desplegable de carpetas. Con muchas carpetas conviene poder ver de un vistazo
     /// qué hay configurado sin tener que abrirlo.

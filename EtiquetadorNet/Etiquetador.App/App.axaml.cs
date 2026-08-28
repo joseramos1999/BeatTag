@@ -23,6 +23,11 @@ public partial class App : Application
             {
                 DataContext = new MainViewModel(),
             };
+
+            // Al cerrar se guarda lo que solo vive en memoria. Hoy son las casillas "Aplicar" que el
+            // usuario haya tocado en Enriquecer: revisar cientos de propuestas lleva su rato y
+            // cerrar la ventana no puede tirar ese trabajo.
+            desktop.ShutdownRequested += (_, _) => Services.AppEngine.Current?.Marks.Save();
         }
 
         base.OnFrameworkInitializationCompleted();

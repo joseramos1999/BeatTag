@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using System.Linq;
 using Avalonia.VisualTree;
 using Etiquetador.App.ViewModels;
 
@@ -36,8 +37,20 @@ public partial class NotFoundView : UserControl
     {
         if (sender is not DataGrid grid) return;
         if (!e.GetCurrentPoint(grid).Properties.IsRightButtonPressed) return;
-        if (e.Source is Control c && c.FindAncestorOfType<DataGridRow>() is { DataContext: { } item })
+
+        // Pulsar con el derecho apunta a la fila de debajo, salvo que YA forme parte de una
+        // selección: ahí se deja intacta, o abrir el menú para actuar sobre un bloque lo reduciría
+        // a una sola fila justo antes de ejecutar la acción.
+        if (e.Source is Control c && c.FindAncestorOfType<DataGridRow>() is { DataContext: { } item }
+            && !grid.SelectedItems.Contains(item))
             grid.SelectedItem = item;
+    }
+
+    /// <summary>Lleva la selección al modelo: el DataGrid de Avalonia no deja enlazar SelectedItems.</summary>
+    private void Grid_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not DataGrid grid || DataContext is not NotFoundViewModel vm) return;
+        vm.SetSelection(grid.SelectedItems.OfType<NotFoundRow>());
     }
 
     private void Grid_DoubleTapped(object? sender, TappedEventArgs e) => GridBehaviors.AutoFitOnHeaderDoubleTap(sender, e);

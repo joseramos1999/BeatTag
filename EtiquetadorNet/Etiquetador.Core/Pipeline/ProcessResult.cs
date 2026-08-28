@@ -56,5 +56,12 @@ public sealed class ProcessResult
 
     public int DurLocal { get; set; }
     public string DurMatch { get; set; } = "";
+    /// <summary>
+    /// Por que se propuso esto, en claro: que hizo ganar a la coincidencia y como la corrigen los
+    /// tags que el archivo ya traia. Se ensena en la tabla para poder juzgar una propuesta dudosa
+    /// sin abrir el registro. Vacio si no hubo coincidencia de catalogo.
+    /// </summary>
+    public string Why { get; set; } = "";
+
     public string FieldSrc { get; set; } = "";
 }

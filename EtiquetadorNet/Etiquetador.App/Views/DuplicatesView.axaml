@@ -25,6 +25,9 @@
                       ToolTip.Tip="Qué copia se considera la mejor de cada grupo. Es la que se marca en verde y la que no se marca al pulsar «Marcar sobrantes»." />
             <Button Content="⯆ Desplegar" Click="ExpandAll_Click" />
             <Button Content="⯈ Cerrar" Click="CollapseAll_Click" />
+            <TextBox Text="{Binding Busqueda}" PlaceholderText="Buscar…" Width="180"
+                     ToolTip.Tip="Filtra por archivo, carpeta o grupo. Se muestran los GRUPOS completos que contengan alguna coincidencia: un duplicado solo significa algo al lado de su pareja." />
+            <TextBlock Text="{Binding FiltroInfo}" VerticalAlignment="Center" Opacity="0.7" />
         </StackPanel>
 
         <!-- Carpetas: prioritaria = de ahí sale la copia buena; excluida = ni se mira. -->

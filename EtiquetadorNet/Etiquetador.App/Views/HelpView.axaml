@@ -62,6 +62,9 @@
             <TextBlock Classes="li" Text="• Puedes seleccionar varias canciones a la vez (Ctrl+clic para ir sumando, Mayús+clic para un bloque entero) y actuar sobre todas con el clic derecho: marcarlas, desmarcarlas o quitarlas de la lista de una vez. Arriba aparece cuántas llevas seleccionadas." />
             <TextBlock Classes="li" Text="• «Marcar / desmarcar» sobre un bloque a medias las marca todas; solo las desmarca si ya estaban todas marcadas." />
             <TextBlock Classes="li" Text="• «Quitar de la lista» descarta esas canciones: no volverán a aparecer en Enriquecer. No se toca ningún archivo y se recuperan desde Ajustes." />
+            <TextBlock Classes="li" Text="• La columna «Por qué» explica en claro qué hizo ganar a esa coincidencia: el título exacto, la duración que cuadra, la versión que pedías, o los tags que ya traía el archivo y no concuerdan. Posa el ratón sobre la fila para verlo entero. Sirve para decidir sobre una propuesta dudosa sin abrir el registro." />
+            <TextBlock Classes="li" Text="• El cuadro «Buscar…» filtra las propuestas ya analizadas por archivo, artista, título, álbum o género. Va por palabras sueltas y en cualquier orden, sin acentos ni mayúsculas: «bunny titi» encuentra «Bad Bunny - Tití Me Preguntó»." />
+            <TextBlock Classes="li" Text="• Las casillas que marcas o desmarcas se conservan aunque cierres la aplicación: una revisión larga se puede dejar a medias y seguir otro día." />
             <TextBlock Classes="li" Text="• Aplicar seleccionados escribe los cambios de todas las canciones marcadas. Las que se aplican bien desaparecen de la lista." />
             <TextBlock Classes="li" Text="• Deshacer última revierte la aplicación anterior, respetando lo que hayas cambiado a mano por tu cuenta." />
 
@@ -112,6 +115,7 @@
             <TextBlock Classes="li" Text="• Incompletas — canciones a las que les falta algún tag; con el clic derecho puedes Editar o Reanalizar." />
             <TextBlock Classes="li" Text="• No encontradas — las que ninguna fuente ha sabido identificar. Buenas candidatas para el buscador por enlace." />
             <TextBlock Classes="li" Text="   · La columna «Sugerencia de la IA» muestra cómo entiende el nombre la IA local cuando ningún catálogo confirma la canción. Repásala y, si es correcta, «Aceptar sugerencia» renombra el archivo y escribe artista y título." />
+            <TextBlock Classes="li" Text="   · Aquí también puedes seleccionar varias (Ctrl+clic o Mayús+clic) y aceptar o descartar todas de una vez, y filtrar con el cuadro «Buscar…»." />
             <TextBlock Classes="li" Text="   · Es la única parte de la aplicación donde se escribe algo sin confirmación de un catálogo, y por eso lo decides tú canción a canción. Se filtra antes lo que la IA se inventa: solo se sugiere lo que reordena o completa datos que ya estaban en el nombre o en los tags. Como cualquier otro cambio, se puede deshacer desde el historial." />
 
             <!-- TENDENCIAS -->
@@ -145,7 +149,7 @@
             <TextBlock Classes="li" Text="• IA local — opcional y sin clave. Se ejecuta en tu propio equipo mediante Ollama, de modo que no se envía información a ningún servicio externo. Sirve para interpretar nombres de archivo muy alterados; su propuesta siempre se contrasta con el catálogo antes de aplicarse. Si no la instalas, el resto del análisis funciona igual." />
             <TextBlock Classes="li" Text="• Probar conexión — comprueba que cada fuente responde con tus claves." />
             <TextBlock Classes="li" Text="• Vaciar caché — borra las cachés de red, escaneo y análisis. Se regeneran solas al volver a usar la app." />
-            <TextBlock Classes="li" Text="• Recuperar descartadas — vuelve a tener en cuenta las canciones que quitaste de la lista en Enriquecer. Y «Olvidar aplicadas» hace lo propio con las que ya se aplicaron." />
+            <TextBlock Classes="li" Text="• Recuperar descartadas — abre la lista de las que quitaste de la lista en Enriquecer o en No encontradas, para elegir cuáles vuelves a tener en cuenta. Puedes buscar dentro y marcar solo las que te interesen: descartar se decide canción a canción, así que deshacerlo también. Y «Olvidar aplicadas» hace lo propio con las que ya se aplicaron." />
             <TextBlock Classes="li" Text="• Nombres de artista — dos listas ampliables: los alias agrupan nombres distintos de un mismo artista (un artista puede figurar en el catálogo con un nombre anterior) y las grafías fijan cómo debe escribirse un nombre." />
             <TextBlock Classes="li" Text="• Limpiar carpeta de datos — borra registros, informes y cachés, diciendo antes cuánto ocupa cada cosa. No toca los ajustes, ni las listas de artista, ni el historial para deshacer." />
             <TextBlock Classes="li" Text="• Reparar colección de rekordbox — rekordbox guarda los cue points y el beatgrid en su base de datos, ligados a la ruta del archivo, así que al renombrar los da por perdidos. BeatTag anota cada renombrado y puede devolvérselos: exporta tu colección desde rekordbox, repárala aquí y vuelve a importarla. El archivo original no se toca." />

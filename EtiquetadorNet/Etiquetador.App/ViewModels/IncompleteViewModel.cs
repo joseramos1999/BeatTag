@@ -34,6 +34,21 @@ public partial class IncompleteViewModel : ScanViewModelBase
 
     [ObservableProperty] private IncRow? _selectedRow;
 
+    /// <summary>Cuadro de busqueda de la tabla: filtra lo ya listado.</summary>
+    [ObservableProperty] private string _busqueda = "";
+
+    /// <summary>Cuantas quedan a la vista mientras hay busqueda. Vacio si no se esta filtrando.</summary>
+    [ObservableProperty] private string _filtroInfo = "";
+
+    partial void OnBusquedaChanged(string value)
+    {
+        RowsView.Filter = Busqueda.Trim().Length == 0
+            ? null
+            : o => o is IncRow r && BusquedaTexto.Coincide(Busqueda, r.FileName, r.Folder, r.Missing, r.Title, r.Artist, r.Genre);
+        RowsView.Refresh();
+        FiltroInfo = Busqueda.Trim().Length == 0 ? "" : $"{RowsView.Count} de {Rows.Count}";
+    }
+
     public IncompleteViewModel(AppEngine engine) : base(engine.Library)
     {
         _engine = engine;

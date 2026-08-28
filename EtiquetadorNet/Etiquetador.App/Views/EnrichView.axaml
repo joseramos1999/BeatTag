@@ -45,6 +45,9 @@
                     ToolTip.Tip="Desmarca todas las filas." />
             <Button Content="⯆ Desplegar" Click="ExpandAll_Click" Margin="0,0,6,4" />
             <Button Content="⯈ Cerrar" Click="CollapseAll_Click" Margin="0,0,6,4" />
+            <TextBox Text="{Binding Busqueda}" PlaceholderText="Buscar…" Width="190" Margin="6,0,4,4"
+                     ToolTip.Tip="Filtra lo ya analizado por archivo, artista, título, álbum o género. Por palabras sueltas y en cualquier orden: «bunny titi» encuentra «Bad Bunny - Tití Me Preguntó»." />
+            <TextBlock Text="{Binding FiltroInfo}" VerticalAlignment="Center" Opacity="0.7" Margin="0,0,6,4" />
             <!--
               Solo aparece al seleccionar varias filas. Es lo que hace ver que hay acciones para el
               bloque entero: sin esto, el menú del clic derecho no se le ocurre a nadie.
@@ -146,6 +149,11 @@
             <DataGrid.Styles>
                 <Style Selector="DataGridRow">
                     <Setter Property="Background" Value="{Binding StateBrush}" />
+                    <!--
+                      El motivo completo al posar el ratón sobre la fila: la columna lo recorta, y
+                      aquí cabe entero sin tener que ensancharla ni abrir el registro.
+                    -->
+                    <Setter Property="ToolTip.Tip" Value="{Binding Why}" />
                 </Style>
             </DataGrid.Styles>
             <DataGrid.ContextMenu>
@@ -180,6 +188,12 @@
                 <DataGridTextColumn Header="Cambio" Binding="{Binding Cambio}" Width="60" MinWidth="50" IsReadOnly="True" />
                 <DataGridTextColumn Header="Conf." Binding="{Binding Score}" Width="55" MinWidth="45" IsReadOnly="True" />
                 <DataGridTextColumn Header="Fuente" Binding="{Binding Source}" Width="100" MinWidth="70" IsReadOnly="True" />
+                <!--
+                  Por qué se propuso esto. Es la explicación que hasta ahora solo estaba en el
+                  registro: sin ella, decidir sobre una propuesta dudosa obligaba a salir de la
+                  aplicación y leer un archivo de texto.
+                -->
+                <DataGridTextColumn Header="Por qué" Binding="{Binding Why}" Width="220" MinWidth="120" IsReadOnly="True" />
                 <DataGridTextColumn Header="Estado" Binding="{Binding RowStatus}" Width="110" MinWidth="70" IsReadOnly="True" />
             </DataGrid.Columns>
         </DataGrid>

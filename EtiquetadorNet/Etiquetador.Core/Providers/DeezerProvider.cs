@@ -34,7 +34,7 @@ public sealed class DeezerProvider
         var data = J.A(J.P(r, "data"));
         if (data == null || data.Count == 0) { Log?.Detail("      dz: 0 resultados"); return null; }
 
-        var pick = SelectBest(data, artist, title, wantRemix, wantLive, localDur, isEdit, out var bestSc,
+        var pick = SelectBest(data, artist, title, wantRemix, wantLive, localDur, isEdit, out var bestSc, out var bestWhy,
             Log == null ? null : m => Log.Detail("      dz: " + m), expectedRemixer);
         if (pick == null) { Log?.Detail($"      dz: {data.Count} resultados, ninguno aceptado"); return null; }
 
@@ -73,6 +73,7 @@ public sealed class DeezerProvider
             CoverUrl = J.S(J.P(pick, "album", "cover_big")),
             AlbumId = J.S(J.P(pick, "album", "id")),
             Score = bestSc < -900 ? 0 : Math.Round(bestSc, 1),
+            Why = bestWhy,
             Dur = J.I(J.P(pick, "duration")),
         };
     }
@@ -93,15 +94,27 @@ public sealed class DeezerProvider
         return "";
     }
 
-    /// <summary>Selección + scoring pura sobre los items de Deezer (data). Devuelve el item elegido o null.</summary>
+    /// <summary>
+    /// Misma selección para quien solo quiere la puntuación. Existe para no obligar a declarar un
+    /// descarte en las decenas de pruebas de scoring, a las que el motivo no les aporta nada.
+    /// </summary>
     public static JsonNode? SelectBest(JsonArray data, string artist, string title, bool wantRemix, bool wantLive,
         int localDur, bool isEdit, out double bestSc, Action<string>? trace = null, string expectedRemixer = "")
+        => SelectBest(data, artist, title, wantRemix, wantLive, localDur, isEdit, out bestSc, out _, trace, expectedRemixer);
+
+    /// <summary>Selección + scoring pura sobre los items de Deezer (data). Devuelve el item elegido o null.</summary>
+    public static JsonNode? SelectBest(JsonArray data, string artist, string title, bool wantRemix, bool wantLive,
+        int localDur, bool isEdit, out double bestSc, out string bestWhy, Action<string>? trace = null, string expectedRemixer = "")
     {
         var nRemixer = TextUtils.Nk(expectedRemixer);
         var na = TextUtils.Nk(artist);
         var nt = TextUtils.Nk(Descriptors.CleanKeywords(title));
         JsonNode? pick = null;
         bestSc = -999.0;
+        bestWhy = "";
+        // Motivo por el que gana el candidato elegido. Antes solo iba a la traza y se perdia: es
+        // justo lo que hace falta para decidir sobre una propuesta dudosa sin abrir el registro.
+        var razones = new List<string>();
 
         foreach (var x in data)
         {
@@ -215,7 +228,7 @@ public sealed class DeezerProvider
             }
             else why.Add("sin duracion");
             trace?.Invoke($"candidato '{J.S(J.P(x, "artist", "name"))} - {rt}' = {sc:0.##}  [{string.Join(", ", why)}]");
-            if (sc > bestSc) { bestSc = sc; pick = x; }
+            if (sc > bestSc) { bestSc = sc; pick = x; razones = why; }
         }
         if (pick != null && bestSc <= -8)
         {
@@ -260,7 +273,7 @@ public sealed class DeezerProvider
                     else why.Add($"dur Δ{dd2}s (version)");
                 }
                 trace?.Invoke($"respaldo '{J.S(J.P(x, "artist", "name"))} - {rt}' = {sc:0.##}  [{string.Join(", ", why)}]");
-                if (sc > best) { best = sc; pick = x; }
+                if (sc > best) { best = sc; pick = x; razones = why; }
             }
             if (pick != null) bestSc = best;
         }
@@ -289,7 +302,12 @@ public sealed class DeezerProvider
                 var tFuzzy = nt.Length >= 5 && tn.Length >= 5 && Matching.JaroWinkler(nt, tn) >= 0.95;
                 var dur = J.I(J.P(x, "duration"));
                 var durOk = localDur > 0 && dur > 0 && Math.Abs(dur - localDur) <= 4;
-                if ((aFuzzy && tStrict) || (aStrict && tFuzzy && durOk && !isEdit)) { pick = x; bestSc = 5; break; }
+                if ((aFuzzy && tStrict) || (aStrict && tFuzzy && durOk && !isEdit))
+                {
+                    pick = x; bestSc = 5;
+                    razones = new List<string> { "coincidencia aproximada: tolera erratas del nombre" };
+                    break;
+                }
                 // Mismo artista y un título PARECIDO pero no incluido: erratas del nombre del
                 // archivo ("Prrum" por "Prrrum", "CUENTA REGREVISA" por "Cuenta Regresiva").
                 //
@@ -308,8 +326,13 @@ public sealed class DeezerProvider
                     if (jw >= 0.95 && jw > bestFzJw) { bestFzJw = jw; bestFz = x; }
                 }
             }
-            if (pick == null && bestFz != null) { pick = bestFz; bestSc = 4; }
+            if (pick == null && bestFz != null)
+            {
+                pick = bestFz; bestSc = 4;
+                razones = new List<string> { $"mismo artista y título casi igual ({bestFzJw:0.00} de parecido)" };
+            }
         }
+        bestWhy = pick == null ? "" : string.Join(", ", razones);
         return pick;
     }
 }

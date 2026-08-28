@@ -17,4 +17,11 @@ public sealed record ProviderResult
     public int Bpm { get; init; }
     public double Score { get; init; }
     public int Dur { get; init; }
+
+    /// <summary>
+    /// Por que gano este candidato ("titulo exacto +10, dur =1s +5"). Es el razonamiento del
+    /// scoring, que antes solo se escribia en el registro y se perdia: llevarlo hasta la pantalla
+    /// permite juzgar una propuesta dudosa sin salir de la aplicacion.
+    /// </summary>
+    public string Why { get; init; } = "";
 }

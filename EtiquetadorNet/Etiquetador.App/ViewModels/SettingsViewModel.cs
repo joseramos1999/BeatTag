@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Etiquetador.App.Views;
 using Etiquetador.App.Services;
 using Etiquetador.Core;
 
@@ -489,14 +490,28 @@ public partial class SettingsViewModel : ViewModelBase
         Status = "Carpeta de registros: " + _engine.Paths.LogsDir;
     }
 
-    /// <summary>Vuelve a tener en cuenta las canciones descartadas con "Quitar de la lista".</summary>
+    /// <summary>
+    /// Vuelve a tener en cuenta canciones descartadas con "Quitar de la lista", ELIGIENDO cuáles.
+    ///
+    /// Antes era todo o nada: quien había descartado trescientas y quería una sola de vuelta tenía
+    /// que devolverlas todas y volver a descartar las demás.
+    /// </summary>
     [RelayCommand]
-    private void RestoreIgnored()
+    private async Task RestoreIgnoredAsync()
     {
-        var n = _engine.Ignored.Count;
-        if (n == 0) { Status = "No hay ninguna canción descartada."; return; }
-        _engine.ClearIgnored();
-        Status = $"Recuperadas {n} canciones descartadas. Vuelve a analizar en Enriquecer para verlas.";
+        if (_engine.Ignored.Count == 0) { Status = "No hay ninguna canción descartada."; return; }
+        if (Avalonia.Application.Current?.ApplicationLifetime
+            is not Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow: { } owner })
+        { Status = "No se pudo abrir la ventana."; return; }
+
+        var elegidas = await RestoreIgnoredDialog.AskAsync(owner, _engine.Ignored.Items);
+        if (elegidas == null) return;                       // cancelado
+        if (elegidas.Count == 0) { Status = "No marcaste ninguna."; return; }
+
+        _engine.RestoreIgnored(elegidas);
+        Status = $"Recuperadas {elegidas.Count} canciones (quedan {_engine.Ignored.Count} descartadas). "
+               + "Vuelve a analizar en Enriquecer para verlas.";
+        _engine.Logger.Log($"Recuperadas {elegidas.Count} canciones descartadas (quedan {_engine.Ignored.Count})");
     }
 
     /// <summary>Olvida qué canciones se aplicaron ya, para que vuelvan a proponerse al analizar.</summary>

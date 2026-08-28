@@ -473,6 +473,7 @@ public sealed class FileProcessor
 
         // Confianza mostrada = puntuación del proveedor + coherencia con los tags ya embebidos.
         var scoreStr = "";
+        var why = "";
         if (primary != null)
         {
             var tagAdj = Matching.TagCoherence(tagArtist, tagTitle, primary.Artist, primary.Title);
@@ -500,6 +501,26 @@ public sealed class FileProcessor
             _log?.Detail($"    confianza-> {primary.Score.ToString(inv)} (fuente) "
                        + $"{(tagAdj >= 0 ? "+" : "")}{tagAdj.ToString(inv)} (tags) = {scoreStr}"
                        + (finalScore < 2.0 ? "  [BAJA]" : ""));
+
+            // El mismo razonamiento que va al registro, guardado para enseñarlo en la tabla: por qué
+            // ganó esta coincidencia y cómo la corrigen los tags que el archivo ya traía. Es lo que
+            // convierte una propuesta dudosa en una decisión de un segundo.
+            var partes = new List<string>();
+            if (primary.Why.Length > 0) partes.Add(primary.Why);
+            else if (primary.Dur > 0 && localDur > 0)
+            {
+                // Fuentes que no detallan su puntuación (iTunes, Spotify). Al menos se dice lo que
+                // sí se puede afirmar de este archivo: si la duración cuadra con la del catálogo,
+                // que es la comprobación que más veces cambia una decisión.
+                var dd = Math.Abs(primary.Dur - localDur);
+                partes.Add(dd <= 2 ? $"la duración cuadra (Δ{dd}s)" : $"la duración difiere en {dd}s");
+            }
+            if (tagAdj != 0)
+                partes.Add(tagAdj > 0
+                    ? $"los tags del archivo concuerdan +{tagAdj.ToString(inv)}"
+                    : $"los tags del archivo NO concuerdan {tagAdj.ToString(inv)}");
+            if (manual) partes.Add(o.SearchSource.Length > 0 ? $"coincidencia elegida por ti en {o.SearchSource}" : "búsqueda dictada por ti");
+            why = string.Join(" · ", partes);
         }
         _log?.Detail($"    -> {(primary != null || acHit != null || genreOnly || cleanOnly ? "OK" : "SIN RESULTADO")} · fuente={srcLabel} · nuevo='{newBase + ext}'");
 
@@ -548,6 +569,7 @@ public sealed class FileProcessor
             Score = scoreStr,
             Remixer = remix.Remixer,
             RemixKind = remix.Kind,
+            Why = why,
             AiArtist = sugA,
             AiTitle = sugT,
             AiVersion = sugV,

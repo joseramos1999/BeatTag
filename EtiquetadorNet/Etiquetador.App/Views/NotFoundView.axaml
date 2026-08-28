@@ -30,12 +30,21 @@
                     ToolTip.Tip="Renombra el archivo y escribe artista y título con lo que propone la IA local. Ningún catálogo lo ha confirmado: repasa antes la columna «Sugerencia de la IA». Se puede deshacer desde el historial." />
             <Button Content="⯆ Desplegar todo" Click="ExpandAll_Click" Margin="0,0,6,4" />
             <Button Content="⯈ Cerrar todo" Click="CollapseAll_Click" Margin="0,0,6,4" />
+            <TextBox Text="{Binding Busqueda}" PlaceholderText="Buscar…" Width="180" Margin="6,0,4,4"
+                     ToolTip.Tip="Filtra por archivo, carpeta, búsqueda usada o sugerencia de la IA. Por palabras sueltas y en cualquier orden." />
+            <TextBlock Text="{Binding FiltroInfo}" VerticalAlignment="Center" Opacity="0.7" Margin="0,0,6,4" />
+            <Border IsVisible="{Binding SeleccionadasInfo, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                    Background="#1E3A8A" CornerRadius="4" Padding="8,3" Margin="0,0,6,4" VerticalAlignment="Center">
+                <TextBlock Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center"
+                           Text="{Binding SeleccionadasInfo, StringFormat='{}{0} · clic derecho para actuar sobre todas'}" />
+            </Border>
             <TextBlock Text="{Binding Status}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
         </WrapPanel>
         <ProgressBar DockPanel.Dock="Top" Minimum="0" Maximum="100" Value="{Binding Progress}" Height="6"
                      IsVisible="{Binding IsBusy}" Margin="0,0,0,6" />
 
         <DataGrid Name="Grid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
+                  SelectionMode="Extended" SelectionChanged="Grid_SelectionChanged"
                   x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
                   CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
                   PointerPressed="Grid_PointerPressed" DoubleTapped="Grid_DoubleTapped">

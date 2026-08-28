@@ -22,6 +22,9 @@ public sealed class AppPaths
     public string LoudnessCachePath { get; }
     public string FingerprintCachePath { get; }
     public string IgnoredPath { get; }
+
+    /// <summary>Casillas "Aplicar" que el usuario ha tocado a mano en Enriquecer.</summary>
+    public string ApplyMarksPath { get; }
     public string AppliedPath { get; }
 
     public AppPaths(string? dataDir = null)
@@ -44,6 +47,7 @@ public sealed class AppPaths
         FingerprintCachePath = Path.Combine(DataDir, "huellas.json");
         IgnoredPath = Path.Combine(DataDir, "descartadas.json");
         AppliedPath = Path.Combine(DataDir, "aplicadas.json");
+        ApplyMarksPath = Path.Combine(DataDir, "marcas-aplicar.json");
     }
 
     /// <summary>Crea las carpetas de datos si no existen (idempotente).</summary>

@@ -46,6 +46,9 @@ public sealed class AppEngine
     public AnalysisCache Analysis { get; }
     public IgnoreList Ignored { get; }
 
+    /// <summary>Casillas "Aplicar" que el usuario ha tocado: sobreviven a cerrar la aplicacion.</summary>
+    public ApplyMarks Marks { get; }
+
     /// <summary>Canciones ya aplicadas: se omiten en "Analizar" (pero no en "Reanalizar todo").</summary>
     public IgnoreList Applied { get; }
     public CandidateFinder Candidates { get; }
@@ -121,6 +124,7 @@ public sealed class AppEngine
         Analysis = new AnalysisCache(Paths.AnalysisCachePath);
         Ignored = new IgnoreList(Paths.IgnoredPath);
         Applied = new IgnoreList(Paths.AppliedPath);
+        Marks = new ApplyMarks(Paths.ApplyMarksPath);
 
         // La firma de la caché pasó a distinguir QUÉ credenciales se usan, no solo si las hay. Lo
         // ya analizado con las mismas claves sigue siendo válido, así que se le pone la firma nueva
@@ -276,4 +280,11 @@ public sealed class AppEngine
 
     /// <summary>Vuelve a tener en cuenta todas las canciones descartadas.</summary>
     public void ClearIgnored() => Ignored.Clear();
+
+    /// <summary>Vuelve a tener en cuenta SOLO las canciones indicadas.</summary>
+    public void RestoreIgnored(IEnumerable<string> filePaths)
+    {
+        foreach (var p in filePaths) Ignored.Remove(p);
+        Ignored.Save();
+    }
 }
