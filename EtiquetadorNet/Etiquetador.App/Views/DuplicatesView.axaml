@@ -87,6 +87,17 @@
                        Text="{Binding Marcadas, StringFormat='{}{0} marcadas'}" />
             <TextBlock Text="{Binding Status}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
         </StackPanel>
+
+        <!--
+          La tabla se ha quedado vieja porque la biblioteca cambió desde otra pestaña. Comparar el
+          audio otra vez es carísimo, así que no se hace solo: se avisa y decide el usuario.
+        -->
+        <Border DockPanel.Dock="Top" IsVisible="{Binding Desactualizada}" Margin="0,0,0,6"
+                Background="#33D97706" BorderBrush="#D97706" BorderThickness="1" CornerRadius="4" Padding="10,6">
+            <TextBlock TextWrapping="Wrap"
+                       Text="⚠ La biblioteca ha cambiado desde el último análisis, así que estos grupos pueden estar desfasados. Pulsa Analizar para volver a comparar el audio." />
+        </Border>
+
         <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="4" Margin="0,0,0,6" />
 
         <!-- IsReadOnly="False" solo para que la casilla se pueda pulsar; las columnas de datos van

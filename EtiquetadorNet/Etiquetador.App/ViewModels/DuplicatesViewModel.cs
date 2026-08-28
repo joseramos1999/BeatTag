@@ -263,8 +263,37 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         _ => "",
     };
 
+    /// <summary>
+    /// La biblioteca ha cambiado por una acción hecha en OTRA pestaña (aplicar, aceptar una
+    /// sugerencia, descartar…). Agrupar por audio aquí sería doblemente malo:
+    ///
+    /// - Es carísimo: son millones de comparaciones de huellas, y se lanzaría por cada canción que
+    ///   el usuario aplique en cualquier parte de la aplicación.
+    /// - Marca esta pestaña como ocupada, y el bloqueo global entonces deshabilita las demás y
+    ///   arrastra al usuario hasta aquí. Que aplicar una canción en "No encontradas" te plante en
+    ///   Duplicados no hay forma de explicarlo.
+    ///
+    /// Así que en ese modo no se recalcula solo: se anota que la tabla se ha quedado vieja y se
+    /// dice. El usuario vuelve cuando quiera y pulsa Analizar.
+    /// </summary>
+    protected override void RecomputeReactive()
+    {
+        if (SelectedMode.Value == DuplicateMode.Fingerprint)
+        {
+            if (Rows.Count == 0) return;   // no hay nada que se haya quedado viejo
+            Desactualizada = true;
+            Status = "La biblioteca ha cambiado: pulsa Analizar para volver a comparar el audio.";
+            return;
+        }
+        Recompute();
+    }
+
+    /// <summary>La tabla ya no refleja la biblioteca actual (se avisa en pantalla).</summary>
+    [ObservableProperty] private bool _desactualizada;
+
     protected override void Recompute()
     {
+        Desactualizada = false;
         var excluidas = _engine.Config.ExcludedDupFolders;
         var fuente = excluidas.Count == 0
             ? Store.Tracks.AsEnumerable()

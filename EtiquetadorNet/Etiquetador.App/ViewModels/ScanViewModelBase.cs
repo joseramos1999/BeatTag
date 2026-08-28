@@ -19,11 +19,22 @@ public abstract partial class ScanViewModelBase : ViewModelBase
     protected ScanViewModelBase(LibraryStore store)
     {
         Store = store;
-        Store.Changed += Recompute;
+        Store.Changed += RecomputeReactive;
     }
 
     /// <summary>Reconstruye las filas a partir de <c>Store.Tracks</c>. Se llama tras cada escaneo.</summary>
     protected abstract void Recompute();
+
+    /// <summary>
+    /// Lo que se hace cuando la biblioteca cambia POR SU CUENTA: casi siempre porque el usuario
+    /// aplicó algo en otra pestaña y hubo que reescanear.
+    ///
+    /// Para casi todas las pestañas es lo mismo que recalcular, porque es barato. Existe como punto
+    /// aparte para las que no lo son: una pestaña no puede ponerse a trabajar -ni marcarse como
+    /// ocupada, que bloquea la interfaz entera- a raíz de una acción que el usuario hizo en otro
+    /// sitio y sobre otra cosa.
+    /// </summary>
+    protected virtual void RecomputeReactive() => Recompute();
 
     /// <summary>Si la biblioteca aún no está escaneada, la escanea (compartida); si ya lo está, recalcula.</summary>
     [RelayCommand]
