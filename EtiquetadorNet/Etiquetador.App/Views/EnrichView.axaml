@@ -45,6 +45,15 @@
                     ToolTip.Tip="Desmarca todas las filas." />
             <Button Content="⯆ Desplegar" Click="ExpandAll_Click" Margin="0,0,6,4" />
             <Button Content="⯈ Cerrar" Click="CollapseAll_Click" Margin="0,0,6,4" />
+            <!--
+              Solo aparece al seleccionar varias filas. Es lo que hace ver que hay acciones para el
+              bloque entero: sin esto, el menú del clic derecho no se le ocurre a nadie.
+            -->
+            <Border IsVisible="{Binding SeleccionadasInfo, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                    Background="#1E3A8A" CornerRadius="4" Padding="8,3" Margin="6,0,0,4" VerticalAlignment="Center">
+                <TextBlock Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center"
+                           Text="{Binding SeleccionadasInfo, StringFormat='{}{0} · clic derecho para marcar o quitar'}" />
+            </Border>
         </WrapPanel>
 
         <views:FolderListView DockPanel.Dock="Top" Margin="0,0,0,6" />
@@ -123,6 +132,8 @@
         <DataGrid Name="RowsGrid"
                   ItemsSource="{Binding RowsView}"
                   SelectedItem="{Binding SelectedRow}"
+                  SelectionMode="Extended"
+                  SelectionChanged="Rows_SelectionChanged"
                   x:CompileBindings="False"
                   AutoGenerateColumns="False"
                   CanUserSortColumns="True"
@@ -140,11 +151,15 @@
             <DataGrid.ContextMenu>
                 <ContextMenu>
                     <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
-                    <MenuItem Header="Marcar / desmarcar" Command="{Binding ToggleSelectedCommand}" />
+                    <MenuItem Header="Marcar / desmarcar" Command="{Binding ToggleSelectedCommand}"
+                              ToolTip.Tip="Con varias seleccionadas actúa sobre todas: las marca, y solo las desmarca si ya estaban todas marcadas." />
+                    <MenuItem Header="Marcar las seleccionadas" Command="{Binding MarkSelectedCommand}" />
+                    <MenuItem Header="Desmarcar las seleccionadas" Command="{Binding UnmarkSelectedCommand}" />
                     <MenuItem Header="✔ Aplicar esta canción" Command="{Binding ApplySelectedCommand}"
                               ToolTip.Tip="Escribe los tags y renombra solo esta canción (se puede deshacer)." />
                     <MenuItem Header="Reanalizar…" Click="Reanalyze_Click" />
-                    <MenuItem Header="Quitar de la lista (descartar)" Command="{Binding RemoveSelectedCommand}" />
+                    <MenuItem Header="Quitar de la lista (descartar)" Command="{Binding RemoveSelectedCommand}"
+                              ToolTip.Tip="Quita de la lista todas las seleccionadas y las descarta: no volverán a aparecer. No se toca ningún archivo, y se recuperan desde Ajustes." />
                     <Separator />
                     <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
                 </ContextMenu>

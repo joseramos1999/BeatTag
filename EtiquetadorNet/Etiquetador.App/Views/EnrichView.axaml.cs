@@ -130,8 +130,13 @@ public partial class EnrichView : UserControl
         var props = e.GetCurrentPoint(RowsGrid).Properties;
         if (props.IsRightButtonPressed && e.Source is Control c)
         {
+            // Pulsar con el derecho apunta a la fila de debajo... salvo que esa fila YA forme parte
+            // de una selección. Ahí hay que dejarla intacta: si no, seleccionar diez canciones y
+            // abrir el menú para actuar sobre todas dejaría la selección en una sola, y la acción
+            // se aplicaría a esa. Es justo el gesto que la selección múltiple viene a permitir.
             var row = c.FindAncestorOfType<DataGridRow>();
-            if (row?.DataContext is PreviewRow pr) RowsGrid.SelectedItem = pr;
+            if (row?.DataContext is PreviewRow pr && !RowsGrid.SelectedItems.Contains(pr))
+                RowsGrid.SelectedItem = pr;
         }
     }
 
@@ -167,6 +172,16 @@ public partial class EnrichView : UserControl
         if (GridBehaviors.AutoFitOnHeaderDoubleTap(sender, e)) return;
         if (_suppressToggle) { _suppressToggle = false; return; }
         if (sender is DataGrid { SelectedItem: PreviewRow row }) row.Toggle();
+    }
+
+    /// <summary>
+    /// Lleva la selección al modelo. El DataGrid de Avalonia no permite enlazar SelectedItems, así
+    /// que se copia a mano; sin esto, las acciones del menú solo verían la última fila pulsada.
+    /// </summary>
+    private void Rows_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not DataGrid grid || DataContext is not EnrichViewModel vm) return;
+        vm.SetSelection(grid.SelectedItems.OfType<PreviewRow>());
     }
 
     private void OnDragOver(object? sender, DragEventArgs e)

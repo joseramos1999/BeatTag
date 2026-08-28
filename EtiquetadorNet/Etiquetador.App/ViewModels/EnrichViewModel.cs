@@ -508,21 +508,96 @@ public partial class EnrichViewModel : ViewModelBase
     [RelayCommand]
     private void MarkNone() { foreach (var r in Rows) r.Apply = false; }
 
-    // --- Menú contextual (sobre la fila seleccionada) ---
-    [RelayCommand]
-    private void ToggleSelected() => SelectedRow?.Toggle();
+    // --- Menú contextual (sobre lo que haya seleccionado) ---
 
-    /// <summary>Quita la fila y DESCARTA la canción: no volverá a aparecer en Enriquecer.</summary>
+    /// <summary>
+    /// Filas seleccionadas en la tabla. Las mantiene al día la vista, porque el DataGrid de Avalonia
+    /// no deja enlazar SelectedItems. Con una sola fila seleccionada contiene esa fila, de modo que
+    /// las acciones no tienen que distinguir entre "una" y "varias".
+    /// </summary>
+    private IReadOnlyList<PreviewRow> _seleccion = Array.Empty<PreviewRow>();
+
+    public void SetSelection(IEnumerable<PreviewRow> filas)
+    {
+        _seleccion = filas.ToList();
+        SeleccionadasInfo = _seleccion.Count > 1 ? $"{_seleccion.Count} seleccionadas" : "";
+    }
+
+    /// <summary>Cuántas hay seleccionadas, para decirlo en los botones. Vacío si es una o ninguna.</summary>
+    [ObservableProperty] private string _seleccionadasInfo = "";
+
+    /// <summary>
+    /// Sobre qué actúa una acción del menú: lo seleccionado, y si no hay nada, la fila en curso.
+    /// Así una acción no tiene que preguntarse si el usuario marcó un bloque o pinchó una sola fila.
+    /// </summary>
+    public static List<PreviewRow> Objetivo(IReadOnlyList<PreviewRow> seleccion, PreviewRow? actual)
+        => seleccion.Count > 0 ? seleccion.ToList()
+         : actual != null ? new List<PreviewRow> { actual }
+         : new List<PreviewRow>();
+
+    /// <summary>
+    /// Al marcar/desmarcar un bloque: se marca salvo que ya estuvieran TODAS marcadas. Con una
+    /// selección a medias, marcar es lo que espera quien acaba de seleccionar para aplicar; invertir
+    /// cada casilla por separado dejaría el bloque igual de mezclado que estaba.
+    /// </summary>
+    public static bool DebeMarcar(IEnumerable<PreviewRow> filas) => filas.Any(f => !f.Apply);
+
+    private List<PreviewRow> Objetivo() => Objetivo(_seleccion, SelectedRow);
+
+    /// <summary>
+    /// Marca o desmarca las seleccionadas. Con varias filas y la casilla en distinto estado, se
+    /// marcan todas: es lo que espera quien acaba de seleccionar un bloque para aplicarlo. Solo se
+    /// desmarcan cuando ya estaban todas marcadas.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleSelected()
+    {
+        var filas = Objetivo();
+        if (filas.Count == 0) return;
+
+        var marcar = DebeMarcar(filas);
+        foreach (var f in filas) f.Apply = marcar;
+        RecontarRenombrados();
+        if (filas.Count > 1) Status = $"{filas.Count} {(marcar ? "marcadas" : "desmarcadas")}.";
+    }
+
+    [RelayCommand]
+    private void MarkSelected() => MarcarSeleccion(true);
+
+    [RelayCommand]
+    private void UnmarkSelected() => MarcarSeleccion(false);
+
+    private void MarcarSeleccion(bool valor)
+    {
+        var filas = Objetivo();
+        if (filas.Count == 0) { Status = "Selecciona antes una o varias canciones."; return; }
+        foreach (var f in filas) f.Apply = valor;
+        RecontarRenombrados();
+        Status = $"{filas.Count} {(valor ? "marcadas" : "desmarcadas")}.";
+    }
+
+    /// <summary>
+    /// Quita las filas seleccionadas y DESCARTA esas canciones: no volverán a aparecer en
+    /// Enriquecer. No se toca ningún archivo, y se recuperan desde Ajustes.
+    /// </summary>
     [RelayCommand]
     private void RemoveSelected()
     {
-        var row = SelectedRow;
-        if (row == null) return;
-        _engine.IgnoreTrack(row.Result.FilePath);
-        _engine.Logger.Log($"Descartada '{row.Old}' (total descartadas: {_engine.Ignored.Count})");
-        Rows.Remove(row);
+        var filas = Objetivo();
+        if (filas.Count == 0) { Status = "Selecciona antes una o varias canciones."; return; }
+
+        _engine.IgnoreTracks(filas.Select(f => f.Result.FilePath));
+        foreach (var f in filas) Rows.Remove(f);
         RowsView.Refresh();
-        Status = $"Descartada «{row.Old}». No volverá a aparecer (puedes recuperarlas en Ajustes).";
+        RecontarRenombrados();
+        SetSelection(Array.Empty<PreviewRow>());
+
+        _engine.Logger.Log($"Descartadas {filas.Count} (total descartadas: {_engine.Ignored.Count})");
+        foreach (var f in filas) _engine.Logger.Detail($"    descartada '{f.Old}'");
+
+        Status = filas.Count == 1
+            ? $"Descartada «{filas[0].Old}». No volverá a aparecer (puedes recuperarlas en Ajustes)."
+            : $"Descartadas {filas.Count} canciones. No volverán a aparecer (puedes recuperarlas en Ajustes).";
     }
 
     /// <summary>

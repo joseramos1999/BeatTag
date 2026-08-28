@@ -254,6 +254,26 @@ public sealed class AppEngine
         Ignored.Save();
     }
 
+    /// <summary>
+    /// Descarta VARIAS canciones de una vez. Igual que IgnoreTrack, pero guardando los dos ficheros
+    /// una sola vez al final: descartar cincuenta filas seleccionadas no puede costar cien
+    /// escrituras en disco.
+    /// </summary>
+    public void IgnoreTracks(IEnumerable<string> filePaths)
+    {
+        var n = 0;
+        foreach (var p in filePaths)
+        {
+            if (string.IsNullOrWhiteSpace(p)) continue;
+            Analysis.Remove(p);
+            Ignored.Add(p);
+            n++;
+        }
+        if (n == 0) return;
+        Analysis.Save();
+        Ignored.Save();
+    }
+
     /// <summary>Vuelve a tener en cuenta todas las canciones descartadas.</summary>
     public void ClearIgnored() => Ignored.Clear();
 }
