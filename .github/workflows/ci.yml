@@ -48,8 +48,21 @@ jobs:
       - name: Build
         run: dotnet build -c Release --no-restore
 
+      # Los tests que fallen se publican ademas como ANOTACIONES del run. Los logs completos exigen
+      # permisos de administrador para leerse, y las anotaciones no: asi el resultado de macOS se
+      # puede consultar desde fuera sin tener que entrar a mirarlo a mano cada vez.
       - name: Test
-        run: dotnet test -c Release --no-build --verbosity normal
+        shell: bash
+        run: |
+          if dotnet test -c Release --no-build --verbosity normal > test.log 2>&1; then
+            tail -3 test.log
+          else
+            echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
+            grep -E "^[[:space:]]*(Failed|Con error) |Error Message|Assert\.|Expected:|Actual:|Message:" test.log \
+              | head -60 \
+              | while IFS= read -r l; do echo "::error::$(echo "$l" | sed 's/^[[:space:]]*//')"; done
+            exit 1
+          fi
 
       # Solo en macOS: comprobar que además se puede PUBLICAR para Apple Silicon. Compilar y pasar
       # las pruebas no garantiza que el empaquetado salga; es un paso aparte y conviene verlo fallar
