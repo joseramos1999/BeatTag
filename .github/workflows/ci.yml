@@ -12,23 +12,21 @@ jobs:
   build-test:
     name: ${{ matrix.nombre }}
     runs-on: ${{ matrix.os }}
-    # Windows es la plataforma que se publica: si falla, es un fallo de verdad.
+    # Las dos plataformas son bloqueantes.
     #
-    # macOS todavía NO está portada. Se ejecuta igualmente y se le permite fallar, porque su
-    # resultado es precisamente la lista de lo que queda por hacer: DPAPI, el audio de NAudio, la
-    # papelera y fpcalc compilan sin quejarse y revientan al ejecutarse allí. Cuando el port esté
-    # terminado se quita `continue-on-error` y macOS pasa a ser bloqueante como Windows.
-    continue-on-error: ${{ matrix.experimental }}
+    # macOS lo es desde que compila, pasa los 547 tests y produce el ejecutable para Apple Silicon.
+    # Eso NO significa que el port esté terminado: quedan seis piezas -DPAPI, la decodificación de
+    # audio, la reproducción, la papelera, winget y fpcalc- que no se rompen al compilar ni en los
+    # tests, solo al USARLAS. Lo que este trabajo protege es que lo ya conseguido no se pierda por
+    # un descuido, que es justo para lo que sirve una CI.
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
             nombre: Windows
-            experimental: false
           - os: macos-latest
-            nombre: macOS (port en curso)
-            experimental: true
+            nombre: macOS
 
     defaults:
       run:
