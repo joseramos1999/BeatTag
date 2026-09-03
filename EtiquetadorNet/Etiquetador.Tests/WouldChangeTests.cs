@@ -24,8 +24,8 @@ public class WouldChangeTests
                                 uint anio = 2022, uint bpm = 106)
         => new()
         {
-            FilePath = @"C:\m\" + archivo,
-            Folder = @"C:\m",
+            FilePath = Rutas.Archivo(archivo),
+            Folder = Rutas.Carpeta,
             Title = titulo, Artist = artista, Album = album, Genre = genero, Year = anio, Bpm = bpm,
         };
 
@@ -35,7 +35,7 @@ public class WouldChangeTests
                                            string anio = "2022", string bpm = "106")
         => new()
         {
-            FilePath = @"C:\m\x.mp3", Old = "x.mp3", New = nuevo,
+            FilePath = Rutas.Archivo("x.mp3"), Old = "x.mp3", New = nuevo,
             Title = titulo, Artist = artista, Album = album, Genre = genero, Year = anio, Bpm = bpm,
         };
 

@@ -31,7 +31,7 @@ public class PlaylistWriterTests
     [Fact]
     public void Sin_datos_se_usa_el_nombre_del_archivo()
         => Assert.Contains("#EXTINF:-1,cancion",
-                           PlaylistWriter.Build(new[] { It(@"C:\m\cancion.mp3") }));
+                           PlaylistWriter.Build(new[] { It(Rutas.Archivo("cancion.mp3")) }));
 
     // Guarda: un salto de linea en el rotulo partiria la entrada en dos y rompe la lista entera.
     [Fact]

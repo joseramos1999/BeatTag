@@ -10,6 +10,9 @@ namespace Etiquetador.Tests;
 /// </summary>
 public class SafetyTests
 {
+    /// <summary>Escapa una ruta para meterla dentro de una cadena JSON (las barras invertidas van dobles).</summary>
+    private static string Json(string ruta) => ruta.Replace("\\", "\\\\");
+
     // El recorrido de tramas busca la marca de sincronismo byte a byte, asi que en un FLAC o un WAV
     // puede dar con una secuencia que la imite y reescribir encima. La extension corta ese camino.
     [Theory]
@@ -160,14 +163,19 @@ public class SafetyTests
         var dir = Mp3Fixture.NewTempDir();
         try
         {
+            // Las rutas se construyen para la plataforma donde corra: el producto las parte con
+            // Path, y en macOS la barra invertida no separa carpetas.
+            var actual = Rutas.De("Musica", "Bad Bunny - Tema.mp3");
+            var antes = Rutas.De("Musica", "pista01.mp3");
+
             // Formato antiguo: "new" es la ruta ACTUAL y "orig" solo el NOMBRE de partida.
             File.WriteAllText(Path.Combine(dir, "run_20240101_101010.jsonl"),
-                """{"new":"D:\\Musica\\Bad Bunny - Tema.mp3","orig":"pista01.mp3","renamed":true}""" + "\n");
+                $$"""{"new":"{{Json(actual)}}","orig":"pista01.mp3","renamed":true}""" + "\n");
 
             var mapa = RekordboxRelocator.ReadRenames(dir);
 
             Assert.Single(mapa);
-            Assert.Equal(@"D:\Musica\Bad Bunny - Tema.mp3", mapa[@"D:\Musica\pista01.mp3"]);
+            Assert.Equal(actual, mapa[antes]);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
@@ -179,14 +187,16 @@ public class SafetyTests
         var dir = Mp3Fixture.NewTempDir();
         try
         {
+            string a = Rutas.De("M", "a.mp3"), b = Rutas.De("M", "b.mp3"), c = Rutas.De("M", "c.mp3");
+
             File.WriteAllText(Path.Combine(dir, "run_20240101_101010.jsonl"),
-                """{"new":"D:\\M\\b.mp3","orig":"a.mp3","renamed":true}""" + "\n");
+                $$"""{"new":"{{Json(b)}}","orig":"a.mp3","renamed":true}""" + "\n");
             File.WriteAllText(Path.Combine(dir, "run_20250101_101010.jsonl"),
-                """{"OrigPath":"D:\\M\\b.mp3","FinalPath":"D:\\M\\c.mp3","Renamed":true}""" + "\n");
+                $$"""{"OrigPath":"{{Json(b)}}","FinalPath":"{{Json(c)}}","Renamed":true}""" + "\n");
 
             var mapa = RekordboxRelocator.ReadRenames(dir);
 
-            Assert.Equal(@"D:\M\c.mp3", mapa[@"D:\M\a.mp3"]);
+            Assert.Equal(c, mapa[a]);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }

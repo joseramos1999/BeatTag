@@ -31,8 +31,11 @@ public class RenameSafetyTests
         Assert.Equal("A B.mp3", target);
     }
 
-    [Fact]
-    public void Rechaza_dos_puntos_de_unidad()   // "A:" parece unidad de Windows -> se rechaza
+    // Solo en Windows: alli "A:" parece una unidad y Path.IsPathRooted lo da por ruta absoluta, asi
+    // que se rechaza. En macOS ese mismo texto es un nombre de archivo legal y aceptarlo es lo
+    // correcto, no un fallo.
+    [WindowsFact]
+    public void Rechaza_dos_puntos_de_unidad()
         => Assert.False(RenameSafety.TryResolveTarget("A: B.mp3", "orig.mp3", Dir, out _, out _));
 
     [Fact]
