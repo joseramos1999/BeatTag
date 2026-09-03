@@ -69,6 +69,37 @@ pruebas deterministas y pasa; lanzar el proceso y que salga sonido por el altavo
 
 Nada de código conocido. Lo que queda es **comprobarlo en un Mac de verdad**.
 
+## Cómo conseguir el .app para probarlo
+
+Cada commit de `main` deja el paquete listo como artefacto de la ejecución de CI:
+
+1. Entrar en **[Actions](https://github.com/joseramos1999/BeatTag/actions)** → la última ejecución
+   de *CI* en verde.
+2. Abajo del todo, en **Artifacts**, descargar **`BeatTag-macos-arm64`**.
+3. Descomprimir dos veces: GitHub envuelve el artefacto en un `.zip`, y dentro está el
+   `BeatTag-macos-arm64.tar.gz` que contiene `BeatTag.app`.
+
+Hace falta haber iniciado sesión en GitHub: los artefactos no se descargan de forma anónima aunque
+el repositorio sea público.
+
+**Por qué va en `.tar.gz` y no como carpeta suelta:** el `.zip` que genera Actions pierde los
+permisos de Unix, y sin el bit de ejecución el `.app` no arranca de ninguna manera. El `.tar.gz` los
+conserva.
+
+**La primera vez, Gatekeeper lo bloqueará.** La aplicación no está firmada ni notarizada (eso exige
+cuenta de desarrollador de Apple), y además todo lo descargado del navegador llega en cuarentena.
+macOS dirá *«no se puede abrir porque Apple no puede comprobar que no contenga malware»*. Para
+abrirlo igualmente:
+
+```bash
+xattr -dr com.apple.quarantine BeatTag.app   # quita la cuarentena
+open BeatTag.app
+```
+
+O, sin tocar el Terminal: clic derecho sobre `BeatTag.app` → **Abrir** → *Abrir* en el aviso.
+
+Es solo arm64 (Apple Silicon). Para un Mac Intel habría que añadir `osx-x64` a la compilación.
+
 ## Lo que la CI no puede comprobar
 
 Un runner no pincha botones, no tiene salida de audio y su sesión no es la de un usuario de verdad.
