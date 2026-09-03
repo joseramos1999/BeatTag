@@ -76,7 +76,11 @@ public sealed class LoudnessScanner
 
         try
         {
-            using var reader = new AudioFileReader(path);   // decodifica a float -1..1
+            // Decodifica a float -1..1. Va por AudioSamples y no por AudioFileReader directamente
+            // para que también funcione fuera de Windows: NAudio decodifica MP3 con códecs del
+            // sistema, y en macOS no los hay.
+            var reader = AudioSamples.Abrir(path, out var recurso);
+            using var _ = recurso;
             var fmt = reader.WaveFormat;
             var meter = new LoudnessMeter(fmt.SampleRate, fmt.Channels);
             var buf = new float[fmt.SampleRate * fmt.Channels / 4];   // ~250 ms
