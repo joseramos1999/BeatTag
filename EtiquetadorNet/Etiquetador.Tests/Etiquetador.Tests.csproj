@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0-windows</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -9,7 +9,8 @@
 
   <ItemGroup>
     <!-- HTML real guardado: las pruebas del chart leen lo que el sitio publica de verdad. -->
-    <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Con barra normal: en macOS y Linux la barra invertida no separa carpetas. -->
+    <None Include="Fixtures/**/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

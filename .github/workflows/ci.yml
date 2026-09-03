@@ -5,13 +5,35 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  # Para poder lanzarlo a mano mientras se trabaja en el port a macOS.
+  workflow_dispatch:
 
 jobs:
   build-test:
-    runs-on: windows-latest
+    name: ${{ matrix.nombre }}
+    runs-on: ${{ matrix.os }}
+    # Windows es la plataforma que se publica: si falla, es un fallo de verdad.
+    #
+    # macOS todavía NO está portada. Se ejecuta igualmente y se le permite fallar, porque su
+    # resultado es precisamente la lista de lo que queda por hacer: DPAPI, el audio de NAudio, la
+    # papelera y fpcalc compilan sin quejarse y revientan al ejecutarse allí. Cuando el port esté
+    # terminado se quita `continue-on-error` y macOS pasa a ser bloqueante como Windows.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            nombre: Windows
+            experimental: false
+          - os: macos-latest
+            nombre: macOS (port en curso)
+            experimental: true
+
     defaults:
       run:
         working-directory: EtiquetadorNet
+
     steps:
       - uses: actions/checkout@v4
 
@@ -28,3 +50,18 @@ jobs:
 
       - name: Test
         run: dotnet test -c Release --no-build --verbosity normal
+
+      # Solo en macOS: comprobar que además se puede PUBLICAR para Apple Silicon. Compilar y pasar
+      # las pruebas no garantiza que el empaquetado salga; es un paso aparte y conviene verlo fallar
+      # por separado.
+      - name: Publicar para Apple Silicon
+        if: matrix.os == 'macos-latest'
+        run: dotnet publish Etiquetador.App/Etiquetador.App.csproj -c Release -r osx-arm64 --self-contained -o ../publicado-osx
+
+      - name: Guardar el resultado de macOS
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeatTag-osx-arm64
+          path: publicado-osx
+          if-no-files-found: ignore
