@@ -58,9 +58,14 @@ jobs:
             tail -3 test.log
           else
             echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
-            grep -E "^[[:space:]]*(Failed|Con error) |Error Message|Assert\.|Expected:|Actual:|Message:" test.log \
-              | head -60 \
-              | while IFS= read -r l; do echo "::error::$(echo "$l" | sed 's/^[[:space:]]*//')"; done
+
+            # UNA sola anotacion con todo dentro: GitHub solo conserva unas diez por trabajo y
+            # ademas deduplica, asi que emitir una por fallo perdia justo lo que hace falta ver.
+            # %0A es el salto de linea dentro de un mensaje de anotacion.
+            fallos=$(grep -E "^[[:space:]]*(Failed|Con error) [A-Za-z]" test.log | sed 's/^[[:space:]]*//' | sort -u)
+            total=$(printf '%s\n' "$fallos" | grep -c . || true)
+            cuerpo=$(printf '%s\n' "$fallos" | head -60 | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Tests que fallan ($total)::$cuerpo"
             exit 1
           fi
 
