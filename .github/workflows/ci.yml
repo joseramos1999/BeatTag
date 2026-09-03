@@ -70,77 +70,17 @@ jobs:
       # Solo en macOS: comprobar que además se puede PUBLICAR para Apple Silicon. Compilar y pasar
       # las pruebas no garantiza que el empaquetado salga; es un paso aparte y conviene verlo fallar
       # por separado.
-      - name: Publicar para Apple Silicon
-        if: matrix.os == 'macos-latest'
-        run: dotnet publish Etiquetador.App/Etiquetador.App.csproj -c Release -r osx-arm64 --self-contained -o ../publicado-osx
-
-      # Un `dotnet publish` deja una carpeta plana con el binario y sus dylib. Eso arranca desde el
-      # Terminal, pero NO es una aplicación de macOS: sin icono, sin nombre propio y sin poder
-      # abrirse con doble clic. Aquí se monta el .app de verdad, que es lo que se puede probar.
+      # Monta el BeatTag.app universal (arm64 + Intel). El mismo script que usa la publicación de
+      # una versión, para que lo que se prueba aquí y lo que se entrega sean exactamente lo mismo.
       - name: Montar BeatTag.app
         if: matrix.os == 'macos-latest'
         shell: bash
-        run: |
-          set -euo pipefail
-          APP="../BeatTag.app"
-          rm -rf "$APP"
-          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-          cp -R ../publicado-osx/. "$APP/Contents/MacOS/"
-          chmod +x "$APP/Contents/MacOS/BeatTag"
-
-          VERSION=$(grep -oE 'Version = "[0-9]+\.[0-9]+\.[0-9]+"' Etiquetador.Core/AppInfo.cs \
-                    | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
-          echo "versión: $VERSION"
-
-          cat > "$APP/Contents/Info.plist" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleName</key>              <string>BeatTag</string>
-            <key>CFBundleDisplayName</key>       <string>BeatTag</string>
-            <key>CFBundleIdentifier</key>        <string>com.joseramos.beattag</string>
-            <key>CFBundleExecutable</key>        <string>BeatTag</string>
-            <key>CFBundlePackageType</key>       <string>APPL</string>
-            <key>CFBundleVersion</key>           <string>$VERSION</string>
-            <key>CFBundleShortVersionString</key><string>$VERSION</string>
-            <key>CFBundleIconFile</key>          <string>beattag</string>
-            <key>LSMinimumSystemVersion</key>    <string>12.0</string>
-            <key>NSHighResolutionCapable</key>   <true/>
-          </dict>
-          </plist>
-          PLIST
-
-          # El icono: se convierte el .ico de Windows a .icns. Si algo falla, la aplicación se queda
-          # con el icono genérico y seguimos: por un icono no se tumba una compilación.
-          if sips -s format png Etiquetador.App/Assets/beattag.ico --out /tmp/icono.png >/dev/null 2>&1; then
-            mkdir -p /tmp/beattag.iconset
-            for t in 16 32 128 256 512; do
-              sips -z $t $t /tmp/icono.png --out /tmp/beattag.iconset/icon_${t}x${t}.png >/dev/null 2>&1 || true
-              sips -z $((t*2)) $((t*2)) /tmp/icono.png --out /tmp/beattag.iconset/icon_${t}x${t}@2x.png >/dev/null 2>&1 || true
-            done
-            iconutil -c icns /tmp/beattag.iconset -o "$APP/Contents/Resources/beattag.icns" 2>/dev/null \
-              && echo "icono incrustado" || echo "sin icono (no se pudo convertir)"
-          else
-            echo "sin icono (sips no pudo leer el .ico)"
-          fi
-
-          # Comprobación mínima de que el paquete está bien formado antes de publicarlo.
-          test -x "$APP/Contents/MacOS/BeatTag"
-          plutil -lint "$APP/Contents/Info.plist"
-          du -sh "$APP"
-
-      # Se empaqueta en .tar.gz y NO como carpeta suelta: el zip que hace upload-artifact pierde el
-      # permiso de ejecución, y sin él el .app descargado no arranca de ninguna manera.
-      - name: Comprimir el .app conservando permisos
-        if: matrix.os == 'macos-latest'
-        shell: bash
-        run: tar -czf ../BeatTag-macos-arm64.tar.gz -C .. BeatTag.app
+        run: ../scripts/empaquetar-macos.sh
 
       - name: Guardar el resultado de macOS
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: BeatTag-macos-arm64
-          path: BeatTag-macos-arm64.tar.gz
+          name: BeatTag-macos-universal
+          path: BeatTag-macos-universal.tar.gz
           if-no-files-found: error

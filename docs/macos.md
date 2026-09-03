@@ -69,36 +69,53 @@ pruebas deterministas y pasa; lanzar el proceso y que salga sonido por el altavo
 
 Nada de código conocido. Lo que queda es **comprobarlo en un Mac de verdad**.
 
-## Cómo conseguir el .app para probarlo
+## Cómo conseguir el .app
 
-Cada commit de `main` deja el paquete listo como artefacto de la ejecución de CI:
+El paquete lo monta `scripts/empaquetar-macos.sh`, que usan tanto la CI de cada commit como la
+publicación de una versión: así lo que se prueba y lo que se entrega son exactamente lo mismo. Es
+**universal** (Apple Silicon e Intel), así que se le puede pasar a cualquiera sin preguntar antes
+qué Mac tiene.
 
-1. Entrar en **[Actions](https://github.com/joseramos1999/BeatTag/actions)** → la última ejecución
-   de *CI* en verde.
-2. Abajo del todo, en **Artifacts**, descargar **`BeatTag-macos-arm64`**.
-3. Descomprimir dos veces: GitHub envuelve el artefacto en un `.zip`, y dentro está el
-   `BeatTag-macos-arm64.tar.gz` que contiene `BeatTag.app`.
+### Para probarlo uno mismo
 
-Hace falta haber iniciado sesión en GitHub: los artefactos no se descargan de forma anónima aunque
-el repositorio sea público.
+En **[Actions](https://github.com/joseramos1999/BeatTag/actions)** → la última ejecución de *CI* en
+verde → abajo, en **Artifacts**, descargar **`BeatTag-macos-universal`**. Hay que descomprimir dos
+veces: GitHub envuelve el artefacto en un `.zip` y dentro está el `.tar.gz` con el `BeatTag.app`.
 
-**Por qué va en `.tar.gz` y no como carpeta suelta:** el `.zip` que genera Actions pierde los
-permisos de Unix, y sin el bit de ejecución el `.app` no arranca de ninguna manera. El `.tar.gz` los
-conserva.
+Requiere sesión iniciada en GitHub: los artefactos de CI no se descargan de forma anónima ni en un
+repositorio público.
 
-**La primera vez, Gatekeeper lo bloqueará.** La aplicación no está firmada ni notarizada (eso exige
-cuenta de desarrollador de Apple), y además todo lo descargado del navegador llega en cuarentena.
-macOS dirá *«no se puede abrir porque Apple no puede comprobar que no contenga malware»*. Para
-abrirlo igualmente:
+### Para pasárselo a otra persona
+
+Empujar una etiqueta `v*` publica una **Release**, y los archivos de una Release **sí tienen enlace
+directo, sin cuenta ni sesión**:
+
+```
+https://github.com/joseramos1999/BeatTag/releases/latest
+```
+
+Ese enlace se puede mandar tal cual. La alternativa, si no se quiere publicar una versión, es
+descargar el artefacto de la CI y enviar el `.tar.gz` por el medio que sea: es un archivo normal.
+
+**Por qué `.tar.gz` y no `.zip`:** el zip pierde los permisos de Unix, y sin el bit de ejecución el
+`.app` no arranca de ninguna manera.
+
+### La primera vez, Gatekeeper lo bloqueará
+
+La aplicación no está firmada ni notarizada —eso exige cuenta de desarrollador de Apple— y todo lo
+descargado llega además en cuarentena. macOS dirá *«no se puede abrir porque Apple no puede
+comprobar que no contenga malware»*. Para abrirlo igualmente:
 
 ```bash
-xattr -dr com.apple.quarantine BeatTag.app   # quita la cuarentena
+tar -xzf BeatTag-macos-universal.tar.gz
+xattr -dr com.apple.quarantine BeatTag.app
 open BeatTag.app
 ```
 
 O, sin tocar el Terminal: clic derecho sobre `BeatTag.app` → **Abrir** → *Abrir* en el aviso.
 
-Es solo arm64 (Apple Silicon). Para un Mac Intel habría que añadir `osx-x64` a la compilación.
+Conviene avisar de esto a quien lo reciba: si no, el aviso de macOS parece que la aplicación está
+rota o es peligrosa.
 
 ## Lo que la CI no puede comprobar
 

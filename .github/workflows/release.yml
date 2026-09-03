@@ -1,6 +1,10 @@
 name: Release
 
-# Publica BeatTag.exe como artefacto de la Release al empujar una etiqueta v* (p. ej. v1.0.0).
+# Publica BeatTag para Windows y para macOS al empujar una etiqueta v* (p. ej. v1.0.0).
+#
+# Lo que se adjunta a una Release SÍ se descarga con un enlace directo, sin cuenta de GitHub ni
+# iniciar sesión: es la forma de pasarle la aplicación a alguien. Los artefactos de la CI, en
+# cambio, solo los puede bajar quien tenga sesión iniciada.
 on:
   push:
     tags: [ 'v*' ]
@@ -9,7 +13,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  windows:
     runs-on: windows-latest
     defaults:
       run:
@@ -32,8 +36,73 @@ jobs:
           -p:PublishSingleFile=true
           -o publicado
 
-      - name: Create GitHub Release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: EtiquetadorNet/publicado/BeatTag.exe
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: EtiquetadorNet
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Test
+        run: dotnet test -c Release
+
+      # Mismo script que la CI: universal (arm64 + Intel), con icono y en .tar.gz para no perder
+      # el permiso de ejecución por el camino.
+      - name: Montar BeatTag.app
+        shell: bash
+        run: ../scripts/empaquetar-macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: BeatTag-macos-universal.tar.gz
+          if-no-files-found: error
+
+  publicar:
+    needs: [ windows, macos ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: entregas
+
+      - name: Ver qué se va a publicar
+        run: find entregas -type f -exec ls -lh {} \;
+
+      - name: Crear la Release
         uses: softprops/action-gh-release@v2
         with:
-          files: EtiquetadorNet/publicado/BeatTag.exe
+          files: |
+            entregas/windows/BeatTag.exe
+            entregas/macos/BeatTag-macos-universal.tar.gz
           generate_release_notes: true
+          body: |
+            ## Descargas
+
+            - **Windows**: `BeatTag.exe` — un solo archivo, no necesita instalación.
+            - **macOS**: `BeatTag-macos-universal.tar.gz` — universal (Apple Silicon e Intel).
+
+            ### Primera vez en macOS
+
+            La aplicación no está firmada ni notarizada, así que macOS la bloqueará al abrirla.
+            Para permitirla:
+
+            ```bash
+            tar -xzf BeatTag-macos-universal.tar.gz
+            xattr -dr com.apple.quarantine BeatTag.app
+            open BeatTag.app
+            ```
+
+            O bien: clic derecho sobre `BeatTag.app` → **Abrir** → *Abrir* en el aviso.

@@ -10,6 +10,10 @@
 *.yml       text
 *.yaml      text
 
+# Los guiones de shell SIEMPRE con LF, aunque se editen desde Windows: con finales de linea de
+# Windows, bash en macOS falla con un "\r: command not found" que no dice nada de lo que pasa.
+*.sh        text eol=lf
+
 # Binarios: sin conversion.
 *.ico       binary
 *.png       binary
