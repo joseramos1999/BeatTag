@@ -239,23 +239,25 @@ public partial class SettingsViewModel : ViewModelBase
         AiStatus = $"Preparada. {modelos.Count} modelo(s) instalado(s).";
     }
 
-    /// <summary>Instala Ollama con winget. Windows pedirá confirmación de administrador.</summary>
+    /// <summary>Instala Ollama con el gestor de paquetes del sistema (winget o Homebrew).</summary>
     [RelayCommand]
     private async Task InstallAiAsync()
     {
-        if (!OllamaInstaller.HayWinget())
+        if (!OllamaInstaller.HayGestorDePaquetes())
         {
-            AiStatus = "Este Windows no tiene winget. Se abrirá la página oficial de descarga.";
+            AiStatus = $"Este equipo no tiene {OllamaInstaller.GestorDePaquetes}. Se abrirá la página oficial de descarga.";
             await Shell.OpenUrlAsync(OllamaInstaller.PaginaDescarga);
             return;
         }
 
         AiBusy = true;
         AiShowProgress = false;
-        AiStatus = "Instalando Ollama… Windows pedirá confirmación de administrador.";
+        AiStatus = OperatingSystem.IsWindows()
+            ? "Instalando Ollama… Windows pedirá confirmación de administrador."
+            : "Instalando Ollama con Homebrew…";
         try
         {
-            var err = await OllamaInstaller.InstalarAsync(l => _engine.Logger.Detail("  winget: " + l));
+            var err = await OllamaInstaller.InstalarAsync(l => _engine.Logger.Detail($"  {OllamaInstaller.GestorDePaquetes}: {l}"));
             if (err.Length > 0)
             {
                 AiStatus = "No se pudo instalar: " + err;

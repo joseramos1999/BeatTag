@@ -66,6 +66,12 @@ public static class Dpapi
     /// <summary>Compat: descifra devolviendo solo el valor (claro heredado se devuelve tal cual).</summary>
     public static string Unprotect(string? s) => TryUnprotect(s).Value;
 
+    /// <summary>
+    /// ¿Estos bytes son un blob DPAPI? Lo usa <see cref="Secretos"/> para poder decir "esto se cifró
+    /// en un Windows y aquí no se puede abrir" en vez de confundirlo con texto en claro.
+    /// </summary>
+    public static bool PareceBlobDpapi(byte[] datos) => StartsWith(datos, DpapiMagic);
+
     private static bool StartsWith(byte[] data, byte[] prefix)
     {
         if (data.Length < prefix.Length) return false;

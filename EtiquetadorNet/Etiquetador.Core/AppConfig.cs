@@ -84,16 +84,16 @@ public sealed class AppConfig
     public bool Cache { get; set; } = true;
 
     // --- Secretos serializados (cifrados). El getter cifra, el setter descifra. ---
-    [JsonPropertyName("DiscogsTokenEnc")] public string DiscogsTokenEnc { get => Dpapi.Protect(DiscogsToken); set => DiscogsToken = Dec(value); }
-    [JsonPropertyName("SpotifySecretEnc")] public string SpotifySecretEnc { get => Dpapi.Protect(SpotifySecret); set => SpotifySecret = Dec(value); }
-    [JsonPropertyName("AcoustIdKeyEnc")] public string AcoustIdKeyEnc { get => Dpapi.Protect(AcoustIdKey); set => AcoustIdKey = Dec(value); }
+    [JsonPropertyName("DiscogsTokenEnc")] public string DiscogsTokenEnc { get => Secretos.Protect(DiscogsToken); set => DiscogsToken = Dec(value); }
+    [JsonPropertyName("SpotifySecretEnc")] public string SpotifySecretEnc { get => Secretos.Protect(SpotifySecret); set => SpotifySecret = Dec(value); }
+    [JsonPropertyName("AcoustIdKeyEnc")] public string AcoustIdKeyEnc { get => Secretos.Protect(AcoustIdKey); set => AcoustIdKey = Dec(value); }
 
     /// <summary>true si al cargar hubo un ERROR criptográfico descifrando algún secreto (bloquea el guardado).</summary>
     [JsonIgnore] public bool SecretsUnreadable { get; private set; }
 
     private string Dec(string? enc)
     {
-        var (value, status) = Dpapi.TryUnprotect(enc);
+        var (value, status) = Secretos.TryUnprotect(enc);
         if (status == UnprotectStatus.CryptoError) SecretsUnreadable = true;
         return value;
     }
@@ -125,12 +125,13 @@ public sealed class AppConfig
     public bool Save(AppPaths paths, out string error)
     {
         error = "";
-        // Si las credenciales guardadas no se pudieron descifrar (otro perfil de Windows / DPAPI no
-        // disponible), NO guardamos: re-cifraríamos vacíos y perderíamos las originales del archivo.
+        // Si las credenciales guardadas no se pudieron descifrar (otro perfil de usuario, o una
+        // configuración traída de otro sistema), NO guardamos: re-cifraríamos vacíos y perderíamos
+        // las originales del archivo.
         if (SecretsUnreadable)
         {
-            error = "No se pueden descifrar las credenciales guardadas en este perfil de Windows; " +
-                    "no se guardará para no perderlas. (Si son de otro equipo/usuario, borra config.net.json y vuelve a introducirlas.)";
+            error = "No se pueden descifrar las credenciales guardadas en este equipo; " +
+                    "no se guardará para no perderlas. (Si son de otro equipo o usuario, borra config.net.json y vuelve a introducirlas.)";
             return false;
         }
         string json;
