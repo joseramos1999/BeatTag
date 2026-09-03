@@ -91,14 +91,30 @@ public sealed class ApiClient : IDisposable
         catch { /* cae a red */ }
         return null;
     }
+    /// <summary>
+    /// Igual que <see cref="GetAsync"/> pero devolviendo el cuerpo TAL CUAL, sin interpretarlo como
+    /// JSON. Hace falta para las fuentes que publican HTML, como el chart de Spotify: así se
+    /// aprovechan la caché, el limitador por dominio y los reintentos que ya hay aquí, en vez de
+    /// abrir un camino aparte que no los tenga.
+    /// </summary>
+    public async Task<string?> GetTextAsync(string url, IDictionary<string, string>? headers = null,
+        int throttleMs = -1, CancellationToken ct = default, bool useCache = true)
+    {
+        var node = await GetAsync(url, headers, throttleMs, ct, useCache, crudo: true).ConfigureAwait(false);
+        return node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+    }
 
     /// <summary>GET con caché+throttle+backoff. Devuelve el JSON parseado o null.</summary>
-    public async Task<JsonNode?> GetAsync(string url, IDictionary<string, string>? headers = null,
+    public Task<JsonNode?> GetAsync(string url, IDictionary<string, string>? headers = null,
         int throttleMs = -1, CancellationToken ct = default, bool useCache = true)
+        => GetAsync(url, headers, throttleMs, ct, useCache, crudo: false);
+
+    private async Task<JsonNode?> GetAsync(string url, IDictionary<string, string>? headers,
+        int throttleMs, CancellationToken ct, bool useCache, bool crudo)
     {
         var cp = (CacheOn && useCache) ? CachePath(url) : null;
         var cached = TryReadCache(cp);
-        if (cached != null) { Log?.Detail($"    GET {Short(url)} · caché"); return Parse(cached); }
+        if (cached != null) { Log?.Detail($"    GET {Short(url)} · caché"); return crudo ? JsonValue.Create(cached) : Parse(cached); }
 
         var th = throttleMs >= 0 ? throttleMs : InferThrottle(url);
         if (th > 0) await Task.Delay(th, ct).ConfigureAwait(false);
@@ -131,7 +147,7 @@ public sealed class ApiClient : IDisposable
                 CacheMiss++;
                 if (CacheOn && cp != null) CacheStore(cp, tx);
                 Log?.Detail($"    GET {Short(url)} · HTTP 200 · {tx.Length} B · {sw.ElapsedMilliseconds} ms");
-                return Parse(tx);
+                return crudo ? JsonValue.Create(tx) : Parse(tx);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)

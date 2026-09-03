@@ -40,7 +40,8 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   del resto. El audio **no se recodifica** —se ajusta la ganancia del propio MP3—, así que no hay
   pérdida de calidad, los archivos mantienen su tamaño y el cambio es reversible. Ese ajuste sin
   pérdida solo existe para MP3: un FLAC, un WAV o un M4A **se miden pero no se tocan**.
-- **Tendencias**: listas de éxitos de más de 70 países, marcando lo que ya tienes en la biblioteca.
+- **Tendencias**: el **chart diario de Spotify** de 77 países (y el Global), marcando lo que ya
+  tienes en la biblioteca. Deezer queda como fuente alternativa.
 - **Tonalidad**: muestra la clave de cada tema y su código **Camelot**, para mezclar en armónico.
   Se lee de los tags (la escriben rekordbox y similares); BeatTag no la deduce del audio.
 - **Listas M3U8**: exporta lo que hayas filtrado a una lista que abren rekordbox, Engine DJ o Serato.

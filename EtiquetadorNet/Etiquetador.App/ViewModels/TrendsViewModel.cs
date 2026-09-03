@@ -22,7 +22,15 @@ public sealed partial class TrendRow : ObservableObject
     public int Position { get; init; }
     public string Artist { get; init; } = "";
     public string Title { get; init; } = "";
-    public string DurText { get; init; } = "";
+
+    /// <summary>ID de Spotify, si el chart viene de ahi: con el se pide la duracion exacta.</summary>
+    public string SpotifyId { get; init; } = "";
+    /// <summary>
+    /// Duracion. Es [ObservableProperty] porque en el chart de Spotify llega DESPUES: la tabla se
+    /// pinta al momento con el orden y los nombres, y la ficha exacta de cada pista se va rellenando
+    /// en segundo plano sin hacer esperar al usuario.
+    /// </summary>
+    [ObservableProperty] private string _durText = "";
 
     /// <summary>Ruta del archivo de tu biblioteca, si la tienes.</summary>
     public string FilePath { get; init; } = "";
@@ -35,8 +43,11 @@ public sealed partial class TrendRow : ObservableObject
 
 /// <summary>
 /// Pestaña Tendencias: qué suena ahora en cada país y cuánto de eso tienes ya.
-/// Se usa Deezer porque sus listas son públicas y sin clave (Spotify cerró el acceso a sus
-/// playlists editoriales, Top 50 incluido, en noviembre de 2024).
+///
+/// La fuente por defecto es el chart de Spotify, que es el que se corresponde con lo que suena de
+/// verdad. Su API ya no sirve las listas editoriales (ver ChartsProvider), así que el orden y los
+/// IDs se leen del chart publicado por kworb y la ficha exacta de cada pista se le pide a Spotify
+/// con esos IDs. Deezer queda como alternativa seleccionable.
 /// </summary>
 public partial class TrendsViewModel : ViewModelBase
 {
@@ -65,6 +76,28 @@ public partial class TrendsViewModel : ViewModelBase
 
     public int[] ListSizes { get; } = { 20, 50, 100 };
 
+    /// <summary>
+    /// De dónde salen las listas. Spotify va primero porque es la que se corresponde con lo que
+    /// suena de verdad; Deezer se queda como alternativa por si el otro camino falla.
+    /// </summary>
+    public string[] Fuentes { get; } = { "Spotify (el que marca lo que suena)", "Deezer" };
+
+    [ObservableProperty] private string _fuente = "Spotify (el que marca lo que suena)";
+
+    private ChartSource FuenteElegida
+        => Fuente.StartsWith("Spotify", StringComparison.Ordinal) ? ChartSource.Spotify : ChartSource.Deezer;
+
+    /// <summary>Al cambiar de fuente cambian los países disponibles: hay que rehacer el selector.</summary>
+    partial void OnFuenteChanged(string value)
+    {
+        Countries.Clear();
+        Rows.Clear();
+        RowsView.Refresh();
+        Resumen = "";
+        Status = "Cargando países…";
+        _ = EnsureCountriesAsync();
+    }
+
     public TrendsViewModel(AppEngine engine)
     {
         _engine = engine;
@@ -89,7 +122,7 @@ public partial class TrendsViewModel : ViewModelBase
         _engine.Logger.Detail("Tendencias: pidiendo la lista de países…");
         try
         {
-            var paises = await _engine.Charts.GetCountriesAsync();
+            var paises = await _engine.Charts.GetCountriesAsync(FuenteElegida);
             foreach (var p in paises) Countries.Add(p);
             // España por defecto; si no estuviera, el primero.
             SelectedCountry = Countries.FirstOrDefault(c => c.Name.Equals("Spain", StringComparison.OrdinalIgnoreCase))
@@ -126,7 +159,7 @@ public partial class TrendsViewModel : ViewModelBase
                 await _engine.Library.ScanAsync();
             }
 
-            var chart = await _engine.Charts.GetChartAsync(pais.PlaylistId, ListSize, _cts.Token);
+            var chart = await _engine.Charts.GetChartAsync(FuenteElegida, pais, ListSize, _cts.Token);
             var indice = BuildLibraryIndex();
 
             Rows.Clear();
@@ -136,7 +169,7 @@ public partial class TrendsViewModel : ViewModelBase
                 Rows.Add(new TrendRow
                 {
                     Position = t.Position, Artist = t.Artist, Title = t.Title,
-                    DurText = t.DurText, FilePath = ruta ?? "",
+                    DurText = t.DurText, FilePath = ruta ?? "", SpotifyId = t.SpotifyId,
                 });
             }
 
@@ -145,10 +178,42 @@ public partial class TrendsViewModel : ViewModelBase
             Resumen = $"{tengo} de {Rows.Count} disponibles en la biblioteca ({(Rows.Count == 0 ? 0 : tengo * 100 / Rows.Count)}%)";
             Status = $"Top {Rows.Count} de {pais.Name}. {Resumen}. Faltan {Rows.Count - tengo}.";
             _engine.Logger.Sum($"Tendencias {pais.Name}: tienes {tengo} de {Rows.Count}");
+
+            // La tabla ya está en pantalla. Las duraciones se rellenan después, sin bloquear nada:
+            // son 50 consultas a Spotify de una en una y no tiene sentido hacer esperar por ellas.
+            _ = RellenarDuracionesAsync(Rows.ToList());
         }
         catch (OperationCanceledException) { Status = "Consulta cancelada."; }
         catch (Exception e) { Status = "No se pudieron cargar las tendencias: " + e.Message; }
         finally { IsBusy = false; _cts?.Dispose(); _cts = null; }
+    }
+
+    /// <summary>
+    /// Pide a Spotify la duración exacta de cada canción del chart, usando el ID que trae cada fila.
+    ///
+    /// Va detrás de pintar la tabla y sin marcar la pestaña como ocupada: el usuario ya tiene
+    /// delante el orden y los nombres, que es lo que venía a ver. Las respuestas se cachean, así que
+    /// esto solo se paga la primera vez que aparece cada canción.
+    /// </summary>
+    private async Task RellenarDuracionesAsync(List<TrendRow> filas)
+    {
+        var cfg = _engine.Config;
+        if (cfg.SpotifyId.Length == 0 || cfg.SpotifySecret.Length == 0) return;   // sin credenciales, nada que pedir
+
+        var pendientes = filas.Where(f => f.SpotifyId.Length > 0 && f.DurText.Length == 0).ToList();
+        if (pendientes.Count == 0) return;
+
+        var puestas = 0;
+        foreach (var fila in pendientes)
+        {
+            try
+            {
+                var seg = await _engine.Spotify.TrackDurationAsync(fila.SpotifyId, cfg.SpotifyId, cfg.SpotifySecret);
+                if (seg > 0) { fila.DurText = $"{seg / 60}:{seg % 60:00}"; puestas++; }
+            }
+            catch { /* que falte una duración no puede tumbar la pestaña */ }
+        }
+        if (puestas > 0) _engine.Logger.Detail($"Tendencias: {puestas} duraciones traídas de Spotify.");
     }
 
     /// <summary>

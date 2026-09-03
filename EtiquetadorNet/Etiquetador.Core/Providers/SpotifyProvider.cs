@@ -52,6 +52,26 @@ public sealed class SpotifyProvider
         return items is { Count: > 0 } ? items : null;
     }
 
+    /// <summary>
+    /// Duración exacta de una pista, por su ID de Spotify. La usa la pestaña Tendencias: el chart
+    /// da el orden y el ID, y esto pone la ficha que solo Spotify conoce con certeza.
+    ///
+    /// Va de una en una a propósito. El endpoint que acepta varios IDs de golpe responde 403 con
+    /// credenciales normales -comprobado-, mientras que el de una sola pista responde 200. Como cada
+    /// respuesta se cachea, el coste solo se paga la primera vez que se ve cada canción.
+    /// </summary>
+    public async Task<int> TrackDurationAsync(string trackId, string id, string secret, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(trackId)) return 0;
+        var tok = await GetTokenAsync(id, secret, ct).ConfigureAwait(false);
+        if (tok == null) return 0;
+
+        var headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + tok };
+        var r = await _api.GetAsync($"https://api.spotify.com/v1/tracks/{trackId}", headers, 150, ct).ConfigureAwait(false);
+        var ms = J.I(J.P(r, "duration_ms"));
+        return ms > 0 ? (int)Math.Round(ms / 1000.0) : 0;
+    }
+
     public async Task<ProviderResult?> SearchAsync(string artist, string title, string id, string secret,
         bool wantRemix, bool wantLive, int localDur = 0, bool isEdit = false, CancellationToken ct = default)
     {
