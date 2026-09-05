@@ -27,10 +27,24 @@ public static class Dpapi
     private static readonly byte[] DpapiMagic = { 0x01, 0x00, 0x00, 0x00, 0xD0, 0x8C, 0x9D, 0xDF };
 
     /// <summary>
-    /// ¿Se puede cifrar en esta máquina? Falso fuera de Windows. Existe para que quien dependa de
-    /// esto pueda preguntarlo en vez de descubrirlo con una excepción a mitad de un guardado.
+    /// ¿Se puede cifrar en esta máquina? Existe para que quien dependa de esto pueda preguntarlo en
+    /// vez de descubrirlo con una excepción a mitad de un guardado.
+    ///
+    /// Se COMPRUEBA de verdad, cifrando una cadena de prueba, en lugar de dar por hecho que basta
+    /// con estar en Windows. DPAPI cifra ligado al perfil del usuario, y hay entornos de Windows
+    /// donde no hay perfil cargado -un servicio, una sesión de integración continua-: ahí decir que
+    /// sí estaba disponible era una promesa falsa, y quien se fiaba de ella reventaba después.
+    ///
+    /// La prueba se hace una sola vez por proceso: es barata, pero no gratis.
     /// </summary>
-    public static bool Disponible => OperatingSystem.IsWindows();
+    public static bool Disponible => _disponible.Value;
+
+    private static readonly Lazy<bool> _disponible = new(() =>
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        try { return Protect("prueba").Length > 0; }
+        catch { return false; }
+    });
 
     /// <summary>Cifra una cadena → hex. Vacío/nulo → "". Si DPAPI falla, PROPAGA la excepción.</summary>
     public static string Protect(string? s)

@@ -746,7 +746,7 @@ public partial class EnrichViewModel : ViewModelBase
     }
 
     /// <summary>Entrecomilla un campo del CSV (separador ';', como espera Excel en español).</summary>
-    private static string Q(string? s) => "\"" + (s ?? "").Replace("\"", "\"\"").Replace('\n', ' ').Replace('\r', ' ') + "\"";
+    private static string Q(string? s) => TextUtils.CsvField(s);
 
     /// <summary>Se dispara al terminar un análisis, para que otras pestañas se refresquen.</summary>
     public event Action? AnalysisCompleted;

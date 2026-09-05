@@ -1,0 +1,108 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="560"
+             x:Class="Etiquetador.App.Views.IdentifyView"
+             x:CompileBindings="False">
+
+    <DockPanel Margin="8">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="6">
+            <TextBlock Classes="titulo" Text="Comprobar audio" />
+            <TextBlock Classes="desc"
+                       Text="Escucha un fragmento de cada canción y averigua qué es en realidad, sin fiarse del nombre ni de las etiquetas. Las que resultan ser otra cosa se señalan en rojo. Las mezclas y los mashups no se comprueban: no existen como grabación publicada, así que el resultado solo podría ser un aviso falso." />
+            <TextBlock Classes="desc"
+                       Text="Se prueba primero con AcoustID, que es gratuito e ilimitado. A diferencia del resto de la aplicación, la huella se toma de la mitad del tema y no del principio: el intro añadido por el editor no existe en la grabación original, y buscarlo por ahí era pedirle al servicio justo la parte que no puede reconocer." />
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                <Button Content="Comprobar" Click="Check_Click" IsEnabled="{Binding !IsBusy}"
+                        Background="#7C3AED" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Comprueba solo las que aún no tienen respuesta. Lo ya comprobado se conserva y no se vuelve a pagar." />
+                <Button Content="Comprobar todo de nuevo" Click="CheckAll_Click" IsEnabled="{Binding !IsBusy}"
+                        ToolTip.Tip="Vuelve a preguntar por TODAS, incluidas las que ya tenían respuesta. Gasta una consulta por canción." />
+                <Button Content="Cancelar" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
+
+                <CheckBox Content="Mostrar solo las que no coinciden" IsChecked="{Binding SoloDiferencias}"
+                          VerticalAlignment="Center" />
+
+                <TextBox Text="{Binding Busqueda}" Width="220" PlaceholderText="Buscar en la lista…"
+                         VerticalAlignment="Center" />
+                <TextBlock Text="{Binding FiltroInfo}" Foreground="Gray" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding SeleccionadasInfo}" Foreground="Gray" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <!-- El motor de pago va aparte y apagado: es lo único de la aplicación que cuesta dinero. -->
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2,0,0">
+                <CheckBox Content="Usar también AudD (de pago) con las que el gratuito no reconozca"
+                          IsChecked="{Binding UsarPago}" VerticalAlignment="Center"
+                          ToolTip.Tip="AcoustID no reconoce las ediciones de pool. AudD sí, pero cada consulta se cobra pasadas las 300 gratuitas de tu cuenta." />
+                <TextBlock Text="Máximo de consultas de pago" VerticalAlignment="Center"
+                           IsEnabled="{Binding UsarPago}" />
+                <NumericUpDown Value="{Binding MaxConsultasPago}" Minimum="0" Maximum="100000" Increment="50"
+                               FormatString="0" Width="130" VerticalAlignment="Center"
+                               IsEnabled="{Binding UsarPago}"
+                               ToolTip.Tip="Freno de mano. Viene en 300, que es justo lo que AudD regala al registrarse: con el valor de fábrica no se puede gastar sin subirlo a mano." />
+            </StackPanel>
+            <TextBlock Text="{Binding MotoresInfo}" Foreground="Gray" TextWrapping="Wrap" FontSize="12" />
+
+            <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}" Height="8"
+                         IsVisible="{Binding IsBusy}" Margin="0,2,0,0" />
+            <TextBlock Text="{Binding Status}" Foreground="Gray" TextWrapping="Wrap" Margin="0,2,0,4" />
+        </StackPanel>
+
+        <!-- La rejilla y, encima, el aviso de que se está preparando. Van en un Grid para que el
+             aviso quede centrado sobre la tabla y no empuje nada al aparecer. -->
+        <Grid>
+        <DataGrid Name="RowsGrid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
+                  AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Extended"
+                  CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                  DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed"
+                  SelectionChanged="Grid_SelectionChanged">
+            <DataGrid.Styles>
+                <Style Selector="DataGridRow">
+                    <Setter Property="Background" Value="{Binding StateBrush}" />
+                </Style>
+            </DataGrid.Styles>
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
+                    <MenuItem Header="Corregir en el Editor" Command="{Binding EditTrackCommand}" />
+                    <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                    <Separator />
+                    <MenuItem Header="Reanalizar con otro fragmento" Command="{Binding ReanalyzeOtherPartCommand}"
+                              ToolTip.Tip="Vuelve a preguntar enviando otro trozo del tema. Casi siempre un aviso falso es que el fragmento cayó en un break o en un trozo hablado, no que la canción sea otra." />
+                    <MenuItem Header="Descartar el aviso (la canción es correcta)" Command="{Binding DiscardSelectedCommand}"
+                              ToolTip.Tip="Deja de contar como discrepancia. No se toca el archivo ni se borra lo identificado." />
+                    <MenuItem Header="Volver a avisar de estas" Command="{Binding UndiscardSelectedCommand}"
+                              ToolTip.Tip="Deshace el descarte, por si se dio por buena alguna por error." />
+                    <Separator />
+                    <MenuItem Header="Olvidar la respuesta y empezar de cero" Command="{Binding ForgetSelectedCommand}" />
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="*" MinWidth="200" />
+                <DataGridTextColumn Header="Estado" Binding="{Binding Estado}" Width="130" MinWidth="100" />
+                <DataGridTextColumn Header="El audio es" Binding="{Binding Audio}" Width="260" MinWidth="140" />
+                <DataGridTextColumn Header="Motor" Binding="{Binding Motor}" Width="90" MinWidth="70" />
+                <DataGridTextColumn Header="Explicación" Binding="{Binding Motivo}" Width="320" MinWidth="160" />
+            </DataGrid.Columns>
+        </DataGrid>
+
+            <Border IsVisible="{Binding Cargando}" Background="#66000000">
+                <Border Background="#FF2B2B2B" CornerRadius="10" Padding="28,22"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        BorderBrush="#40FFFFFF" BorderThickness="1">
+                    <StackPanel Spacing="10" MinWidth="260">
+                        <TextBlock Text="Preparando la lista…" Foreground="White"
+                                   FontWeight="SemiBold" FontSize="15" HorizontalAlignment="Center" />
+                        <ProgressBar IsIndeterminate="True" Height="6" />
+                        <TextBlock Text="Se está repasando la biblioteca entera y comparando cada canción con lo ya comprobado. No se consulta nada por la red."
+                                   Foreground="#C0FFFFFF" TextWrapping="Wrap" FontSize="12"
+                                   MaxWidth="300" HorizontalAlignment="Center" TextAlignment="Center" />
+                    </StackPanel>
+                </Border>
+            </Border>
+        </Grid>
+    </DockPanel>
+</UserControl>

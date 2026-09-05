@@ -95,6 +95,20 @@ public static class Matching
            && Regex.IsMatch(folderPath, @"\b(mashups?|mash\s*ups?|mash-ups?)\b", RegexOptions.IgnoreCase);
 
     /// <summary>
+    /// El nombre dice que esto combina VARIOS temas: mashup, transición o blend.
+    ///
+    /// Deja fuera a propósito los remixes, bootlegs y ediciones: esos siguen siendo la canción, y
+    /// para un DJ tenerlos ES tenerla. Un mashup no: es otra cosa hecha con ella.
+    ///
+    /// Es una parte de <see cref="IsSkipMix"/>, separada para poder usarla donde la pregunta no es
+    /// «¿se puede identificar?» sino «¿tengo esta canción?», que se responden distinto.
+    /// </summary>
+    public static bool IsMezclaDeVariosTemas(string? baseName)
+        => !string.IsNullOrEmpty(baseName)
+           && Regex.IsMatch(baseName, @"\b(mashups?|mash\s*ups?|mash-ups?|spice\s+mash|transitions?|segue|blend)\b",
+                            RegexOptions.IgnoreCase);
+
+    /// <summary>
     /// El nombre PODRÍA ser una mezcla, pero no está claro. Sirve para decidir a quién preguntar:
     /// estos casos no los resuelve una expresión regular, porque la misma "x" separa colaboradores
     /// en "Nicky Jam x J. Balvin - X (EQUIS)" y canciones distintas en "Ella Me Levanto x Gul".

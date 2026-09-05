@@ -84,6 +84,17 @@ public static class TextUtils
         return TitleCase(s);
     }
 
+    /// <summary>
+    /// Un campo listo para un CSV de los informes: entrecomillado, con las comillas internas
+    /// dobladas y sin saltos de línea.
+    ///
+    /// Va entrecomillado SIEMPRE, y no solo cuando hace falta, porque el separador de estos
+    /// informes es «;» -que es lo que espera Excel en español- y un punto y coma dentro del nombre
+    /// de un archivo partiría la fila en dos columnas sin avisar de nada.
+    /// </summary>
+    public static string CsvField(string? s)
+        => "\"" + (s ?? "").Replace("\"", "\"\"").Replace('\n', ' ').Replace('\r', ' ') + "\"";
+
     /// <summary>ETA legible: "2m 5s", "1h 3m", "45s".</summary>
     public static string FormatEta(double sec)
     {

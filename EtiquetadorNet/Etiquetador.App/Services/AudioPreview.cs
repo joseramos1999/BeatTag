@@ -108,7 +108,21 @@ public sealed class AudioPreview : IDisposable
             return;
         }
 
+        // Publicar el proceso ANTES de volver a mirar el token, y mirarlo DESPUÉS de publicarlo.
+        // Ese orden cierra la carrera: un Stop() que llegue mientras se decodificaba el WAV encuentra
+        // _procMac todavía a null y no mata nada, pero deja el token cancelado; sin esta segunda
+        // comprobación, afplay arrancaba igual y seguía sonando una pista que el usuario ya paró.
         _procMac = p; _tmpMac = tmp;
+
+        if (ct.IsCancellationRequested)
+        {
+            try { if (!p.HasExited) p.Kill(entireProcessTree: true); } catch { }
+            p.Dispose();
+            if (ReferenceEquals(_procMac, p)) { _procMac = null; _tmpMac = null; }
+            BorrarSiExiste(tmp);
+            return;
+        }
+
         p.EnableRaisingEvents = true;
         p.Exited += (s, _) =>
         {
@@ -132,23 +146,7 @@ public sealed class AudioPreview : IDisposable
     /// existe fuera de macOS.
     /// </summary>
     internal static string EscribirRecorte(string path, CancellationToken ct = default)
-    {
-        using var stream = AudioSamples.AbrirComoWaveStream(path);
-        try { stream.CurrentTime = TimeSpan.FromSeconds(stream.TotalTime.TotalSeconds * 0.25); } catch { }
-
-        var tmp = Path.Combine(Path.GetTempPath(), "beattag_preview_" + Guid.NewGuid().ToString("N") + ".wav");
-        using (var writer = new WaveFileWriter(tmp, stream.WaveFormat))
-        {
-            var buf = new byte[Math.Max(4096, stream.WaveFormat.AverageBytesPerSecond)];   // ~1s por lectura
-            int n;
-            while ((n = stream.Read(buf, 0, buf.Length)) > 0)
-            {
-                ct.ThrowIfCancellationRequested();
-                writer.Write(buf, 0, n);
-            }
-        }
-        return tmp;
-    }
+        => AudioSamples.EscribirRecorteWav(path, inicioFraccion: 0.25, segundos: null, ct).Ruta;
 
     private static void BorrarSiExiste(string? path)
     {

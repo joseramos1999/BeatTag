@@ -46,6 +46,7 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string _spotifySecret = "";
     [ObservableProperty] private string _discogsToken = "";
     [ObservableProperty] private string _acoustIdKey = "";
+    [ObservableProperty] private string _auddToken = "";
     [ObservableProperty] private string _aiModel = "";
     [ObservableProperty] private string _aiStatus = "";
     [ObservableProperty] private string _aiHost = "";
@@ -155,6 +156,7 @@ public partial class SettingsViewModel : ViewModelBase
         _spotifySecret = c.SpotifySecret;
         _discogsToken = c.DiscogsToken;
         _acoustIdKey = c.AcoustIdKey;
+        _auddToken = c.AuddToken;
         _aiModel = c.AiModel;
         _aiHost = c.AiHost;
         _cache = c.Cache;
@@ -171,6 +173,7 @@ public partial class SettingsViewModel : ViewModelBase
         c.SpotifySecret = SpotifySecret.Trim();
         c.DiscogsToken = DiscogsToken.Trim();
         c.AcoustIdKey = AcoustIdKey.Trim();
+        c.AuddToken = (AuddToken ?? "").Trim();
         c.AiModel = (AiModel ?? "").Trim();
         c.AiHost = (AiHost ?? "").Trim();
         c.Cache = Cache;
@@ -415,6 +418,11 @@ public partial class SettingsViewModel : ViewModelBase
         Mirar(p.ScanCachePath, "Caché de escaneo");
         Mirar(p.AnalysisCachePath, "Caché de análisis");
         Mirar(p.LoudnessCachePath, "Mediciones de volumen");
+
+        // NO se listan a propósito, aunque sean cachés: las huellas acústicas cuestan horas de
+        // cálculo y las identificaciones por audio cuestan DINERO, una consulta de pago cada una.
+        // «Limpiar» está para recuperar espacio de lo que se regenera solo; eso no se regenera solo.
+        // Cada una tiene su propio botón donde toca, avisando de lo que se pierde.
 
         return (partes.Count == 0 ? "No hay nada que limpiar." : string.Join("\n", partes), total, rutas);
     }

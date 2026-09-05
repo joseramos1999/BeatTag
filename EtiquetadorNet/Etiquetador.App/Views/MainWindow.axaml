@@ -69,26 +69,30 @@
                      IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=6}">
                 <views:NotFoundView DataContext="{Binding NotFound}" />
             </TabItem>
-            <TabItem Header="📊 Estadísticas"
+            <TabItem Header="🎤 Comprobar audio"
                      IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=7}">
+                <views:IdentifyView DataContext="{Binding Identify}" />
+            </TabItem>
+            <TabItem Header="📊 Estadísticas"
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=8}">
                 <views:StatsView DataContext="{Binding Stats}" />
             </TabItem>
             <TabItem Header="🌍 Tendencias"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=8}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=9}">
                 <views:TrendsView DataContext="{Binding Trends}" />
             </TabItem>
             <TabItem Header="🔊 Volumen"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=9}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=10}">
                 <views:LoudnessView DataContext="{Binding Loudness}" />
             </TabItem>
             <TabItem Header="⚙ Ajustes"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=10}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=11}">
                 <views:SettingsView DataContext="{Binding Settings}" />
             </TabItem>
             <!-- Ayuda no altera nada, pero también se bloquea: dejarla accesible daría a entender
                  que se puede navegar durante un proceso. -->
             <TabItem Header="ℹ Ayuda"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=11}">
+                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=12}">
                 <views:HelpView />
             </TabItem>
         </TabControl>

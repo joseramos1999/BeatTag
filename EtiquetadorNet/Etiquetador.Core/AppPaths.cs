@@ -21,6 +21,12 @@ public sealed class AppPaths
     public string AnalysisCachePath { get; }
     public string LoudnessCachePath { get; }
     public string FingerprintCachePath { get; }
+
+    /// <summary>Lo que resultó ser cada archivo al escuchar su audio. Cada entrada costó una consulta de pago.</summary>
+    public string IdentificacionCachePath { get; }
+
+    /// <summary>Avisos de «Comprobar audio» que el usuario ha revisado y dado por buenos.</summary>
+    public string AudioAceptadasPath { get; }
     public string IgnoredPath { get; }
 
     /// <summary>Casillas "Aplicar" que el usuario ha tocado a mano en Enriquecer.</summary>
@@ -45,6 +51,8 @@ public sealed class AppPaths
         AnalysisCachePath = Path.Combine(DataDir, "analysis-cache.json");
         LoudnessCachePath = Path.Combine(DataDir, "sonoridad.json");
         FingerprintCachePath = Path.Combine(DataDir, "huellas.json");
+        IdentificacionCachePath = Path.Combine(DataDir, "identificacion.json");
+        AudioAceptadasPath = Path.Combine(DataDir, "audio-aceptadas.json");
         IgnoredPath = Path.Combine(DataDir, "descartadas.json");
         AppliedPath = Path.Combine(DataDir, "aplicadas.json");
         ApplyMarksPath = Path.Combine(DataDir, "marcas-aplicar.json");

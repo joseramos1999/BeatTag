@@ -56,6 +56,17 @@ public sealed class AppEngine
     /// <summary>Medida de sonoridad (EBU R128) con cache propia. Solo mide, no toca archivos.</summary>
     public LoudnessScanner Loudness { get; }
     public FingerprintScanner Fingerprints { get; }
+
+    /// <summary>Identificación por audio al estilo de Shazam. De pago: solo se usa si el usuario lo activa.</summary>
+    public AuddProvider Audd { get; }
+    public IdentificationScanner Identificacion { get; }
+
+    /// <summary>
+    /// Avisos de «Comprobar audio» que el usuario ha revisado y descartado por ser falsos. Lista
+    /// PROPIA, aparte de las descartadas de Enriquecer: dar por bueno un aviso de esta pestaña no
+    /// puede tener el efecto lateral de sacar la canción del análisis de las demás.
+    /// </summary>
+    public IgnoreList AudioAceptadas { get; }
     public ChartsProvider Charts { get; }
     public LinkResolver Links { get; }
 
@@ -111,6 +122,10 @@ public sealed class AppEngine
         Fingerprint = new Fingerprint(Paths, Logger);
         // Detrás de Fingerprint a propósito: necesita su ruta de fpcalc, y antes estaría a null.
         Fingerprints = new FingerprintScanner(Paths.FingerprintCachePath, Fingerprint.FpcalcPath, Logger);
+        Audd = new AuddProvider(Http, Logger);
+        // Los dos motores encadenados: AcoustID (gratis) primero, AudD solo para lo que quede.
+        Identificacion = new IdentificationScanner(
+            Paths.IdentificacionCachePath, Fingerprint, AcoustId, Audd, Http, Logger);
         Covers = new CoverFetcher(Api);
         // Los alias se cargan ANTES que las excepciones: estas los incorporan para escribir el nombre canónico.
         ArtistAliases.Current = ArtistAliases.Load(Paths.ArtistAliasesPath);
@@ -125,6 +140,7 @@ public sealed class AppEngine
         Ignored = new IgnoreList(Paths.IgnoredPath);
         Applied = new IgnoreList(Paths.AppliedPath);
         Marks = new ApplyMarks(Paths.ApplyMarksPath);
+        AudioAceptadas = new IgnoreList(Paths.AudioAceptadasPath);
 
         // La firma de la caché pasó a distinguir QUÉ credenciales se usan, no solo si las hay. Lo
         // ya analizado con las mismas claves sigue siendo válido, así que se le pone la firma nueva

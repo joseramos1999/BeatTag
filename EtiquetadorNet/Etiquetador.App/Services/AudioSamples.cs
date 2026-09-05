@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading;
 using NAudio.Wave;
 using NLayer.NAudioSupport;
 
@@ -59,9 +60,12 @@ public static class AudioSamples
     }
 
     /// <summary>
-    /// Abre el archivo como <see cref="WaveStream"/>: bytes PCM con posición (CurrentTime, Read).
-    /// Solo fuera de Windows -allí el camino sigue siendo el códec del sistema-, para lo que
-    /// necesite saltar a un punto del archivo, como la vista previa que empieza al 25 % del tema.
+    /// Abre el archivo como <see cref="WaveStream"/>: bytes PCM con posición (CurrentTime, Read),
+    /// para lo que necesite saltar a un punto del archivo en vez de leerlo entero.
+    ///
+    /// Este camino es el mismo en los dos sistemas, y a diferencia de <see cref="Abrir"/> eso no es
+    /// un problema: aquí no se MIDE nada. Lo que sale de aquí se reproduce o se manda a identificar,
+    /// y para ambas cosas da igual qué decodificador lo produjo.
     /// </summary>
     public static WaveStream AbrirComoWaveStream(string path)
     {
@@ -75,6 +79,64 @@ public static class AudioSamples
         if (ext == ".wav") return new WaveFileReader(path);
 
         throw new NotSupportedException($"Fuera de Windows solo se pueden leer MP3 y WAV (este es {ext}).");
+    }
+
+    /// <summary>
+    /// Un recorte ya escrito en disco, con la duración del tema del que salió.
+    ///
+    /// La duración del ORIGINAL va aquí porque quien identifica la necesita y ya no la tiene: al
+    /// recibir solo la ruta de un WAV de 120 segundos, no hay forma de saber que venía de un tema
+    /// de cinco minutos. Y AcoustID espera exactamente eso —comprobado ejecutando fpcalc: el campo
+    /// «duration» que emite es siempre el del archivo entero, aunque solo analice los primeros
+    /// segundos—, así que mandar la del recorte sería describir mal lo que se envía.
+    /// </summary>
+    public readonly record struct Recorte(string Ruta, double SegundosOriginal);
+
+    /// <summary>
+    /// Escribe un fragmento del audio a un WAV temporal. Quien llama es responsable de borrarlo.
+    ///
+    /// Lo usan dos cosas distintas y por eso vive aquí: la vista previa de macOS, que necesita un
+    /// archivo porque «afplay» no sabe empezar a mitad de tema, y la identificación por audio, que
+    /// tiene que enviar unos segundos a un servicio. Reunirlo evita que existan dos recortes con
+    /// reglas ligeramente distintas.
+    ///
+    /// <paramref name="segundos"/> a null significa hasta el final del archivo.
+    /// </summary>
+    public static Recorte EscribirRecorteWav(string path, double inicioFraccion, double? segundos,
+                                             CancellationToken ct = default)
+    {
+        using var stream = AbrirComoWaveStream(path);
+        var duracionOriginal = stream.TotalTime.TotalSeconds;
+        try { stream.CurrentTime = TimeSpan.FromSeconds(duracionOriginal * inicioFraccion); } catch { }
+
+        // Cuánto se deja escribir. Sin tope se copia el resto del archivo, que es lo que quiere la
+        // vista previa; con tope, los bytes exactos de los segundos pedidos.
+        var tope = segundos is double s
+            ? (long)(s * stream.WaveFormat.AverageBytesPerSecond)
+            : long.MaxValue;
+
+        var tmp = Path.Combine(Path.GetTempPath(), "beattag_recorte_" + Guid.NewGuid().ToString("N") + ".wav");
+        try
+        {
+            using var writer = new WaveFileWriter(tmp, stream.WaveFormat);
+            var buf = new byte[Math.Max(4096, stream.WaveFormat.AverageBytesPerSecond)];   // ~1s por lectura
+            long escritos = 0;
+            int n;
+            while (escritos < tope && (n = stream.Read(buf, 0, buf.Length)) > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                var cabe = (int)Math.Min(n, tope - escritos);
+                writer.Write(buf, 0, cabe);
+                escritos += cabe;
+            }
+        }
+        catch
+        {
+            // Un recorte a medias no le sirve a nadie y encima queda ocupando disco.
+            try { File.Delete(tmp); } catch { }
+            throw;
+        }
+        return new Recorte(tmp, duracionOriginal);
     }
 
     /// <summary>

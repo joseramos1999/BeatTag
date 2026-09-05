@@ -14,9 +14,10 @@ public partial class MainViewModel : ViewModelBase
     // Índices de los TabItem de MainWindow.axaml.
     private const int LibraryTabIndex = 0;
     private const int EditorTabIndex = 2;
-    private const int TrendsTabIndex = 8;
-    private const int SettingsTabIndex = 10;
-    private const int HelpTabIndex = 11;
+    private const int IdentifyTabIndex = 7;
+    private const int TrendsTabIndex = 9;
+    private const int SettingsTabIndex = 11;
+    private const int HelpTabIndex = 12;
 
     public AppEngine Engine { get; }
 
@@ -27,6 +28,7 @@ public partial class MainViewModel : ViewModelBase
     public QualityViewModel Quality { get; }
     public IncompleteViewModel Incomplete { get; }
     public NotFoundViewModel NotFound { get; }
+    public IdentifyViewModel Identify { get; }
     public StatsViewModel Stats { get; }
     public TrendsViewModel Trends { get; }
     public LoudnessViewModel Loudness { get; }
@@ -89,6 +91,7 @@ public partial class MainViewModel : ViewModelBase
         Quality = new QualityViewModel(engine);
         Incomplete = new IncompleteViewModel(engine);
         NotFound = new NotFoundViewModel(engine);
+        Identify = new IdentifyViewModel(engine);
         Stats = new StatsViewModel(engine);
         Trends = new TrendsViewModel(engine);
         Loudness = new LoudnessViewModel(engine);
@@ -105,6 +108,7 @@ public partial class MainViewModel : ViewModelBase
             (() => Quality.IsBusy,    "Calidad"),
             (() => Incomplete.IsBusy, "Incompletas"),
             (() => NotFound.IsBusy,   "No encontradas"),
+            (() => Identify.IsBusy,   "Comprobar audio"),
             (() => Stats.IsBusy,      "Estadísticas"),
             // La carga de países no cuenta: es una precarga de fondo, no un proceso del usuario.
             (() => Trends.IsBusy && !Trends.LoadingCountries, "Tendencias"),
@@ -115,7 +119,7 @@ public partial class MainViewModel : ViewModelBase
 
         // Bloqueo global: seguir el estado "ocupado" de todas las pestañas con operación larga.
         foreach (ViewModelBase vm in new ViewModelBase[]
-                 { Library, Enrich, Editor, Duplicates, Quality, Incomplete, NotFound, Stats, Trends, Loudness, Settings })
+                 { Library, Enrich, Editor, Duplicates, Quality, Incomplete, NotFound, Identify, Stats, Trends, Loudness, Settings })
             vm.PropertyChanged += OnChildChanged;
 
         // La biblioteca avisa al escanearse y al cambiar las carpetas: es lo que abre el resto de
@@ -235,6 +239,11 @@ public partial class MainViewModel : ViewModelBase
             // Al entrar en Tendencias se cargan los países (una sola vez). Se hace aquí y no en la
             // vista porque el enganche al árbol visual no llegaba a dispararse con las pestañas.
             if (!_reverting && value == TrendsTabIndex) _ = Trends.EnsureCountriesAsync();
+
+            // Al entrar en Comprobar audio se muestra lo que ya se comprobó en su día. No consulta
+            // nada ni gasta nada: solo lee lo guardado. Se hace aquí y no en el constructor para no
+            // recorrer la biblioteca entera al arrancar por una pestaña que quizá no se abra.
+            if (!_reverting && value == IdentifyTabIndex && !Identify.IsBusy) _ = Identify.RecomponerAsync();
             return;
         }
         _reverting = true;

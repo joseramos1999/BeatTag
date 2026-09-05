@@ -73,9 +73,9 @@
                 <!-- ================= CLAVES ================= -->
                 <TextBlock Classes="sec" Text="Claves de API" />
                 <TextBlock Classes="ayuda"
-                           Text="Deezer y Apple Music funcionan sin ninguna clave. Las demás fuentes son opcionales y mejoran los resultados. Se guardan cifradas con DPAPI: solo tu usuario de Windows puede leerlas." />
+                           Text="Deezer y Apple Music funcionan sin ninguna clave. Las demás fuentes son opcionales y mejoran los resultados. Se guardan cifradas y ligadas a tu usuario (DPAPI en Windows, el Llavero en macOS): nadie más puede leerlas en este equipo. Cada clave viaja únicamente al servicio al que pertenece, que es para lo que sirve." />
 
-                <Grid ColumnDefinitions="140,*" RowDefinitions="Auto,Auto,Auto,Auto" >
+                <Grid ColumnDefinitions="140,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" >
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Spotify Client ID" VerticalAlignment="Center" Margin="0,2" />
                     <TextBox   Grid.Row="0" Grid.Column="1" Text="{Binding SpotifyId}" Margin="0,2" />
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Spotify Client Secret" VerticalAlignment="Center" Margin="0,2" />
@@ -84,6 +84,9 @@
                     <TextBox   Grid.Row="2" Grid.Column="1" Text="{Binding DiscogsToken}" PasswordChar="•" Margin="0,2" />
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Clave de AcoustID" VerticalAlignment="Center" Margin="0,2" />
                     <TextBox   Grid.Row="3" Grid.Column="1" Text="{Binding AcoustIdKey}" PasswordChar="•" Margin="0,2" />
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Clave de AudD" VerticalAlignment="Center" Margin="0,2" />
+                    <TextBox   Grid.Row="4" Grid.Column="1" Text="{Binding AuddToken}" PasswordChar="•" Margin="0,2"
+                               ToolTip.Tip="Para la pestaña Comprobar audio. Se obtiene en dashboard.audd.io; las primeras 300 consultas son gratuitas." />
                 </Grid>
 
                 <!-- ================= NOMBRES DE ARTISTA ================= -->

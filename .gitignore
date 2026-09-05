@@ -11,6 +11,10 @@ TestResults/
 project.lock.json
 artifacts/
 
+# Sobras del compilador de XAML de Avalonia: un archivo suelto por cada compilación, con nombre
+# aleatorio. No son fuente ni resultado, solo restos de proceso.
+AvaloniaUI/
+
 # ---- Binarios / artefactos ----
 *.exe
 *.dll

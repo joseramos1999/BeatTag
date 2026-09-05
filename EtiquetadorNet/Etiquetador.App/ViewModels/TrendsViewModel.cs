@@ -10,6 +10,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Etiquetador.App.Services;
 using Etiquetador.Core;
+using Etiquetador.Core.Analysis;
 using Etiquetador.Core.Providers;
 
 namespace Etiquetador.App.ViewModels;
@@ -223,8 +224,12 @@ public partial class TrendsViewModel : ViewModelBase
     private Dictionary<string, string> BuildLibraryIndex()
     {
         var idx = new Dictionary<string, string>(StringComparer.Ordinal);
+        var apartadas = 0;
+
         foreach (var t in _engine.Library.Tracks)
         {
+            if (NoCuentaComoTenerla(t)) { apartadas++; continue; }
+
             if (!string.IsNullOrEmpty(t.Artist) && !string.IsNullOrEmpty(t.Title))
                 idx.TryAdd(Clave(t.Artist, t.Title), t.FilePath);
 
@@ -232,8 +237,27 @@ public partial class TrendsViewModel : ViewModelBase
             if (pr.FnArtist.Length > 0 && pr.QTitle.Length > 0)
                 idx.TryAdd(Clave(pr.FnArtist, pr.QTitle), t.FilePath);
         }
+
+        if (apartadas > 0)
+            _engine.Logger.Detail($"Tendencias: {apartadas} acapellas y mashups no cuentan para el «lo tengo».");
+
         return idx;
     }
+
+    /// <summary>
+    /// Tenerla en acapella o dentro de un mashup NO es tenerla.
+    ///
+    /// La clave de comparación se construye con el título ya limpio, y esa limpieza se lleva por
+    /// delante el «(Acapella)»: la acapella de un tema del chart casaba con él y la lista decía que
+    /// lo tenías. Para preparar una sesión eso es justo lo contrario de lo que hace falta saber,
+    /// porque el día que lo busques no vas a tener más que la voz.
+    ///
+    /// Los remixes, bootlegs y ediciones SÍ cuentan: siguen siendo la canción y se pueden pinchar.
+    /// </summary>
+    internal static bool NoCuentaComoTenerla(Track t)
+        => Identificacion.EsAcapella(t.FilePath)
+        || Matching.IsMashupFolder(Path.GetDirectoryName(t.FilePath))
+        || Matching.IsMezclaDeVariosTemas(Path.GetFileNameWithoutExtension(t.FileName));
 
     /// <summary>Clave de comparación: artista principal + título, sin adornos ni versiones.</summary>
     private static string Clave(string artist, string title)

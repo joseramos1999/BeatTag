@@ -73,4 +73,58 @@ public class AudioSamplesTests
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
+
+    // El recorte acotado es lo que se envía a identificar. Que respete los segundos pedidos no es
+    // un detalle: manda el tamaño de cada envío, y el servicio rechaza lo que pase de 10 MB.
+    [Fact]
+    public void El_recorte_acotado_no_se_pasa_de_los_segundos_pedidos()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        string? tmp = null;
+        try
+        {
+            var mp3 = Path.Combine(dir, "a.mp3");
+            Mp3Fixture.WriteMinMp3(mp3, frames: 200);
+
+            using (var entero = AudioSamples.AbrirComoWaveStream(mp3))
+                Assert.True(entero.TotalTime.TotalSeconds > 2, "el fixture tiene que dar para recortar");
+
+            tmp = AudioSamples.EscribirRecorteWav(mp3, inicioFraccion: 0.30, segundos: 1.0).Ruta;
+
+            using var salida = new NAudio.Wave.WaveFileReader(tmp);
+            Assert.InRange(salida.TotalTime.TotalSeconds, 0.5, 1.05);
+        }
+        finally
+        {
+            if (tmp != null) { try { File.Delete(tmp); } catch { } }
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    // Sin tope se copia hasta el final: es lo que necesita la vista previa, y lo que hacía antes.
+    [Fact]
+    public void Sin_tope_el_recorte_llega_hasta_el_final()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        string? tmp = null;
+        try
+        {
+            var mp3 = Path.Combine(dir, "a.mp3");
+            Mp3Fixture.WriteMinMp3(mp3, frames: 120);
+
+            double total;
+            using (var entero = AudioSamples.AbrirComoWaveStream(mp3)) total = entero.TotalTime.TotalSeconds;
+
+            tmp = AudioSamples.EscribirRecorteWav(mp3, inicioFraccion: 0.25, segundos: null).Ruta;
+
+            using var salida = new NAudio.Wave.WaveFileReader(tmp);
+            // Aproximadamente el 75 % restante; el salto en un MP3 redondea a tramas.
+            Assert.InRange(salida.TotalTime.TotalSeconds, total * 0.5, total * 0.85);
+        }
+        finally
+        {
+            if (tmp != null) { try { File.Delete(tmp); } catch { } }
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
 }

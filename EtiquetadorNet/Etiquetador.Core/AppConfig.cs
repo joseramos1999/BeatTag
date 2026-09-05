@@ -45,6 +45,9 @@ public sealed class AppConfig
     [JsonIgnore] public string DiscogsToken { get; set; } = "";
     [JsonIgnore] public string SpotifySecret { get; set; } = "";
     [JsonIgnore] public string AcoustIdKey { get; set; } = "";
+
+    /// <summary>Clave de AudD, el servicio que identifica una canción escuchando su audio.</summary>
+    [JsonIgnore] public string AuddToken { get; set; } = "";
     public string SpotifyId { get; set; } = "";   // no secreto
 
     /// <summary>Modelo de la IA local (Ollama). No es un secreto: se guarda en claro.</summary>
@@ -87,6 +90,7 @@ public sealed class AppConfig
     [JsonPropertyName("DiscogsTokenEnc")] public string DiscogsTokenEnc { get => Secretos.Protect(DiscogsToken); set => DiscogsToken = Dec(value); }
     [JsonPropertyName("SpotifySecretEnc")] public string SpotifySecretEnc { get => Secretos.Protect(SpotifySecret); set => SpotifySecret = Dec(value); }
     [JsonPropertyName("AcoustIdKeyEnc")] public string AcoustIdKeyEnc { get => Secretos.Protect(AcoustIdKey); set => AcoustIdKey = Dec(value); }
+    [JsonPropertyName("AuddTokenEnc")] public string AuddTokenEnc { get => Secretos.Protect(AuddToken); set => AuddToken = Dec(value); }
 
     /// <summary>true si al cargar hubo un ERROR criptográfico descifrando algún secreto (bloquea el guardado).</summary>
     [JsonIgnore] public bool SecretsUnreadable { get; private set; }
