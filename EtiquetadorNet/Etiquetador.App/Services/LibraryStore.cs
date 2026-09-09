@@ -43,7 +43,17 @@ public sealed class LibraryStore
 
     private void Add(FolderItem item)
     {
-        item.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(FolderItem.Enabled)) Persist(); };
+        item.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(FolderItem.Enabled)) return;
+            Persist();
+
+            // Desmarcar una carpeta tiene que sacar sus canciones AHORA. Antes solo se guardaba la
+            // preferencia, así que hasta el siguiente escaneo la carpeta seguía saliendo en las
+            // tablas y, peor, seguía analizándose: la casilla prometía excluirla y no excluía nada.
+            if (item.Enabled) MarcarQueFaltaEscanear();
+            else OlvidarTracksDe(item.Path);
+        };
         Folders.Add(item);
     }
 
@@ -80,15 +90,109 @@ public sealed class LibraryStore
     /// <summary>Vacía la caché de escaneo (memoria + archivo), para que el próximo escaneo relea todo.</summary>
     public void ClearScanCache() => _cache.Clear();
 
-    public void AddFolder(string folder) { if (!Has(folder)) { Add(new FolderItem(folder)); Persist(); } }
+    public void AddFolder(string folder)
+    {
+        if (Has(folder)) return;
+        Add(new FolderItem(folder));
+        Persist();
+        MarcarQueFaltaEscanear();   // sus canciones todavía no están cargadas
+    }
 
     public void RemoveFolder(string folder)
     {
         var item = Folders.FirstOrDefault(f => string.Equals(f.Path, folder, StringComparison.OrdinalIgnoreCase));
-        if (item != null) { Folders.Remove(item); Persist(); }
+        if (item == null) return;
+        Folders.Remove(item);
+        Persist();
+        OlvidarTracksDe(item.Path);
     }
 
-    public void ClearFolders() { Folders.Clear(); Persist(); }
+    public void ClearFolders()
+    {
+        if (Folders.Count == 0) return;
+        Folders.Clear();
+        Persist();
+
+        Tracks.Clear();
+        IsScanned = false;
+        Log?.Detail("Biblioteca: quitadas todas las carpetas; la lista de canciones queda vacía.");
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Saca de la biblioteca en memoria las canciones de una carpeta que ya no cuenta.
+    ///
+    /// NO hace falta reescanear, y por eso es instantáneo: quitar una carpeta solo puede restar
+    /// canciones, nunca añadirlas. Se compara con la carpeta raíz que se le asignó a cada canción
+    /// al escanear, así que una carpeta anidada dentro de otra que siga configurada conserva sus
+    /// canciones por la otra vía, que es lo correcto.
+    ///
+    /// Esto vive aquí y no en la pestaña Biblioteca a propósito: TODAS las pestañas trabajan sobre
+    /// esta misma lista, así que dejarlo en la interfaz habría arreglado la tabla que se ve y no lo
+    /// que de verdad importaba, que es que se seguían analizando archivos de una carpeta retirada.
+    /// </summary>
+    private void OlvidarTracksDe(string folder)
+    {
+        // Sin carpetas no queda nada escaneado, aunque el borrado no llegue a quitar ninguna
+        // canción (por ejemplo, si todavía no se había escaneado).
+        if (Folders.Count == 0)
+        {
+            var habia = Tracks.Count;
+            Tracks.Clear();
+            IsScanned = false;
+            if (habia > 0) Log?.Detail($"Biblioteca: {habia} canciones fuera de la lista al retirar «{folder}».");
+            Changed?.Invoke();
+            return;
+        }
+
+        var sobreviven = Tracks.Where(t => !string.Equals(t.Folder, folder, StringComparison.OrdinalIgnoreCase)).ToList();
+        var quitados = Tracks.Count - sobreviven.Count;
+        if (quitados == 0) { Changed?.Invoke(); return; }
+
+        // Cómo se quitan importa más de lo que parece. Esta lista está enlazada a varias tablas
+        // AGRUPADAS, y cada baja suelta hace que la rejilla rehaga sus grupos: quitar una carpeta de
+        // miles de canciones así deja la ventana clavada. Vaciar y volver a poner cuesta un solo
+        // aviso más un alta por superviviente, que es lo que ya hace el escaneo.
+        //
+        // Por eso se elige según el tamaño: para unas pocas bajas sale más barato quitarlas en su
+        // sitio; para muchas, rehacer la lista entera.
+        if (quitados > UmbralRehacerLista)
+        {
+            Tracks.Clear();
+            foreach (var t in sobreviven) Tracks.Add(t);
+        }
+        else
+        {
+            for (int i = Tracks.Count - 1; i >= 0; i--)
+                if (string.Equals(Tracks[i].Folder, folder, StringComparison.OrdinalIgnoreCase))
+                    Tracks.RemoveAt(i);
+        }
+
+        Log?.Detail($"Biblioteca: {quitados} canciones fuera de la lista al retirar «{folder}».");
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// A partir de cuántas bajas sale más barato rehacer la lista que ir quitándolas una a una.
+    /// No es un número medido al detalle: basta con que separe «unas pocas» de «una carpeta entera».
+    /// </summary>
+    private const int UmbralRehacerLista = 200;
+
+    /// <summary>
+    /// La biblioteca en memoria se ha quedado corta: hay una carpeta marcada cuyas canciones no
+    /// están cargadas. Se declara «sin escanear» en vez de cargarlas por sorpresa.
+    ///
+    /// Es el mismo estado por el que pasa la aplicación recién abierta, así que el resto de
+    /// pestañas se bloquean solas y aparece el aviso de pulsar Escanear. Reescanear por nuestra
+    /// cuenta al marcar una casilla sería meterse a hacer un trabajo largo que nadie ha pedido.
+    /// </summary>
+    private void MarcarQueFaltaEscanear()
+    {
+        if (!IsScanned) return;
+        IsScanned = false;
+        Log?.Detail("Biblioteca: hay una carpeta nueva marcada; hay que volver a escanear.");
+        Changed?.Invoke();
+    }
 
     /// <summary>Rutas de las carpetas MARCADAS (las que se analizan).</summary>
     public List<string> EnabledPaths() => Folders.Where(f => f.Enabled).Select(f => f.Path).ToList();

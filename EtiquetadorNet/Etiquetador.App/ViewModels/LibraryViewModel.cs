@@ -32,6 +32,8 @@ public partial class LibraryViewModel : ViewModelBase
         TracksView = new DataGridCollectionView(_store.Tracks);
         TracksView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(Track.Folder)));
         _store.Changed += OnLibraryChanged;
+        // Añadir una carpeta no siempre cambia las canciones, pero sí lo que dice el estado.
+        _store.Folders.CollectionChanged += (_, _) => UpdateStatus();
         UpdateStatus();
     }
 
@@ -43,9 +45,23 @@ public partial class LibraryViewModel : ViewModelBase
 
     private void UpdateStatus()
     {
-        if (_store.Tracks.Count == 0) { Status = "Añade una o varias carpetas y pulsa Escanear."; return; }
+        if (_store.Folders.Count == 0)
+        {
+            Status = "Añade una o varias carpetas y pulsa Escanear.";
+            return;
+        }
+
+        // Que la lista esté vacía teniendo carpetas no es lo mismo que no tener ninguna, y hasta
+        // ahora se decía igual: quien acababa de añadir una carpeta leía «añade una carpeta».
+        if (_store.Tracks.Count == 0)
+        {
+            Status = $"{_store.Folders.Count} carpeta(s) sin escanear. Pulsa Escanear.";
+            return;
+        }
+
         var incompletas = _store.Tracks.Count(t => t.IsIncomplete);
-        Status = $"{_store.Tracks.Count} canciones · {incompletas} incompletas · {_store.Folders.Count} carpeta(s)";
+        Status = $"{_store.Tracks.Count} canciones · {incompletas} incompletas · {_store.Folders.Count} carpeta(s)"
+               + (_store.IsScanned ? "" : " · hay carpetas por escanear, pulsa Escanear");
     }
 
     public void AddFolder(string folder) => _store.AddFolder(folder);

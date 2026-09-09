@@ -45,7 +45,9 @@
             <TextBlock Classes="h" Text="📚 Biblioteca" />
             <TextBlock Classes="p" Text="El punto de partida: aquí vive tu colección." />
             <TextBlock Classes="li" Text="• Añade carpetas con el botón o arrastrándolas desde el Explorador." />
-            <TextBlock Classes="li" Text="• Cada carpeta tiene una casilla: desmárcala para excluirla sin borrarla de la lista." />
+            <TextBlock Classes="li" Text="• Cada carpeta tiene una casilla: desmárcala para excluirla sin quitarla de la lista de carpetas. Sus canciones desaparecen al momento de la tabla y dejan de analizarse en todas las pestañas." />
+            <TextBlock Classes="li" Text="• Quitar una carpeta con la ✕, o «Vaciar carpetas», también saca sus canciones al instante. No hace falta volver a escanear: retirar una carpeta solo puede restar canciones, nunca añadirlas. Los archivos no se tocan; salen de la lista, no del disco." />
+            <TextBlock Classes="li" Text="• Al revés sí hace falta escanear: si añades una carpeta o vuelves a marcar una que habías desmarcado, sus canciones no están cargadas todavía. La aplicación se pone «sin escanear» —el resto de pestañas se bloquea y te lo dice— hasta que pulses Escanear. Es preferible a ponerse a leer el disco sin que se lo hayas pedido." />
             <TextBlock Classes="li" Text="• Escanear lee los tags, la duración y la calidad de cada canción, y detecta si es Clean o Explícito." />
             <TextBlock Classes="li" Text="• 'Importar rekordbox…' trae el BPM y la clave musical desde un XML exportado de rekordbox (también se puede deshacer)." />
             <TextBlock Classes="li" Text="• Las columnas Clave y Camelot muestran la tonalidad de cada tema, leída de los tags. El código Camelot es el que se usa para mezclar en armónico: encajan los temas del mismo número y los de un paso a cada lado. BeatTag la lee y la muestra, pero no la deduce del audio." />
