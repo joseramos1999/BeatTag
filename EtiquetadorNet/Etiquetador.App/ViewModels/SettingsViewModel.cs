@@ -37,7 +37,7 @@ public sealed record LogLine(DateTime Time, string Message, LogKind Kind)
 }
 
 /// <summary>Pestaña Ajustes: claves de API (cifradas DPAPI), caché, prueba de conexión y registro (log).</summary>
-public partial class SettingsViewModel : ViewModelBase
+public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
 {
     private const int MaxLogLines = 500;
     private readonly AppEngine _engine;
@@ -117,6 +117,44 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string _testReport = "";
     [ObservableProperty] private bool _isBusy;
 
+    // --- Aspecto ---
+
+    public string[] Temas { get; } = { "Como el sistema", "Claro", "Oscuro" };
+
+    [ObservableProperty] private string _tema = "Como el sistema";
+    [ObservableProperty] private bool _tablasCompactas;
+
+    /// <summary>Lo que se guarda en el archivo, a partir de lo que se lee en pantalla.</summary>
+    private static string ClaveTema(string? mostrado) => mostrado switch
+    {
+        "Claro" => Apariencia.Claro,
+        "Oscuro" => Apariencia.Oscuro,
+        _ => Apariencia.Sistema,
+    };
+
+    private static string TemaMostrado(string? clave) => clave switch
+    {
+        Apariencia.Claro => "Claro",
+        Apariencia.Oscuro => "Oscuro",
+        _ => "Como el sistema",
+    };
+
+    // Se aplican en caliente y se guardan al momento: son ajustes que se eligen mirando el
+    // resultado, así que obligar a pulsar Guardar para verlos sería absurdo.
+    partial void OnTemaChanged(string value)
+    {
+        _engine.Config.Theme = ClaveTema(value);
+        Apariencia.AplicarTema(_engine.Config.Theme);
+        _engine.SaveConfig();
+    }
+
+    partial void OnTablasCompactasChanged(bool value)
+    {
+        _engine.Config.CompactRows = value;
+        Apariencia.AplicarDensidad(value);
+        _engine.SaveConfig();
+    }
+
     /// <summary>Registro en vivo (mensajes del motor: proveedores, IA, fpcalc, deshacer…).</summary>
     public ObservableCollection<LogLine> Log { get; } = new();
 
@@ -160,6 +198,10 @@ public partial class SettingsViewModel : ViewModelBase
         _aiModel = c.AiModel;
         _aiHost = c.AiHost;
         _cache = c.Cache;
+        // Con el campo y no con la propiedad: asignar la propiedad dispararía el guardado nada más
+        // abrir la aplicación, escribiendo la configuración sin que nadie haya cambiado nada.
+        _tema = TemaMostrado(c.Theme);
+        _tablasCompactas = c.CompactRows;
         RefrescarOpciones();
 
         // El Logger puede emitir desde hilos de fondo -> marshalizar a la UI.

@@ -9,6 +9,14 @@
         <local:ViewLocator />
     </Application.DataTemplates>
 
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://BeatTag/Tema.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+
     <Application.Styles>
         <FluentTheme />
         <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
@@ -24,9 +32,43 @@
             <Setter Property="FontSize" Value="15" />
         </Style>
         <Style Selector="TextBlock.desc">
-            <Setter Property="Foreground" Value="Gray" />
+            <Setter Property="Foreground" Value="{DynamicResource TextoSecundario}" />
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="Margin" Value="0,0,0,2" />
+        </Style>
+
+        <!--
+            Altura de fila de TODAS las tablas, desde un solo sitio. El ajuste de densidad cambia
+            el recurso en caliente y con DynamicResource lo recogen las dieciocho vistas sin que
+            haya que tocar ninguna.
+        -->
+        <Style Selector="DataGrid">
+            <Setter Property="RowHeight" Value="{DynamicResource FilaAltura}" />
+        </Style>
+
+        <!-- Un botón de la barra lateral. Se le da forma aquí para no repetirla trece veces. -->
+        <Style Selector="Button.nav">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="10,7" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+        <Style Selector="Button.nav.activa">
+            <Setter Property="Background" Value="{DynamicResource NavActivo}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Button.nav:disabled">
+            <Setter Property="Opacity" Value="0.4" />
+        </Style>
+
+        <!-- Título de un grupo de la barra lateral. -->
+        <Style Selector="TextBlock.grupo">
+            <Setter Property="Foreground" Value="{DynamicResource NavGrupo}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Margin" Value="12,14,8,4" />
         </Style>
     </Application.Styles>
 </Application>

@@ -75,7 +75,7 @@ public sealed partial class LoudnessRow : ObservableObject
 /// Pestaña Volumen: mide la sonoridad real (EBU R128) de la biblioteca y dice cuánto se desvía
 /// cada canción del objetivo. De momento SOLO MIDE: no se toca ningún archivo.
 /// </summary>
-public partial class LoudnessViewModel : ViewModelBase
+public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgresoPagina
 {
     private readonly AppEngine _engine;
     private CancellationTokenSource? _cts;

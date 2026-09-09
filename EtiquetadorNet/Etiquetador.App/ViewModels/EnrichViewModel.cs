@@ -86,7 +86,7 @@ public partial class PreviewRow : ObservableObject
 }
 
 /// <summary>Pestaña Enriquecer: analiza varias carpetas, previsualiza (agrupado) y aplica/deshace.</summary>
-public partial class EnrichViewModel : ViewModelBase
+public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPagina
 {
     private readonly AppEngine _engine;
     private CancellationTokenSource? _cts;

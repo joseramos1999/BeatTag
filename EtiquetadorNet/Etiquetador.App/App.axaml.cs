@@ -19,10 +19,13 @@ public partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow
-            {
-                DataContext = new MainViewModel(),
-            };
+            // El motor (y con él la configuración) nace aquí dentro, así que el aspecto se aplica
+            // DESPUÉS de tener el ViewModel y ANTES de crear la ventana: así abre ya con el tema y
+            // la densidad elegidos, sin el parpadeo de pintarse en claro y corregirse a oscuro.
+            var vm = new MainViewModel();
+            if (Services.AppEngine.Current is { } motor) Services.Apariencia.Aplicar(motor.Config);
+
+            desktop.MainWindow = new MainWindow { DataContext = vm };
 
             // Al cerrar se guarda lo que solo vive en memoria. Hoy son las casillas "Aplicar" que el
             // usuario haya tocado en Enriquecer: revisar cientos de propuestas lleva su rato y

@@ -38,7 +38,6 @@
                         ToolTip.Tip="Copia (no mueve) a una carpeta nueva las grabaciones de la lista que ya están en la biblioteca, numeradas por su posición." />
             </StackPanel>
 
-            <TextBlock Text="{Binding Status}" Foreground="Gray" TextTrimming="CharacterEllipsis" Margin="0,2,0,4" />
         </StackPanel>
 
         <DataGrid Name="RowsGrid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
@@ -62,6 +61,7 @@
                 <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="220" MinWidth="120" />
                 <DataGridTextColumn Header="Dur." Binding="{Binding DurText}" Width="60" MinWidth="50" />
                 <DataGridTextColumn Header="Disponibilidad" Binding="{Binding Estado}" Width="110" MinWidth="90" />
+                <DataGridTextColumn Header="Versión" Binding="{Binding Version}" Width="120" MinWidth="90" />
                 <DataGridTextColumn Header="Archivo en la biblioteca" Binding="{Binding FileName}" Width="*" MinWidth="140" />
             </DataGrid.Columns>
         </DataGrid>

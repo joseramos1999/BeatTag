@@ -28,11 +28,10 @@
                         ToolTip.Tip="Corrige el volumen de las grabaciones desviadas modificando los archivos. No se recodifica el audio, por lo que no hay pérdida de calidad, y el cambio se puede deshacer." />
             </StackPanel>
 
-            <TextBlock Text="{Binding ExplicacionModo}" Foreground="Gray" TextWrapping="Wrap" FontSize="12" />
+            <TextBlock Text="{Binding ExplicacionModo}" Foreground="{DynamicResource TextoSecundario}" TextWrapping="Wrap" FontSize="12" />
 
             <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}" Height="8"
                          IsVisible="{Binding IsBusy}" Margin="0,2,0,0" />
-            <TextBlock Text="{Binding Status}" Foreground="Gray" TextTrimming="CharacterEllipsis" Margin="0,2,0,4" />
         </StackPanel>
 
         <DataGrid Name="RowsGrid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"

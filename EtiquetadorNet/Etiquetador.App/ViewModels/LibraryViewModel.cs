@@ -13,7 +13,7 @@ using Etiquetador.Core.Pipeline;
 namespace Etiquetador.App.ViewModels;
 
 /// <summary>Pestaña Biblioteca: gestiona las carpetas, escanea la biblioteca compartida e importa rekordbox.</summary>
-public partial class LibraryViewModel : ViewModelBase
+public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
 {
     private readonly AppEngine _engine;
     private readonly LibraryStore _store;

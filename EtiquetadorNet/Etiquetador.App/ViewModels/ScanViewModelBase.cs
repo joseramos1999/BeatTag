@@ -9,7 +9,7 @@ namespace Etiquetador.App.ViewModels;
 /// Base para las pestañas de análisis: trabajan sobre la biblioteca compartida (LibraryStore).
 /// Al escanearse la biblioteca (desde cualquier pestaña) se recalcula la vista automáticamente.
 /// </summary>
-public abstract partial class ScanViewModelBase : ViewModelBase
+public abstract partial class ScanViewModelBase : ViewModelBase, IEstadoPagina
 {
     protected readonly LibraryStore Store;
 

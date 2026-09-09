@@ -16,7 +16,7 @@
         </Style>
         <!-- Texto explicativo bajo el encabezado -->
         <Style Selector="TextBlock.ayuda">
-            <Setter Property="Foreground" Value="Gray" />
+            <Setter Property="Foreground" Value="{DynamicResource TextoSecundario}" />
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Margin" Value="0,0,0,4" />
@@ -35,7 +35,21 @@
 
                 <TextBlock Classes="titulo" Text="Ajustes" />
                 <TextBlock Classes="desc" Margin="0,0,0,6"
-                           Text="Configuración de la aplicación: la IA local, las claves de las fuentes musicales, las listas de nombres de artista y el mantenimiento de los datos guardados." />
+                           Text="Configuración de la aplicación: el aspecto, la IA local, las claves de las fuentes musicales, las listas de nombres de artista y el mantenimiento de los datos guardados." />
+
+                <!-- ================= ASPECTO ================= -->
+                <TextBlock Classes="sec" Text="Aspecto" />
+                <TextBlock Classes="ayuda"
+                           Text="Se aplica al momento y se recuerda. La ventana también guarda su tamaño y su posición al cerrarla." />
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Tema" VerticalAlignment="Center" Width="60" />
+                    <ComboBox ItemsSource="{Binding Temas}" SelectedItem="{Binding Tema}" MinWidth="180"
+                              ToolTip.Tip="«Como el sistema» sigue a Windows o macOS. Forzarlo sirve para pinchar de noche sin que el sistema te encienda la pantalla en blanco por la mañana." />
+                </StackPanel>
+
+                <CheckBox Content="Tablas compactas" IsChecked="{Binding TablasCompactas}"
+                          ToolTip.Tip="Filas más juntas: caben bastantes más canciones en pantalla, a costa de leerse algo más apretado." />
 
                 <!-- ================= IA LOCAL ================= -->
                 <TextBlock Classes="sec" Text="IA local" Margin="0,0,0,0" />
@@ -57,7 +71,7 @@
                     <ComboBox ItemsSource="{Binding AiOpciones}" SelectedItem="{Binding AiModel}"
                               MinWidth="220" IsEnabled="{Binding !AiBusy}"
                               ToolTip.Tip="Primero los modelos instalados; después los recomendados, que hay que descargar." />
-                    <TextBlock Text="{Binding AiModelNota}" Foreground="Gray" VerticalAlignment="Center" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding AiModelNota}" Foreground="{DynamicResource TextoSecundario}" VerticalAlignment="Center" TextWrapping="Wrap" />
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -68,7 +82,7 @@
 
                 <ProgressBar Minimum="0" Maximum="100" Value="{Binding AiProgress}" Height="8"
                              IsVisible="{Binding AiShowProgress}" />
-                <TextBlock Text="{Binding AiStatus}" Foreground="Gray" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding AiStatus}" Foreground="{DynamicResource TextoSecundario}" TextWrapping="Wrap" />
 
                 <!-- ================= CLAVES ================= -->
                 <TextBlock Classes="sec" Text="Claves de API" />
@@ -108,7 +122,7 @@
                     <Button Content="Reparar colección de rekordbox" Click="RepairRekordbox_Click"
                             Background="#0D9488" Foreground="White" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding RenombradosAnotados, StringFormat='{}{0} renombrados anotados'}"
-                               Foreground="Gray" VerticalAlignment="Center" />
+                               Foreground="{DynamicResource TextoSecundario}" VerticalAlignment="Center" />
                 </StackPanel>
 
                 <!-- ================= MANTENIMIENTO ================= -->
@@ -136,7 +150,6 @@
                             Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
                     <Button Content="Probar conexión" Command="{Binding TestConnectionCommand}" IsEnabled="{Binding !IsBusy}"
                             Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding Status}" VerticalAlignment="Center" Foreground="Gray" TextWrapping="Wrap" />
                 </StackPanel>
 
                 <TextBlock Text="Resultado de la prueba" FontWeight="Bold" Margin="0,10,0,0" />
@@ -160,7 +173,7 @@
                 <Button Content="Limpiar" Command="{Binding ClearLogCommand}" Classes="gris" />
             </StackPanel>
 
-            <TextBlock DockPanel.Dock="Bottom" Text="{Binding LogFilePath}" Foreground="Gray" FontSize="11"
+            <TextBlock DockPanel.Dock="Bottom" Text="{Binding LogFilePath}" Foreground="{DynamicResource TextoSecundario}" FontSize="11"
                        TextTrimming="CharacterEllipsis" Margin="0,4,0,0"
                        ToolTip.Tip="Archivo de registro de esta sesión. Contiene mucho más detalle que lo que cabe en pantalla." />
 
@@ -169,7 +182,7 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <TextBlock Text="{Binding Hora}" Foreground="#9CA3AF" />
+                                <TextBlock Text="{Binding Hora}" Foreground="{DynamicResource TextoSecundario}" />
                                 <TextBlock Text="{Binding Message}" Foreground="{Binding Color}"
                                            FontWeight="{Binding Peso}" TextWrapping="Wrap" />
                             </StackPanel>

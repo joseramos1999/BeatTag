@@ -87,7 +87,7 @@
                     <TextBlock Text="Mostrar solo cambios de al menos" VerticalAlignment="Center" />
                     <ComboBox ItemsSource="{Binding UmbralesCambio}" SelectedItem="{Binding MinChangeIndex}" MinWidth="70"
                               ToolTip.Tip="Índice de 0 a 10 de cuánto cambia el archivo. Los retoques por debajo del umbral no se listan: renombrar de «pista01» a «Artista - Título» puntúa alto; corregir un acento, casi nada. Pon 0 para verlo todo." />
-                    <TextBlock Text="de 10" VerticalAlignment="Center" Foreground="Gray" />
+                    <TextBlock Text="de 10" VerticalAlignment="Center" Foreground="{DynamicResource TextoSecundario}" />
                 </StackPanel>
 
                 <WrapPanel Margin="0,6,0,0">
@@ -102,7 +102,7 @@
                     <Button Content="Imagen…" Click="PickCover_Click" Margin="6,0,0,0"
                             IsVisible="{Binding CoverMode, Converter={x:Static vm:EnrichViewModel.IsPngMode}}" />
                     <TextBlock Text="{Binding CoverPath}" VerticalAlignment="Center" Margin="6,0,0,0"
-                               Foreground="Gray" TextTrimming="CharacterEllipsis" MaxWidth="240"
+                               Foreground="{DynamicResource TextoSecundario}" TextTrimming="CharacterEllipsis" MaxWidth="240"
                                IsVisible="{Binding CoverMode, Converter={x:Static vm:EnrichViewModel.IsPngMode}}" />
                 </WrapPanel>
             </StackPanel>
@@ -111,23 +111,22 @@
         <!-- Renombrar rompe las referencias de rekordbox y con ellas los cue points. Conviene
              saberlo ANTES de aplicar, no descubrirlo en cabina. -->
         <Border DockPanel.Dock="Top" IsVisible="{Binding HayRenombrados}" Margin="0,0,0,6" Padding="8,6"
-                Background="#FEF3C7" BorderBrush="#F59E0B" BorderThickness="1" CornerRadius="4">
-            <TextBlock Foreground="#78350F" TextWrapping="Wrap" FontSize="12"
+                Background="{DynamicResource AvisoFondo}" BorderBrush="{DynamicResource AvisoBorde}" BorderThickness="1" CornerRadius="4">
+            <TextBlock Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap" FontSize="12"
                        Text="{Binding RenombradosPendientes, StringFormat='Se van a renombrar {0} archivos. Si usas rekordbox, al cambiar el nombre pierde sus cue points y su beatgrid, porque los guarda ligados a la ruta. Puedes devolvérselos después con «Reparar colección de rekordbox», en Ajustes.'}" />
         </Border>
 
-        <TextBlock DockPanel.Dock="Top" Text="{Binding Status}" Margin="0,0,0,4" TextTrimming="CharacterEllipsis" />
         <StackPanel DockPanel.Dock="Top" Margin="0,0,0,6" Spacing="3" IsVisible="{Binding IsBusy}">
             <!-- Barra 1: progreso global (canciones procesadas) -->
             <Grid ColumnDefinitions="*,Auto">
                 <ProgressBar Grid.Column="0" Minimum="0" Maximum="100" Value="{Binding Progress}" Height="8" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding TimeInfo}" Margin="10,0,0,0" Foreground="Gray" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{Binding TimeInfo}" Margin="10,0,0,0" Foreground="{DynamicResource TextoSecundario}" VerticalAlignment="Center" />
             </Grid>
             <!-- Barra 2: progreso DENTRO de la canción en curso (fuente que se está consultando) -->
             <Grid ColumnDefinitions="*,Auto">
                 <ProgressBar Grid.Column="0" Minimum="0" Maximum="100" Value="{Binding StepProgress}" Height="4"
                              VerticalAlignment="Center" Opacity="0.75" />
-                <TextBlock Grid.Column="1" Text="{Binding StepInfo}" Margin="10,0,0,0" Foreground="Gray"
+                <TextBlock Grid.Column="1" Text="{Binding StepInfo}" Margin="10,0,0,0" Foreground="{DynamicResource TextoSecundario}"
                            FontSize="11" VerticalAlignment="Center" />
             </Grid>
         </StackPanel>

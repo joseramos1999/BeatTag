@@ -34,7 +34,7 @@ public sealed partial class NotFoundRow : ObservableObject
 }
 
 /// <summary>Pestaña No encontradas: procesa la biblioteca y lista las que ninguna fuente identifica.</summary>
-public partial class NotFoundViewModel : ViewModelBase
+public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgresoPagina
 {
     private readonly AppEngine _engine;
     private CancellationTokenSource? _cts;

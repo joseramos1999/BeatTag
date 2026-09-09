@@ -4,24 +4,26 @@
         xmlns:views="using:Etiquetador.App.Views"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="640"
+        mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="680"
         x:Class="Etiquetador.App.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Icon="/Assets/beattag.ico"
-        Title="BeatTag — Etiquetador DJ" Width="1000" Height="640">
+        MinWidth="820" MinHeight="520"
+        Title="BeatTag — Etiquetador DJ" Width="1100" Height="680">
 
     <DockPanel>
 
         <!--
-            Aviso de bloqueo. Mientras hay un proceso en marcha, las demás pestañas se deshabilitan
-            (ver TabEnabled): tocar archivos que otro proceso está usando hace fallar la operación.
-            La pestaña que trabaja sigue activa para poder ver el avance y cancelar.
+            Aviso de bloqueo. Mientras hay un proceso en marcha, las demás pestañas se deshabilitan:
+            tocar archivos que otro proceso está usando hace fallar la operación. La pestaña que
+            trabaja sigue activa para poder ver el avance y cancelar.
         -->
         <Border DockPanel.Dock="Bottom" IsVisible="{Binding Busy}"
-                Background="#FEF3C7" BorderBrush="#F59E0B" BorderThickness="0,1,0,0" Padding="10,6">
+                Background="{DynamicResource AvisoFondo}" BorderBrush="{DynamicResource AvisoBorde}"
+                BorderThickness="0,1,0,0" Padding="10,6">
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBlock Text="⏳" VerticalAlignment="Center" />
-                <TextBlock VerticalAlignment="Center" Foreground="#78350F" TextWrapping="Wrap"
+                <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap"
                            Text="{Binding BusyWhat, StringFormat='Proceso en curso en «{0}». El resto de la aplicación permanece bloqueado hasta que termine, para no alterar archivos que se están usando.'}" />
             </StackPanel>
         </Border>
@@ -32,69 +34,91 @@
             por qué. Siguen accesibles Biblioteca, Ajustes y Ayuda.
         -->
         <Border DockPanel.Dock="Bottom" IsVisible="{Binding ShowSetupHint}"
-                Background="#DBEAFE" BorderBrush="#3B82F6" BorderThickness="0,1,0,0" Padding="10,6">
+                Background="{DynamicResource InfoFondo}" BorderBrush="{DynamicResource InfoBorde}"
+                BorderThickness="0,1,0,0" Padding="10,6">
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBlock Text="👋" VerticalAlignment="Center" />
                 <TextBlock Text="{Binding SetupHint}" VerticalAlignment="Center"
-                           Foreground="#1E3A8A" TextWrapping="Wrap" />
+                           Foreground="{DynamicResource InfoTexto}" TextWrapping="Wrap" />
             </StackPanel>
         </Border>
 
-        <TabControl SelectedIndex="{Binding SelectedTabIndex}">
-            <TabItem Header="📚 Biblioteca"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=0}">
-                <views:LibraryView DataContext="{Binding Library}" />
-            </TabItem>
-            <TabItem Header="✨ Enriquecer"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=1}">
-                <views:EnrichView DataContext="{Binding Enrich}" />
-            </TabItem>
-            <TabItem Header="✏ Editor"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=2}">
-                <views:EditorView DataContext="{Binding Editor}" />
-            </TabItem>
-            <TabItem Header="👥 Duplicados"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=3}">
-                <views:DuplicatesView DataContext="{Binding Duplicates}" />
-            </TabItem>
-            <TabItem Header="🎧 Calidad"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=4}">
-                <views:QualityView DataContext="{Binding Quality}" />
-            </TabItem>
-            <TabItem Header="⚠ Incompletas"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=5}">
-                <views:IncompleteView DataContext="{Binding Incomplete}" />
-            </TabItem>
-            <TabItem Header="❓ No encontradas"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=6}">
-                <views:NotFoundView DataContext="{Binding NotFound}" />
-            </TabItem>
-            <TabItem Header="🎤 Comprobar audio"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=7}">
-                <views:IdentifyView DataContext="{Binding Identify}" />
-            </TabItem>
-            <TabItem Header="📊 Estadísticas"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=8}">
-                <views:StatsView DataContext="{Binding Stats}" />
-            </TabItem>
-            <TabItem Header="🌍 Tendencias"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=9}">
-                <views:TrendsView DataContext="{Binding Trends}" />
-            </TabItem>
-            <TabItem Header="🔊 Volumen"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=10}">
-                <views:LoudnessView DataContext="{Binding Loudness}" />
-            </TabItem>
-            <TabItem Header="⚙ Ajustes"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=11}">
-                <views:SettingsView DataContext="{Binding Settings}" />
-            </TabItem>
-            <!-- Ayuda no altera nada, pero también se bloquea: dejarla accesible daría a entender
-                 que se puede navegar durante un proceso. -->
-            <TabItem Header="ℹ Ayuda"
-                     IsEnabled="{Binding EnabledTabs, Converter={x:Static vm:MainViewModel.TabEnabled}, ConverterParameter=12}">
-                <views:HelpView />
-            </TabItem>
-        </TabControl>
+        <!--
+            Barra de estado. Lo que la página abierta tenga que contar sale SIEMPRE aquí, en vez de
+            en un sitio distinto según la pestaña.
+        -->
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource SuperficieSuave}"
+                BorderBrush="{DynamicResource BordeSuave}" BorderThickness="0,1,0,0" Padding="10,5">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="{Binding PaginaActual}" FontWeight="SemiBold"
+                           VerticalAlignment="Center" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{Binding EstadoPagina}" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TextoSecundario}" TextTrimming="CharacterEllipsis"
+                           ToolTip.Tip="{Binding EstadoPagina}" />
+                <ProgressBar Grid.Column="2" Width="150" Height="6" VerticalAlignment="Center"
+                             Minimum="0" Maximum="100" Value="{Binding ProgresoPagina}"
+                             IsVisible="{Binding HayBarraProgreso}" Margin="10,0,0,0" />
+            </Grid>
+        </Border>
+
+        <!--
+            Barra lateral. Trece destinos en una fila de pestañas no se leen; agrupados por lo que
+            uno viene a hacer, sí. Los bloques y su contenido salen de MainViewModel.Grupos, que es
+            también de donde sale el nombre para el aviso de «proceso en curso»: una sola lista.
+        -->
+        <Border DockPanel.Dock="Left" Background="{DynamicResource NavFondo}"
+                BorderBrush="{DynamicResource BordeSuave}" BorderThickness="0,0,1,0">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding Grupos}" Width="182" Margin="6,4,6,10">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:GrupoNav">
+                            <StackPanel>
+                                <TextBlock Classes="grupo" Text="{Binding Titulo}"
+                                           IsVisible="{Binding TieneTitulo}" />
+                                <!-- El bloque sin título (Ajustes y Ayuda) va separado por una línea. -->
+                                <Separator Margin="10,10,10,6" IsVisible="{Binding !TieneTitulo}"
+                                           Background="{DynamicResource BordeSuave}" />
+                                <ItemsControl ItemsSource="{Binding Paginas}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="vm:PaginaNav">
+                                            <Button Classes="nav" Classes.activa="{Binding Activa}"
+                                                    IsEnabled="{Binding Habilitada}"
+                                                    Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).IrACommand}"
+                                                    CommandParameter="{Binding}">
+                                                <StackPanel Orientation="Horizontal" Spacing="9">
+                                                    <TextBlock Text="{Binding Icono}" FontSize="14" Width="18" />
+                                                    <TextBlock Text="{Binding Nombre}" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+
+        <!--
+            El contenido. Las trece vistas viven a la vez y solo se muestra la activa: cada una
+            guarda estado que no está en su ViewModel -posición de la tabla, selección, grupos
+            desplegados- y volver a crearla en cada salto lo perdería.
+        -->
+        <Grid>
+            <views:LibraryView    DataContext="{Binding Library}"    IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=0}" />
+            <views:EnrichView     DataContext="{Binding Enrich}"     IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=1}" />
+            <views:EditorView     DataContext="{Binding Editor}"     IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=2}" />
+            <views:DuplicatesView DataContext="{Binding Duplicates}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=3}" />
+            <views:QualityView    DataContext="{Binding Quality}"    IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=4}" />
+            <views:IncompleteView DataContext="{Binding Incomplete}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=5}" />
+            <views:NotFoundView   DataContext="{Binding NotFound}"   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=6}" />
+            <views:IdentifyView   DataContext="{Binding Identify}"   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=7}" />
+            <views:StatsView      DataContext="{Binding Stats}"      IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=8}" />
+            <views:TrendsView     DataContext="{Binding Trends}"     IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=9}" />
+            <views:LoudnessView   DataContext="{Binding Loudness}"   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=10}" />
+            <views:SettingsView   DataContext="{Binding Settings}"   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=11}" />
+            <views:HelpView                                          IsVisible="{Binding SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=12}" />
+        </Grid>
     </DockPanel>
 </Window>

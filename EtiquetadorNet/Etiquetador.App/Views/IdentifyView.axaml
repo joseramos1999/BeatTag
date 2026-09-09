@@ -28,8 +28,8 @@
 
                 <TextBox Text="{Binding Busqueda}" Width="220" PlaceholderText="Buscar en la lista…"
                          VerticalAlignment="Center" />
-                <TextBlock Text="{Binding FiltroInfo}" Foreground="Gray" VerticalAlignment="Center" />
-                <TextBlock Text="{Binding SeleccionadasInfo}" Foreground="Gray" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding FiltroInfo}" Foreground="{DynamicResource TextoSecundario}" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding SeleccionadasInfo}" Foreground="{DynamicResource TextoSecundario}" VerticalAlignment="Center" />
             </StackPanel>
 
             <!-- El motor de pago va aparte y apagado: es lo único de la aplicación que cuesta dinero. -->
@@ -44,11 +44,10 @@
                                IsEnabled="{Binding UsarPago}"
                                ToolTip.Tip="Freno de mano. Viene en 300, que es justo lo que AudD regala al registrarse: con el valor de fábrica no se puede gastar sin subirlo a mano." />
             </StackPanel>
-            <TextBlock Text="{Binding MotoresInfo}" Foreground="Gray" TextWrapping="Wrap" FontSize="12" />
+            <TextBlock Text="{Binding MotoresInfo}" Foreground="{DynamicResource TextoSecundario}" TextWrapping="Wrap" FontSize="12" />
 
             <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}" Height="8"
                          IsVisible="{Binding IsBusy}" Margin="0,2,0,0" />
-            <TextBlock Text="{Binding Status}" Foreground="Gray" TextWrapping="Wrap" Margin="0,2,0,4" />
         </StackPanel>
 
         <!-- La rejilla y, encima, el aviso de que se está preparando. Van en un Grid para que el

@@ -3,14 +3,14 @@ using System.Text.RegularExpressions;
 namespace Etiquetador.Tests;
 
 /// <summary>
-/// El número de cada pestaña está escrito a mano en DOS sitios: el ConverterParameter de cada
-/// TabItem en MainWindow.axaml y la lista de pestañas de MainViewModel, más un puñado de constantes
-/// para saltar a Editor, Tendencias, Ajustes o Ayuda.
+/// Las páginas están descritas en dos sitios que tienen que decir lo mismo: la barra lateral, que
+/// sale de MainViewModel.Grupos, y el contenido de MainWindow.axaml, donde vive una vista por
+/// página marcada con su número.
 ///
-/// Si se inserta una pestaña nueva y esos números no se corrigen todos, no falla nada al compilar:
-/// la aplicación arranca y lo que ocurre es que se bloquea la pestaña equivocada mientras otra
-/// trabaja, o «Editar esta canción» te lleva a otro sitio. Un fallo silencioso y difícil de atar.
-/// Esto lo convierte en un fallo ruidoso.
+/// Si se añade una entrada a la barra y no su vista, el botón lleva a una ventana en blanco. Si se
+/// añade la vista y no la entrada, la pestaña existe pero no hay forma de llegar a ella. Ninguna de
+/// las dos cosas rompe la compilación, y por eso están estas pruebas: es un fallo silencioso, y ya
+/// pasó una vez con la lista de nombres del aviso de «proceso en curso».
 /// </summary>
 public class PestanasTests
 {
@@ -25,32 +25,60 @@ public class PestanasTests
         return Path.Combine(dir!.FullName, Path.Combine(tramos));
     }
 
-    [Fact]
-    public void Las_pestanas_estan_numeradas_en_orden_y_sin_huecos()
+    private static List<int> Numeros(string texto, string patron)
+        => Regex.Matches(texto, patron).Select(m => int.Parse(m.Groups[1].Value)).ToList();
+
+    /// <summary>Las páginas de la barra lateral (MainViewModel) y las vistas del contenido (XAML).</summary>
+    private static (List<int> Nav, List<int> Vistas) Leer()
     {
+        var vm = File.ReadAllText(Fuente("Etiquetador.App", "ViewModels", "MainViewModel.cs"));
         var xaml = File.ReadAllText(Fuente("Etiquetador.App", "Views", "MainWindow.axaml"));
-
-        var numeros = Regex.Matches(xaml, @"ConverterParameter=(\d+)")
-                           .Select(m => int.Parse(m.Groups[1].Value))
-                           .ToList();
-
-        Assert.NotEmpty(numeros);
-        Assert.Equal(Enumerable.Range(0, numeros.Count).ToList(), numeros);
+        return (Numeros(vm, @"Indice = (\d+)"), Numeros(xaml, @"ConverterParameter=(\d+)"));
     }
 
-    // La lista de MainViewModel tiene que cubrir todas las pestañas menos Ayuda, que no ejecuta
-    // ningún proceso. Si sobra o falta una, el bloqueo mientras se trabaja apunta a la que no es.
     [Fact]
-    public void La_lista_del_shell_cubre_todas_las_pestanas_con_proceso()
+    public void La_barra_lateral_y_el_contenido_cubren_las_mismas_paginas()
     {
-        var xaml = File.ReadAllText(Fuente("Etiquetador.App", "Views", "MainWindow.axaml"));
+        var (nav, vistas) = Leer();
+
+        Assert.NotEmpty(nav);
+        Assert.Equal(nav.OrderBy(n => n), vistas.OrderBy(n => n));
+    }
+
+    // Sin huecos y sin repetidos: los números son el índice con el que se decide qué se ve y qué se
+    // bloquea, así que dos páginas con el mismo número se taparían la una a la otra.
+    [Fact]
+    public void Las_paginas_estan_numeradas_de_cero_en_adelante_sin_repetir()
+    {
+        var (nav, _) = Leer();
+
+        Assert.Equal(nav.Count, nav.Distinct().Count());
+        Assert.Equal(Enumerable.Range(0, nav.Count).ToList(), nav.OrderBy(n => n).ToList());
+    }
+
+    // Las constantes de salto ("Editar esta canción" va al Editor, entrar en Tendencias carga los
+    // países) son números escritos a mano aparte. Si alguien renumera las páginas y se las deja,
+    // los saltos llevan a otro sitio sin que nada falle al compilar.
+    [Theory]
+    [InlineData("LibraryTabIndex", "Biblioteca")]
+    [InlineData("EditorTabIndex", "Editor")]
+    [InlineData("IdentifyTabIndex", "Comprobar audio")]
+    [InlineData("TrendsTabIndex", "Tendencias")]
+    [InlineData("SettingsTabIndex", "Ajustes")]
+    [InlineData("HelpTabIndex", "Ayuda")]
+    public void Las_constantes_de_salto_apuntan_a_la_pagina_que_dicen(string constante, string nombre)
+    {
         var vm = File.ReadAllText(Fuente("Etiquetador.App", "ViewModels", "MainViewModel.cs"));
 
-        var pestanas = Regex.Matches(xaml, @"ConverterParameter=(\d+)").Count;
+        var declarada = Regex.Match(vm, @"const int " + constante + @" = (\d+);");
+        Assert.True(declarada.Success, $"no se encontró la constante {constante}");
 
-        // Las entradas de la tabla son de la forma: (() => Algo.IsBusy, "Nombre"),
-        var entradas = Regex.Matches(vm, @"\(\(\) => [^,]+,\s*""[^""]+""\)").Count;
+        // El índice con el que esa página aparece de verdad en la lista de la barra lateral.
+        var enLaLista = Regex.Match(vm, @"Indice = (\d+),[^\n]*Nombre = ""“?" + Regex.Escape(nombre) + @"""");
+        if (!enLaLista.Success)
+            enLaLista = Regex.Match(vm, @"Indice = (\d+),[^\n]*Nombre = """ + Regex.Escape(nombre) + @"""");
 
-        Assert.Equal(pestanas - 1, entradas);   // -1: Ayuda no tiene proceso propio
+        Assert.True(enLaLista.Success, $"no se encontró la página «{nombre}» en la barra lateral");
+        Assert.Equal(enLaLista.Groups[1].Value, declarada.Groups[1].Value);
     }
 }

@@ -14,7 +14,7 @@
 
         <StackPanel DockPanel.Dock="Top" Spacing="8">
             <TextBlock Text="¿Qué buscamos?" FontSize="16" FontWeight="Bold" />
-            <TextBlock x:Name="FileText" TextWrapping="Wrap" Foreground="Gray" FontSize="12" />
+            <TextBlock x:Name="FileText" TextWrapping="Wrap" Foreground="{DynamicResource TextoSecundario}" FontSize="12" />
 
             <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" Margin="0,4,0,0">
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Artista" FontWeight="Bold" Margin="0,0,6,2" />
@@ -29,7 +29,7 @@
                 <Button x:Name="SearchBtn" Content="🔎 Buscar coincidencias" Click="Search_Click" />
                 <Button x:Name="FpBtn" Content="🎧 Identificar por huella" Click="Fingerprint_Click"
                         ToolTip.Tip="Analiza el audio para identificar la canción sin depender del nombre del archivo (necesita clave de AcoustID)." />
-                <TextBlock x:Name="SearchStatus" Foreground="Gray" FontSize="12" VerticalAlignment="Center" />
+                <TextBlock x:Name="SearchStatus" Foreground="{DynamicResource TextoSecundario}" FontSize="12" VerticalAlignment="Center" />
             </StackPanel>
 
             <!-- Enlace directo: lo más exacto, no hay que adivinar nada -->
@@ -41,7 +41,7 @@
                                  PlaceholderText="https://open.spotify.com/track/…  ·  deezer.com/track/…  ·  music.apple.com/…?i=…" />
                         <Button Grid.Column="1" x:Name="LinkBtn" Content="Usar enlace" Click="UseLink_Click" Margin="8,0,0,0" />
                     </Grid>
-                    <TextBlock x:Name="LinkStatus" Foreground="Gray" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock x:Name="LinkStatus" Foreground="{DynamicResource TextoSecundario}" FontSize="11" TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 
@@ -65,7 +65,7 @@
                     <DataTemplate>
                         <StackPanel Margin="2">
                             <TextBlock Text="{Binding Display}" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding Source}" Foreground="Gray" FontSize="11" />
+                            <TextBlock Text="{Binding Source}" Foreground="{DynamicResource TextoSecundario}" FontSize="11" />
                         </StackPanel>
                     </DataTemplate>
                 </ListBox.ItemTemplate>

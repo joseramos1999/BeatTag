@@ -23,7 +23,6 @@
             <TextBox Text="{Binding Busqueda}" PlaceholderText="Buscar…" Width="180" Margin="6,0,4,4"
                      ToolTip.Tip="Filtra por archivo, carpeta, campos que faltan o tags. Por palabras sueltas y en cualquier orden." />
             <TextBlock Text="{Binding FiltroInfo}" VerticalAlignment="Center" Opacity="0.7" Margin="0,0,6,4" />
-            <TextBlock Text="{Binding Status}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
         </WrapPanel>
         <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="4" Margin="0,0,0,6" />
 

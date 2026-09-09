@@ -33,7 +33,6 @@
 
         <views:FolderListView DockPanel.Dock="Top" Margin="0,0,0,6" />
 
-        <TextBlock DockPanel.Dock="Top" Text="{Binding Status}" Margin="0,0,0,4" TextTrimming="CharacterEllipsis" />
         <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="4" Margin="0,0,0,6" />
 
         <DataGrid ItemsSource="{Binding TracksView}"

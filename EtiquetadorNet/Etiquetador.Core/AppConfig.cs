@@ -86,6 +86,25 @@ public sealed class AppConfig
     // --- Varios ---
     public bool Cache { get; set; } = true;
 
+    // --- Aspecto ---
+
+    /// <summary>Tema: "sistema", "claro" u "oscuro". Por defecto el del sistema.</summary>
+    public string Theme { get; set; } = "sistema";
+
+    /// <summary>Filas de tabla más juntas, para que quepan más canciones en pantalla.</summary>
+    public bool CompactRows { get; set; }
+
+    // --- Ventana ---
+    //
+    // Se guarda para volver a abrirla como se dejó. Cero significa «nunca se ha guardado», y con
+    // eso la ventana usa su tamaño de fábrica; las coordenadas usan int.MinValue por lo mismo,
+    // porque 0,0 es una posición legítima (esquina superior izquierda).
+    public double WindowWidth { get; set; }
+    public double WindowHeight { get; set; }
+    public int WindowX { get; set; } = int.MinValue;
+    public int WindowY { get; set; } = int.MinValue;
+    public bool WindowMaximized { get; set; }
+
     // --- Secretos serializados (cifrados). El getter cifra, el setter descifra. ---
     [JsonPropertyName("DiscogsTokenEnc")] public string DiscogsTokenEnc { get => Secretos.Protect(DiscogsToken); set => DiscogsToken = Dec(value); }
     [JsonPropertyName("SpotifySecretEnc")] public string SpotifySecretEnc { get => Secretos.Protect(SpotifySecret); set => SpotifySecret = Dec(value); }

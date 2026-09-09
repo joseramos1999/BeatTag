@@ -1,0 +1,71 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        Los colores que NO puede resolver el tema de Avalonia por su cuenta.
+
+        La mayoría de la aplicación ya funciona en claro y en oscuro sin tocar nada: los botones de
+        acción llevan color de acento saturado con texto blanco, y eso se lee igual con cualquier
+        fondo. Lo que sí se rompía eran los avisos, que estaban escritos como pastel claro con texto
+        oscuro encima: en modo oscuro quedaban como dos manchas luminosas con el texto casi negro.
+
+        Aquí viven esos, y el gris de los textos secundarios, que en oscuro necesita ser MÁS claro y
+        no más gris. Cada uno con su pareja para los dos temas, para que la elección esté en un solo
+        sitio en vez de repartida por dieciocho vistas.
+    -->
+    <ResourceDictionary.ThemeDictionaries>
+
+        <ResourceDictionary x:Key="Light">
+            <!-- Aviso de proceso en curso (ámbar) -->
+            <SolidColorBrush x:Key="AvisoFondo"  Color="#FEF3C7" />
+            <SolidColorBrush x:Key="AvisoBorde"  Color="#F59E0B" />
+            <SolidColorBrush x:Key="AvisoTexto"  Color="#78350F" />
+
+            <!-- Aviso de primeros pasos (azul) -->
+            <SolidColorBrush x:Key="InfoFondo"   Color="#DBEAFE" />
+            <SolidColorBrush x:Key="InfoBorde"   Color="#3B82F6" />
+            <SolidColorBrush x:Key="InfoTexto"   Color="#1E3A8A" />
+
+            <!-- Texto de apoyo: explicaciones, contadores, notas al pie -->
+            <SolidColorBrush x:Key="TextoSecundario" Color="#6B7280" />
+
+            <!-- Superficies y separaciones suaves (tarjetas, cabeceras de grupo) -->
+            <SolidColorBrush x:Key="SuperficieSuave" Color="#F3F4F6" />
+            <SolidColorBrush x:Key="BordeSuave"      Color="#E5E7EB" />
+
+            <!-- Navegación lateral -->
+            <SolidColorBrush x:Key="NavFondo"    Color="#F9FAFB" />
+            <SolidColorBrush x:Key="NavActivo"   Color="#EDE9FE" />
+            <SolidColorBrush x:Key="NavGrupo"    Color="#9CA3AF" />
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="Dark">
+            <!-- Mismos papeles, invertidos: fondo apagado y texto claro. No es el color de arriba
+                 «un poco más oscuro»; es el contrario, o el texto no se leería. -->
+            <SolidColorBrush x:Key="AvisoFondo"  Color="#3A2E12" />
+            <SolidColorBrush x:Key="AvisoBorde"  Color="#B45309" />
+            <SolidColorBrush x:Key="AvisoTexto"  Color="#FDE68A" />
+
+            <SolidColorBrush x:Key="InfoFondo"   Color="#16263F" />
+            <SolidColorBrush x:Key="InfoBorde"   Color="#2563EB" />
+            <SolidColorBrush x:Key="InfoTexto"   Color="#BFDBFE" />
+
+            <SolidColorBrush x:Key="TextoSecundario" Color="#A1A1AA" />
+
+            <SolidColorBrush x:Key="SuperficieSuave" Color="#26262A" />
+            <SolidColorBrush x:Key="BordeSuave"      Color="#3F3F46" />
+
+            <SolidColorBrush x:Key="NavFondo"    Color="#1C1C20" />
+            <SolidColorBrush x:Key="NavActivo"   Color="#3B2E63" />
+            <SolidColorBrush x:Key="NavGrupo"    Color="#8B8B93" />
+        </ResourceDictionary>
+
+    </ResourceDictionary.ThemeDictionaries>
+
+    <!--
+        Altura de fila de las tablas. Vive aquí, y no en cada vista, porque el ajuste de densidad la
+        cambia en caliente para TODAS a la vez (ver Ajustes → Densidad de las tablas).
+    -->
+    <x:Double x:Key="FilaAltura">34</x:Double>
+
+</ResourceDictionary>

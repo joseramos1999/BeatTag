@@ -91,7 +91,7 @@ public sealed partial class IdentifyRow : ObservableObject
 /// ahí que se cuente por adelantado el techo, que la respuesta se guarde para siempre y que nada se
 /// consulte dos veces.
 /// </summary>
-public partial class IdentifyViewModel : ViewModelBase
+public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgresoPagina
 {
     private readonly AppEngine _engine;
     private CancellationTokenSource? _cts;

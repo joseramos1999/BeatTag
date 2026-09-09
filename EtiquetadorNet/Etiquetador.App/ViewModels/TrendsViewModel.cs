@@ -39,6 +39,12 @@ public sealed partial class TrendRow : ObservableObject
     public bool Tengo => FilePath.Length > 0;
     public string Estado => Tengo ? "En la biblioteca" : "No disponible";
 
+    /// <summary>
+    /// Qué copia se ha elegido teniendo varias. Se enseña para que la preferencia no sea invisible:
+    /// si sale «Remix» es que de ese tema no tienes ni la extendida ni la original.
+    /// </summary>
+    public string Version => Tengo ? PrioridadVersion.Nombre(PrioridadVersion.De(FileName)) : "";
+
     public IBrush StateBrush => Tengo ? TengoBrush : Brushes.Transparent;
 }
 
@@ -50,7 +56,7 @@ public sealed partial class TrendRow : ObservableObject
 /// IDs se leen del chart publicado por kworb y la ficha exacta de cada pista se le pide a Spotify
 /// con esos IDs. Deezer queda como alternativa seleccionable.
 /// </summary>
-public partial class TrendsViewModel : ViewModelBase
+public partial class TrendsViewModel : ViewModelBase, IEstadoPagina
 {
     private readonly AppEngine _engine;
     private CancellationTokenSource? _cts;
@@ -223,25 +229,43 @@ public partial class TrendsViewModel : ViewModelBase
     /// </summary>
     private Dictionary<string, string> BuildLibraryIndex()
     {
-        var idx = new Dictionary<string, string>(StringComparer.Ordinal);
+        // Se guarda también CON QUÉ prioridad entró cada ruta, para poder cambiarla si aparece una
+        // copia mejor. Antes se usaba TryAdd, que se queda con la primera que aparezca en el
+        // escaneo: puro azar del orden de las carpetas.
+        var mejor = new Dictionary<string, (string Ruta, int Orden)>(StringComparer.Ordinal);
         var apartadas = 0;
+        var mejoras = 0;
+
+        void Ofrecer(string clave, Track t, int orden)
+        {
+            if (mejor.TryGetValue(clave, out var actual))
+            {
+                if (orden >= actual.Orden) return;   // la que ya había es igual de buena o mejor
+                mejoras++;
+            }
+            mejor[clave] = (t.FilePath, orden);
+        }
 
         foreach (var t in _engine.Library.Tracks)
         {
             if (NoCuentaComoTenerla(t)) { apartadas++; continue; }
 
+            var orden = PrioridadVersion.OrdenDe(t.FileName);
+
             if (!string.IsNullOrEmpty(t.Artist) && !string.IsNullOrEmpty(t.Title))
-                idx.TryAdd(Clave(t.Artist, t.Title), t.FilePath);
+                Ofrecer(Clave(t.Artist, t.Title), t, orden);
 
             var pr = Core.Pipeline.FileNameParser.Parse(t.FileName);
             if (pr.FnArtist.Length > 0 && pr.QTitle.Length > 0)
-                idx.TryAdd(Clave(pr.FnArtist, pr.QTitle), t.FilePath);
+                Ofrecer(Clave(pr.FnArtist, pr.QTitle), t, orden);
         }
 
         if (apartadas > 0)
             _engine.Logger.Detail($"Tendencias: {apartadas} acapellas y mashups no cuentan para el «lo tengo».");
+        if (mejoras > 0)
+            _engine.Logger.Detail($"Tendencias: {mejoras} veces se prefirió una versión mejor teniendo varias copias.");
 
-        return idx;
+        return mejor.ToDictionary(kv => kv.Key, kv => kv.Value.Ruta, StringComparer.Ordinal);
     }
 
     /// <summary>

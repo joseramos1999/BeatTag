@@ -38,7 +38,6 @@
                 <TextBlock Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center"
                            Text="{Binding SeleccionadasInfo, StringFormat='{}{0} · clic derecho para actuar sobre todas'}" />
             </Border>
-            <TextBlock Text="{Binding Status}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
         </WrapPanel>
         <ProgressBar DockPanel.Dock="Top" Minimum="0" Maximum="100" Value="{Binding Progress}" Height="6"
                      IsVisible="{Binding IsBusy}" Margin="0,0,0,6" />

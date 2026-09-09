@@ -83,7 +83,5 @@
             </StackPanel>
         </ScrollViewer>
 
-        <TextBlock Grid.Row="1" Grid.Column="2" VerticalAlignment="Bottom" Text="{Binding Status}"
-                   Foreground="Gray" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
     </Grid>
 </UserControl>

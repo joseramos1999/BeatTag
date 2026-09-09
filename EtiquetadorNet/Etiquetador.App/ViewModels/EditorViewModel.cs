@@ -13,7 +13,7 @@ using Etiquetador.App.Views;
 namespace Etiquetador.App.ViewModels;
 
 /// <summary>Pestaña Editor: elige una canción de la biblioteca y edita a mano su título y tags.</summary>
-public partial class EditorViewModel : ViewModelBase
+public partial class EditorViewModel : ViewModelBase, IEstadoPagina
 {
     private readonly AppEngine _engine;
     private LibraryStore Store => _engine.Library;
