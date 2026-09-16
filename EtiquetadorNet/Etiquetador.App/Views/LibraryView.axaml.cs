@@ -32,7 +32,9 @@ public partial class LibraryView : UserControl
         foreach (var f in folders)
         {
             var path = f.TryGetLocalPath();
-            if (!string.IsNullOrEmpty(path)) { vm.AddFolder(path); added = true; }
+            // Solo se escanea si alguna ha entrado de verdad: una carpeta que ya estaba dentro de
+            // otra se rechaza, y ponerse a releer el disco entero por nada sería absurdo.
+            if (!string.IsNullOrEmpty(path) && vm.AddFolder(path)) added = true;
         }
         if (added) await vm.ScanAsync();
     }
@@ -73,7 +75,7 @@ public partial class LibraryView : UserControl
             var p = it.TryGetLocalPath();
             if (string.IsNullOrEmpty(p)) continue;
             var dir = Directory.Exists(p) ? p : Path.GetDirectoryName(p);
-            if (!string.IsNullOrEmpty(dir)) { vm.AddFolder(dir); added = true; }
+            if (!string.IsNullOrEmpty(dir) && vm.AddFolder(dir)) added = true;
         }
         if (added) await vm.ScanAsync();
     }

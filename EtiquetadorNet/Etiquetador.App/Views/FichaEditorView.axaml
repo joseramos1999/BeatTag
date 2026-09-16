@@ -1,0 +1,68 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="300" d:DesignHeight="560"
+             x:Class="Etiquetador.App.Views.FichaEditorView"
+             x:DataType="vm:FichaEditorViewModel">
+
+    <!--
+        Panel de la ficha de DJ. Lo usan Ficha DJ y Bandeja de entrada: rellenar la ficha tiene que
+        verse y comportarse igual en las dos.
+    -->
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Spacing="6" Margin="0,0,6,0">
+            <TextBlock Text="{Binding Titulo}" FontWeight="Bold" FontSize="14" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding Nota}" Classes="desc" IsVisible="{Binding Nota, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+            <StackPanel Spacing="6" IsEnabled="{Binding HaySeleccion}">
+                <TextBlock Text="Energía" Margin="0,4,0,0" Background="Transparent"
+                           ToolTip.Tip="De 1 (muy tranquila) a 10 (máxima intensidad). Con la tabla seleccionada, las teclas 1 a 9 y 0 (para el 10) la ponen directamente." />
+                <!-- La explicación va en la etiqueta y no en la lista: su globo tapaba las casillas de debajo. -->
+                <ComboBox ItemsSource="{Binding OpcionesEnergia}" SelectedItem="{Binding Energia}" HorizontalAlignment="Stretch" />
+
+                <TextBlock Text="Momento de la sesión" Margin="0,4,0,0" />
+                <WrapPanel>
+                    <CheckBox Content="Apertura" IsChecked="{Binding Apertura}" Margin="0,0,10,0" />
+                    <CheckBox Content="Subida" IsChecked="{Binding Subida}" Margin="0,0,10,0" />
+                    <CheckBox Content="Pico" IsChecked="{Binding Pico}" Margin="0,0,10,0" />
+                    <CheckBox Content="Cierre" IsChecked="{Binding Cierre}" Margin="0,0,10,0" />
+                    <CheckBox Content="After" IsChecked="{Binding After}" Margin="0,0,10,0" />
+                </WrapPanel>
+
+                <Grid ColumnDefinitions="*,8,*">
+                    <StackPanel Grid.Column="0" Spacing="6">
+                        <TextBlock Text="Voz" />
+                        <ComboBox ItemsSource="{Binding OpcionesVoz}" SelectedItem="{Binding Voz}" HorizontalAlignment="Stretch" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Spacing="6">
+                        <TextBlock Text="Letra" />
+                        <ComboBox ItemsSource="{Binding OpcionesLetra}" SelectedItem="{Binding Letra}" HorizontalAlignment="Stretch"
+                                  ToolTip.Tip="Si se deja sin indicar, se usa lo que diga el nombre del archivo (Clean, Dirty…)." />
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock Text="Idioma" />
+                <TextBox Text="{Binding Idioma}" PlaceholderText="{Binding IdiomaMarcador}" />
+
+                <TextBlock Text="Ambiente" />
+                <TextBox Text="{Binding Ambiente}" PlaceholderText="oscura, alegre, melancólica…"
+                         ToolTip.Tip="Palabras separadas por comas." />
+
+                <TextBlock Text="Etiquetas" />
+                <TextBox Text="{Binding Etiquetas}" PlaceholderText="boda, club, público joven…"
+                         ToolTip.Tip="Lo que te sirva para encontrarla: tipo de público, evento, estilo. Separadas por comas." />
+
+                <CheckBox Content="Arma secreta" IsChecked="{Binding ArmaSecreta}" Margin="0,4,0,0"
+                          ToolTip.Tip="La que se guarda para cuando la pista necesita un empujón." />
+
+                <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
+                    <Button Content="Guardar ficha" Command="{Binding GuardarCommand}" IsEnabled="{Binding HayCambios}"
+                            Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+                    <Button Content="Descartar cambios" Command="{Binding DescartarCommand}" IsEnabled="{Binding HayCambios}" />
+                </StackPanel>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

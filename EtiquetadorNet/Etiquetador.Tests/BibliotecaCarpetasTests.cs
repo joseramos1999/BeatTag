@@ -150,19 +150,122 @@ public class BibliotecaCarpetasTests : IDisposable
     }
 
     // --- Carpetas anidadas ---
+    //
+    // Configurar «Música» y «Música/House» a la vez metía cada canción de House DOS veces en la
+    // biblioteca. No era cosmético: falseaba el recuento y las estadísticas, inventaba duplicados
+    // donde había un solo archivo, y cualquier operación por lote tocaba el mismo archivo dos veces.
 
-    // Con una carpeta dentro de otra, cada canción entra una vez por cada raíz configurada. Quitar
-    // la de dentro debe dejar la copia que entró por la de fuera: esa carpeta sigue configurada.
+    // Se corta al elegir la carpeta, que es donde se puede explicar por qué.
     [Fact]
-    public async Task Quitar_la_carpeta_de_dentro_conserva_lo_que_entro_por_la_de_fuera()
+    public void No_se_puede_anadir_una_carpeta_que_ya_esta_dentro_de_otra()
+    {
+        var store = Montar(_raiz);
+
+        var alta = store.AddFolder(_a);
+
+        Assert.False(alta.Anadida);
+        Assert.NotEqual("", alta.Aviso);          // y se dice por qué: si no, parece que no hizo nada
+        Assert.Single(store.Folders);
+    }
+
+    // Al revés: la nueva engloba a las que ya estaban, y esas dejan de hacer falta por separado.
+    [Fact]
+    public void Anadir_la_carpeta_de_fuera_absorbe_las_de_dentro()
+    {
+        var store = Montar(_a, _b);
+
+        var alta = store.AddFolder(_raiz);
+
+        Assert.True(alta.Anadida);
+        Assert.NotEqual("", alta.Aviso);
+        Assert.Single(store.Folders);
+        Assert.Equal(_raiz, store.Folders[0].Path);
+    }
+
+    // Salvo que una de las de dentro esté DESMARCADA: absorberla la volvería a incluir sin decir
+    // nada, y desmarcar es justo la forma que tiene el usuario de dejar música fuera del análisis.
+    [Fact]
+    public void No_absorbe_una_carpeta_desmarcada_a_su_espalda()
+    {
+        var store = Montar(_a, _b);
+        store.Folders.First(f => f.Path == _a).Enabled = false;
+
+        var alta = store.AddFolder(_raiz);
+
+        Assert.False(alta.Anadida);
+        Assert.Equal(2, store.Folders.Count);
+        Assert.False(store.Folders.First(f => f.Path == _a).Enabled);   // sigue fuera
+    }
+
+    // Y si una configuración guardada por una versión anterior ya trae el solape, el escaneo se
+    // defiende solo: cada archivo entra una vez, y por la carpeta de FUERA, que es la que lo
+    // seguirá cubriendo si se quita la de dentro.
+    [Fact]
+    public async Task Un_solape_ya_guardado_no_duplica_canciones_al_escanear()
     {
         var (store, _) = await Escaneada(_raiz, _a);
-        var porLaDeFuera = store.Tracks.Count(t => t.Folder == _raiz);
-        Assert.True(porLaDeFuera > 0, "la raíz tiene que haber recogido los archivos de dentro");
+
+        Assert.Equal(3, store.Tracks.Count);                            // tres archivos, tres filas
+        Assert.Equal(3, store.Tracks.Select(t => t.FilePath).Distinct().Count());
+        Assert.All(store.Tracks, t => Assert.Equal(_raiz, t.Folder));   // la de fuera es la dueña
+    }
+
+    // Por eso quitar la de dentro no se lleva nada: la de fuera sigue configurada y las cubre.
+    [Fact]
+    public async Task Quitar_la_carpeta_de_dentro_no_deja_huerfana_la_musica()
+    {
+        var (store, _) = await Escaneada(_raiz, _a);
 
         store.RemoveFolder(_a);
 
-        Assert.Equal(porLaDeFuera, store.Tracks.Count);
+        Assert.Equal(3, store.Tracks.Count);
         Assert.All(store.Tracks, t => Assert.Equal(_raiz, t.Folder));
+    }
+
+    // Comparar rutas «a pelo» haría que «Musica2» pareciera estar dentro de «Musica».
+    // Las barras se escriben «/» y se traducen a la del sistema: esto tiene que valer igual en
+    // Windows y en macOS, y con la barra escrita a mano no valdría en los dos.
+    [Theory]
+    [InlineData("Musica/House", "Musica", true)]
+    [InlineData("Musica/House/Deep", "Musica", true)]
+    [InlineData("Musica2", "Musica", false)]        // el caso que rompe la comparación ingenua
+    [InlineData("Musica", "Musica", false)]         // la misma no está «dentro» de sí misma
+    [InlineData("Musica", "Musica/House", false)]   // la de fuera no está dentro de la de dentro
+    [InlineData("Otra", "Musica", false)]
+    public void Una_ruta_esta_dentro_de_otra_solo_si_cuelga_de_ella(string ruta, string raiz, bool dentro)
+        => Assert.Equal(dentro, LibraryStore.EstaDentroDe(DelSistema(ruta), DelSistema(raiz)));
+
+    private static string DelSistema(string conBarras)
+        => Path.Combine(_baseRutas, conBarras.Replace('/', Path.DirectorySeparatorChar));
+
+    private static readonly string _baseRutas = Path.Combine(Path.GetTempPath(), "beattag-rutas");
+
+    // --- Ninguna carpeta marcada ---
+
+    // Desmarcarlas todas deja la biblioteca igual de vacía que no tener ninguna. Darla por
+    // escaneada abría la aplicación entera sobre una lista sin canciones, en vez de pedir que se
+    // marcara alguna.
+    [Fact]
+    public async Task Desmarcarlas_todas_deja_la_biblioteca_sin_preparar()
+    {
+        var (store, _) = await Escaneada(_a, _b);
+
+        foreach (var f in store.Folders.ToList()) f.Enabled = false;
+
+        Assert.Empty(store.Tracks);
+        Assert.Empty(store.EnabledPaths());
+    }
+
+    // Y escanear sin ninguna marcada no puede declarar la biblioteca lista.
+    [Fact]
+    public async Task Escanear_sin_ninguna_carpeta_marcada_no_la_da_por_lista()
+    {
+        var store = Montar(_a, _b);
+        foreach (var f in store.Folders) f.Enabled = false;
+
+        await store.ScanAsync();
+
+        Assert.False(store.IsScanned);
+        Assert.Empty(store.Tracks);
     }
 }

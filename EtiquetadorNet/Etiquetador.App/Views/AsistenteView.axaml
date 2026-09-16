@@ -1,0 +1,243 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:views="using:Etiquetador.App.Views"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="640"
+             x:Class="Etiquetador.App.Views.AsistenteView"
+             x:DataType="vm:AsistenteViewModel">
+
+    <DockPanel Margin="8">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,8">
+            <TextBlock Classes="titulo" Text="Asistente IA" />
+            <TextBlock Classes="desc"
+                       Text="Herramientas que usan la IA local de tu equipo. La IA propone y tú decides: nada se guarda ni se escribe en tus archivos sin que lo revises y lo aceptes." />
+        </StackPanel>
+
+        <!-- Estado de la IA -->
+        <Border DockPanel.Dock="Top" Padding="10,6" CornerRadius="6" Margin="0,0,0,8"
+                Background="{DynamicResource SuperficieSuave}" BorderBrush="{DynamicResource BordeSuave}" BorderThickness="1">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                <TextBlock Grid.Column="0" Text="🤖" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <TextBlock Grid.Column="1" Text="{Binding EstadoIa}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                <Button Grid.Column="2" Content="Comprobar" Command="{Binding ComprobarIaCommand}" IsEnabled="{Binding !IsBusy}" Margin="8,0,0,0" />
+                <Button Grid.Column="3" Content="Cancelar" Command="{Binding CancelarCommand}" IsEnabled="{Binding IsBusy}" Margin="6,0,0,0" />
+            </Grid>
+        </Border>
+
+        <TabControl>
+
+            <!-- ============================ 1. BUSCAR CON UNA FRASE ============================ -->
+            <TabItem Header="Buscar con una frase">
+                <Grid RowDefinitions="Auto,Auto,Auto,*" ColumnDefinitions="*,4,*" DataContext="{Binding Busqueda}" x:DataType="vm:BusquedaFraseViewModel" Margin="0,8,0,0">
+                    <TextBlock Grid.Row="0" Grid.ColumnSpan="3" Classes="desc" Margin="0,0,0,6"
+                               Text="Describe lo que buscas como se lo dirías a otro DJ. Lo que se puede leer sin interpretar (géneros y artistas que tienes, BPM, décadas, «sin palabrotas», el momento de la sesión) se detecta con reglas; la IA añade el resto, y solo si lo justifica con tus palabras. Revisa las condiciones y crea la colección." />
+                    <Grid Grid.Row="1" Grid.ColumnSpan="3" ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+                        <TextBox Grid.Column="0" Text="{Binding Frase}" PlaceholderText="Por ejemplo: bachata romántica de los 2000 para cerrar" />
+                        <Button Grid.Column="1" Content="Interpretar" Command="{Binding InterpretarCommand}" Margin="6,0,0,0"
+                                IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                Background="#2563EB" Foreground="White" FontWeight="SemiBold" IsDefault="True" />
+                    </Grid>
+                    <WrapPanel Grid.Row="2" Grid.ColumnSpan="3" Margin="0,0,0,8">
+                        <TextBlock Text="Ejemplos:" VerticalAlignment="Center" Margin="0,0,6,4" Foreground="{DynamicResource TextoSecundario}" />
+                        <ItemsControl ItemsSource="{Binding Ejemplos}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="x:String">
+                                    <Button Content="{Binding}" Margin="0,0,6,4" FontSize="12"
+                                            Command="{Binding $parent[ItemsControl].((vm:BusquedaFraseViewModel)DataContext).UsarEjemploCommand}"
+                                            CommandParameter="{Binding}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </WrapPanel>
+
+                    <!-- Condiciones -->
+                    <DockPanel Grid.Row="3" Grid.Column="0">
+                        <TextBlock DockPanel.Dock="Top" Text="Condiciones" FontWeight="SemiBold" Margin="0,0,0,4" />
+                        <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,8,0,0" IsVisible="{Binding HayFiltros}">
+                            <TextBlock Text="Nombre de la colección" />
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Grid.Column="0" Text="{Binding NombreColeccion}" />
+                                <Button Grid.Column="1" Content="Crear colección" Command="{Binding CrearColeccionCommand}" Margin="6,0,0,0"
+                                        Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
+                            </Grid>
+                        </StackPanel>
+                        <ListBox ItemsSource="{Binding Filtros}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:FiltroFila">
+                                    <Grid ColumnDefinitions="Auto,*" Opacity="{Binding SePuedeUsar, Converter={x:Static views:AsistenteView.Atenuar}}">
+                                        <CheckBox Grid.Column="0" IsChecked="{Binding Aceptado}" IsEnabled="{Binding SePuedeUsar}" VerticalAlignment="Top" />
+                                        <StackPanel Grid.Column="1" Spacing="1">
+                                            <TextBlock TextWrapping="Wrap">
+                                                <Run Text="{Binding Campo}" FontWeight="SemiBold" />
+                                                <Run Text=": " />
+                                                <Run Text="{Binding Valor}" />
+                                                <Run Text="  " />
+                                                <Run Text="{Binding Cita}" Foreground="{DynamicResource TextoSecundario}" />
+                                            </TextBlock>
+                                            <TextBlock FontSize="12" Foreground="{DynamicResource TextoSecundario}" TextWrapping="Wrap">
+                                                <Run Text="{Binding Origen}" />
+                                                <Run Text="{Binding Motivo}" />
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+
+                    <!-- Vista previa -->
+                    <DockPanel Grid.Row="3" Grid.Column="2">
+                        <TextBlock DockPanel.Dock="Top" Text="{Binding Resumen}" FontWeight="SemiBold" Margin="0,0,0,4" />
+                        <Border DockPanel.Dock="Top" Padding="8,6" CornerRadius="4" Margin="0,0,0,6"
+                                Background="{DynamicResource AvisoFondo}" BorderBrush="{DynamicResource AvisoBorde}" BorderThickness="1"
+                                IsVisible="{Binding Aviso, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                            <TextBlock Text="{Binding Aviso}" Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap" />
+                        </Border>
+                        <DataGrid ItemsSource="{Binding Vista}" x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
+                                  CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="*" />
+                                <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="*" />
+                                <DataGridTextColumn Header="Género" Binding="{Binding Genre}" Width="90" />
+                                <DataGridTextColumn Header="BPM" Binding="{Binding BpmTexto}" SortMemberPath="Bpm" Width="70" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </DockPanel>
+                </Grid>
+            </TabItem>
+
+            <!-- ============================ 2. PROPONER FICHAS ============================ -->
+            <TabItem Header="Proponer fichas">
+                <DockPanel DataContext="{Binding FichasIa}" x:DataType="vm:FichasIaViewModel" Margin="0,8,0,0">
+                    <TextBlock DockPanel.Dock="Top" Classes="desc" Margin="0,0,0,6"
+                               Text="Propone el idioma y si lleva voz para las canciones que no los tienen en su ficha. Solo esos dos datos: medida con canciones conocidas, la IA acierta el idioma en unas 7 de cada 10 canciones (suele fallar cuando deduce por la nacionalidad del artista) y no sabe estimar la energía. Nunca cambia lo que ya hayas rellenado. Revisa y acepta." />
+                    <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                        <TextBlock Text="Canciones de" VerticalAlignment="Center" Margin="0,0,6,4" />
+                        <ComboBox ItemsSource="{Binding Ambitos}" SelectedItem="{Binding Ambito}" MinWidth="200" Margin="0,0,12,4" />
+                        <TextBlock Text="Como máximo" VerticalAlignment="Center" Margin="0,0,6,4" />
+                        <ComboBox ItemsSource="{Binding Limites}" SelectedItem="{Binding Limite}" MinWidth="90" Margin="0,0,12,4" />
+                        <Button Content="Proponer" Command="{Binding ProponerCommand}" Margin="0,0,12,4"
+                                IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+                        <Button Content="Marcar todas" Command="{Binding MarcarTodasCommand}" Margin="0,0,6,4" />
+                        <Button Content="Desmarcar todas" Command="{Binding MarcarNingunaCommand}" Margin="0,0,12,4" />
+                        <Button Content="Aceptar las marcadas" Command="{Binding AceptarCommand}" Margin="0,0,12,4"
+                                IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" />
+                    </WrapPanel>
+                    <DataGrid ItemsSource="{Binding Propuestas}" x:CompileBindings="False" AutoGenerateColumns="False"
+                              CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
+                        <DataGrid.Columns>
+                            <DataGridCheckBoxColumn Header="Aceptar" Binding="{Binding Aceptar}" Width="80" />
+                            <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="*" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="*" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Idioma" Binding="{Binding Idioma}" Width="80" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Voz" Binding="{Binding Voz}" Width="110" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Origen" Binding="{Binding Origen}" Width="140" IsReadOnly="True" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ============================ 3. UNIFICAR GÉNEROS ============================ -->
+            <TabItem Header="Unificar géneros">
+                <DockPanel DataContext="{Binding Generos}" x:DataType="vm:GenerosIaViewModel" Margin="0,8,0,0">
+                    <TextBlock DockPanel.Dock="Top" Classes="desc" Margin="0,0,0,6"
+                               Text="Agrupa las distintas formas de escribir un mismo género. Primero se aplican reglas (grafías conocidas y valores que no son un género, como un usuario de redes); la IA solo puede elegir entre los géneros que ya usas, nunca inventar uno ni vaciarlo. Lo propuesto por reglas sale marcado y lo de la IA desmarcado. Puedes corregir la propuesta escribiendo en la columna. Se puede deshacer desde Enriquecer." />
+                    <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                        <Button Content="Analizar géneros" Command="{Binding AnalizarCommand}" Margin="0,0,12,4"
+                                IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+                        <Button Content="Marcar todas" Command="{Binding MarcarTodasCommand}" Margin="0,0,6,4" />
+                        <Button Content="Desmarcar todas" Command="{Binding MarcarNingunaCommand}" Margin="0,0,12,4" />
+                        <Button Content="Aplicar las marcadas" Click="AplicarGeneros_Click" Margin="0,0,12,4"
+                                IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" />
+                    </WrapPanel>
+                    <DataGrid ItemsSource="{Binding Filas}" x:CompileBindings="False" AutoGenerateColumns="False"
+                              CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
+                        <DataGrid.Columns>
+                            <DataGridCheckBoxColumn Header="Aplicar" Binding="{Binding Aplicar}" Width="80" />
+                            <DataGridTextColumn Header="Género actual" Binding="{Binding Original}" Width="*" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Canciones" Binding="{Binding Canciones}" Width="100" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Quedaría como" Binding="{Binding Propuesto}" Width="*" />
+                            <DataGridTextColumn Header="Origen" Binding="{Binding Origen}" Width="140" IsReadOnly="True" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ============================ 5. RENOMBRAR CON IA ============================ -->
+            <TabItem Header="Renombrar con IA">
+                <DockPanel DataContext="{Binding Renombrar}" x:DataType="vm:RenombrarIaViewModel" Margin="0,8,0,0">
+                    <TextBlock DockPanel.Dock="Top" Classes="desc" Margin="0,0,0,6"
+                               Text="Propone un nombre limpio («Artista - Título (Versión)») para los archivos con nombre sucio: BPM, tonalidad, record pools, guiones bajos, nombres cortados o sin separar artista y título. Los nombres ya limpios y los mashups no se tocan. La IA solo puede reordenar lo que ya dice el nombre o las etiquetas, nunca inventar, y cada propuesta pasa por comprobaciones; lo que no se puede comprobar se avisa. Medido sobre bibliotecas reales, unas 3 de cada 4 propuestas son buenas: todo sale desmarcado y puedes corregir el nombre antes de aceptarlo." />
+                    <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                        <TextBlock Text="Canciones de" VerticalAlignment="Center" Margin="0,0,6,4" />
+                        <ComboBox ItemsSource="{Binding Ambitos}" SelectedItem="{Binding Ambito}" MinWidth="200" Margin="0,0,12,4" />
+                        <TextBlock Text="Como máximo" VerticalAlignment="Center" Margin="0,0,6,4" />
+                        <ComboBox ItemsSource="{Binding Limites}" SelectedItem="{Binding Limite}" MinWidth="90" Margin="0,0,12,4" />
+                        <Button Content="Proponer nombres" Command="{Binding ProponerCommand}" Margin="0,0,12,4"
+                                IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+                        <CheckBox Content="Solo las que no tienen avisos" IsChecked="{Binding SoloSinAvisos}" Margin="0,0,12,4" />
+                        <Button Content="Marcar las visibles" Command="{Binding MarcarTodasCommand}" Margin="0,0,6,4" />
+                        <Button Content="Desmarcar todas" Command="{Binding MarcarNingunaCommand}" Margin="0,0,12,4" />
+                        <Button Content="Renombrar las marcadas" Click="Renombrar_Click" Margin="0,0,12,4"
+                                IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" />
+                    </WrapPanel>
+                    <DataGrid ItemsSource="{Binding FilasView}" x:CompileBindings="False" AutoGenerateColumns="False"
+                              CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
+                        <DataGrid.Columns>
+                            <DataGridCheckBoxColumn Header="Aceptar" Binding="{Binding Aceptar}" Width="80" />
+                            <DataGridTextColumn Header="Nombre actual" Binding="{Binding Actual}" Width="1.2*" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Nombre propuesto" Binding="{Binding Propuesto}" Width="1.2*" />
+                            <DataGridTextColumn Header="Avisos" Binding="{Binding Avisos}" Width="*" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Carpeta" Binding="{Binding Carpeta}" Width="120" IsReadOnly="True" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ============================ 4. ORDENAR PARA MEZCLAR ============================ -->
+            <TabItem Header="Ordenar para mezclar">
+                <DockPanel DataContext="{Binding Mezcla}" x:DataType="vm:MezclaViewModel" Margin="0,8,0,0">
+                    <TextBlock DockPanel.Dock="Top" Classes="desc" Margin="0,0,0,6"
+                               Text="Ordena una colección para pincharla seguida: empieza por lo más tranquilo y encadena cada canción con la que mejor entra, priorizando tonos compatibles en la rueda Camelot, después el tempo (contando doble y mitad) y después que la energía no baje. No usa la IA: son reglas de mezcla y sale igual cada vez. Necesita la tonalidad en las etiquetas." />
+                    <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                        <TextBlock Text="Colección" VerticalAlignment="Center" Margin="0,0,6,4" />
+                        <ComboBox ItemsSource="{Binding Colecciones}" SelectedItem="{Binding Coleccion}" MinWidth="220" Margin="0,0,12,4" />
+                        <Button Content="Ordenar" Command="{Binding OrdenarCommand}" Margin="0,0,12,4"
+                                IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+                        <Button Content="Guardar como lista (M3U8)" Click="ExportarMezcla_Click" Margin="0,0,12,4"
+                                Background="#0D9488" Foreground="White" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" TextWrapping="Wrap" />
+                    </WrapPanel>
+                    <DataGrid ItemsSource="{Binding Pasos}" x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
+                              CanUserResizeColumns="True" CanUserSortColumns="False" GridLinesVisibility="Horizontal">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="#" Binding="{Binding Posicion}" Width="50" />
+                            <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="*" />
+                            <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="*" />
+                            <DataGridTextColumn Header="BPM" Binding="{Binding Bpm}" Width="70" />
+                            <DataGridTextColumn Header="Tono" Binding="{Binding Camelot}" Width="70" />
+                            <DataGridTextColumn Header="Energía" Binding="{Binding Energia}" Width="90" />
+                            <DataGridTextColumn Header="Entrada desde la anterior" Binding="{Binding Transicion}" Width="220" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</UserControl>

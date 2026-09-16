@@ -53,6 +53,8 @@ public partial class MainViewModel : ViewModelBase
     private const int TrendsTabIndex = 9;
     private const int SettingsTabIndex = 11;
     private const int HelpTabIndex = 12;
+    private const int ColeccionesTabIndex = 15;
+    private const int AsistenteTabIndex = 16;
 
     public AppEngine Engine { get; }
 
@@ -68,6 +70,10 @@ public partial class MainViewModel : ViewModelBase
     public TrendsViewModel Trends { get; }
     public LoudnessViewModel Loudness { get; }
     public SettingsViewModel Settings { get; }
+    public BandejaViewModel Bandeja { get; }
+    public FichasViewModel Fichas { get; }
+    public ColeccionesViewModel Colecciones { get; }
+    public AsistenteViewModel Asistente { get; }
 
     [ObservableProperty] private int _selectedTabIndex;
 
@@ -85,19 +91,26 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private string _busyWhat = "";
 
     /// <summary>
-    /// La biblioteca está lista: hay carpetas y ya se han escaneado. Hasta entonces el resto de
-    /// pestañas no tiene nada sobre lo que trabajar, así que se mantienen fuera de alcance para
-    /// no mostrar tablas vacías que hacen pensar que la aplicación no funciona.
+    /// La biblioteca está lista: hay alguna carpeta MARCADA y ya se ha escaneado. Hasta entonces el
+    /// resto de pestañas no tiene nada sobre lo que trabajar, así que se mantienen fuera de alcance
+    /// para no mostrar tablas vacías que hacen pensar que la aplicación no funciona.
+    ///
+    /// Cuentan las marcadas, no las configuradas: desmarcarlas todas deja la biblioteca igual de
+    /// vacía que no tener ninguna, y mirando solo si existían la aplicación se abría entera sobre
+    /// una lista sin canciones en lugar de pedir que se marcara una.
     /// </summary>
-    public bool LibraryReady => Engine.Library.Folders.Count > 0 && Engine.Library.IsScanned;
+    public bool LibraryReady => Engine.Library.Folders.Any(f => f.Enabled) && Engine.Library.IsScanned;
 
     /// <summary>Hay que explicar por qué está casi todo en gris (no basta con deshabilitarlo).</summary>
     public bool ShowSetupHint => !Busy && !LibraryReady;
 
-    /// <summary>Siguiente paso concreto, según si ya hay carpetas o todavía no.</summary>
-    public string SetupHint => Engine.Library.Folders.Count == 0
-        ? "Empieza por añadir tus carpetas de música en esta pestaña. El resto de la aplicación se activará en cuanto la biblioteca esté preparada."
-        : "Pulsa «Escanear» para preparar la biblioteca. El resto de la aplicación se activará al terminar.";
+    /// <summary>Siguiente paso concreto: falta añadir carpetas, falta marcar alguna, o falta escanear.</summary>
+    public string SetupHint =>
+        Engine.Library.Folders.Count == 0
+            ? "Empieza por añadir tus carpetas de música en esta pestaña. El resto de la aplicación se activará en cuanto la biblioteca esté preparada."
+        : !Engine.Library.Folders.Any(f => f.Enabled)
+            ? "Todas las carpetas están desmarcadas, así que no hay música que analizar. Marca al menos una y pulsa «Escanear»."
+            : "Pulsa «Escanear» para preparar la biblioteca. El resto de la aplicación se activará al terminar.";
 
     /// <summary>
     /// Pestañas disponibles, un bit por pestaña (bit N = pestaña N). Se calcula en un solo sitio
@@ -134,6 +147,10 @@ public partial class MainViewModel : ViewModelBase
         Trends = new TrendsViewModel(engine);
         Loudness = new LoudnessViewModel(engine);
         Settings = new SettingsViewModel(engine);
+        Bandeja = new BandejaViewModel(engine);
+        Fichas = new FichasViewModel(engine);
+        Colecciones = new ColeccionesViewModel(engine);
+        Asistente = new AsistenteViewModel(engine);
 
         // El ÍNDICE de cada página es su hueco en el contenido de MainWindow.axaml; el ORDEN en que
         // aparecen aquí es el de la barra lateral, y no tiene por qué ser el mismo.
@@ -145,6 +162,7 @@ public partial class MainViewModel : ViewModelBase
                 Paginas = new PaginaNav[]
                 {
                     new() { Indice = 0,  Icono = "📚", Nombre = "Biblioteca", Vm = Library, Ocupada = () => Library.IsBusy },
+                    new() { Indice = 13, Icono = "📥", Nombre = "Bandeja de entrada", Vm = Bandeja, Ocupada = () => Bandeja.IsBusy },
                     new() { Indice = 2,  Icono = "✏",  Nombre = "Editor",     Vm = Editor, Ocupada = () => Editor.IsBusy },
                 },
             },
@@ -156,6 +174,7 @@ public partial class MainViewModel : ViewModelBase
                     new() { Indice = 1,  Icono = "✨", Nombre = "Enriquecer",      Vm = Enrich, Ocupada = () => Enrich.IsBusy },
                     new() { Indice = 6,  Icono = "❓", Nombre = "No encontradas",  Vm = NotFound, Ocupada = () => NotFound.IsBusy },
                     new() { Indice = 7,  Icono = "🎤", Nombre = "Comprobar audio", Vm = Identify, Ocupada = () => Identify.IsBusy },
+                    new() { Indice = 14, Icono = "🎚", Nombre = "Ficha DJ", Vm = Fichas, Ocupada = () => Fichas.IsBusy },
                 },
             },
             new()
@@ -174,10 +193,20 @@ public partial class MainViewModel : ViewModelBase
                 Titulo = "EXPLORAR",
                 Paginas = new PaginaNav[]
                 {
+                    new() { Indice = 15, Icono = "🗂", Nombre = "Colecciones", Vm = Colecciones, Ocupada = () => Colecciones.IsBusy },
                     new() { Indice = 8,  Icono = "📊", Nombre = "Estadísticas", Vm = Stats, Ocupada = () => Stats.IsBusy },
                     // La carga de países no cuenta: es una precarga de fondo, no un proceso del usuario.
                     new() { Indice = 9,  Icono = "🌍", Nombre = "Tendencias", Vm = Trends,
                             Ocupada = () => Trends.IsBusy && !Trends.LoadingCountries },
+                },
+            },
+            new()
+            {
+                // Bloque propio: la IA atraviesa los demás (fichas, colecciones, géneros) y no pertenece a uno solo.
+                Titulo = "ASISTENTE",
+                Paginas = new PaginaNav[]
+                {
+                    new() { Indice = 16, Icono = "🤖", Nombre = "Asistente IA", Vm = Asistente, Ocupada = () => Asistente.IsBusy },
                 },
             },
             new()
@@ -198,7 +227,7 @@ public partial class MainViewModel : ViewModelBase
 
         // Bloqueo global: seguir el estado "ocupado" de todas las pestañas con operación larga.
         foreach (ViewModelBase vm in new ViewModelBase[]
-                 { Library, Enrich, Editor, Duplicates, Quality, Incomplete, NotFound, Identify, Stats, Trends, Loudness, Settings })
+                 { Library, Enrich, Editor, Duplicates, Quality, Incomplete, NotFound, Identify, Stats, Trends, Loudness, Settings, Bandeja, Fichas, Colecciones, Asistente })
             vm.PropertyChanged += OnChildChanged;
 
         // La biblioteca avisa al escanearse y al cambiar las carpetas: es lo que abre el resto de
@@ -218,6 +247,13 @@ public partial class MainViewModel : ViewModelBase
         {
             Editor.SelectByPath(path);
             SelectedTabIndex = EditorTabIndex;
+        };
+
+        // Una colección creada en el Asistente se abre en Colecciones, que es donde se ajusta y se exporta.
+        Asistente.ColeccionCreada += c =>
+        {
+            Colecciones.AnadirColeccion(c);
+            SelectedTabIndex = ColeccionesTabIndex;
         };
 
         // Al terminar un análisis en Enriquecer, las no identificadas pasan a su pestaña.
@@ -395,6 +431,10 @@ public partial class MainViewModel : ViewModelBase
             // nada ni gasta nada: solo lee lo guardado. Se hace aquí y no en el constructor para no
             // recorrer la biblioteca entera al arrancar por una pestaña que quizá no se abra.
             if (!_reverting && value == IdentifyTabIndex && !Identify.IsBusy) _ = Identify.RecomponerAsync();
+
+            // Al entrar en el Asistente se mira si la IA responde y con qué modelo: pudo arrancarse o
+            // pararse desde la última vez, y las colecciones pudieron cambiar.
+            if (!_reverting && value == AsistenteTabIndex && !Asistente.IsBusy) _ = Asistente.ComprobarIaAsync();
             return;
         }
         _reverting = true;

@@ -279,7 +279,7 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
         _instalados.Clear();
         foreach (var m in modelos) _instalados.Add(m);
         // Conserva la elección anterior si sigue instalada; si no, la primera disponible.
-        AiModel = previo.Length > 0 && EstaInstalado(previo) ? previo : modelos[0];
+        AiModel = previo.Length > 0 && EstaInstalado(previo) ? previo : Core.Ai.OllamaClient.Automatico(modelos);
         RefrescarOpciones();
         AiStatus = $"Preparada. {modelos.Count} modelo(s) instalado(s).";
     }

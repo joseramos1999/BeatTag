@@ -195,7 +195,15 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         if (e.PropertyName != null && OptionProps.Contains(e.PropertyName)) PushToConfig();
     }
 
-    public void AddFolder(string folder) => _engine.Library.AddFolder(folder);
+    /// <summary>
+    /// Añade una carpeta. Puede rechazarse por solaparse con otra que ya estaba, y entonces hay que
+    /// decirlo: si no, el usuario elige una carpeta, no ve ningún cambio y no sabe por qué.
+    /// </summary>
+    public void AddFolder(string folder)
+    {
+        var alta = _engine.Library.AddFolder(folder);
+        if (alta.Aviso.Length > 0) Status = alta.Aviso;
+    }
 
     [RelayCommand]
     private void RemoveFolderPath(string? folder) { if (folder != null) _engine.Library.RemoveFolder(folder); }

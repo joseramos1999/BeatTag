@@ -31,6 +31,15 @@ public sealed class AppPaths
 
     /// <summary>Casillas "Aplicar" que el usuario ha tocado a mano en Enriquecer.</summary>
     public string ApplyMarksPath { get; }
+
+    /// <summary>Fichas de DJ (energía, momento, ambiente…). Trabajo hecho a mano: no es una caché.</summary>
+    public string FichasDjPath { get; }
+
+    /// <summary>Colecciones inteligentes guardadas.</summary>
+    public string ColeccionesPath { get; }
+
+    /// <summary>Estado de cada canción de la bandeja de entrada.</summary>
+    public string BandejaPath { get; }
     public string AppliedPath { get; }
 
     public AppPaths(string? dataDir = null)
@@ -56,6 +65,9 @@ public sealed class AppPaths
         IgnoredPath = Path.Combine(DataDir, "descartadas.json");
         AppliedPath = Path.Combine(DataDir, "aplicadas.json");
         ApplyMarksPath = Path.Combine(DataDir, "marcas-aplicar.json");
+        FichasDjPath = Path.Combine(DataDir, "fichas-dj.json");
+        ColeccionesPath = Path.Combine(DataDir, "colecciones.json");
+        BandejaPath = Path.Combine(DataDir, "bandeja.json");
     }
 
     /// <summary>Crea las carpetas de datos si no existen (idempotente).</summary>

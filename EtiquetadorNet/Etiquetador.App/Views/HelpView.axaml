@@ -44,7 +44,7 @@
             <!-- LA VENTANA -->
             <TextBlock Classes="h" Text="🖥 Cómo está montada la ventana" />
             <TextBlock Classes="p" Text="A la izquierda, las pestañas agrupadas por lo que vienes a hacer; en el centro, la que tengas abierta; abajo, lo que la aplicación te esté contando." />
-            <TextBlock Classes="li" Text="• TU MÚSICA es dónde vive la colección. ETIQUETAR es ponerle nombre y datos correctos. LIMPIAR es quitar sobras y corregir defectos. EXPLORAR es mirarla en conjunto. Ajustes y Ayuda van aparte abajo, porque no forman parte de ese recorrido." />
+            <TextBlock Classes="li" Text="• TU MÚSICA es dónde vive la colección. ETIQUETAR es ponerle nombre y datos correctos. LIMPIAR es quitar sobras y corregir defectos. EXPLORAR es mirarla en conjunto. ASISTENTE reúne las herramientas con IA. Ajustes y Ayuda van aparte abajo, porque no forman parte de ese recorrido." />
             <TextBlock Classes="li" Text="• La barra de abajo dice siempre en qué pestaña estás y qué está pasando, con la barra de avance cuando hay algo en marcha. Antes cada pestaña lo contaba donde le venía bien y había que buscarlo." />
             <TextBlock Classes="li" Text="• El tema (claro, oscuro o el del sistema) y las tablas compactas se eligen en Ajustes → Aspecto y se aplican al momento. La ventana recuerda su tamaño y su posición al cerrarla; si la dejaste en un monitor que ya no está conectado, vuelve al centro en vez de abrirse donde no se ve." />
 
@@ -52,6 +52,7 @@
             <TextBlock Classes="h" Text="📚 Biblioteca" />
             <TextBlock Classes="p" Text="El punto de partida: aquí vive tu colección." />
             <TextBlock Classes="li" Text="• Añade carpetas con el botón o arrastrándolas desde el Explorador." />
+            <TextBlock Classes="li" Text="• Una carpeta que ya está dentro de otra de la lista no se añade, porque sus canciones contarían dos veces. Si añades una carpeta que contiene a otras de la lista, esas dejan de hacer falta por separado y se retiran, salvo que alguna esté desmarcada: en ese caso no se añade, para no volver a incluir música que habías excluido." />
             <TextBlock Classes="li" Text="• Cada carpeta tiene una casilla: desmárcala para excluirla sin quitarla de la lista de carpetas. Sus canciones desaparecen al momento de la tabla y dejan de analizarse en todas las pestañas." />
             <TextBlock Classes="li" Text="• Quitar una carpeta con la ✕, o «Vaciar carpetas», también saca sus canciones al instante. No hace falta volver a escanear: retirar una carpeta solo puede restar canciones, nunca añadirlas. Los archivos no se tocan; salen de la lista, no del disco." />
             <TextBlock Classes="li" Text="• Al revés sí hace falta escanear: si añades una carpeta o vuelves a marcar una que habías desmarcado, sus canciones no están cargadas todavía. La aplicación se pone «sin escanear» —el resto de pestañas se bloquea y te lo dice— hasta que pulses Escanear. Es preferible a ponerse a leer el disco sin que se lo hayas pedido." />
@@ -111,6 +112,42 @@
             <TextBlock Classes="li" Text="• '🔎 Reanalizar…' abre el mismo buscador que Enriquecer y RELLENA el formulario con la propuesta; no se escribe nada hasta que pulses Guardar." />
             <TextBlock Classes="li" Text="• '▶ Escuchar' reproduce un fragmento para comprobar que es la canción correcta." />
             <TextBlock Classes="li" Text="• Lo que guardes aquí también se puede revertir con 'Deshacer última' desde Enriquecer." />
+
+            <!-- BANDEJA -->
+            <TextBlock Classes="h" Text="📥 Bandeja de entrada" />
+            <TextBlock Classes="p" Text="Una carpeta aparte, fuera de la biblioteca, donde dejas la música recién descargada. Aquí se revisa antes de que entre en la colección y en tu programa de DJ, que es cuando un problema todavía es fácil de corregir." />
+            <TextBlock Classes="li" Text="• Elige la carpeta de la bandeja y pulsa Analizar. Cada canción recibe avisos si ya está en la biblioteca, si tienes otra versión (por ejemplo, la extended), si está repetida dentro de la propia bandeja, si su calidad es baja, si le faltan etiquetas o si en la carpeta de destino ya hay un archivo con su nombre." />
+            <TextBlock Classes="li" Text="• Cada canción pasa por cuatro estados. Recibida y Analizada los pone la aplicación; Revisada y Preparada los pones tú cuando has visto los avisos y cuando la das por lista. Volver a analizar nunca devuelve atrás lo que tú has marcado." />
+            <TextBlock Classes="li" Text="• «Pasar las preparadas a la biblioteca» mueve solo las preparadas a la carpeta de destino, que tiene que ser una carpeta de la biblioteca o estar dentro de una. Nunca se sobrescribe un archivo: si el nombre ya existe, esa canción se queda en la bandeja. Se puede deshacer desde Enriquecer." />
+            <TextBlock Classes="li" Text="• A la derecha puedes rellenar su ficha de DJ antes de pasarla: la ficha la acompaña al moverse." />
+
+            <!-- FICHA DJ -->
+            <TextBlock Classes="h" Text="🎚 Ficha DJ" />
+            <TextBlock Classes="p" Text="Lo que sabes de cada canción y no cabe en las etiquetas habituales: energía de 1 a 10, momento de la sesión (apertura, subida, pico, cierre, after), voz, letra limpia o explícita, idioma, ambiente, etiquetas libres y si es un arma secreta." />
+            <TextBlock Classes="li" Text="• Se guarda en BeatTag, no en el archivo. Rellenar fichas no modifica tu música, y los datos valen igual con cualquier programa de DJ." />
+            <TextBlock Classes="li" Text="• Selecciona varias canciones para rellenarlas a la vez. El panel muestra lo que tienen en común y, al guardar, solo aplica lo que hayas cambiado: marcar «Pico» en cuarenta temas no les borra el ambiente ni las etiquetas que ya tenían." />
+            <TextBlock Classes="li" Text="• Con la tabla activa, las teclas 1 a 9 asignan esa energía a las seleccionadas y el 0 asigna un 10." />
+            <TextBlock Classes="li" Text="• Si la letra no está indicada, se usa lo que diga el nombre del archivo (Clean, Dirty…)." />
+            <TextBlock Classes="li" Text="• «Escribir en el comentario» copia la ficha al comentario del archivo dentro de un bloque [DJ: …], para verla en rekordbox, Serato o Engine DJ. Lo que ya hubiera en el comentario se conserva, volver a escribirla reemplaza el bloque, y se puede deshacer desde Enriquecer." />
+            <TextBlock Classes="li" Text="• Si BeatTag renombra o mueve un archivo, su ficha lo sigue. La ficha de un archivo que no aparece (por ejemplo, en un disco desconectado) se conserva." />
+
+            <!-- COLECCIONES -->
+            <TextBlock Classes="h" Text="🗂 Colecciones" />
+            <TextBlock Classes="p" Text="Listas que se rellenan solas a partir de unas condiciones: género, BPM, energía, momento, voz, letra, idioma, ambiente y etiquetas. No guardan canciones sino el criterio, así que se mantienen al día cuando entra música nueva o completas fichas." />
+            <TextBlock Classes="li" Text="• Todas las condiciones se tienen que cumplir a la vez. En los momentos basta con uno de los marcados; en ambiente y etiquetas hacen falta todos los indicados." />
+            <TextBlock Classes="li" Text="• Las condiciones que dependen de la ficha (energía, momento, voz, idioma, ambiente, etiquetas) solo encuentran canciones que tengan ese dato rellenado." />
+            <TextBlock Classes="li" Text="• «Guardar como lista (M3U8)» la exporta en el orden de la tabla para abrirla en tu programa de DJ. No copia ni mueve archivos." />
+            <TextBlock Classes="li" Text="• Además del género (varios separados por comas valen como «cualquiera de ellos») se puede limitar por año de publicación." />
+
+            <!-- ASISTENTE IA -->
+            <TextBlock Classes="h" Text="🤖 Asistente IA" />
+            <TextBlock Classes="p" Text="Herramientas que usan la IA local de tu equipo (Ollama), sin enviar nada a internet. La norma es siempre la misma: la IA propone, BeatTag comprueba la propuesta con reglas y con tu biblioteca, y tú decides. Si la IA no está disponible, las herramientas siguen funcionando solo con reglas." />
+            <TextBlock Classes="li" Text="• Buscar con una frase: describe lo que quieres («bachata romántica de los 2000 para cerrar») y se convierte en condiciones que revisas antes de crear una colección. Lo seguro (géneros y artistas que tienes, BPM, décadas, «sin palabrotas», el momento de la sesión) se lee con reglas; la IA solo añade condiciones que justifica con tus palabras, y las que no pasan la comprobación se muestran como descartadas con el motivo." />
+            <TextBlock Classes="li" Text="• Proponer fichas: sugiere idioma y voz para las canciones que no los tienen en su ficha. Nunca cambia lo que ya hayas rellenado. Es orientativo: la IA acierta el idioma en unas 7 de cada 10 canciones y se equivoca sobre todo al deducirlo por la nacionalidad del artista; tampoco detecta bien los temas instrumentales. No propone energía, porque no sabe estimarla." />
+            <TextBlock Classes="li" Text="• Unificar géneros: agrupa las formas distintas de escribir un mismo género. Las grafías conocidas y los valores que no son un género se resuelven con reglas y salen marcados; la IA solo puede elegir entre géneros que ya usas, y sus propuestas salen desmarcadas. Se escribe en los archivos y se puede deshacer desde Enriquecer." />
+            <TextBlock Classes="li" Text="• Renombrar con IA: propone un nombre limpio («Artista - Título (Versión)») para los archivos con nombre sucio, sin pasar por el catálogo. Solo consulta los nombres que las reglas reconocen como sucios (BPM, tonalidad, record pools, guiones bajos, nombres cortados) y deja fuera los ya limpios y los mashups. La IA solo puede reordenar lo que ya dice el nombre o las etiquetas, y cada propuesta pasa por comprobaciones: se descartan el record pool como artista, el editor de la versión como artista, un mashup al que se le pierde una canción o una versión que no estaba en el nombre. Lo que no se puede comprobar (por ejemplo, si artista y título están al revés, o si se pierde una palabra) se muestra como aviso. Medido sobre una biblioteca real, unas 3 de cada 4 propuestas son buenas: todo sale desmarcado, puedes corregir el nombre antes de aceptarlo y se puede deshacer. Solo cambia el nombre del archivo; si usas rekordbox, repara después la colección en Ajustes." />
+            <TextBlock Classes="li" Text="• Ordenar para mezclar: ordena una colección empezando por lo más tranquilo y encadenando tonos compatibles (rueda Camelot), tempos cercanos y energía creciente. No usa la IA y necesita la tonalidad en las etiquetas (se puede importar de rekordbox)." />
+            <TextBlock Classes="li" Text="• El modelo se elige en Ajustes. Probados con estas herramientas, llama3.1:8b entiende mejor las frases de búsqueda, pero llama3.2 acierta igual el idioma, es más rápido y es más prudente unificando géneros." />
 
             <!-- REVISIÓN -->
             <TextBlock Classes="h" Text="🔁 Duplicados · 🎚️ Calidad · ⚠️ Incompletas · 🔎 No encontradas" />
@@ -224,6 +261,7 @@
             <!-- DATOS -->
             <TextBlock Classes="h" Text="📁 Dónde se guardan tus datos" />
             <TextBlock Classes="p" Text="En Documentos\Etiquetador de Musica: los ajustes, las cachés, los manifiestos para deshacer y los registros. Si la app fallara, en la subcarpeta logs se guarda un informe del error." />
+            <TextBlock Classes="p" Text="Las fichas de DJ (fichas-dj.json), las colecciones (colecciones.json) y el estado de la bandeja (bandeja.json) también están ahí. A diferencia de las cachés, son trabajo tuyo y no se pueden regenerar: inclúyelos en tus copias de seguridad." />
 
             <!-- Créditos -->
             <Border Margin="0,22,0,0" Padding="16" CornerRadius="8"

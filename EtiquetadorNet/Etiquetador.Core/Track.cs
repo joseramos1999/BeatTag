@@ -59,6 +59,17 @@ public class Track
         string.IsNullOrWhiteSpace(Title) || string.IsNullOrWhiteSpace(Artist) ||
         string.IsNullOrWhiteSpace(Genre) || Year == 0;
 
+    /// <summary>Qué etiquetas esenciales faltan, por su nombre en pantalla. Vacía si no falta ninguna.</summary>
+    public System.Collections.Generic.List<string> CamposQueFaltan()
+    {
+        var m = new System.Collections.Generic.List<string>();
+        if (string.IsNullOrWhiteSpace(Title)) m.Add("Título");
+        if (string.IsNullOrWhiteSpace(Artist)) m.Add("Artista");
+        if (string.IsNullOrWhiteSpace(Genre)) m.Add("Género");
+        if (Year == 0) m.Add("Año");
+        return m;
+    }
+
     public string Duration => DurationSeconds > 0
         ? TimeSpan.FromSeconds(DurationSeconds).ToString(@"m\:ss")
         : "";

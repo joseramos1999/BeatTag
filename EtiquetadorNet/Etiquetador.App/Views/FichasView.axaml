@@ -1,0 +1,64 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:views="using:Etiquetador.App.Views"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="600"
+             x:Class="Etiquetador.App.Views.FichasView"
+             x:DataType="vm:FichasViewModel">
+
+    <Grid ColumnDefinitions="*,4,300" RowDefinitions="Auto,Auto,*" Margin="8">
+
+        <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Spacing="2" Margin="0,0,0,8">
+            <TextBlock Classes="titulo" Text="Ficha DJ" />
+            <TextBlock Classes="desc"
+                       Text="Lo que sabes de cada canción y no cabe en las etiquetas: energía, momento de la sesión, voz, letra, idioma y ambiente. Se guarda en BeatTag sin modificar los archivos. Selecciona varias para rellenarlas a la vez; con la tabla activa, las teclas 1 a 9 y 0 asignan la energía." />
+        </StackPanel>
+
+        <WrapPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,0,0,6">
+            <TextBox Text="{Binding Busqueda}" PlaceholderText="Buscar…" Width="220" Margin="0,0,6,4"
+                     ToolTip.Tip="Filtra por archivo, artista, título, género, ambiente o etiquetas." />
+            <ComboBox ItemsSource="{Binding Filtros}" SelectedItem="{Binding Filtro}" MinWidth="130" Margin="0,0,6,4" />
+            <TextBlock Text="{Binding FiltroInfo}" VerticalAlignment="Center" Opacity="0.7" Margin="0,0,16,4" />
+            <Button Content="Escribir en el comentario" Click="Volcar_Click" IsEnabled="{Binding !IsBusy}" Margin="0,0,6,4"
+                    ToolTip.Tip="Copia la ficha de las seleccionadas al comentario del archivo, para verla en rekordbox, Serato o Engine DJ. Lo que ya hubiera en el comentario se conserva. Se puede deshacer." />
+            <Button Content="Borrar ficha" Click="Borrar_Click" IsEnabled="{Binding !IsBusy}" Margin="0,0,6,4" />
+        </WrapPanel>
+
+        <DataGrid Grid.Row="2" Grid.Column="0" Name="Grid"
+                  ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
+                  x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Extended"
+                  CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                  SelectionChanged="Grid_SelectionChanged" KeyDown="Grid_KeyDown"
+                  PointerPressed="Grid_PointerPressed" DoubleTapped="Grid_DoubleTapped">
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
+                    <MenuItem Header="Editar etiquetas de esta canción" Command="{Binding EditThisCommand}" />
+                    <Separator />
+                    <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="1.2*" MinWidth="90" />
+                <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="1.5*" MinWidth="100" />
+                <DataGridTextColumn Header="Género" Binding="{Binding Genre}" Width="90" MinWidth="60" />
+                <DataGridTextColumn Header="BPM" Binding="{Binding BpmTexto}" SortMemberPath="Bpm" Width="70" MinWidth="66" />
+                <DataGridTextColumn Header="Tono" Binding="{Binding Camelot}" Width="64" MinWidth="60" />
+                <DataGridTextColumn Header="Energía" Binding="{Binding Energia}" SortMemberPath="EnergiaValor" Width="92" MinWidth="88" />
+                <DataGridTextColumn Header="Momento" Binding="{Binding Momentos}" Width="110" MinWidth="70" />
+                <DataGridTextColumn Header="Voz" Binding="{Binding Voz}" Width="90" MinWidth="60" />
+                <DataGridTextColumn Header="Letra" Binding="{Binding Letra}" Width="80" MinWidth="68" />
+                <DataGridTextColumn Header="Idioma" Binding="{Binding Idioma}" Width="76" MinWidth="72" />
+                <DataGridTextColumn Header="Ambiente" Binding="{Binding Ambiente}" Width="110" MinWidth="60" />
+                <DataGridTextColumn Header="Etiquetas" Binding="{Binding Etiquetas}" Width="110" MinWidth="60" />
+                <DataGridTextColumn Header="★" Binding="{Binding ArmaSecreta}" Width="34" MinWidth="30" />
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <GridSplitter Grid.Row="2" Grid.Column="1" Width="4" Background="#33888888" ResizeDirection="Columns" />
+
+        <views:FichaEditorView Grid.Row="2" Grid.Column="2" Margin="8,0,0,0" DataContext="{Binding Editor}" />
+    </Grid>
+</UserControl>

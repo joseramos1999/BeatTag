@@ -1,0 +1,95 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:views="using:Etiquetador.App.Views"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="640"
+             x:Class="Etiquetador.App.Views.BandejaView"
+             x:DataType="vm:BandejaViewModel">
+
+    <Grid ColumnDefinitions="*,4,300" RowDefinitions="Auto,Auto,Auto,*" Margin="8">
+
+        <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Spacing="2" Margin="0,0,0,8">
+            <TextBlock Classes="titulo" Text="Bandeja de entrada" />
+            <TextBlock Classes="desc"
+                       Text="La música recién descargada se revisa aquí antes de entrar en la biblioteca: duplicados, otras versiones que ya tienes, calidad baja y etiquetas que faltan. Cuando una canción está lista, márcala como preparada y pásala a la biblioteca." />
+        </StackPanel>
+
+        <!-- Carpetas -->
+        <Grid Grid.Row="1" Grid.ColumnSpan="3" ColumnDefinitions="Auto,*,Auto,Auto,16,Auto,*,Auto" RowDefinitions="Auto" Margin="0,0,0,6">
+            <TextBlock Grid.Column="0" Text="Bandeja" VerticalAlignment="Center" Margin="0,0,6,0" />
+            <TextBox Grid.Column="1" Text="{Binding Carpeta}" IsReadOnly="True" PlaceholderText="Sin elegir" />
+            <Button Grid.Column="2" Content="Elegir…" Click="ElegirCarpeta_Click" IsEnabled="{Binding !IsBusy}" Margin="6,0,0,0" />
+            <Button Grid.Column="3" Content="Abrir" Command="{Binding AbrirCarpetaCommand}" IsEnabled="{Binding HayCarpeta}" Margin="6,0,0,0" />
+            <TextBlock Grid.Column="5" Text="Destino" VerticalAlignment="Center" Margin="0,0,6,0" />
+            <ComboBox Grid.Column="6" ItemsSource="{Binding Destinos}" SelectedItem="{Binding Destino}" HorizontalAlignment="Stretch"
+                      IsEnabled="{Binding !IsBusy}"
+                      ToolTip.Tip="Carpeta de la biblioteca a la que pasan las canciones preparadas." />
+            <Button Grid.Column="7" Content="Otra…" Click="ElegirDestino_Click" IsEnabled="{Binding !IsBusy}" Margin="6,0,0,0"
+                    ToolTip.Tip="Elige una subcarpeta de la biblioteca como destino." />
+        </Grid>
+
+        <!-- Acciones -->
+        <WrapPanel Grid.Row="2" Grid.ColumnSpan="3" Margin="0,0,0,6">
+            <Button Content="Analizar" Command="{Binding AnalizarCommand}" IsEnabled="{Binding !IsBusy}"
+                    Background="#2563EB" Foreground="White" FontWeight="SemiBold" Margin="0,0,12,4" />
+            <Button Content="Marcar como revisadas" Command="{Binding MarcarRevisadasCommand}" IsEnabled="{Binding !IsBusy}" Margin="0,0,6,4" />
+            <Button Content="Marcar como preparadas" Command="{Binding MarcarPreparadasCommand}" IsEnabled="{Binding !IsBusy}" Margin="0,0,6,4" />
+            <Button Content="Quitar marca" Command="{Binding QuitarMarcaCommand}" IsEnabled="{Binding !IsBusy}" Margin="0,0,12,4"
+                    ToolTip.Tip="Devuelve las seleccionadas al estado «Analizada»." />
+            <Button Content="Pasar las preparadas a la biblioteca" Click="Pasar_Click" IsEnabled="{Binding !IsBusy}"
+                    Background="#16A34A" Foreground="White" FontWeight="SemiBold" Margin="0,0,12,4"
+                    ToolTip.Tip="Mueve las canciones preparadas a la carpeta de destino. Nunca sobrescribe un archivo existente y se puede deshacer." />
+            <Button Content="Escribir ficha en el comentario" Click="Volcar_Click" IsEnabled="{Binding !IsBusy}" Margin="0,0,12,4" />
+            <TextBox Text="{Binding Busqueda}" PlaceholderText="Buscar…" Width="160" Margin="0,0,6,4" />
+            <ComboBox ItemsSource="{Binding Filtros}" SelectedItem="{Binding Filtro}" MinWidth="120" Margin="0,0,6,4" />
+            <TextBlock Text="{Binding FiltroInfo}" VerticalAlignment="Center" Opacity="0.7" Margin="0,0,6,4" />
+        </WrapPanel>
+
+        <DockPanel Grid.Row="3" Grid.Column="0">
+            <TextBlock DockPanel.Dock="Bottom" Text="{Binding Recuento}" Classes="desc" Margin="0,6,0,0" />
+            <DataGrid Name="Grid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
+                      x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Extended"
+                      CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                      SelectionChanged="Grid_SelectionChanged" KeyDown="Grid_KeyDown"
+                      PointerPressed="Grid_PointerPressed" DoubleTapped="Grid_DoubleTapped">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
+                        <MenuItem Header="Marcar como revisadas" Command="{Binding MarcarRevisadasCommand}" />
+                        <MenuItem Header="Marcar como preparadas" Command="{Binding MarcarPreparadasCommand}" />
+                        <Separator />
+                        <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Estado" Binding="{Binding Estado}" SortMemberPath="EstadoValor" Width="100" MinWidth="95" />
+                    <DataGridTextColumn Header="Avisos" Binding="{Binding AvisoPrincipal}" Width="1.3*" MinWidth="140" />
+                    <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="1.1*" MinWidth="80" />
+                    <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="1.3*" MinWidth="90" />
+                    <DataGridTextColumn Header="Género" Binding="{Binding Genre}" Width="85" MinWidth="60" />
+                    <DataGridTextColumn Header="BPM" Binding="{Binding BpmTexto}" SortMemberPath="Bpm" Width="70" MinWidth="66" />
+                    <DataGridTextColumn Header="Energía" Binding="{Binding Energia}" SortMemberPath="EnergiaValor" Width="92" MinWidth="88" />
+                    <DataGridTextColumn Header="Momento" Binding="{Binding Momentos}" Width="100" MinWidth="70" />
+                    <DataGridTextColumn Header="Llegada" Binding="{Binding LlegadaTexto}" SortMemberPath="Llegada" Width="110" MinWidth="80" />
+                    <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="1.5*" MinWidth="120" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </DockPanel>
+
+        <GridSplitter Grid.Row="3" Grid.Column="1" Width="4" Background="#33888888" ResizeDirection="Columns" />
+
+        <Grid Grid.Row="3" Grid.Column="2" RowDefinitions="Auto,*" Margin="8,0,0,0">
+            <Border Grid.Row="0" Padding="8" CornerRadius="6" Margin="0,0,0,8"
+                    Background="{DynamicResource SuperficieSuave}" BorderBrush="{DynamicResource BordeSuave}" BorderThickness="1"
+                    IsVisible="{Binding Detalle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Avisos" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Detalle}" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+            <views:FichaEditorView Grid.Row="1" DataContext="{Binding Editor}" />
+        </Grid>
+    </Grid>
+</UserControl>

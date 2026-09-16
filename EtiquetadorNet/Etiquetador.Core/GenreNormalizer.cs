@@ -44,6 +44,10 @@ public static class GenreNormalizer
         (new[] { "rock" }, "Rock"),
     };
 
+    /// <summary>Los nombres canónicos que esta tabla conoce, tal como se escriben.</summary>
+    public static IReadOnlyCollection<string> Conocidos { get; } =
+        Map.Select(m => m.Canonical).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
     public static string Canonical(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return "";

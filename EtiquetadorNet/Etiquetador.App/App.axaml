@@ -46,13 +46,19 @@
             <Setter Property="RowHeight" Value="{DynamicResource FilaAltura}" />
         </Style>
 
-        <!-- Un botón de la barra lateral. Se le da forma aquí para no repetirla trece veces. -->
+        <!--
+            Un botón de la barra lateral. Se le da forma aquí para no repetirla trece veces.
+            El margen no es adorno: sin él los trece botones se tocan y el fondo del activo llega
+            pegado al borde de la barra, así que no se lee como un elemento suelto sino como una
+            franja. Con aire alrededor, el resaltado del activo se ve como lo que es.
+        -->
         <Style Selector="Button.nav">
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="10,7" />
+            <Setter Property="Margin" Value="4,2" />
             <Setter Property="CornerRadius" Value="6" />
         </Style>
         <Style Selector="Button.nav.activa">
@@ -68,7 +74,8 @@
             <Setter Property="Foreground" Value="{DynamicResource NavGrupo}" />
             <Setter Property="FontSize" Value="11" />
             <Setter Property="FontWeight" Value="Bold" />
-            <Setter Property="Margin" Value="12,14,8,4" />
+            <!-- 14 a la izquierda: justo donde empieza el contenido del botón (4 de margen + 10 de relleno). -->
+            <Setter Property="Margin" Value="14,14,8,4" />
         </Style>
     </Application.Styles>
 </Application>

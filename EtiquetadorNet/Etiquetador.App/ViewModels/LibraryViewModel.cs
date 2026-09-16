@@ -64,7 +64,17 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
                + (_store.IsScanned ? "" : " · hay carpetas por escanear, pulsa Escanear");
     }
 
-    public void AddFolder(string folder) => _store.AddFolder(folder);
+    /// <summary>
+    /// Añade una carpeta y devuelve si de verdad ha entrado. Puede rechazarse por solaparse con
+    /// otra que ya estaba; cuando eso pasa hay que decirlo, porque si no el usuario elige una
+    /// carpeta, no ve ningún cambio y no tiene forma de saber por qué.
+    /// </summary>
+    public bool AddFolder(string folder)
+    {
+        var alta = _store.AddFolder(folder);
+        if (alta.Aviso.Length > 0) Status = alta.Aviso;
+        return alta.Anadida;
+    }
 
     [RelayCommand]
     private void RemoveFolderPath(string? folder) { if (folder != null) _store.RemoveFolder(folder); }

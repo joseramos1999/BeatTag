@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System;
 using System.IO;
+using System.Linq;
+using Etiquetador.Core.Dj;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -69,6 +71,23 @@ public sealed class AppEngine
     public IgnoreList AudioAceptadas { get; }
     public ChartsProvider Charts { get; }
     public LinkResolver Links { get; }
+
+    /// <summary>Fichas de DJ: energía, momento, ambiente… Se guardan en local, no en el archivo.</summary>
+    public AlmacenFichas Fichas { get; }
+
+    /// <summary>Colecciones inteligentes guardadas.</summary>
+    public AlmacenColecciones Colecciones { get; }
+
+    /// <summary>Estado de cada canción de la bandeja de entrada.</summary>
+    public AlmacenBandeja Bandeja { get; }
+
+    /// <summary>
+    /// Alguna ficha ha cambiado. Las fichas se editan desde dos páginas (Ficha DJ y Bandeja) y se
+    /// leen desde una tercera (Colecciones): sin este aviso, una colección seguiría enseñando lo de
+    /// antes de guardar.
+    /// </summary>
+    public event Action? FichasCambiadas;
+    public void AvisarFichasCambiadas() => FichasCambiadas?.Invoke();
 
     /// <summary>Reproductor de vista previa (uno a la vez), compartido entre pestañas.</summary>
     public AudioPreview Preview { get; } = new();
@@ -142,6 +161,18 @@ public sealed class AppEngine
         Marks = new ApplyMarks(Paths.ApplyMarksPath);
         AudioAceptadas = new IgnoreList(Paths.AudioAceptadasPath);
 
+        Fichas = new AlmacenFichas(Paths.FichasDjPath);
+        Colecciones = new AlmacenColecciones(Paths.ColeccionesPath);
+        Bandeja = new AlmacenBandeja(Paths.BandejaPath);
+        foreach (var aviso in new[] { Fichas.AvisoCarga, Colecciones.AvisoCarga, Bandeja.AvisoCarga })
+            if (aviso.Length > 0) Logger.Err(aviso);
+        Logger.Detail($"Fichas de DJ: {Fichas.Count} · colecciones: {Colecciones.Todas.Count}");
+
+        // Cada vez que la biblioteca se reescanea -típicamente tras aplicar o deshacer renombrados-,
+        // las fichas se recolocan con sus archivos. Se suscribe AQUÍ, antes de que existan las
+        // páginas, para que cuando estas recalculen las fichas ya estén en su sitio.
+        Library.Changed += ReubicarFichas;
+
         // La firma de la caché pasó a distinguir QUÉ credenciales se usan, no solo si las hay. Lo
         // ya analizado con las mismas claves sigue siendo válido, así que se le pone la firma nueva
         // en vez de tirarlo: de otro modo, el primer arranque tras actualizar reanalizaría la
@@ -153,6 +184,217 @@ public sealed class AppEngine
             Analysis.Save();
             Logger.Detail($"Caché de análisis: {migradas} entradas conservadas al cambiar el formato de la firma.");
         }
+    }
+
+    /// <summary>
+    /// Devuelve a su archivo las fichas cuyo archivo ha cambiado de nombre o de sitio.
+    ///
+    /// Primero se pregunta si hace falta, que es barato: casi todas las fichas son de canciones de
+    /// la biblioteca en memoria y no hay que ir al disco para saber que existen. Solo si alguna no
+    /// aparece se leen los manifiestos de deshacer, que es lo caro.
+    /// </summary>
+    private void ReubicarFichas()
+    {
+        if (Fichas.Count == 0 || !Library.IsScanned) return;
+        try
+        {
+            var enBiblioteca = new HashSet<string>(Library.Tracks.Select(t => t.FilePath), StringComparer.OrdinalIgnoreCase);
+            bool Existe(string ruta) => enBiblioteca.Contains(ruta) || File.Exists(ruta);
+
+            if (!Fichas.HayHuerfanas(Existe)) return;
+
+            var movidas = Fichas.Reubicar(RekordboxRelocator.ReadRenames(Paths.UndoDir), Existe);
+            if (movidas == 0) return;
+
+            var err = Fichas.Guardar();
+            Logger.Detail($"Fichas de DJ: {movidas} recolocada(s) tras renombrar archivos."
+                        + (err.Length > 0 ? $" ⚠ No se pudo guardar: {err}" : ""));
+        }
+        catch (Exception e) { Logger.Error("Error al recolocar las fichas de DJ", e); }
+    }
+
+    // --- Fichas de DJ: lo comparten la página de fichas y la bandeja ---
+
+    /// <summary>Aplica unos cambios a la ficha de cada archivo y lo guarda en disco. Devuelve "" o el error.</summary>
+    public string GuardarFichas(IReadOnlyList<string> rutas, CambiosFicha cambios)
+    {
+        foreach (var r in rutas) Fichas.Poner(r, cambios.AplicarA(Fichas.Obtener(r)));
+        var err = Fichas.Guardar();
+        if (err.Length > 0) Logger.Err("No se pudieron guardar las fichas de DJ: " + err);
+        return err;
+    }
+
+    /// <summary>
+    /// Aplica a cada archivo SU cambio de ficha y guarda en disco una sola vez. Es lo que usa aceptar
+    /// propuestas de la IA: cada canción trae la suya, y guardar el archivo por cada una serían cientos
+    /// de escrituras.
+    /// </summary>
+    public string GuardarFichas(IEnumerable<(string Ruta, CambiosFicha Cambios)> cambios)
+    {
+        foreach (var (r, c) in cambios) Fichas.Poner(r, c.AplicarA(Fichas.Obtener(r)));
+        var err = Fichas.Guardar();
+        if (err.Length > 0) Logger.Err("No se pudieron guardar las fichas de DJ: " + err);
+        return err;
+    }
+
+    public sealed record ResultadoGeneros(int Escritas, int SinCambio, IReadOnlyList<string> Fallos, string UndoErr, bool Cancelado);
+
+    /// <summary>
+    /// Escribe el género nuevo en cada archivo («» lo quita). Como toda escritura de etiquetas, queda
+    /// anotada para deshacer EN CUANTO se hace, así que cancelar a medias deja reversible lo ya
+    /// escrito. Hay que llamarla fuera del hilo de la interfaz y con el reproductor parado.
+    /// </summary>
+    public ResultadoGeneros AplicarGeneros(IReadOnlyList<(string Ruta, string Genero)> cambios,
+                                           IProgress<double>? progreso, CancellationToken ct)
+    {
+        var undo = Path.Combine(Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+        int escritas = 0, sinCambio = 0;
+        var fallos = new List<string>();
+        var undoErr = "";
+
+        for (var i = 0; i < cambios.Count; i++)
+        {
+            if (ct.IsCancellationRequested)
+                return new ResultadoGeneros(escritas, sinCambio, fallos, undoErr, true);
+
+            var (ruta, genero) = cambios[i];
+            try
+            {
+                using var f = TagLib.File.Create(ruta);
+                var antes = f.Tag.Genres ?? Array.Empty<string>();
+                var despues = genero.Length == 0 ? Array.Empty<string>() : new[] { genero };
+                if (antes.SequenceEqual(despues, StringComparer.Ordinal)) { sinCambio++; continue; }
+
+                f.Tag.Genres = despues;
+                f.Save();
+                escritas++;
+
+                var rec = new UndoRecord
+                {
+                    OrigPath = ruta, FinalPath = ruta, Renamed = false,
+                    Fields = new Dictionary<string, FieldChange> { ["Genre"] = FieldChange.Arr(antes, despues) },
+                };
+                try { File.AppendAllText(undo, System.Text.Json.JsonSerializer.Serialize(rec) + "\n"); }
+                catch (Exception e) { undoErr = e.Message; }
+            }
+            catch (Exception e)
+            {
+                fallos.Add(Path.GetFileName(ruta) + ": " + e.Message);
+                Logger.Log($"Género: {Path.GetFileName(ruta)}: {e.Message}", LogKind.Err);
+            }
+            progreso?.Report(100.0 * (i + 1) / cambios.Count);
+        }
+        Logger.Detail($"Géneros unificados: {escritas} escritos · {sinCambio} ya estaban · {fallos.Count} fallos.");
+        return new ResultadoGeneros(escritas, sinCambio, fallos, undoErr, false);
+    }
+
+    public sealed record ResultadoRenombrado(IReadOnlyList<(string Origen, string Destino)> Hechos, IReadOnlyList<string> Fallos,
+                                             string UndoErr, bool Cancelado);
+
+    /// <summary>
+    /// Renombra archivos dentro de su carpeta. Cada renombrado queda anotado para deshacer en cuanto
+    /// se hace, y con eso también sirve para reparar la colección de rekordbox. La ficha de DJ sigue
+    /// al archivo.
+    ///
+    /// A diferencia de Enriquecer, si el nombre ya existe NO se añade «(2)»: dos archivos que acaban
+    /// llamándose igual suelen ser la misma canción, y eso se dice en vez de esconderlo.
+    /// Hay que llamarla fuera del hilo de la interfaz y con el reproductor parado.
+    /// </summary>
+    public ResultadoRenombrado RenombrarArchivos(IReadOnlyList<(string Ruta, string NuevoNombre)> cambios,
+                                                 IProgress<double>? progreso, CancellationToken ct)
+    {
+        var undo = Path.Combine(Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+        var hechos = new List<(string, string)>();
+        var fallos = new List<string>();
+        var undoErr = "";
+
+        for (var i = 0; i < cambios.Count; i++)
+        {
+            if (ct.IsCancellationRequested) return new ResultadoRenombrado(hechos, fallos, undoErr, true);
+            var (ruta, nuevo) = cambios[i];
+            var nombre = Path.GetFileName(ruta);
+            var t = Etiquetador.Core.Ai.RenombradoIa.RenombrarArchivo(ruta, nuevo);
+            if (t.Ok)
+            {
+                hechos.Add((t.Origen, t.Destino));
+                Fichas.Mover(t.Origen, t.Destino);
+                var rec = new UndoRecord { OrigPath = t.Origen, FinalPath = t.Destino, Renamed = true };
+                try { File.AppendAllText(undo, System.Text.Json.JsonSerializer.Serialize(rec) + "\n"); }
+                catch (Exception e) { undoErr = e.Message; }
+                Logger.Detail($"Renombrado con IA: «{nombre}» → «{Path.GetFileName(t.Destino)}»");
+            }
+            else
+            {
+                fallos.Add($"{nombre}: {t.Error}");
+                Logger.Log($"Renombrado con IA: {nombre}: {t.Error}", LogKind.Err);
+            }
+            progreso?.Report(100.0 * (i + 1) / cambios.Count);
+        }
+
+        if (hechos.Count > 0)
+        {
+            var err = Fichas.Guardar();
+            if (err.Length > 0) Logger.Err("No se pudieron guardar las fichas tras renombrar: " + err);
+        }
+        return new ResultadoRenombrado(hechos, fallos, undoErr, false);
+    }
+
+    /// <summary>Borra la ficha de cada archivo. Devuelve "" o el error.</summary>
+    public string BorrarFichas(IReadOnlyList<string> rutas)
+    {
+        foreach (var r in rutas) Fichas.Quitar(r);
+        var err = Fichas.Guardar();
+        if (err.Length > 0) Logger.Err("No se pudieron guardar las fichas de DJ: " + err);
+        return err;
+    }
+
+    public sealed record ResultadoVolcado(int Escritas, int SinCambio, IReadOnlyList<string> Fallos, string UndoErr);
+
+    /// <summary>
+    /// Copia la ficha de cada archivo a su comentario, conservando lo que el comentario ya tenía.
+    ///
+    /// Es la única acción de las fichas que toca la música, y por eso queda anotada para deshacer
+    /// como cualquier otra escritura. Cada cambio se anota EN CUANTO se hace, no al final: si algo se
+    /// interrumpe a medias, lo ya escrito sigue siendo reversible. Hay que llamarla fuera del hilo de
+    /// la interfaz y con el reproductor parado (<see cref="ReleaseAudio"/>).
+    /// </summary>
+    public ResultadoVolcado VolcarFichasAlComentario(IReadOnlyList<string> rutas)
+    {
+        var undo = Path.Combine(Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+        int escritas = 0, sinCambio = 0;
+        var fallos = new List<string>();
+        var undoErr = "";
+
+        foreach (var ruta in rutas)
+        {
+            try
+            {
+                var ficha = Fichas.Obtener(ruta) ?? new FichaDj();
+                using var f = TagLib.File.Create(ruta);
+                var antes = f.Tag.Comment ?? "";
+                var despues = Etiquetador.Core.Dj.Fichas.ComentarioCombinado(antes, ficha);
+                if (despues == antes) { sinCambio++; continue; }
+
+                f.Tag.Comment = despues.Length == 0 ? null : despues;
+                f.Save();
+                escritas++;
+
+                var rec = new UndoRecord
+                {
+                    OrigPath = ruta, FinalPath = ruta, Renamed = false,
+                    Fields = new Dictionary<string, FieldChange> { ["Comment"] = FieldChange.Str(antes, despues) },
+                };
+                try { File.AppendAllText(undo, System.Text.Json.JsonSerializer.Serialize(rec) + "\n"); }
+                catch (Exception e) { undoErr = e.Message; }
+            }
+            catch (Exception e)
+            {
+                fallos.Add(Path.GetFileName(ruta) + ": " + e.Message);
+                Logger.Log($"Ficha al comentario: {Path.GetFileName(ruta)}: {e.Message}", LogKind.Err);
+            }
+        }
+        Logger.Detail($"Fichas al comentario: {escritas} escritas · {sinCambio} ya estaban al día · {fallos.Count} fallos.");
+        return new ResultadoVolcado(escritas, sinCambio, fallos, undoErr);
     }
 
     /// <summary>Opciones de proceso a partir de la config actual.</summary>

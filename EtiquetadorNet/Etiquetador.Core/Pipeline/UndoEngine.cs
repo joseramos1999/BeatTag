@@ -203,6 +203,9 @@ public sealed class UndoEngine
             case "Album":
                 if ((tag.Album ?? "") == (fc.NewStr ?? "")) { tag.Album = Empty(fc.OldStr); return (true, false); }
                 return (false, true);
+            case "Comment":   // ficha de DJ volcada al comentario
+                if ((tag.Comment ?? "") == (fc.NewStr ?? "")) { tag.Comment = Empty(fc.OldStr); return (true, false); }
+                return (false, true);
             case "Key":   // clave musical (importación de rekordbox)
                 if ((tag.InitialKey ?? "") == (fc.NewStr ?? "")) { tag.InitialKey = Empty(fc.OldStr); return (true, false); }
                 return (false, true);

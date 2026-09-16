@@ -43,7 +43,15 @@ public partial class DupRow : ObservableObject
     public string Version { get; init; } = "";
 
     /// <summary>Verde para la copia a conservar. El resto sin fondo, para que destaque una sola.</summary>
-    public IBrush? Fondo => EsMejor ? new SolidColorBrush(Color.FromRgb(0xDC, 0xFC, 0xE7)) : null;
+    public IBrush? Fondo => EsMejor ? VerdeConservar : null;
+
+    /// <summary>
+    /// TRANSLÚCIDO a propósito, igual que los verdes de Comprobar audio y Tendencias. Antes era un
+    /// pastel opaco (#DCFCE7): en claro se veía bien, pero en modo oscuro el texto es blanco y la
+    /// fila quedaba como una franja luminosa ilegible. Con transparencia el verde se mezcla con el
+    /// fondo de cada tema y el texto se lee en los dos.
+    /// </summary>
+    private static readonly IBrush VerdeConservar = new SolidColorBrush(Color.FromArgb(0x33, 0x16, 0xA3, 0x4A));
 
     partial void OnEsMejorChanged(bool value) => OnPropertyChanged(nameof(Fondo));
 }

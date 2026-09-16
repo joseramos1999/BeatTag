@@ -45,6 +45,21 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
 - **Tonalidad**: muestra la clave de cada tema y su código **Camelot**, para mezclar en armónico.
   Se lee de los tags (la escriben rekordbox y similares); BeatTag no la deduce del audio.
 - **Listas M3U8**: exporta lo que hayas filtrado a una lista que abren rekordbox, Engine DJ o Serato.
+- **Bandeja de entrada**: una carpeta aparte donde dejas la música recién descargada. Antes de que
+  entre en la biblioteca, avisa si ya la tienes (o tienes otra versión), si está repetida, si su
+  calidad es baja o si le faltan etiquetas. Cada canción pasa por *recibida → analizada → revisada →
+  preparada*, y las preparadas se mueven a la biblioteca sin sobrescribir nada y con deshacer.
+- **Ficha DJ**: lo que sabes de cada canción y no cabe en los tags — energía (1-10), momento de la
+  sesión, voz, letra limpia o explícita, idioma, ambiente, etiquetas libres y «arma secreta». Se
+  guarda en BeatTag sin tocar los archivos; se rellena por lotes (editar cuarenta a la vez no borra lo
+  que cada una tenía) y con las teclas 1-0 para la energía. Opcionalmente se vuelca al comentario del
+  archivo, conservando lo que ya hubiera.
+- **Colecciones**: listas que se rellenan solas a partir de condiciones (género, BPM, años, energía,
+  momento, voz, letra, idioma, etiquetas) y se exportan a M3U8.
+- **Asistente IA**: herramientas con la IA local — buscar con una frase («bachata romántica de los
+  2000 para cerrar»), proponer idioma y voz para las fichas, unificar géneros escritos de formas
+  distintas, renombrar archivos con nombre sucio y ordenar una colección para mezclar (tono Camelot,
+  tempo y energía). Ver [IA local](#-ia-local-opcional).
 - **Estadísticas**: reparto de la biblioteca por BPM, género, calidad, década y Clean/Explícito.
 - **Importar rekordbox**: trae BPM y clave musical desde un XML de rekordbox.
 - **Caché persistente** en tres niveles (respuestas de red, escaneo y análisis): no se reprocesa lo
@@ -95,8 +110,26 @@ artistas con una «x», la IA distingue el mashup de la colaboración y aparta e
 Y cuando entiende el nombre pero **ningún catálogo lo confirma**, la propuesta no se tira: aparece en
 **No encontradas**, en la columna «Sugerencia de la IA», para que la revises y la apliques de un clic
 si es correcta. Antes se filtra lo que el modelo se inventa, así que solo se sugiere lo que reordena
-o completa datos que ya estaban en el nombre o en los tags. Es el único sitio donde se escribe sin
-confirmación de un catálogo, y siempre lo decides tú, canción a canción.
+o completa datos que ya estaban en el nombre o en los tags.
+
+La pestaña **Asistente IA** reúne las herramientas que usan el modelo sin pasar por un catálogo.
+Todas siguen la misma norma: **la IA propone, las reglas y tu biblioteca comprueban, y tú decides**.
+Cada una se midió con bibliotecas reales antes de construirla, y la ayuda de la aplicación dice
+cuánto acierta:
+
+- **Buscar con una frase**: lo seguro (géneros y artistas que tienes, BPM, décadas, «sin
+  palabrotas») se lee con reglas; la IA solo añade condiciones que justifica con tus palabras, y
+  salen desmarcadas.
+- **Proponer fichas**: solo idioma y voz (acierta el idioma en unas 7 de cada 10). No propone la
+  energía, porque no sabe estimarla.
+- **Unificar géneros**: las grafías conocidas se resuelven con reglas; la IA solo puede elegir entre
+  géneros que ya usas, nunca inventar ni vaciar uno, y sus propuestas salen desmarcadas.
+- **Renombrar con IA**: solo para nombres sucios. Cada propuesta pasa por comprobaciones (el record
+  pool o el editor como artista, mashups deformados, palabras inventadas) y lo que no se puede
+  comprobar se avisa. Unas 3 de cada 4 propuestas son buenas: todo sale desmarcado.
+
+Lo que escriben en tus archivos (géneros y nombres) se puede deshacer. Nada se aplica sin que lo
+marques.
 
 ## 🎛️ rekordbox y los cue points
 

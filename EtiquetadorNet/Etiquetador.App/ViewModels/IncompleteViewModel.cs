@@ -57,15 +57,7 @@ public partial class IncompleteViewModel : ScanViewModelBase
         if (Store.IsScanned) Recompute();
     }
 
-    private static string MissingFields(Track t)
-    {
-        var m = new List<string>();
-        if (string.IsNullOrWhiteSpace(t.Title)) m.Add("Título");
-        if (string.IsNullOrWhiteSpace(t.Artist)) m.Add("Artista");
-        if (string.IsNullOrWhiteSpace(t.Genre)) m.Add("Género");
-        if (t.Year == 0) m.Add("Año");
-        return string.Join(", ", m);
-    }
+    private static string MissingFields(Track t) => string.Join(", ", t.CamposQueFaltan());
 
     protected override void Recompute()
     {

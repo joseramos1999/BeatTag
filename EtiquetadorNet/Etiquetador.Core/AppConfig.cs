@@ -86,6 +86,14 @@ public sealed class AppConfig
     // --- Varios ---
     public bool Cache { get; set; } = true;
 
+    // --- Bandeja de entrada ---
+
+    /// <summary>Carpeta donde se deja la música recién descargada, fuera de la biblioteca.</summary>
+    public string BandejaCarpeta { get; set; } = "";
+
+    /// <summary>Carpeta de la biblioteca a la que pasan las canciones preparadas.</summary>
+    public string BandejaDestino { get; set; } = "";
+
     // --- Aspecto ---
 
     /// <summary>Tema: "sistema", "claro" u "oscuro". Por defecto el del sistema.</summary>

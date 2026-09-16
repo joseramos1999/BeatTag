@@ -69,7 +69,8 @@
         <Border DockPanel.Dock="Left" Background="{DynamicResource NavFondo}"
                 BorderBrush="{DynamicResource BordeSuave}" BorderThickness="0,0,1,0">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <ItemsControl ItemsSource="{Binding Grupos}" Width="182" Margin="6,4,6,10">
+                <!-- 190 y no 182: los botones ganaron margen propio, y el nombre necesita el mismo sitio de antes. -->
+                <ItemsControl ItemsSource="{Binding Grupos}" Width="190" Margin="4,6,4,12">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="vm:GrupoNav">
                             <StackPanel>
@@ -119,6 +120,10 @@
             <views:LoudnessView   DataContext="{Binding Loudness}"   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=10}" />
             <views:SettingsView   DataContext="{Binding Settings}"   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=11}" />
             <views:HelpView                                          IsVisible="{Binding SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=12}" />
+            <views:BandejaView     DataContext="{Binding Bandeja}"     IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=13}" />
+            <views:FichasView      DataContext="{Binding Fichas}"      IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=14}" />
+            <views:ColeccionesView DataContext="{Binding Colecciones}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=15}" />
+            <views:AsistenteView   DataContext="{Binding Asistente}"   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=16}" />
         </Grid>
     </DockPanel>
 </Window>

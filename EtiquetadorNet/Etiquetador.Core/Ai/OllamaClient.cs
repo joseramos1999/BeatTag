@@ -170,7 +170,7 @@ public sealed class OllamaClient
             }
             if (string.IsNullOrWhiteSpace(model))
             {
-                _autoModel = ms[0];
+                _autoModel = Automatico(ms);
                 _log?.Log($"        · IA local: se usará el modelo «{_autoModel}».", LogKind.Dim, fileOnly: true);
             }
         }
@@ -258,6 +258,89 @@ public sealed class OllamaClient
                 }));
         }
         return outp;
+    }
+
+    /// <summary>
+    /// El modelo «automático» entre los instalados: el recomendado si está, y si no el primero.
+    ///
+    /// Antes era siempre el primero de la lista, y eso tenía una trampa: al descargar un segundo
+    /// modelo para probarlo, Ollama lo pone delante y el análisis de Enriquecer cambiaba de modelo
+    /// sin que nadie lo hubiera elegido.
+    /// </summary>
+    public static string Automatico(IReadOnlyList<string> instalados)
+    {
+        if (instalados.Count == 0) return "";
+        return instalados.FirstOrDefault(m => string.Equals(m, DefaultModel, StringComparison.OrdinalIgnoreCase)
+                                              || m.StartsWith(DefaultModel + ":", StringComparison.OrdinalIgnoreCase))
+               ?? instalados[0];
+    }
+
+    /// <summary>
+    /// El modelo que se usará: el elegido en Ajustes o, si no hay ninguno, el primero instalado.
+    /// Devuelve "" si Ollama no responde o no tiene modelos, que es la forma de saber que la IA no está.
+    /// </summary>
+    public async Task<string> ModeloEfectivoAsync(string elegido, CancellationToken ct = default)
+    {
+        var instalados = await ListModelsAsync(ct).ConfigureAwait(false);
+        if (instalados is not { Count: > 0 }) return "";
+        if (string.IsNullOrWhiteSpace(elegido)) return Automatico(instalados);
+        return elegido.Trim();
+    }
+
+    /// <summary>
+    /// Pregunta al modelo y devuelve su respuesta como JSON, o el motivo por el que no hay respuesta.
+    ///
+    /// Es la puerta de entrada de las herramientas del Asistente IA. No interpreta nada: lo que diga
+    /// el modelo se valida después, en cada herramienta, contra datos reales. Con un modelo pequeño
+    /// eso no es opcional (ver las mediciones en <see cref="Etiquetador.Core.Ai.BusquedaIa"/>).
+    ///
+    /// Con <paramref name="claveCache"/> la respuesta se guarda y se reutiliza: proponer la ficha de
+    /// una canción ya consultada no vuelve a costar un segundo por canción.
+    /// </summary>
+    public async Task<(JsonNode? Json, string Error)> PedirJsonAsync(string sistema, string peticion, string modelo,
+                                                                   int maxTokens = 512, string? claveCache = null,
+                                                                   CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(modelo)) return (null, "No hay ningún modelo de IA disponible.");
+
+        var clave = claveCache == null ? null : $"ai-ollama:asistente:v1:{modelo}|{claveCache}";
+        if (clave != null && _api.ReadCache(clave) is { Length: > 0 } guardada)
+        {
+            try { return (JsonNode.Parse(guardada), ""); } catch { /* se vuelve a preguntar */ }
+        }
+
+        var body = JsonSerializer.Serialize(new
+        {
+            model = modelo,
+            system = sistema,
+            prompt = peticion,
+            stream = false,
+            format = "json",
+            options = new { temperature = 0.0, num_predict = maxTokens },
+        });
+
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{Host}/api/generate")
+            { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            var raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+                return (null, (int)resp.StatusCode == 404
+                    ? $"El modelo «{modelo}» no está descargado. Descárgalo en Ajustes."
+                    : $"Ollama respondió {(int)resp.StatusCode}. {Trim(raw)}");
+
+            var txt = J.S(J.P(JsonNode.Parse(raw), "response"));
+            var m = Regex.Match(txt, @"\{.*\}", RegexOptions.Singleline);
+            if (!m.Success) return (null, "La IA no devolvió una respuesta legible.");
+            var json = JsonNode.Parse(m.Value);
+            AiCalls++;
+
+            if (clave != null && _api.CachePath(clave) is { } cp) _api.CacheStore(cp, m.Value);
+            return (json, "");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception e) { return (null, $"No se pudo contactar con Ollama en {Host}. {e.Message}"); }
     }
 
     private static string Trim(string s) => s.Length <= 140 ? s : s[..140];

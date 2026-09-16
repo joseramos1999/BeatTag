@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Etiquetador.Core;
@@ -90,13 +91,83 @@ public sealed class LibraryStore
     /// <summary>Vacía la caché de escaneo (memoria + archivo), para que el próximo escaneo relea todo.</summary>
     public void ClearScanCache() => _cache.Clear();
 
-    public void AddFolder(string folder)
+    /// <summary>
+    /// Cómo ha ido un intento de añadir carpeta. El <see cref="Aviso"/> interesa incluso cuando sí
+    /// se añade: puede haber absorbido otras, y eso hay que contarlo en vez de hacerlo callando.
+    /// </summary>
+    public readonly record struct AltaCarpeta(bool Anadida, string Aviso = "");
+
+    /// <summary>
+    /// Añade una carpeta raíz, siempre que no se solape con otra que ya esté.
+    ///
+    /// El solape importaba de verdad: con «Música» y «Música/House» a la vez, cada canción de House
+    /// entraba DOS veces en la biblioteca. Eso falseaba el recuento y las estadísticas, inventaba
+    /// duplicados y hacía que cualquier operación por lote tocara el mismo archivo dos veces.
+    ///
+    /// Se corta aquí, al elegir las carpetas, y no disimulándolo al escanear: así la lista de
+    /// carpetas que se ve es exactamente lo que se recorre. El escaneo además se defiende por su
+    /// cuenta, porque hay configuraciones ya guardadas por versiones anteriores.
+    /// </summary>
+    public AltaCarpeta AddFolder(string folder)
     {
-        if (Has(folder)) return;
+        if (string.IsNullOrWhiteSpace(folder)) return new AltaCarpeta(false);
+        if (Has(folder)) return new AltaCarpeta(false, $"«{Nombre(folder)}» ya estaba en la lista.");
+
+        // Ya la recoge otra: añadirla solo duplicaría sus canciones.
+        var contenedora = Folders.FirstOrDefault(f => EstaDentroDe(folder, f.Path));
+        if (contenedora != null)
+        {
+            Log?.Detail($"Biblioteca: «{folder}» no se añade; ya está dentro de «{contenedora.Path}».");
+            return new AltaCarpeta(false,
+                $"«{Nombre(folder)}» está dentro de «{Nombre(contenedora.Path)}», que ya está en la lista: sus canciones ya entran por ahí.");
+        }
+
+        // La nueva engloba a otras que ya estaban. Esas sobran… salvo que estén DESMARCADAS: meter
+        // la de fuera las volvería a incluir sin decir nada, y desmarcar una carpeta es justo la
+        // forma que tiene el usuario de dejar música fuera. Antes que deshacer esa decisión por su
+        // cuenta, no se añade y se explica.
+        var absorbidas = Folders.Where(f => EstaDentroDe(f.Path, folder)).ToList();
+        var excluida = absorbidas.FirstOrDefault(f => !f.Enabled);
+        if (excluida != null)
+        {
+            Log?.Detail($"Biblioteca: «{folder}» no se añade; contiene «{excluida.Path}», que está desmarcada.");
+            return new AltaCarpeta(false,
+                $"«{Nombre(excluida.Path)}» está desmarcada y quedaría dentro de «{Nombre(folder)}». Quítala de la lista si de verdad quieres escanear todo.");
+        }
+
+        foreach (var f in absorbidas)
+        {
+            Folders.Remove(f);
+            Log?.Detail($"Biblioteca: «{f.Path}» sale de la lista; queda dentro de «{folder}».");
+        }
+
         Add(new FolderItem(folder));
         Persist();
         MarcarQueFaltaEscanear();   // sus canciones todavía no están cargadas
+
+        var aviso = absorbidas.Count switch
+        {
+            0 => "",
+            1 => $"«{Nombre(absorbidas[0].Path)}» ya no hace falta por separado: queda dentro de «{Nombre(folder)}».",
+            _ => $"{absorbidas.Count} carpetas ya no hacen falta por separado: quedan dentro de «{Nombre(folder)}».",
+        };
+        return new AltaCarpeta(true, aviso);
     }
+
+    /// <summary>Solo el nombre de la carpeta, para poder nombrarla en un aviso sin soltar la ruta entera.</summary>
+    private static string Nombre(string ruta)
+    {
+        var limpia = ruta.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var nombre = Path.GetFileName(limpia);
+        return nombre.Length > 0 ? nombre : limpia;
+    }
+
+    /// <summary>
+    /// <paramref name="ruta"/> cuelga de <paramref name="raiz"/>. Ser la MISMA carpeta no cuenta
+    /// aquí: de eso se ocupa <see cref="Has"/>. La regla vive en <see cref="Rutas"/>, que también
+    /// usa la bandeja de entrada.
+    /// </summary>
+    internal static bool EstaDentroDe(string ruta, string raiz) => Rutas.EstaDentroDe(ruta, raiz);
 
     public void RemoveFolder(string folder)
     {
@@ -217,25 +288,42 @@ public sealed class LibraryStore
             foreach (var r in roots) Log?.Detail($"    carpeta: {r}");
             var skipped = Folders.Count - roots.Count;
             if (skipped > 0) Log?.Detail($"    ({skipped} carpeta(s) desmarcada(s) que se omiten)");
-            var list = await Task.Run(() =>
+            var (list, repetidas) = await Task.Run(() =>
             {
                 var acc = new List<Track>();
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var root in roots)
+                var repes = 0;
+
+                // Las raíces de fuera, primero. Con una carpeta dentro de otra, la de fuera es la
+                // propietaria del archivo, y así quitar la de dentro no deja huérfana música que la
+                // de fuera sigue cubriendo. Ordenar por longitud basta: si A contiene a B, la ruta
+                // de A es siempre más corta que la de B.
+                foreach (var root in roots.OrderBy(r => r.Length))
                     foreach (var path in LibraryScanner.EnumerateFiles(root, recursive: true))
                     {
+                        // Cada archivo, una sola vez. Contarlo dos veces por estar bajo dos raíces
+                        // falseaba el recuento, inventaba duplicados y hacía que cada operación por
+                        // lote tocase el mismo archivo dos veces. AddFolder ya no deja configurar
+                        // carpetas solapadas; esto cubre lo que quedó guardado de antes.
+                        if (!seen.Add(path)) { repes++; continue; }
+
                         var t = _cache.Read(path);   // caché por fecha+tamaño (rápido si no cambió)
                         t.Folder = root;
                         acc.Add(t);
-                        seen.Add(path);
                     }
                 _cache.Prune(seen);
                 _cache.Save();
-                return acc;
+                return (acc, repes);
             });
             Tracks.Clear();
             foreach (var t in list) Tracks.Add(t);
-            IsScanned = true;
+
+            // Sin ninguna carpeta marcada no hay biblioteca que valga: darla por escaneada dejaba
+            // la aplicación entera abierta sobre una lista vacía en vez de pedir marcar una carpeta.
+            IsScanned = roots.Count > 0;
+
+            if (repetidas > 0)
+                Log?.Detail($"    ({repetidas} archivo(s) bajo dos carpetas configuradas; se cuentan una sola vez)");
             Log?.Sum($"Escaneo terminado: {Tracks.Count} canciones en {sw.ElapsedMilliseconds} ms.");
             Changed?.Invoke();
         }
