@@ -107,4 +107,94 @@ public class NombreCortadoTests
     {
         Assert.Null(NombreCortado.DesdeIa(R("Stay Worry (Spice Mash) [128bp.mp3"), "Spice Girls", "Wannabe", "Mash"));
     }
+
+    // --- Los tres fallos medidos en una ejecución real de 827 renombrados ---
+
+    // 284 de 827 crecían más de 40 caracteres: se anteponía la lista de artistas de la etiqueta a un
+    // nombre que por delante ya estaba bien. Solo se puede añadir lo que falta, y al final.
+    [Fact]
+    public void No_antepone_la_lista_de_artistas_de_la_etiqueta()
+    {
+        var p = NombreCortado.DesdeEtiquetas(R("A Donde Voy x El Desorden (Rodri Gomez & Adr.mp3"),
+                                             "Daddy Yankee, Cosculluela, Farruko, Arcangel",
+                                             "A Donde Voy x El Desorden (Rodri Gomez & Adrian Chacon Open Show)");
+
+        Assert.Equal("A Donde Voy x El Desorden (Rodri Gomez & Adrian Chacon Open Show)", p);
+    }
+
+    // 49 de 827 repetían el artista: «Bad Bunny x Feid - Bad Bunny x Feid - Amorfoda…».
+    [Fact]
+    public void No_repite_el_artista_que_ya_trae_el_nombre()
+    {
+        var p = NombreCortado.DesdeEtiquetas(R("Bad Bunny X J Balvin X Comando Tiburon - Mos.mp3"),
+                                             "Bad Bunny X J Balvin X Comando Tiburon",
+                                             "Moscow Mule x Mi Gente (Transition 100-105 Bpm)");
+
+        Assert.Equal("Bad Bunny X J Balvin X Comando Tiburon - Moscow Mule x Mi Gente (Transition 100-105 Bpm)", p);
+    }
+
+    // 81 de 827 perdían los acentos: «Feliz Cumpleaños» → «Cumpleanos», «Preguntó» → «Pregunto».
+    [Fact]
+    public void No_quita_los_acentos_del_nombre()
+    {
+        var p = NombreCortado.DesdeEtiquetas(R("Feid - Feliz Cumpleaños Ferxxo (Alberto Este.mp3"),
+                                             "Feid, Polima Westcoast, Paloma Mami",
+                                             "Feliz Cumpleaños Ferxxo (Alberto Esteban Edit)");
+
+        Assert.Equal("Feid - Feliz Cumpleaños Ferxxo (Alberto Esteban Edit)", p);
+    }
+
+    // Lo que ya estaba escrito no se toca aunque las etiquetas lo escriban de otra forma.
+    [Fact]
+    public void Lo_que_ya_estaba_escrito_se_respeta_letra_a_letra()
+    {
+        var p = NombreCortado.DesdeEtiquetas(R("DJ SNAKE ft. Selena Gomez - Taki Taki (Intr.mp3"),
+                                             "DJ Snake", "Taki Taki (Intro Edit)");
+
+        // Conserva sus mayúsculas y su «ft.»; solo se completa «(Intr» → «(Intro Edit)».
+        Assert.Equal("DJ SNAKE ft. Selena Gomez - Taki Taki (Intro Edit)", p);
+    }
+
+    // La IA tampoco puede rehacer el nombre. Aqui propone el titulo al reves («Salte Del Medio x
+    // Gasolina») y con el artista delante: de todo eso solo se aprovecha la cola que faltaba.
+    [Fact]
+    public void De_una_propuesta_reordenada_solo_se_aprovecha_la_cola()
+    {
+        var p = NombreCortado.DesdeIa(R("Gasolina x Salte Del Medio (Dj Nev Hype Int.mp3"),
+                                      "Daddy Yankee", "Salte Del Medio x Gasolina", "Dj Nev Hype Intro");
+
+        Assert.Equal("Gasolina x Salte Del Medio (Dj Nev Hype Intro)", p);
+    }
+
+    // Y cuando sí continúa, lo anterior se queda como estaba, acentos incluidos.
+    [Fact]
+    public void La_ia_completa_sin_tocar_lo_anterior()
+    {
+        var p = NombreCortado.DesdeIa(R("Rosalía - Despechá (Intro Priv.mp3"),
+                                      "Rosalia", "Despecha", "Intro Privado");
+
+        Assert.Equal("Rosalía - Despechá (Intro Privado)", p);
+    }
+
+    // Las etiquetas de los packs arrastran su propia publicidad. Completar un nombre no es meterle
+    // la web del pool ni la tonalidad estampada al final; los dos casos son reales.
+    [Fact]
+    public void La_web_del_pack_no_entra_en_el_nombre()
+    {
+        var p = NombreCortado.DesdeEtiquetas(R("Helena Bianco & Gigi Soriano Vs Kone & Palac.mp3"),
+                                             "Helena Bianco & Gigi Soriano vs Kone & Palacious",
+                                             "No Problem Puente (DJ Baur vs DJ Nejtrino Mashup)@djxizmusic.blogspot.com");
+
+        Assert.Equal("Helena Bianco & Gigi Soriano vs Kone & Palacious - No Problem Puente (DJ Baur vs DJ Nejtrino Mashup)", p);
+    }
+
+    [Fact]
+    public void Ni_el_pack_entre_corchetes_ni_la_tonalidad_del_final()
+    {
+        var p = NombreCortado.DesdeEtiquetas(R("Alesso & Katy Perry - When I'm Gone [Alex Pi.mp3"),
+                                             "Alesso & Katy Perry",
+                                             "When I'm Gone [Alex Pizzuti & Adalwolf Bootleg Remix] [EdmPacks.com] 6A 130");
+
+        Assert.Equal("Alesso & Katy Perry - When I'm Gone [Alex Pizzuti & Adalwolf Bootleg Remix]", p);
+    }
 }

@@ -215,15 +215,20 @@ public static class RenombradoIa
         if (!Matching.SoloReordena($"{archivo} {tagArtista} {tagTitulo}", artista, titulo))
             return (null, "Añade palabras que no están ni en el nombre ni en las etiquetas.");
 
-        var propuesto = AiSuggestion.Compose(artista, titulo, version);
+        // Se conservan los acentos: esto arregla nombres que YA existen, y el modelo responde casi
+        // siempre sin tildes. Las que había en el nombre o en las etiquetas se devuelven a su sitio.
+        var propuesto = AiSuggestion.Compose(artista, titulo, version, conservarAcentos: true);
+        propuesto = AiSuggestion.RestaurarAcentos(propuesto, actual);
         if (propuesto.Length == 0) return (null, "La propuesta queda vacía.");
 
         // Respuesta real: «Tranky Funky (Baila Baila Baila (E. Rodriguez Private Edit)».
         if (propuesto.Count(c => c == '(') != propuesto.Count(c => c == ')'))
             return (null, "La propuesta tiene los paréntesis descuadrados.");
-        // Comparación LITERAL, no normalizada: normalizando, «Ese_Soyy_Yooo» y «Ese Soyy Yooo» son
-        // iguales, y quitar los guiones bajos es justo uno de los arreglos que se buscan.
-        if (string.Equals(propuesto, TextUtils.ToAscii(actual).Trim(), StringComparison.Ordinal))
+        // Comparación LITERAL salvo por los acentos: normalizando del todo, «Ese_Soyy_Yooo» y «Ese
+        // Soyy Yooo» son iguales, y quitar los guiones bajos es justo uno de los arreglos que se
+        // buscan. Ignorar solo los acentos deja fuera el otro caso: un renombrado cuyo único efecto
+        // sería quitar las tildes que el nombre ya tenía.
+        if (string.Equals(TextUtils.ToAscii(propuesto), TextUtils.ToAscii(actual).Trim(), StringComparison.Ordinal))
             return (null, "Ya se llama así.");
 
         // Lo que las reglas no pueden decidir, se avisa.

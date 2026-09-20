@@ -77,9 +77,14 @@ public static class NombreCortado
     /// <summary>
     /// El nombre completo según las etiquetas del propio archivo, o null si no sirven.
     ///
-    /// Solo vale si lo que hay en el nombre es el PRINCIPIO de lo que dicen las etiquetas: así se
-    /// completa el mismo nombre en vez de sustituirlo por otro. Las etiquetas de los record pools a
-    /// veces llevan el pack o el editor, y eso no puede acabar renombrando el archivo entero.
+    /// COMPLETA el nombre que ya hay; no lo recompone. La primera versión de esto armaba
+    /// «Artista - Título» con las etiquetas, y sobre una biblioteca real salió mal de tres formas a
+    /// la vez: anteponía listas larguísimas de artistas a nombres que ya estaban bien (284 de 827
+    /// crecían más de 40 caracteres), repetía el artista cuando ya estaba en el nombre («Bad Bunny x
+    /// Feid - Bad Bunny x Feid - …», 49 casos) y perdía los acentos al pasar todo a ASCII («Feliz
+    /// Cumpleaños» → «Cumpleanos», 81 casos).
+    ///
+    /// Ahora solo se añade LO QUE FALTA, al final, conservando el nombre tal cual estaba.
     /// </summary>
     public static string? DesdeEtiquetas(string archivo, string tagArtista, string tagTitulo)
     {
@@ -88,79 +93,148 @@ public static class NombreCortado
         var titulo = (tagTitulo ?? "").Trim();
         if (titulo.Length == 0) return null;
 
-        // Visto en la aplicación con la biblioteca real: la etiqueta de artista traía «@liyo dj98»,
-        // el alias de quien hizo la edición, y el nombre propuesto empezaba por él. Un alias o un
-        // record pool no es el intérprete: se descarta y queda el título, que sí es lo que se completa.
+        // Un alias de editor o un record pool no es el intérprete: «@liyo dj98» no puede acabar
+        // delante del nombre.
         if (artista.StartsWith("@", StringComparison.Ordinal) || PoolRe.IsMatch(artista)) artista = "";
 
-        var completo = artista.Length > 0 ? $"{artista} - {titulo}" : titulo;
-        var propuesto = AiSuggestion.Compose(artista, titulo, "");
-        if (propuesto.Length == 0) return null;
+        // Se prueba primero con el título solo: si el nombre ya trae su artista, meter el de la
+        // etiqueta sería repetirlo.
+        foreach (var candidato in new[] { titulo, artista.Length > 0 ? $"{artista} - {titulo}" : "" })
+            if (candidato.Length > 0 && Extender(nombre, SinPublicidad(candidato)) is { } completo)
+                return completo;
 
-        var nkNombre = TextUtils.Nk(nombre);
-        var nkCompleto = TextUtils.Nk(completo);
-        if (nkNombre.Length == 0 || nkCompleto.Length <= nkNombre.Length) return null;
+        return null;
+    }
 
-        // El nombre tiene que ser el principio de lo que dicen las etiquetas, en el orden que sea
-        // («Título - Artista» también se usa), y lo que falta, algo con contenido.
-        var nkAlReves = TextUtils.Nk($"{titulo} {artista}");
-        if (!nkCompleto.StartsWith(nkNombre, StringComparison.Ordinal) &&
-            !nkAlReves.StartsWith(nkNombre, StringComparison.Ordinal))
-        {
-            // Segunda vía: la etiqueta de TÍTULO continúa el título del nombre, aunque la de artista
-            // no cuadre. Pasa con los feat largos: «Policia Motores (feat. Le» tiene su título entero
-            // en la etiqueta, pero ahí los artistas invitados se listan uno a uno. Se conserva
-            // entonces el artista que ya trae el nombre.
-            var corte = nombre.IndexOf(" - ", StringComparison.Ordinal);
-            if (corte <= 0) return null;
-            var artistaDelNombre = nombre[..corte].Trim();
-            var tituloDelNombre = nombre[(corte + 3)..].Trim();
-            var nkTituloNombre = TextUtils.Nk(tituloDelNombre);
-            if (nkTituloNombre.Length == 0 || !TextUtils.Nk(titulo).StartsWith(nkTituloNombre, StringComparison.Ordinal)
-                || TextUtils.Nk(titulo).Length <= nkTituloNombre.Length) return null;
+    /// <summary>Una web, un correo o un usuario de red social dentro del texto de una etiqueta.</summary>
+    private static readonly Regex Web = new(@"@?\b[\w-]+\.(?:com|net|org|io|fm|es|info|vip|club|to|me|blogspot\.com)\b|https?://\S+|\bwww\.\S+", IC);
 
-            propuesto = AiSuggestion.Compose(artistaDelNombre, titulo, "");
-            if (propuesto.Length == 0) return null;
-        }
-
-        return string.Equals(propuesto, TextUtils.ToAscii(nombre).Trim(), StringComparison.Ordinal) ? null : propuesto;
+    /// <summary>
+    /// Quita de una etiqueta lo que no es el nombre de la canción: la web del pack y la tonalidad con
+    /// el BPM estampados al final.
+    ///
+    /// Medido en la biblioteca real: al completar desde las etiquetas se colaban nombres como «…
+    /// (DJ Baur vs DJ Nejtrino Mashup)@djxizmusic.blogspot.com» o «… [Catchfraze &amp; Zapdos Mashup]
+    /// [EdmPacks.com] 6A 130». Completar un nombre no puede ser meterle la publicidad del pool.
+    /// </summary>
+    private static string SinPublicidad(string texto)
+    {
+        // Primero los paréntesis o corchetes que solo contienen la web: se van enteros.
+        var t = Regex.Replace(texto, @"[\[(]\s*[^\[\]()]*[\])]", m => Web.IsMatch(m.Value) ? " " : m.Value);
+        t = Web.Replace(t, " ");
+        // Y la tonalidad con el BPM pegados al final: «… 6A 130», «… 130 6A».
+        t = Regex.Replace(t, @"\s*(?:\b(?:1[0-2]|[1-9])[AB]\b\s*\d{2,3}|\d{2,3}\s*\b(?:1[0-2]|[1-9])[AB]\b)\s*$", "", IC);
+        return Regex.Replace(t, @"\s{2,}", " ").Trim().TrimEnd('-', '@', ' ');
     }
 
     /// <summary>
-    /// Lo que completa la IA, validado: tiene que CONTINUAR el nombre cortado, no cambiarlo por otro.
-    /// Se compara palabra a palabra, admitiendo que la última esté a medias («Remi» → «Remix»).
+    /// Empalma <paramref name="nombre"/> con <paramref name="textoCompleto"/> por donde los dos
+    /// coinciden, y devuelve el nombre ya completo. Null si no coinciden en nada aprovechable.
+    ///
+    /// Se busca la coincidencia MÁS LARGA entre el final del nombre y un trozo del texto completo,
+    /// admitiendo que la última palabra del nombre esté cortada: en «… - Mos» con «Moscow Mule x Mi
+    /// Gente (Transition 100-105 Bpm)» coincide «Mos» con «Moscow», así que lo que hay delante del
+    /// empalme -«Bad Bunny X J Balvin X Comando Tiburon - »- se queda TAL CUAL y detrás va el texto
+    /// completo. Así no se antepone nada, no se repite el artista y no se pierde lo que ya estaba.
+    /// </summary>
+    public static string? Extender(string nombre, string textoCompleto)
+    {
+        var n = PalabrasCon(nombre);
+        var c = PalabrasCon(textoCompleto);
+        if (n.Count == 0 || c.Count == 0) return null;
+
+        for (var largo = Math.Min(n.Count, c.Count); largo >= 1; largo--)
+        {
+            var desde = n.Count - largo;
+            for (var j = 0; j + largo <= c.Count; j++)
+            {
+                var cuadra = true;
+                for (var k = 0; k < largo - 1 && cuadra; k++)
+                    cuadra = string.Equals(n[desde + k].Nk, c[j + k].Nk, StringComparison.Ordinal);
+                if (!cuadra) continue;
+
+                // La última palabra del nombre es la que puede estar cortada: vale si la del texto
+                // completo empieza por ella.
+                var ultimaNombre = n[^1].Nk;
+                var ultimaTexto = c[j + largo - 1].Nk;
+                if (!ultimaTexto.StartsWith(ultimaNombre, StringComparison.Ordinal)) continue;
+
+                // Empalmar por una sola palabra es frágil: solo se admite si esa palabra es larga y
+                // está claramente cortada («Mos» → «Moscow»), nunca si coincide entera.
+                if (largo == 1 && (ultimaNombre.Length < 3 || ultimaTexto.Length == ultimaNombre.Length)) continue;
+
+                var conservado = nombre[..n[desde].Pos];
+                var cola = textoCompleto[c[j].Pos..];
+
+                // Lo que se pega no puede repetir lo que se conserva. Sin esto, «Basstyler - Step
+                // Bass» empalmaba «Bass» con «Basstyler» y salía «Basstyler - Step Basstyler - Step
+                // Bass»: el empalme estaba en el sitio equivocado.
+                var yaEstaban = PalabrasCon(conservado).Select(p => p.Nk).Where(w => w.Length >= 3).ToHashSet(StringComparer.Ordinal);
+                if (PalabrasCon(cola).Any(p => p.Nk.Length >= 3 && yaEstaban.Contains(p.Nk))) continue;
+
+                var propuesto = Sanear(conservado + cola);
+
+                // Y tiene que aportar algo: si no alarga el nombre, no se ha completado nada.
+                if (TextUtils.Nk(propuesto).Length <= TextUtils.Nk(nombre).Length) continue;
+
+                // Los acentos que tenía el nombre se quedan: las etiquetas y la IA suelen venir sin
+                // ellos, y renombrar «Feliz Cumpleaños» a «Cumpleanos» es estropear el nombre.
+                return AiSuggestion.RestaurarAcentos(propuesto, nombre);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Las palabras de un texto (sin acentos ni mayúsculas) con su posición en el original.</summary>
+    private static List<(string Nk, int Pos)> PalabrasCon(string texto)
+        => Regex.Matches(texto, @"[\p{L}\p{N}']+")
+                .Select(m => (Nk: TextUtils.Nk(m.Value), m.Index))
+                .Where(p => p.Nk.Length > 0)
+                .Select(p => (p.Nk, Pos: p.Index))
+                .ToList();
+
+    /// <summary>
+    /// Deja el texto utilizable como nombre de archivo SIN tocar acentos ni eñes: solo quita los
+    /// caracteres que Windows no admite y colapsa los espacios dobles.
+    /// </summary>
+    public static string Sanear(string s)
+    {
+        var t = Regex.Replace(s.Normalize(System.Text.NormalizationForm.FormC), @"[""<>|?*:]", "");
+        t = Regex.Replace(t, @"[/\\]", " ");
+        t = Regex.Replace(t, @"\s{2,}", " ").Trim();
+        return t.TrimEnd('.', ' ').Trim();
+    }
+
+    /// <summary>
+    /// Lo que completa la IA, validado: solo puede CONTINUAR el nombre cortado por donde se cortó.
+    ///
+    /// Antes se admitía que la propuesta reordenase o rehiciera el nombre mientras conservara sus
+    /// palabras, y con eso el modelo acababa reescribiéndolo entero. Ahora tiene que empezar
+    /// exactamente por el nombre actual: lo único que puede hacer es añadirle la cola que le falta,
+    /// y lo que ya estaba escrito se queda tal cual, con sus acentos.
     /// </summary>
     public static string? DesdeIa(string archivo, string artista, string titulo, string version)
     {
         var nombre = Path.GetFileNameWithoutExtension(archivo);
-        var propuesto = AiSuggestion.Compose(artista, titulo, version);
-        if (propuesto.Length == 0) return null;
-        if (string.Equals(propuesto, TextUtils.ToAscii(nombre).Trim(), StringComparison.Ordinal)) return null;
 
-        var palabrasNombre = Palabras(nombre);
-        var palabrasPropuesta = Palabras(propuesto);
-        if (palabrasNombre.Count == 0 || palabrasPropuesta.Count < palabrasNombre.Count - 1) return null;
+        // Se prueba también con el título y la versión solos: el modelo casi siempre rellena el campo
+        // de artista, y si el nombre no empezaba por ese artista, anteponerlo no sería completarlo.
+        foreach (var candidato in new[]
+                 {
+                     AiSuggestion.Compose(artista, titulo, version, conservarAcentos: true),
+                     AiSuggestion.Compose("", titulo, version, conservarAcentos: true),
+                 })
+        {
+            if (candidato.Length == 0) continue;
 
-        // Todas las palabras del nombre, menos la última (que puede estar cortada), tienen que seguir
-        // en la propuesta. La última vale si alguna palabra de la propuesta empieza por ella.
-        var enPropuesta = palabrasPropuesta.ToHashSet(StringComparer.Ordinal);
-        for (var i = 0; i < palabrasNombre.Count - 1; i++)
-            if (!enPropuesta.Contains(palabrasNombre[i]) &&
-                !palabrasPropuesta.Any(p => Matching.JaroWinkler(p, palabrasNombre[i]) >= 0.9))
-                return null;
+            // El empalme ya exige que la propuesta aporte texto nuevo, y eso descarta de paso el
+            // fallo más repetido del modelo: medido con 40 nombres cortados reales, de 25 propuestas
+            // la mayoría se limitaba a recolocar el trozo cortado entre paréntesis -«… (Paul» → «…
+            // (Paul)», «… (CARME-1» → «… (CARME-1)»-. Eso no completa nada.
+            if (Extender(nombre, candidato) is { } completo) return completo;
+        }
 
-        // Y tiene que COMPLETAR algo: o alarga la palabra cortada, o añade palabras que no estaban.
-        //
-        // Medido con 40 nombres cortados reales: de 25 propuestas, la mayoría se limitaba a recolocar
-        // el trozo cortado entre paréntesis -«… (Paul» → «… (Paul)», «… (CARME-1» → «… (CARME-1)»-.
-        // Eso no completa nada y solo da trabajo de revisión.
-        var ultima = palabrasNombre[^1];
-        var alarga = palabrasPropuesta.Any(p => p.Length > ultima.Length && p.StartsWith(ultima, StringComparison.Ordinal));
-        var anade = palabrasPropuesta.Any(p => !palabrasNombre.Contains(p, StringComparer.Ordinal)
-                                               && !p.StartsWith(ultima, StringComparison.Ordinal));
-        return alarga || anade ? propuesto : null;
+        return null;
     }
-
-    private static List<string> Palabras(string s)
-        => Regex.Split(s, @"[^\p{L}\p{N}]+").Select(TextUtils.Nk).Where(w => w.Length >= 2).ToList();
 }

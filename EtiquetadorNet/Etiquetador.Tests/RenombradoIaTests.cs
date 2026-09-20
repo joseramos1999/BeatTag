@@ -198,7 +198,8 @@ public class RenombradoIaTests
     {
         var (p, _) = Evaluar("Feid - REMIX EXCLUSIVO (Albert González Remi.mp3", "Feid", "REMIX EXCLUSIVO", "Albert Gonzalez Remix");
 
-        Assert.Equal("Feid - REMIX EXCLUSIVO (Albert Gonzalez Remix)", p!.Propuesto);
+        // La IA responde sin tildes; la que tenia el nombre se queda donde estaba.
+        Assert.Equal("Feid - REMIX EXCLUSIVO (Albert González Remix)", p!.Propuesto);
     }
 
     [Fact]
