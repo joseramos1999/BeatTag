@@ -100,13 +100,17 @@ public class BandejaTests : IDisposable
     }
 
     // Pasarla a la biblioteca con un nombre ya usado en el destino no puede hacerse; mejor saberlo antes.
+    // Las rutas se montan con Path.Combine y no escritas a mano: con «C:\Bandeja\x.mp3» en macOS la
+    // barra invertida no separa carpetas, el nombre del archivo sale entero y la prueba falla sin que
+    // haya nada roto. Pasó en la CI de macOS.
     [Fact]
     public void Avisa_si_el_nombre_ya_existe_en_el_destino()
     {
-        var t = Tema("Fisher", "Losing It", @"C:\Bandeja\Fisher - Losing It.mp3");
-        var ocupado = Path.Combine(@"C:\Musica\House", "Fisher - Losing It.mp3");
+        var destino = Path.Combine(_dir, "Musica", "House");
+        var t = Tema("Fisher", "Losing It", Path.Combine(_dir, "Bandeja", "Fisher - Losing It.mp3"));
+        var ocupado = Path.Combine(destino, "Fisher - Losing It.mp3");
 
-        var avisos = Revisar(t, Array.Empty<Track>(), destino: @"C:\Musica\House", existe: p => p == ocupado);
+        var avisos = Revisar(t, Array.Empty<Track>(), destino: destino, existe: p => p == ocupado);
 
         Assert.Contains(avisos, x => x.Tipo == TipoAviso.NombreOcupado);
     }

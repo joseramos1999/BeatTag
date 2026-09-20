@@ -11,7 +11,11 @@ public class RenombradoIaTests
     private static (PropuestaNombre? P, string Motivo) Evaluar(string archivo, string artista, string titulo, string version,
                                                               double confianza = 0.9, bool mashup = false,
                                                               string tagA = "", string tagT = "")
-        => RenombradoIa.Evaluar($@"C:\Musica\{archivo}", tagA, tagT, new AiParse(artista, titulo, version, mashup, confianza));
+        // La carpeta se monta con Path.Combine: escrita a mano como «C:\Musica\x.mp3», en macOS la
+        // barra invertida no separa nada, el nombre del archivo sale entero y la prueba falla sin que
+        // haya nada roto. Pasó en la CI de macOS.
+        => RenombradoIa.Evaluar(Path.Combine(Path.GetTempPath(), "beattag-pruebas", archivo),
+                                tagA, tagT, new AiParse(artista, titulo, version, mashup, confianza));
 
     // --- Qué se consulta ---
 

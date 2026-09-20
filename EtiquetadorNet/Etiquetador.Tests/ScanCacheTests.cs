@@ -23,8 +23,15 @@ public class ScanCacheTests
             var c2 = new ScanCache(cacheFile);
             Assert.Equal("Titulo A", c2.Read(mp3).Title);
 
-            // Cambia el archivo (nuevo tag -> cambia mtime/tamaño) -> se re-lee
+            // Cambia el archivo (nuevo tag) -> se re-lee.
+            //
+            // La fecha se adelanta a mano a propósito: «Titulo A» y «Titulo B» ocupan lo mismo, y en
+            // una máquina rápida las dos escrituras pueden caer en la misma marca de tiempo del
+            // sistema de archivos. Entonces la caché da el archivo por intacto y la prueba falla sin
+            // que haya nada roto: pasó en la CI de Windows. Lo que se quiere comprobar es que un
+            // archivo MODIFICADO se relee, y eso es justo lo que queda escrito así.
             Mp3Fixture.SetTags(mp3, "Titulo B", "Artista", "Album");
+            File.SetLastWriteTimeUtc(mp3, File.GetLastWriteTimeUtc(mp3).AddSeconds(2));
             Assert.Equal("Titulo B", c2.Read(mp3).Title);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
