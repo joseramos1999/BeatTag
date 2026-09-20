@@ -41,8 +41,12 @@ public static class NombreCortado
     ///
     /// NO entran las palabras de enlace corrientes (la, el, de, y…): «The Wiseguys - Ooh La La» es un
     /// título entero que acaba en «La», y con ellas en la lista se daba por cortado.
+    ///
+    /// La «x» solo cuenta cuando va suelta, como separador entre dos canciones. Sin esa condición
+    /// entraba la «x» final de cualquier palabra, y eso daba por cortado TODO nombre acabado en
+    /// «Remix», «Mix» o «Rmx».
     /// </summary>
-    private static readonly Regex FinalColgando = new(@"[\-,x&(\[]\s*$|\b(feat|ft|vs)\.?\s*$", IC);
+    private static readonly Regex FinalColgando = new(@"[\-,&(\[]\s*$|(?<![\p{L}\p{N}])x\s*$|\b(feat|ft|vs)\.?\s*$", IC);
 
     /// <summary>
     /// El nombre parece cortado. Hacen falta señales DUROS de corte, no que las etiquetas digan más:
@@ -172,7 +176,19 @@ public static class NombreCortado
                 var yaEstaban = PalabrasCon(conservado).Select(p => p.Nk).Where(w => w.Length >= 3).ToHashSet(StringComparer.Ordinal);
                 if (PalabrasCon(cola).Any(p => p.Nk.Length >= 3 && yaEstaban.Contains(p.Nk))) continue;
 
-                var propuesto = Sanear(conservado + cola);
+                // Completar un nombre no puede crear un «Artista - Título» de más. Visto en la
+                // aplicación: «Vazteria X - No Break» (que ni siquiera estaba cortado) empalmaba
+                // «Break» con el «Zona Breakbeat DJ's» de la etiqueta de artista y quedaba «Vazteria
+                // X - No Breakbeat DJ's; DJ Goku - No Break».
+                var maxGuiones = Math.Max(Separadores(nombre), Separadores(textoCompleto));
+                var propuesto = Sanear(SinCierreSuelto(conservado + cola));
+                if (Separadores(propuesto) > maxGuiones) continue;
+
+                // Si el resultado sigue pareciendo cortado, no se ha completado nada: pasa cuando la
+                // etiqueta viene cortada a su vez («Efecto Vs DJ No Pare Remix (DJ»).
+                if (propuesto.Count(ch => ch == '(') > propuesto.Count(ch => ch == ')')) continue;
+                if (propuesto.Count(ch => ch == '[') > propuesto.Count(ch => ch == ']')) continue;
+                if (FinalColgando.IsMatch(propuesto)) continue;
 
                 // Y tiene que aportar algo: si no alarga el nombre, no se ha completado nada.
                 if (TextUtils.Nk(propuesto).Length <= TextUtils.Nk(nombre).Length) continue;
@@ -184,6 +200,32 @@ public static class NombreCortado
         }
 
         return null;
+    }
+
+    /// <summary>Cuántos «Artista - Título» separa un texto: los guiones con espacio a los dos lados.</summary>
+    private static int Separadores(string s) => Regex.Matches(s, @"\s[-–]\s").Count;
+
+    /// <summary>
+    /// Quita un paréntesis o corchete de cierre que se quedó sin su pareja.
+    ///
+    /// Sale al empalmar cuando el nombre traía el paréntesis convertido en guión: «… AMANECER - DJ
+    /// EMILIA» con la etiqueta «… (EMILIANO NEGRI REMIX)» dejaba un «)» colgando al final.
+    /// </summary>
+    private static string SinCierreSuelto(string s)
+    {
+        var sb = new System.Text.StringBuilder(s.Length);
+        int abiertos = 0, corchetes = 0;
+        foreach (var c in s)
+        {
+            if (c == '(') abiertos++;
+            if (c == '[') corchetes++;
+            if (c == ')' && abiertos == 0) continue;
+            if (c == ']' && corchetes == 0) continue;
+            if (c == ')') abiertos--;
+            if (c == ']') corchetes--;
+            sb.Append(c);
+        }
+        return sb.ToString();
     }
 
     /// <summary>Las palabras de un texto (sin acentos ni mayúsculas) con su posición en el original.</summary>

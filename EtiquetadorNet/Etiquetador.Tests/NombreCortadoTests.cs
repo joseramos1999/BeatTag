@@ -197,4 +197,46 @@ public class NombreCortadoTests
 
         Assert.Equal("Alesso & Katy Perry - When I'm Gone [Alex Pizzuti & Adalwolf Bootleg Remix]", p);
     }
+
+    // --- Lo que se vio al usar la herramienta en la biblioteca real (12 renombrados) ---
+
+    // «Vazteria X - No Break» no estaba cortado: el título entero es «No Break». La etiqueta de
+    // artista traía «Zona Breakbeat DJ's», y empalmando «Break» con «Breakbeat» salía «Vazteria X -
+    // No Breakbeat DJ's; DJ Goku - No Break». Completar no puede crear un «Artista - Título» de más.
+    [Fact]
+    public void No_inventa_un_segundo_artista_titulo()
+    {
+        Assert.Null(NombreCortado.DesdeEtiquetas(R("Vazteria X - No Break.mp3"),
+                                                 "Vazteria X; Zona Breakbeat DJ's; DJ Goku", "No Break"));
+    }
+
+    // Cuando la etiqueta viene cortada a su vez, el resultado seguiria cortado: mejor no proponer nada.
+    [Fact]
+    public void Una_etiqueta_tambien_cortada_no_completa()
+    {
+        Assert.Null(NombreCortado.DesdeEtiquetas(R("Bad-Bunny- Justin-Quiles- Lenny-Tavarez-Efec.mp3"),
+                                                 "Bad Bunny, Justin Quiles, Lenn", "Efecto Vs DJ No Pare Remix (DJ"));
+    }
+
+    // El nombre traia el parentesis convertido en guion, asi que al pegar la cola sobraba un «)».
+    [Fact]
+    public void Un_cierre_sin_pareja_no_se_queda_colgando()
+    {
+        var p = NombreCortado.DesdeEtiquetas(R("MOSCOW MULE VS HASTA EL AMANECER - DJ EMILIA.mp3"),
+                                             "Emiliano Negri", "HASTA EL AMANECER VS MOSCOW MULE (EMILIANO NEGRI REMIX)");
+
+        Assert.Equal("MOSCOW MULE VS HASTA EL AMANECER - DJ EMILIANO NEGRI REMIX", p);
+    }
+
+    // Un nombre acabado en «Remix» no esta cortado: la «x» solo cuenta cuando va suelta, separando
+    // dos canciones. Con la regla anterior entraba aqui TODO lo acabado en «Remix», «Mix» o «Rmx».
+    [Theory]
+    [InlineData("Daddy Yankee - Gasolina Remix.mp3", "Daddy Yankee", "Gasolina Remix")]
+    [InlineData("Duke Dumont - Ocean Drive Mix.mp3", "Duke Dumont", "Ocean Drive Mix")]
+    public void Acabar_en_remix_no_es_estar_cortado(string archivo, string tagA, string tagT)
+        => Assert.False(NombreCortado.Parece(R(archivo), tagA, tagT));
+
+    [Fact]
+    public void Pero_una_x_suelta_al_final_si_lo_es()
+        => Assert.True(NombreCortado.Parece(R("Bad Bunny x.mp3"), "", ""));
 }
