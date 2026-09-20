@@ -30,6 +30,9 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   que conviene conservar**, según el criterio que elijas: carpeta prioritaria, mejor calidad o mayor
   duración. Puedes marcar las sobrantes de todos los grupos a la vez y enviarlas a la papelera de
   una sola pasada, conservando siempre un ejemplar de cada canción.
+  Con **«Excluir ediciones de DJ»** se dejan fuera del análisis las ediciones hechas para pinchar
+  (hype intro, open show, aca out, acapellas, transiciones, mashups): no son copias sobrantes, y
+  emparejadas con su original tapan los duplicados de verdad.
   También puede agrupar **por el audio** (huella acústica), lo que encuentra la misma canción
   aunque tenga títulos distintos o no esté etiquetada. En ese modo cada versión conserva su propio
   ejemplar: tus ediciones de DJ no se marcan como sobrantes.

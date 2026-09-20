@@ -38,6 +38,12 @@ public sealed class AppConfig
 
     /// <summary>Criterio para decidir qué copia es la mejor de cada grupo.</summary>
     public string DupKeepCriterion { get; set; } = "";
+
+    /// <summary>
+    /// Dejar fuera de Duplicados las ediciones para pinchar (intros, open shows, acapellas, mashups).
+    /// No son copias sobrantes, y emparejadas con su original tapan los duplicados de verdad.
+    /// </summary>
+    public bool DupExcluirEdicionesDj { get; set; }
     /// <summary>Carpetas presentes pero desmarcadas (no se analizan).</summary>
     public List<string> DisabledFolders { get; set; } = new();
 

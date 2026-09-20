@@ -23,6 +23,8 @@
             <TextBlock Text="Conservar" VerticalAlignment="Center" />
             <ComboBox ItemsSource="{Binding KeepOptions}" SelectedItem="{Binding SelectedKeep}" MinWidth="230"
                       ToolTip.Tip="Qué copia se considera la mejor de cada grupo. Es la que se marca en verde y la que no se marca al pulsar «Marcar sobrantes»." />
+            <CheckBox Content="Excluir ediciones de DJ" IsChecked="{Binding ExcluirEdicionesDj}" VerticalAlignment="Center"
+                      ToolTip.Tip="Deja fuera del análisis las ediciones hechas para pinchar: hype intro, melodic intro, break intro, open show, starter, aca in/out, acapellas, redrum, quick hit, transiciones y mashups. No son copias sobrantes de una canción, son herramientas distintas, y emparejadas con su original tapan los duplicados de verdad.&#10;&#10;No excluye «Extended», «Remix», «Radio Edit» ni «Original Mix»: esas también las publica el catálogo, y dejarlas fuera escondería duplicados reales." />
             <Button Content="⯆ Desplegar" Click="ExpandAll_Click" />
             <Button Content="⯈ Cerrar" Click="CollapseAll_Click" />
             <TextBox Text="{Binding Busqueda}" PlaceholderText="Buscar…" Width="180"

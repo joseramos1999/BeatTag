@@ -187,6 +187,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         _selectedMode = ModeOptions[0];
         _selectedKeep = KeepOptions.FirstOrDefault(k => k.Value.ToString() == engine.Config.DupKeepCriterion)
                         ?? KeepOptions[0];
+        _excluirEdicionesDj = engine.Config.DupExcluirEdicionesDj;
 
         RowsView = new DataGridCollectionView(Rows);
         RowsView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(DupRow.Group)));
@@ -248,6 +249,20 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         if (Store.IsScanned) Recompute();
     }
 
+    /// <summary>
+    /// Dejar fuera del análisis las ediciones para pinchar (intros, open shows, acapellas, mashups,
+    /// transiciones). No son copias sobrantes: son herramientas distintas, y al emparejarse una y
+    /// otra vez con su original tapan los duplicados de verdad.
+    /// </summary>
+    [ObservableProperty] private bool _excluirEdicionesDj;
+
+    partial void OnExcluirEdicionesDjChanged(bool value)
+    {
+        _engine.Config.DupExcluirEdicionesDj = value;
+        _engine.SaveConfig();
+        if (Store.IsScanned) Recompute();
+    }
+
     private bool EsPrioritaria(string carpeta)
         => _engine.Config.PriorityFolders.Contains(carpeta, StringComparer.OrdinalIgnoreCase);
 
@@ -297,6 +312,9 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         Recompute();
     }
 
+    /// <summary>Cuántas ediciones de DJ se dejaron fuera en el último recálculo (para el estado).</summary>
+    private int _edicionesFuera;
+
     /// <summary>La tabla ya no refleja la biblioteca actual (se avisa en pantalla).</summary>
     [ObservableProperty] private bool _desactualizada;
 
@@ -309,6 +327,13 @@ public partial class DuplicatesViewModel : ScanViewModelBase
             : Store.Tracks.Where(t => !excluidas.Contains(t.Folder, StringComparer.OrdinalIgnoreCase));
 
         var lista = fuente.ToList();
+        if (ExcluirEdicionesDj)
+        {
+            var antes = lista.Count;
+            lista = lista.Where(t => !EdicionDj.Es(t.FilePath)).ToList();
+            _edicionesFuera = antes - lista.Count;
+        }
+        else _edicionesFuera = 0;
 
         // Agrupar por audio es caro y NO puede hacerse aquí: Recompute corre en el hilo de la
         // interfaz y la dejaría congelada. Se desvía a un método propio en segundo plano.
@@ -375,9 +400,10 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         Marcadas = 0;
 
         var excl = excluidas.Count > 0 ? $" · {excluidas.Count} carpeta(s) excluida(s)" : "";
+        var edic = _edicionesFuera > 0 ? $" · {_edicionesFuera} edición(es) de DJ fuera" : "";
         var prio = conPrioridad > 0 ? $" · {conPrioridad} resueltos por carpeta prioritaria" : "";
         var nota = porAudio ? " · cada versión conserva un ejemplar" : "";
-        Status = $"{groups.Count} grupo(s) de duplicados · {copies} archivos implicados{excl}{prio}{nota}.";
+        Status = $"{groups.Count} grupo(s) de duplicados · {copies} archivos implicados{excl}{edic}{prio}{nota}.";
     }
 
     /// <summary>
