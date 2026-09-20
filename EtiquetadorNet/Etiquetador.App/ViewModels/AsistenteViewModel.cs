@@ -40,6 +40,7 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
     public GenerosIaViewModel Generos { get; }
     public MezclaViewModel Mezcla { get; }
     public RenombrarIaViewModel Renombrar { get; }
+    public CompletarNombresViewModel Completar { get; }
 
     /// <summary>Se ha creado una colección desde aquí: el shell la abre en Colecciones.</summary>
     public event Action<ColeccionInteligente>? ColeccionCreada;
@@ -53,6 +54,7 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
         Generos = new GenerosIaViewModel(this);
         Mezcla = new MezclaViewModel(this);
         Renombrar = new RenombrarIaViewModel(this);
+        Completar = new CompletarNombresViewModel(this);
     }
 
     /// <summary>Mira si Ollama responde y con qué modelo. Se llama al entrar en la página.</summary>
@@ -74,6 +76,7 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
         Mezcla.RellenarColecciones();
         FichasIa.RellenarAmbitos();
         Renombrar.RellenarAmbitos();
+        Completar.RellenarAmbitos();
     }
 
     [RelayCommand]
@@ -676,6 +679,183 @@ public sealed partial class RenombrarIaViewModel : ObservableObject
         if (res.Hechos.Count > 0) _p.Engine.AvisarFichasCambiadas();
 
         var texto = $"{res.Hechos.Count} archivos renombrados";
+        if (res.Fallos.Count > 0) texto += $" · {res.Fallos.Count} no ({res.Fallos[0]})";
+        if (res.Cancelado) texto += " · cancelado a medias";
+        texto += res.UndoErr.Length > 0
+            ? $". ⚠ El cambio NO quedó anotado y no se podrá deshacer: {res.UndoErr}"
+            : res.Hechos.Count > 0 ? ". Se puede deshacer desde Enriquecer; si usas rekordbox, repara la colección en Ajustes." : ".";
+        _p.Status = texto;
+    });
+}
+
+// =====================================================================================================
+// 6. Completar nombres cortados
+// =====================================================================================================
+
+public sealed partial class CortadoFila : ObservableObject
+{
+    public Completado Completado { get; }
+    public CortadoFila(Completado c)
+    {
+        Completado = c;
+        _propuesto = c.Propuesto;
+        // Lo que sale de las ETIQUETAS del propio archivo se marca: no lo ha inventado nadie, ya
+        // estaba dentro del archivo. Lo de la IA, no.
+        _aceptar = c.Origen == OrigenCompletado.Etiquetas;
+    }
+
+    [ObservableProperty] private string _propuesto;
+    [ObservableProperty] private bool _aceptar;
+
+    public string Ruta => Completado.Ruta;
+    public string Actual => Completado.Actual;
+    public string Detalle => Completado.Detalle;
+    public string Origen => Completado.Origen switch
+    {
+        OrigenCompletado.Etiquetas => "Etiquetas del archivo",
+        OrigenCompletado.IaConfirmada => "IA, confirmada en el catálogo",
+        _ => "IA sin confirmar",
+    };
+}
+
+public sealed partial class CompletarNombresViewModel : ObservableObject
+{
+    private readonly AsistenteViewModel _p;
+    public const string TodaLaBiblioteca = "Toda la biblioteca";
+
+    public CompletarNombresViewModel(AsistenteViewModel padre)
+    {
+        _p = padre;
+        RellenarAmbitos();
+    }
+
+    public ObservableCollection<string> Ambitos { get; } = new();
+    [ObservableProperty] private string? _ambito = TodaLaBiblioteca;
+
+    public IReadOnlyList<int> Limites { get; } = new[] { 50, 200, 1000, 5000 };
+    [ObservableProperty] private int _limite = 1000;
+
+    /// <summary>Consultar a la IA los que no se arreglan con sus etiquetas. Cuesta ~0,5 s por canción.</summary>
+    [ObservableProperty] private bool _usarIa = true;
+
+    public ObservableCollection<CortadoFila> Filas { get; } = new();
+    [ObservableProperty] private string _resumen = "";
+
+    public void RellenarAmbitos()
+    {
+        var actual = Ambito;
+        Ambitos.Clear();
+        Ambitos.Add(TodaLaBiblioteca);
+        foreach (var c in _p.Engine.Colecciones.Todas) Ambitos.Add(c.Nombre);
+        Ambito = Ambitos.Contains(actual ?? "") ? actual : TodaLaBiblioteca;
+    }
+
+    [RelayCommand]
+    private Task BuscarAsync() => _p.TrabajarAsync("Buscando nombres cortados…", async ct =>
+    {
+        if (!_p.BibliotecaLista(out var motivo)) { _p.Status = motivo; return; }
+
+        var fichas = _p.FichasActuales();
+        var coleccion = _p.Engine.Colecciones.Todas.FirstOrDefault(c => c.Nombre == Ambito);
+        var cortados = _p.Engine.Library.Tracks
+            .Where(t => coleccion == null || FiltroColeccion.Cumple(coleccion, t, fichas.GetValueOrDefault(t.FilePath)))
+            .Where(t => NombreCortado.Parece(t.FilePath, t.Artist ?? "", t.Title ?? ""))
+            .Take(Limite)
+            .ToList();
+
+        Filas.Clear();
+        if (cortados.Count == 0) { Resumen = ""; _p.Status = "No hay nombres cortados en el ámbito elegido."; return; }
+
+        // 1) Las etiquetas del propio archivo. Ni IA ni red: es lo que ya está dentro del archivo.
+        var paraIa = new List<Track>();
+        foreach (var t in cortados)
+        {
+            var conTags = NombreCortado.DesdeEtiquetas(t.FilePath, t.Artist ?? "", t.Title ?? "");
+            if (conTags != null)
+                Filas.Add(new CortadoFila(new Completado(t.FilePath, Path.GetFileNameWithoutExtension(t.FilePath),
+                                                         conTags, OrigenCompletado.Etiquetas, "Estaba en las etiquetas del archivo")));
+            else paraIa.Add(t);
+        }
+        var conEtiquetas = Filas.Count;
+
+        // 2) Los que llegaron sin etiquetas útiles: la IA, y su propuesta se contrasta con el catálogo.
+        var conIa = 0;
+        if (UsarIa && _p.IaDisponible && paraIa.Count > 0)
+        {
+            _p.Engine.Ai.Reset();
+            for (var i = 0; i < paraIa.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var t = paraIa[i];
+                var ia = await _p.Engine.Ai.ParseAsync(Path.GetFileNameWithoutExtension(t.FilePath),
+                                                       t.Artist ?? "", t.Title ?? "", _p.Modelo, ct);
+                _p.Progress = 100.0 * (i + 1) / paraIa.Count;
+                _p.Status = $"Consultando a la IA… {i + 1} de {paraIa.Count}";
+                if (ia == null) continue;
+
+                var completo = NombreCortado.DesdeIa(t.FilePath, ia.Artist, ia.Title, ia.Version);
+                if (completo == null) continue;
+
+                var (origen, detalle) = await ConfirmarAsync(ia.Artist, ia.Title, ct);
+                Filas.Add(new CortadoFila(new Completado(t.FilePath, Path.GetFileNameWithoutExtension(t.FilePath),
+                                                         completo, origen, detalle)));
+                conIa++;
+            }
+        }
+
+        Resumen = $"{cortados.Count} nombres cortados · {conEtiquetas} se completan con sus etiquetas · {conIa} con la IA";
+        _p.Status = !UsarIa || !_p.IaDisponible
+            ? $"{Resumen}. Sin IA solo se usan las etiquetas; los demás se quedan como están."
+            : $"{Resumen}. Lo que sale de las etiquetas va marcado; lo de la IA, no.";
+    });
+
+    /// <summary>
+    /// ¿Existe esa canción en el catálogo? No decide el nombre —lo cortado suele ser el editor, que
+    /// ningún catálogo conoce— pero sí dice si la IA está hablando de una canción real.
+    /// </summary>
+    private async Task<(OrigenCompletado, string)> ConfirmarAsync(string artista, string titulo, CancellationToken ct)
+    {
+        if (!_p.Engine.Config.UseDeezer || titulo.Trim().Length == 0)
+            return (OrigenCompletado.IaSinConfirmar, "La IA lo completó; no se ha contrastado con ningún catálogo");
+        try
+        {
+            var hit = await _p.Engine.Deezer.SearchAsync(artista, titulo, false, false, 0, false, ct);
+            return hit != null
+                ? (OrigenCompletado.IaConfirmada, $"Deezer: {hit.Artist} - {hit.Title}")
+                : (OrigenCompletado.IaSinConfirmar, "La IA lo completó; Deezer no encuentra esa canción");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch { return (OrigenCompletado.IaSinConfirmar, "La IA lo completó; no se pudo consultar el catálogo"); }
+    }
+
+    [RelayCommand]
+    private void MarcarTodas() { foreach (var f in Filas) f.Aceptar = true; }
+
+    [RelayCommand]
+    private void MarcarNinguna() { foreach (var f in Filas) f.Aceptar = false; }
+
+    public IReadOnlyList<CortadoFila> Marcadas => Filas.Where(f => f.Aceptar && f.Propuesto.Trim().Length > 0).ToList();
+
+    /// <summary>Renombra las marcadas. La confirmación la pide la vista.</summary>
+    public Task RenombrarAsync() => _p.TrabajarAsync("Completando nombres…", async ct =>
+    {
+        var marcadas = Marcadas;
+        if (marcadas.Count == 0) { _p.Status = "No hay ninguna propuesta marcada."; return; }
+
+        _p.Engine.ReleaseAudio();
+        var cambios = marcadas.Select(f => (f.Ruta, f.Propuesto.Trim())).ToList();
+        var progreso = new Progress<double>(v => _p.Progress = v);
+        var res = await Task.Run(() => _p.Engine.RenombrarArchivos(cambios, progreso, ct));
+
+        var hechos = new HashSet<string>(res.Hechos.Select(h => h.Origen), StringComparer.OrdinalIgnoreCase);
+        foreach (var f in Filas.Where(f => hechos.Contains(f.Ruta)).ToList()) Filas.Remove(f);
+        if (res.Hechos.Count > 0)
+        {
+            await _p.Engine.Library.ScanAsync();
+            _p.Engine.AvisarFichasCambiadas();
+        }
+
+        var texto = $"{res.Hechos.Count} nombres completados";
         if (res.Fallos.Count > 0) texto += $" · {res.Fallos.Count} no ({res.Fallos[0]})";
         if (res.Cancelado) texto += " · cancelado a medias";
         texto += res.UndoErr.Length > 0

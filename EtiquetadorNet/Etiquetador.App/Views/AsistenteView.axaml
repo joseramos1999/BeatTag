@@ -209,6 +209,41 @@
                 </DockPanel>
             </TabItem>
 
+            <!-- ============================ 6. COMPLETAR NOMBRES CORTADOS ============================ -->
+            <TabItem Header="Completar nombres cortados">
+                <DockPanel DataContext="{Binding Completar}" x:DataType="vm:CompletarNombresViewModel" Margin="0,8,0,0">
+                    <TextBlock DockPanel.Dock="Top" Classes="desc" Margin="0,0,0,6"
+                               Text="Los record pools y algunas descargas recortan el nombre a una longitud fija y lo dejan a medias: «… (F3LY Intro Hype Dur», «… UNA AMAPO». Aquí se localizan y se propone el nombre entero. Primero con las etiquetas del propio archivo, que en la mayoría de los casos ya lo traen completo: eso no lo inventa nadie y sale marcado. Para los que llegaron sin etiquetas se consulta a la IA, que solo puede alargar lo que ya está —no cambiar la canción por otra— y su propuesta se contrasta con Deezer; esas salen desmarcadas." />
+                    <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                        <TextBlock Text="Canciones de" VerticalAlignment="Center" Margin="0,0,6,4" />
+                        <ComboBox ItemsSource="{Binding Ambitos}" SelectedItem="{Binding Ambito}" MinWidth="200" Margin="0,0,12,4" />
+                        <TextBlock Text="Como máximo" VerticalAlignment="Center" Margin="0,0,6,4" />
+                        <ComboBox ItemsSource="{Binding Limites}" SelectedItem="{Binding Limite}" MinWidth="90" Margin="0,0,12,4" />
+                        <CheckBox Content="Usar la IA para los que no tienen etiquetas" IsChecked="{Binding UsarIa}" Margin="0,0,12,4"
+                                  ToolTip.Tip="Cuesta alrededor de medio segundo por canción. Sin esto solo se usan las etiquetas del propio archivo, que es lo más fiable y es instantáneo." />
+                        <Button Content="Buscar cortados" Command="{Binding BuscarCommand}" Margin="0,0,12,4"
+                                IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+                        <Button Content="Marcar todas" Command="{Binding MarcarTodasCommand}" Margin="0,0,6,4" />
+                        <Button Content="Desmarcar todas" Command="{Binding MarcarNingunaCommand}" Margin="0,0,12,4" />
+                        <Button Content="Completar las marcadas" Click="Completar_Click" Margin="0,0,12,4"
+                                IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" />
+                    </WrapPanel>
+                    <DataGrid ItemsSource="{Binding Filas}" x:CompileBindings="False" AutoGenerateColumns="False"
+                              CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
+                        <DataGrid.Columns>
+                            <DataGridCheckBoxColumn Header="Aceptar" Binding="{Binding Aceptar}" Width="80" />
+                            <DataGridTextColumn Header="Nombre cortado" Binding="{Binding Actual}" Width="1.2*" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Nombre completo" Binding="{Binding Propuesto}" Width="1.4*" />
+                            <DataGridTextColumn Header="De dónde sale" Binding="{Binding Origen}" Width="200" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Detalle" Binding="{Binding Detalle}" Width="*" IsReadOnly="True" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+
             <!-- ============================ 4. ORDENAR PARA MEZCLAR ============================ -->
             <TabItem Header="Ordenar para mezclar">
                 <DockPanel DataContext="{Binding Mezcla}" x:DataType="vm:MezclaViewModel" Margin="0,8,0,0">

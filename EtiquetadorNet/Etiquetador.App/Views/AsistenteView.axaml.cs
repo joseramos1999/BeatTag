@@ -51,6 +51,24 @@ public partial class AsistenteView : UserControl
         if (ok) await vm.Renombrar.RenombrarAsync();
     }
 
+    private async void Completar_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not AsistenteViewModel vm || TopLevel.GetTopLevel(this) is not Window owner) return;
+        var marcadas = vm.Completar.Marcadas;
+        if (marcadas.Count == 0) { vm.Status = "No hay ninguna propuesta marcada."; return; }
+
+        var deIa = marcadas.Count(f => f.Origen.StartsWith("IA", StringComparison.Ordinal));
+        var nota = "Solo cambia el nombre del archivo, no sus etiquetas. Si ya existe un archivo con el nombre nuevo, ese no se renombra. "
+                 + "Se puede deshacer desde Enriquecer. Si usas rekordbox, después repara la colección en Ajustes para no perder los cue points.";
+        if (deIa > 0) nota = $"⚠ {deIa} vienen de la IA y no de las etiquetas del archivo: comprueba que las has revisado. " + nota;
+
+        var ok = await ConfirmDialog.AskAsync(owner,
+            "Completar nombres cortados",
+            $"Se renombrarán {marcadas.Count} archivos con el nombre completo (o el que hayas corregido).",
+            nota, "Completar");
+        if (ok) await vm.Completar.RenombrarAsync();
+    }
+
     private async void ExportarMezcla_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not AsistenteViewModel vm) return;
