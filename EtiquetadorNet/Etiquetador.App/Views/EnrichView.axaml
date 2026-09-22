@@ -93,6 +93,8 @@
                 <WrapPanel Margin="0,6,0,0">
                     <CheckBox Content="Sobrescribir tags existentes" IsChecked="{Binding Overwrite}" Margin="0,0,12,0" />
                     <CheckBox Content="Solo limpiar nombre (sin buscar)" IsChecked="{Binding CleanOnly}" Margin="0,0,12,0" />
+                    <CheckBox Content="Saltar las que ya están bien" IsChecked="{Binding SaltarYaCorrectas}" Margin="0,0,12,0"
+                              ToolTip.Tip="No consulta las canciones cuyo nombre y tags ya dicen lo mismo y que ya tienen todo lo que se escribe (género, año…)." />
                     <TextBlock Text="Carátula:" VerticalAlignment="Center" Margin="8,0,4,0" />
                     <ComboBox SelectedItem="{Binding CoverMode}" MinWidth="110">
                         <sys:String>keep</sys:String>

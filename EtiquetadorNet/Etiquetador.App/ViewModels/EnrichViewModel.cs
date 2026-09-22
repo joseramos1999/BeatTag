@@ -122,6 +122,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     // Opciones
     [ObservableProperty] private bool _overwrite;
     [ObservableProperty] private bool _cleanOnly;
+    [ObservableProperty] private bool _saltarYaCorrectas;
     [ObservableProperty] private string _coverMode = "keep";
     [ObservableProperty] private string _coverPath = "";
 
@@ -170,7 +171,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     {
         nameof(UseDeezer), nameof(UseItunes), nameof(UseSpotify), nameof(UseDiscogs), nameof(UseMusicBrainz),
         nameof(UseAcoustId), nameof(UseAi), nameof(WriteTitle), nameof(WriteArtist), nameof(WriteAlbum),
-        nameof(WriteGenre), nameof(WriteYear), nameof(WriteBpm), nameof(Overwrite), nameof(CleanOnly),
+        nameof(WriteGenre), nameof(WriteYear), nameof(WriteBpm), nameof(Overwrite), nameof(CleanOnly), nameof(SaltarYaCorrectas),
         nameof(CoverMode), nameof(CoverPath), nameof(MinChangeIndex),
     };
 
@@ -183,7 +184,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         _writeTitle = c.WriteTitle; _writeArtist = c.WriteArtist; _writeAlbum = c.WriteAlbum;
         _writeGenre = c.WriteGenre; _writeYear = c.WriteYear; _writeBpm = c.WriteBpm;
         _overwrite = c.Overwrite; _cleanOnly = c.CleanOnly; _coverMode = c.CoverMode; _coverPath = c.CoverPath;
-        _minChangeIndex = c.MinChangeIndex;
+        _minChangeIndex = c.MinChangeIndex; _saltarYaCorrectas = c.SaltarYaCorrectas;
 
         RowsView = new DataGridCollectionView(Rows);
         RowsView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(PreviewRow.Folder)));
@@ -211,6 +212,15 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     [RelayCommand]
     private void ClearFolders() => _engine.Library.ClearFolders();
 
+    /// <summary>
+    /// ¿Se salta sin consultar? Depende solo de su casilla, también con «Sobrescribir tags
+    /// existentes»: si el nombre y los tags ya dicen la misma canción, sobrescribir solo cambiaría
+    /// género, año o álbum por lo que diga un catálogo, y eso no es arreglar nada. Quien lo quiera
+    /// igualmente desmarca la casilla.
+    /// </summary>
+    private bool SeSalta(Track t, FieldFlags campos)
+        => SaltarYaCorrectas && YaCorrecta.SeSalta(t, campos);
+
     private void PushToConfig()
     {
         var c = _engine.Config;
@@ -219,7 +229,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         c.WriteTitle = WriteTitle; c.WriteArtist = WriteArtist; c.WriteAlbum = WriteAlbum;
         c.WriteGenre = WriteGenre; c.WriteYear = WriteYear; c.WriteBpm = WriteBpm;
         c.Overwrite = Overwrite; c.CleanOnly = CleanOnly; c.CoverMode = CoverMode; c.CoverPath = CoverPath;
-        c.MinChangeIndex = MinChangeIndex;
+        c.MinChangeIndex = MinChangeIndex; c.SaltarYaCorrectas = SaltarYaCorrectas;
         _engine.SaveConfig();   // las carpetas las persiste el LibraryStore
     }
 
@@ -267,7 +277,8 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             _engine.Logger.Detail($"Firma de opciones: {sig}");
             var seen = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 
-            int i = 0, fromCache = 0, alreadyApplied = 0, sinCambio = 0;
+            int i = 0, fromCache = 0, alreadyApplied = 0, sinCambio = 0, yaCorrectas = 0;
+            var campos = _engine.BuildFields();
             foreach (var t in tracks)
             {
                 ct.ThrowIfCancellationRequested();
@@ -280,6 +291,9 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
                 // canciones que el usuario ya dio por terminadas. Para recuperarlas está
                 // "Olvidar aplicadas", en Ajustes, que es una decisión explícita.
                 if (_engine.Applied.Contains(t.FilePath)) { alreadyApplied++; continue; }
+                // Nombre y tags ya dicen lo mismo y no le falta nada de lo que se escribe: consultarla
+                // solo gastaría tiempo y peticiones. También al reanalizar, igual que las aplicadas.
+                if (SeSalta(t, campos)) { yaCorrectas++; continue; }
                 Status = $"{(force ? "Reanalizando" : "Analizando")} {i}/{tracks.Count}…  {t.FileName}";
                 Progress = tracks.Count == 0 ? 0 : (double)i / tracks.Count * 100;
                 var per = sw.Elapsed.TotalSeconds / i;
@@ -307,11 +321,14 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             Progress = 100;
             Status = $"Analizadas {tracks.Count} · propuestas {Rows.Count} · {fromCache} de caché"
                    + (alreadyApplied > 0 ? $" · {alreadyApplied} ya aplicadas (omitidas)" : "")
+                   + (yaCorrectas > 0 ? $" · {yaCorrectas} saltadas (nombre y tags ya coinciden)" : "")
                    + (sinCambio > 0 ? $" · {sinCambio} ya estaban bien" : "")
                    + $" · en {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}.";
             var low = Rows.Count(r => r.RowStatus.StartsWith('⚠'));
             if (alreadyApplied > 0)
                 _engine.Logger.Detail($"    {alreadyApplied} ya aplicadas, omitidas (se recuperan con «Olvidar aplicadas» en Ajustes).");
+            if (yaCorrectas > 0)
+                _engine.Logger.Detail($"    {yaCorrectas} saltadas sin consultar: nombre y tags ya coinciden y no les falta nada de lo que se escribe.");
             if (sinCambio > 0)
                 _engine.Logger.Detail($"    {sinCambio} no se muestran porque aplicarlas no cambiaría nada del archivo.");
             _engine.Logger.Sum($"Análisis terminado: {tracks.Count} revisadas · {Rows.Count} propuestas · {fromCache} de caché · "
@@ -384,10 +401,13 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         var sig = _engine.BuildOptions().Signature();
         Rows.Clear();
         int loaded = 0;
+        var campos = _engine.BuildFields();
         foreach (var t in tracks)
         {
             if (_engine.Ignored.Contains(t.FilePath)) continue;   // descartada por el usuario
             if (_engine.Applied.Contains(t.FilePath)) continue;   // ya aplicada
+            // Lo analizado antes de existir esta regla sigue en la caché: sin esto, reaparecería.
+            if (SeSalta(t, campos)) continue;
             var c = _engine.Analysis.Get(t.FilePath, sig);
             if (c == null || c.Skip) continue;
             if (c.Found || c.CleanOnly) { if (AddRow(c, t)) loaded++; }

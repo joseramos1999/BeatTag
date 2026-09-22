@@ -89,6 +89,12 @@ public sealed class AppConfig
     public bool WriteArtist { get; set; } = true;
     public bool WriteBpm { get; set; } = true;
 
+    /// <summary>
+    /// Enriquecer no consulta las canciones cuyo nombre y tags ya coinciden y a las que no les falta
+    /// nada de lo que se escribe (ver <see cref="Pipeline.YaCorrecta"/>).
+    /// </summary>
+    public bool SaltarYaCorrectas { get; set; } = true;
+
     // --- Varios ---
     public bool Cache { get; set; } = true;
 
