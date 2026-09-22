@@ -26,10 +26,14 @@
       suelto NO arranca (le faltan los DLL nativos), que es justo lo que le pasaba a la v1.1.0.
     - EnableCompressionInSingleFile: 121 MB -> 60 MB, sin recortar código (nada que se rompa).
     - DebugType none: no arrastra los .pdb (105 MB de símbolos nativos que no pintan nada).
+    - PublishReadyToRun: el código va ya compilado y no se compila al vuelo en cada arranque.
+      MEDIDO (tres arranques en caliente): la ventana aparece en ~1,2-1,6 s en vez de ~1,7-2,0 s,
+      a cambio de 47 -> 64 MB. Solo afecta a Windows: el paquete de macOS no publica en un archivo.
   -->
   <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishReadyToRun>true</PublishReadyToRun>
     <DebugType>none</DebugType>
   </PropertyGroup>
 

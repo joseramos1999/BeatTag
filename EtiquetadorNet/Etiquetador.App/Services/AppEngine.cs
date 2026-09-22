@@ -103,6 +103,26 @@ public sealed class AppEngine
     /// </summary>
     public static AppEngine? Current { get; private set; }
 
+    /// <summary>
+    /// En qué va el arranque. Lo escucha la pantalla de carga para decir qué se está haciendo, en
+    /// vez de dejar el escritorio vacío mientras se leen las cachés.
+    /// </summary>
+    public static Action<string>? Progreso;
+
+    private readonly System.Diagnostics.Stopwatch _arranque = System.Diagnostics.Stopwatch.StartNew();
+    private long _faseDesde;
+    private string _faseActual = "";
+
+    /// <summary>Cierra la fase anterior en el log (con su duración) y anuncia la siguiente.</summary>
+    private void Fase(string texto)
+    {
+        var ahora = _arranque.ElapsedMilliseconds;
+        if (_faseActual.Length > 0) Logger.Detail($"Arranque · {_faseActual}: {ahora - _faseDesde} ms");
+        _faseActual = texto;
+        _faseDesde = ahora;
+        Progreso?.Invoke(texto);
+    }
+
     public AppEngine()
     {
         Current = this;
@@ -116,6 +136,7 @@ public sealed class AppEngine
         var pruned = Logger.PruneOldLogs(Paths.LogsDir);
         if (pruned > 0) Logger.Detail($"Limpieza de logs: {pruned} antiguos borrados (>30 días).");
 
+        Fase("Leyendo los ajustes…");
         Config = AppConfig.Load(Paths, out var cfgErr);
         if (cfgErr.Length > 0) Logger.Err(cfgErr);
         Api = new ApiClient(Paths) { CacheOn = Config.Cache, Log = Logger };
@@ -126,6 +147,7 @@ public sealed class AppEngine
         Logger.Detail($"Claves presentes: spotify={Config.SpotifyId.Length > 0 && Config.SpotifySecret.Length > 0} "
                     + $"discogs={Config.DiscogsToken.Length > 0} acoustid={Config.AcoustIdKey.Length > 0} ia-local={modeloIa}");
 
+        Fase("Preparando las fuentes de datos…");
         Deezer = new DeezerProvider(Api) { Log = Logger };
         Candidates = new CandidateFinder(Api);
         Charts = new ChartsProvider(Api);
@@ -138,6 +160,7 @@ public sealed class AppEngine
         AcoustId = new AcoustIdProvider(Api);
         Ai = new OllamaClient(Api, Logger);
         if (Config.AiHost.Length > 0) Ai.Host = Config.AiHost;
+        Fase("Cargando las huellas de audio…");
         Fingerprint = new Fingerprint(Paths, Logger);
         // Detrás de Fingerprint a propósito: necesita su ruta de fpcalc, y antes estaría a null.
         Fingerprints = new FingerprintScanner(Paths.FingerprintCachePath, Fingerprint.FpcalcPath, Logger);
@@ -146,6 +169,7 @@ public sealed class AppEngine
         Identificacion = new IdentificationScanner(
             Paths.IdentificacionCachePath, Fingerprint, AcoustId, Audd, Http, Logger);
         Covers = new CoverFetcher(Api);
+        Fase("Cargando los nombres de artista…");
         // Los alias se cargan ANTES que las excepciones: estas los incorporan para escribir el nombre canónico.
         ArtistAliases.Current = ArtistAliases.Load(Paths.ArtistAliasesPath);
         ArtistExc = ArtistExceptions.Load(Paths.ArtistExceptionsPath);   // + grafías personalizadas del usuario
@@ -154,13 +178,16 @@ public sealed class AppEngine
         Apply = new ApplyEngine(Covers);
         Undo = new UndoEngine(Paths, Logger);
         Tester = new ConnectionTester(Api, Spotify, Ai);
+        Fase("Cargando la caché de la biblioteca…");
         Library = new LibraryStore(Config, SaveConfig, new ScanCache(Paths.ScanCachePath)) { Log = Logger };
+        Fase("Cargando lo ya analizado…");
         Analysis = new AnalysisCache(Paths.AnalysisCachePath);
         Ignored = new IgnoreList(Paths.IgnoredPath);
         Applied = new IgnoreList(Paths.AppliedPath);
         Marks = new ApplyMarks(Paths.ApplyMarksPath);
         AudioAceptadas = new IgnoreList(Paths.AudioAceptadasPath);
 
+        Fase("Cargando fichas y colecciones…");
         Fichas = new AlmacenFichas(Paths.FichasDjPath);
         Colecciones = new AlmacenColecciones(Paths.ColeccionesPath);
         Bandeja = new AlmacenBandeja(Paths.BandejaPath);
@@ -184,6 +211,9 @@ public sealed class AppEngine
             Analysis.Save();
             Logger.Detail($"Caché de análisis: {migradas} entradas conservadas al cambiar el formato de la firma.");
         }
+
+        Fase("");   // cierra la última fase en el log
+        Logger.Detail($"Arranque · motor listo en {_arranque.ElapsedMilliseconds} ms");
     }
 
     /// <summary>

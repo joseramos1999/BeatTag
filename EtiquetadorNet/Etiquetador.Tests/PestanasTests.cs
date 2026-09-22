@@ -4,8 +4,8 @@ namespace Etiquetador.Tests;
 
 /// <summary>
 /// Las páginas están descritas en dos sitios que tienen que decir lo mismo: la barra lateral, que
-/// sale de MainViewModel.Grupos, y el contenido de MainWindow.axaml, donde vive una vista por
-/// página marcada con su número.
+/// sale de MainViewModel.Grupos, y las fábricas de MainWindow.axaml.cs, que crean una vista por
+/// página con su número la primera vez que se abre.
 ///
 /// Si se añade una entrada a la barra y no su vista, el botón lleva a una ventana en blanco. Si se
 /// añade la vista y no la entrada, la pestaña existe pero no hay forma de llegar a ella. Ninguna de
@@ -28,12 +28,12 @@ public class PestanasTests
     private static List<int> Numeros(string texto, string patron)
         => Regex.Matches(texto, patron).Select(m => int.Parse(m.Groups[1].Value)).ToList();
 
-    /// <summary>Las páginas de la barra lateral (MainViewModel) y las vistas del contenido (XAML).</summary>
+    /// <summary>Las páginas de la barra lateral (MainViewModel) y las vistas que sabe crear la ventana.</summary>
     private static (List<int> Nav, List<int> Vistas) Leer()
     {
         var vm = File.ReadAllText(Fuente("Etiquetador.App", "ViewModels", "MainViewModel.cs"));
-        var xaml = File.ReadAllText(Fuente("Etiquetador.App", "Views", "MainWindow.axaml"));
-        return (Numeros(vm, @"Indice = (\d+)"), Numeros(xaml, @"ConverterParameter=(\d+)"));
+        var ventana = File.ReadAllText(Fuente("Etiquetador.App", "Views", "MainWindow.axaml.cs"));
+        return (Numeros(vm, @"Indice = (\d+)"), Numeros(ventana, @"\[(\d+)\]\s*=\s*\("));
     }
 
     [Fact]

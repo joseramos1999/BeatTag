@@ -102,28 +102,11 @@
         </Border>
 
         <!--
-            El contenido. Las trece vistas viven a la vez y solo se muestra la activa: cada una
-            guarda estado que no está en su ViewModel -posición de la tabla, selección, grupos
-            desplegados- y volver a crearla en cada salto lo perdería.
+            El contenido. Cada página se construye la PRIMERA VEZ que se abre (ver MainWindow.axaml.cs)
+            y a partir de ahí vive a la vez que las demás, mostrándose solo la activa: cada una guarda
+            estado que no está en su ViewModel -posición de la tabla, selección, grupos desplegados-
+            y volver a crearla en cada salto lo perdería.
         -->
-        <Grid>
-            <views:LibraryView    DataContext="{Binding Library}"    IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=0}" />
-            <views:EnrichView     DataContext="{Binding Enrich}"     IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=1}" />
-            <views:EditorView     DataContext="{Binding Editor}"     IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=2}" />
-            <views:DuplicatesView DataContext="{Binding Duplicates}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=3}" />
-            <views:QualityView    DataContext="{Binding Quality}"    IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=4}" />
-            <views:IncompleteView DataContext="{Binding Incomplete}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=5}" />
-            <views:NotFoundView   DataContext="{Binding NotFound}"   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=6}" />
-            <views:IdentifyView   DataContext="{Binding Identify}"   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=7}" />
-            <views:StatsView      DataContext="{Binding Stats}"      IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=8}" />
-            <views:TrendsView     DataContext="{Binding Trends}"     IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=9}" />
-            <views:LoudnessView   DataContext="{Binding Loudness}"   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=10}" />
-            <views:SettingsView   DataContext="{Binding Settings}"   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=11}" />
-            <views:HelpView                                          IsVisible="{Binding SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=12}" />
-            <views:BandejaView     DataContext="{Binding Bandeja}"     IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=13}" />
-            <views:FichasView      DataContext="{Binding Fichas}"      IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=14}" />
-            <views:ColeccionesView DataContext="{Binding Colecciones}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=15}" />
-            <views:AsistenteView   DataContext="{Binding Asistente}"   IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedTabIndex, Converter={x:Static vm:MainViewModel.EsIndice}, ConverterParameter=16}" />
-        </Grid>
+        <Grid Name="Contenido" />
     </DockPanel>
 </Window>

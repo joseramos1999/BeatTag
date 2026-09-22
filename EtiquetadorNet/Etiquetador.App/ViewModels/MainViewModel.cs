@@ -448,27 +448,6 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     public static readonly IValueConverter TabEnabled = new PestanaHabilitada();
 
-    /// <summary>
-    /// ¿Es esta la página abierta? El parámetro es su índice.
-    ///
-    /// Con esto, las trece vistas viven a la vez en la ventana y solo se muestra una. Se hace así,
-    /// y no creando la vista al entrar, porque cada pestaña guarda estado que no está en su
-    /// ViewModel -la posición de la tabla, la selección, qué grupos hay desplegados-, y volver a
-    /// crearla lo perdería en cada salto.
-    /// </summary>
-    public static readonly IValueConverter EsIndice = new PaginaVisible();
-
-    private sealed class PaginaVisible : IValueConverter
-    {
-        public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-            => value is int actual
-               && int.TryParse(parameter as string, NumberStyles.Integer, CultureInfo.InvariantCulture, out var propio)
-               && actual == propio;
-
-        public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
-            => throw new NotSupportedException();
-    }
-
     private sealed class PestanaHabilitada : IValueConverter
     {
         public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)

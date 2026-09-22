@@ -1,0 +1,43 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="440" d:DesignHeight="200"
+        x:Class="Etiquetador.App.Views.SplashWindow"
+        Icon="/Assets/beattag.ico"
+        Title="BeatTag"
+        Width="440" Height="200"
+        CanResize="False" WindowDecorations="None"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource NavFondo}">
+
+    <!--
+        Lo que se ve mientras el motor se monta. Antes no había nada: el escritorio vacío durante
+        el arranque parecía que la aplicación no había abierto, y se acababa haciendo doble clic
+        otra vez. Aquí no hay ViewModel a propósito: esta ventana tiene que poder pintarse antes de
+        que exista nada de lo demás.
+    -->
+    <Border BorderBrush="{DynamicResource BordeSuave}" BorderThickness="1" Padding="28,24">
+        <DockPanel>
+
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="14">
+                <TextBlock Text="🎧" FontSize="34" VerticalAlignment="Center" />
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="BeatTag" FontSize="26" FontWeight="SemiBold" />
+                    <TextBlock Name="Version" FontSize="12" Opacity="0.7" />
+                </StackPanel>
+            </StackPanel>
+
+            <StackPanel DockPanel.Dock="Bottom" Spacing="10">
+                <TextBlock Name="Estado" Text="Iniciando…" FontSize="13"
+                           Foreground="{DynamicResource TextoSecundario}"
+                           TextTrimming="CharacterEllipsis" />
+                <ProgressBar IsIndeterminate="True" Height="4" />
+            </StackPanel>
+
+            <!-- Relleno: mantiene el estado pegado abajo sin estirar los textos. -->
+            <Panel />
+
+        </DockPanel>
+    </Border>
+</Window>
