@@ -61,8 +61,8 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   momento, voz, letra, idioma, etiquetas) y se exportan a M3U8.
 - **Asistente IA**: herramientas con la IA local — buscar con una frase («bachata romántica de los
   2000 para cerrar»), proponer idioma y voz para las fichas, unificar géneros escritos de formas
-  distintas, renombrar archivos con nombre sucio y ordenar una colección para mezclar (tono Camelot,
-  tempo y energía). Ver [IA local](#-ia-local-opcional).
+  distintas, renombrar archivos con nombre sucio, completar nombres cortados a medias y ordenar una
+  colección para mezclar (tono Camelot, tempo y energía). Ver [IA local](#-ia-local-opcional).
 - **Estadísticas**: reparto de la biblioteca por BPM, género, calidad, década y Clean/Explícito.
 - **Importar rekordbox**: trae BPM y clave musical desde un XML de rekordbox.
 - **Caché persistente** en tres niveles (respuestas de red, escaneo y análisis): no se reprocesa lo
@@ -130,6 +130,12 @@ cuánto acierta:
 - **Renombrar con IA**: solo para nombres sucios. Cada propuesta pasa por comprobaciones (el record
   pool o el editor como artista, mashups deformados, palabras inventadas) y lo que no se puede
   comprobar se avisa. Unas 3 de cada 4 propuestas son buenas: todo sale desmarcado.
+- **Completar nombres cortados**: los record pools recortan muchos nombres a una longitud fija
+  («… (Rodri Gomez & Adr»). La mayoría se completan con las **etiquetas del propio archivo**, sin
+  IA; la IA solo entra en los que no las traen, y su propuesta se contrasta con el catálogo. Solo se
+  **añade lo que falta al final**: lo que ya estaba escrito se conserva tal cual, acentos incluidos,
+  y nunca se antepone el artista ni se mete la publicidad del pack. Si el resultado seguiría
+  cortado, no se propone nada.
 
 Lo que escriben en tus archivos (géneros y nombres) se puede deshacer. Nada se aplica sin que lo
 marques.
