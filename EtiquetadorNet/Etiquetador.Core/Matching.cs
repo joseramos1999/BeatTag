@@ -143,6 +143,37 @@ public static class Matching
     }
 
     /// <summary>
+    /// La propuesta se queda con una canción y pierde otra entera: el título del archivo era «A x B»
+    /// y en el nombre nuevo no queda nada de B.
+    ///
+    /// Es la red de seguridad para los mashups que no se reconocen de antemano. Una sola « x » en el
+    /// título no basta para darlo por mezcla -«Nicky Jam - Loco x verte» es un tema-, pero si el
+    /// catálogo devuelve solo la primera mitad, el renombrado convierte el mashup en el original.
+    /// Visto en una biblioteca real: «A Tu Merced X Pierdo La Cabeza» → «Bad Bunny - A Tu Merced»,
+    /// «Lovumba X Bby Wow» → «Daddy Yankee - Lovumba», 4 de 24 propuestas de una tirada.
+    ///
+    /// Lo que va entre paréntesis no cuenta: ahí la « x » une a los autores de la versión («Dion
+    /// Dobbe x Taron Mashup»), no canciones.
+    /// </summary>
+    public static bool PierdeUnaCancion(string? tituloArchivo, string? nombreNuevo)
+    {
+        var t = Regex.Replace(tituloArchivo ?? "", @"\([^)]*\)?|\[[^\]]*\]?", " ");
+        var partes = Regex.Split(t, @"(?<=[\p{L}\p{N}])\s+x\s+(?=[\p{L}\p{N}])", RegexOptions.IgnoreCase);
+        if (partes.Length < 2) return false;
+
+        var nuevo = Regex.Split(nombreNuevo ?? "", @"[^\p{L}\p{N}]+").Select(TextUtils.Nk).ToHashSet(StringComparer.Ordinal);
+        foreach (var parte in partes)
+        {
+            var palabras = Regex.Split(parte, @"[^\p{L}\p{N}]+")
+                                .Select(TextUtils.Nk)
+                                .Where(w => w.Length >= 3 && !Relleno.Contains(w) && !w.All(char.IsDigit))
+                                .ToList();
+            if (palabras.Count > 0 && !palabras.Any(nuevo.Contains)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Palabras de relleno que no aportan identidad a una canción. Se ignoran al comprobar si la
     /// IA se ha inventado algo: que sobre o falte un "la" no dice nada sobre si acertó.
     /// </summary>

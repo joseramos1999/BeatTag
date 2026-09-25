@@ -466,6 +466,14 @@ public sealed class FileProcessor
         newBase = TextUtils.Sanitize(TextUtils.ToAscii(newBase));
         if (newBase.Length == 0) newBase = TextUtils.Sanitize(TextUtils.ToAscii(@base));
 
+        // El título era «A x B» y el catálogo solo devuelve A: es un mashup que no se reconoció de
+        // antemano, y renombrarlo lo haría pasar por el original. En búsqueda manual manda el usuario.
+        if (!manual && Matching.PierdeUnaCancion(fnTitle, newBase))
+        {
+            _log?.Detail($"    -> SALTADA (parece un mashup: '{newBase}' pierde una de las canciones del nombre)");
+            return new ProcessResult { FilePath = filePath, Old = fileName, New = fileName, Source = "Mezcla", Skip = true, Kw = kwUsed, DurLocal = localDur };
+        }
+
         var titleTag = title;
         if (otros.Count > 0) titleTag = $"{title} (" + string.Join(", ", otros) + ")";
 

@@ -21,6 +21,11 @@ public static class FileNameParser
         b = Rep(b, @"\s*DUPLICADA\s*$", "");
         try { b = WebUtility.HtmlDecode(b); } catch { /* deja b */ }
         b = Rep(b, @"^\s*\[?\s*(discogs|spotify|apple\s*music|applemusic|deezer|musicbrainz|tidal|beatport)\s*\]?\s*", "");
+        // Los corchetes que son una VERSIÓN se conservan como paréntesis; el resto -marcas de pool,
+        // webs, alias de quien lo subió- se quita como siempre. Antes se quitaban todos, y con
+        // ellos «[Intro Clean]», «[Remix]» o «[Extended Mix]»: medido en 300 renombrados reales,
+        // una intro o un remix acababa con nombre de tema original.
+        b = Regex.Replace(b, @"\[([^\]]*)\]", m => EsVersion(m.Groups[1].Value) ? $" ({m.Groups[1].Value.Trim()}) " : " ");
         b = Rep(b, @"\[[^\]]*\]", " ");
         b = Rep(b, @"\[[^\]]*$", " ");
         b = Rep(b, @"[\[\]]", " ");
@@ -58,5 +63,18 @@ public static class FileNameParser
         if (qTitle.Length == 0) qTitle = fnTitle;
 
         return new FileNameParseResult(b, rawForOtros, fnArtist, fnTitle, qTitle);
+    }
+
+    /// <summary>
+    /// El contenido de un corchete describe la versión («Intro Clean», «Extended Mix», «Remix»)
+    /// y no es la firma de un pool o una web («MaxxYsla», «EdmPacks.com», «DJTOOLSVIP»).
+    /// </summary>
+    private static bool EsVersion(string contenido)
+    {
+        var c = contenido.Trim();
+        if (c.Length == 0) return false;
+        if (Regex.IsMatch(c, @"https?://|www\.|\.\w{2,4}\b", IC)) return false;
+        if (Regex.IsMatch(c, Descriptors.PoolRe, IC)) return false;
+        return Regex.IsMatch(c, Descriptors.DescRe);
     }
 }

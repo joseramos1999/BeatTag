@@ -18,7 +18,7 @@ public static class Descriptors
 
     // Descriptores DJ reconocidos (equivalente a $DescRe). Lleva (?i) inline.
     public const string DescRe =
-        @"(?i)\b(remix|rmx|vip|bootleg|flip|rework|mashup|blend|redrum|extended(?:\s+mix)?|original(?:\s+[a-z]+)?\s+(?:mix|version)|club\s+mix|radio\s+edit|quick\s+(?:hit|edit)|short\s+edit|hype\s+intro|melodic\s+intro|break\s+intro|acapella(?:\s+(?:in|out|intro|outro|studio|starter|break|vocals))?|aca\s*(?:in|out)|open\s+show|intro|outro|instrumental|transition|segue|starter|live(?:\s+edit)?|clean|dirty|edit|version|remaster(?:ed)?|dub|percapella|loop|hype)\b";
+        @"(?i)\b(" + AcapellaAbreviada + @"|remix|rmx|vip|bootleg|flip|rework|mashup|blend|redrum|extended(?:\s+mix)?|original(?:\s+[a-z]+)?\s+(?:mix|version)|club\s+mix|radio\s+edit|quick\s+(?:hit|edit)|short\s+edit|intro\s*-?\s*outro|hype\s+intro|melodic\s+intro|break\s+intro|acapella(?:\s+(?:in|out|intro|outro|studio|starter|break|vocals))?|aca\s*(?:in|out)|open\s+show|intro|outro|instrumental|transition|segue|starter|live(?:\s+edit)?|clean|dirty|edit|version|remaster(?:ed)?|dub|percapella|loop|hype)\b";
 
     // Mirror de PowerShell -replace (case-insensitive por defecto).
     private static string Rep(string s, string pat, string rep) => Regex.Replace(s, pat, rep, IC);
@@ -104,9 +104,32 @@ public static class Descriptors
         return Regex.Replace(t, @"\s{2,}", " ").Trim().Trim('-').Trim();
     }
 
-    /// <summary>Normaliza sinónimos de descriptor DJ (rmx → Remix).</summary>
+    /// <summary>
+    /// Las abreviaturas de acapella de los pools latinos: «(In Acp)», «IOAcp», «(Acap)», «Out Acp».
+    ///
+    /// Visto en una biblioteca real: al no reconocerlas, el nombre nuevo las perdía y una intro en
+    /// acapella quedaba como «Jowell &amp; Randy - Eh Oh Eh Oh», indistinguible del tema original.
+    /// Va la primera en <see cref="DescRe"/> para que «In Acp» se tome entero y no como «Intro» suelto.
+    /// </summary>
+    private const string AcapellaAbreviada =
+        @"(?:intro\s*outro|in\s*-?\s*out|io|intro|outro|in|out)?\s*acp|acap";
+
+    /// <summary>Normaliza sinónimos de descriptor DJ (rmx → Remix, «In Acp» → Intro Acapella).</summary>
     public static string NormalizeDescriptor(string s)
-        => TextUtils.Nk(s) == "rmx" ? "Remix" : s;
+    {
+        var k = TextUtils.Nk(s);
+        if (k == "rmx") return "Remix";
+        if (k is "acp" or "acap") return "Acapella";
+        if (k == "introoutro") return "Intro Outro";   // «IntroOutro», todo junto
+        if (k.EndsWith("acp", StringComparison.Ordinal))
+        {
+            var antes = k[..^3];
+            if (antes is "io" or "inout" or "introoutro") return "Intro Outro Acapella";
+            if (antes is "in" or "intro") return "Intro Acapella";
+            if (antes is "out" or "outro") return "Outro Acapella";
+        }
+        return s;
+    }
 
     private static readonly string[] DjWords =
         { "Extended", "Instrumental", "Acapella", "Percapella", "Transition", "Bootleg", "Mashup", "Version" };

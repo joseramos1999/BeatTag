@@ -311,7 +311,7 @@ public sealed class LibraryStore
                         t.Folder = root;
                         acc.Add(t);
                     }
-                _cache.Prune(seen);
+                _cache.Prune(seen, roots);
                 _cache.Save();
                 return (acc, repes);
             });

@@ -38,23 +38,49 @@ public class ScanCacheTests
     }
 
     [Fact]
-    public void Prune_quita_los_ausentes()
+    public void Prune_quita_los_que_faltan_dentro_de_las_carpetas_escaneadas()
     {
         var dir = Mp3Fixture.NewTempDir();
         try
         {
-            var mp3 = Path.Combine(dir, "s.mp3");
+            var mp3 = Path.Combine(dir, "borrada.mp3");
             Mp3Fixture.WriteMinMp3(mp3);
-            var cacheFile = Path.Combine(dir, "cache.json");
+            var cacheFile = Path.Combine(Path.GetDirectoryName(dir)!, Path.GetFileName(dir) + "-cache.json");
             var c = new ScanCache(cacheFile);
             c.Read(mp3);
-            c.Prune(new HashSet<string>());   // ninguno vivo -> se vacía
+            c.Prune(new HashSet<string>(), new[] { dir });   // se escaneó su carpeta y ya no estaba
             c.Save();
-            var reloaded = new ScanCache(cacheFile);
-            // Tras prune+save, borrar el mp3 y leer devuelve Track vacío (no había entrada cacheada válida)
-            File.Delete(mp3);
-            Assert.True(string.IsNullOrEmpty(reloaded.Read(mp3).Title));
+
+            Assert.DoesNotContain("borrada.mp3", File.ReadAllText(cacheFile));
+            File.Delete(cacheFile);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Visto en una biblioteca real: la biblioteca se quedó un rato con otra carpeta, el escaneo
+    // borró las 15.000 entradas de la de siempre y volver a ella costó 331 s en vez de ~4 s.
+    [Fact]
+    public void Prune_conserva_lo_de_carpetas_que_no_se_han_escaneado()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        var otra = Mp3Fixture.NewTempDir();
+        try
+        {
+            var mp3 = Path.Combine(dir, "de-la-biblioteca.mp3");
+            Mp3Fixture.WriteMinMp3(mp3);
+            var cacheFile = Path.Combine(Path.GetDirectoryName(dir)!, Path.GetFileName(dir) + "-cache.json");
+            var c = new ScanCache(cacheFile);
+            c.Read(mp3);
+            c.Prune(new HashSet<string>(), new[] { otra });   // solo se escaneó OTRA carpeta
+            c.Save();
+
+            Assert.Contains("de-la-biblioteca.mp3", File.ReadAllText(cacheFile));
+            File.Delete(cacheFile);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+            try { Directory.Delete(otra, true); } catch { }
+        }
     }
 }

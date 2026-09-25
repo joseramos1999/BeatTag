@@ -63,10 +63,18 @@ public sealed class ScanCache
         return t;
     }
 
-    /// <summary>Elimina de la caché los archivos que ya no existen en el conjunto dado.</summary>
-    public void Prune(ISet<string> livePaths)
+    /// <summary>
+    /// Elimina de la caché los archivos que ya no existen DENTRO de las carpetas escaneadas.
+    ///
+    /// Lo de fuera se conserva. Antes se borraba todo lo que no estuviera en el escaneo, y medido
+    /// en una biblioteca real: al dejar la biblioteca un rato con otra carpeta, se tiraron las
+    /// 15.000 entradas de la de siempre, y volver a añadirla costó 331 s releyendo cada archivo en
+    /// vez de ~4 s. Tampoco se mira si el archivo existe: con un disco externo desconectado todo
+    /// parecería borrado.
+    /// </summary>
+    public void Prune(ISet<string> livePaths, IReadOnlyCollection<string> raices)
     {
-        var stale = _map.Keys.Where(k => !livePaths.Contains(k)).ToList();
+        var stale = _map.Keys.Where(k => !livePaths.Contains(k) && raices.Any(r => Rutas.EstaDentroDe(k, r))).ToList();
         foreach (var k in stale) { _map.Remove(k); _dirty = true; }
     }
 
