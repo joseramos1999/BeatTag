@@ -76,7 +76,7 @@ public class PortMacTests
         {
             File.WriteAllText(Path.Combine(dir, "tema.mp3"), "el de antes");
 
-            var destino = DuplicatesViewModel.DestinoLibre(dir, "tema.mp3");
+            var destino = Etiquetador.App.Services.Papelera.DestinoLibre(dir, "tema.mp3");
 
             Assert.NotEqual(Path.Combine(dir, "tema.mp3"), destino);
             Assert.False(File.Exists(destino));
@@ -92,7 +92,7 @@ public class PortMacTests
         var dir = Mp3Fixture.NewTempDir();
         try
         {
-            Assert.Equal(Path.Combine(dir, "tema.mp3"), DuplicatesViewModel.DestinoLibre(dir, "tema.mp3"));
+            Assert.Equal(Path.Combine(dir, "tema.mp3"), Etiquetador.App.Services.Papelera.DestinoLibre(dir, "tema.mp3"));
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
@@ -104,7 +104,7 @@ public class PortMacTests
     [InlineData("/Musica/co\"millas.mp3", "/Musica/co\\\"millas.mp3")]
     [InlineData("/Musica/ba\\rra.mp3", "/Musica/ba\\\\rra.mp3")]
     public void La_ruta_se_escapa_para_applescript(string entrada, string esperado)
-        => Assert.Equal(esperado, DuplicatesViewModel.EscaparAppleScript(entrada));
+        => Assert.Equal(esperado, Etiquetador.App.Services.Papelera.EscaparAppleScript(entrada));
 
     // --- Instalador de Ollama ---
 

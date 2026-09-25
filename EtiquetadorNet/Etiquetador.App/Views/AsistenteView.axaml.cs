@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Data.Converters;
 using Avalonia.Interactivity;
@@ -34,11 +36,12 @@ public partial class AsistenteView : UserControl
         var marcar = Opcion("Marcar las seleccionadas", () => Marcar(tabla, true));
         var desmarcar = Opcion("Desmarcar las seleccionadas", () => Marcar(tabla, false));
         var carpeta = Opcion("Abrir carpeta contenedora", () => ConArchivo(tabla, (vm, ruta) => { _ = Services.Shell.OpenContainingFolderAsync(ruta); }));
+        var papelera = Opcion("Enviar a la papelera", () => _ = EnviarAPapeleraAsync(tabla));
         var separaMarcas = new Separator();
         var separaCarpeta = new Separator();
 
         var menu = new ContextMenu();
-        foreach (var c in new Control[] { escuchar, editar, separaMarcas, marcar, desmarcar, separaCarpeta, carpeta })
+        foreach (var c in new Control[] { escuchar, editar, separaMarcas, marcar, desmarcar, separaCarpeta, carpeta, papelera })
             menu.Items.Add(c);
 
         // Qué se enseña depende de la tabla: la de géneros no tiene archivos y la de mezcla no tiene
@@ -48,14 +51,64 @@ public partial class AsistenteView : UserControl
             var muestra = tabla.SelectedItem ?? (tabla.ItemsSource as System.Collections.IEnumerable)?.Cast<object>().FirstOrDefault();
             var conArchivo = muestra is IFilaConArchivo;
             var marcable = muestra is IFilaMarcable;
-            escuchar.IsVisible = editar.IsVisible = carpeta.IsVisible = separaCarpeta.IsVisible = conArchivo;
+            escuchar.IsVisible = editar.IsVisible = carpeta.IsVisible = papelera.IsVisible = separaCarpeta.IsVisible = conArchivo;
             marcar.IsVisible = desmarcar.IsVisible = marcable;
             separaMarcas.IsVisible = conArchivo && marcable;
 
             var haySeleccion = tabla.SelectedItem != null;
             escuchar.IsEnabled = editar.IsEnabled = carpeta.IsEnabled = marcar.IsEnabled = desmarcar.IsEnabled = haySeleccion;
+            papelera.IsEnabled = haySeleccion;
+            var cuantas = tabla.SelectedItems.OfType<IFilaConArchivo>().Count();
+            papelera.Header = cuantas > 1 ? $"Enviar a la papelera ({cuantas})" : "Enviar a la papelera";
         };
         return menu;
+    }
+
+    /// <summary>
+    /// Envía a la papelera los archivos de las filas seleccionadas, tras confirmar. Van a la papelera
+    /// del sistema, así que se pueden recuperar; se quitan de la biblioteca y de la tabla.
+    /// </summary>
+    private async Task EnviarAPapeleraAsync(DataGrid tabla)
+    {
+        if (DataContext is not AsistenteViewModel vm || TopLevel.GetTopLevel(this) is not Window owner) return;
+        var filas = tabla.SelectedItems.OfType<IFilaConArchivo>().ToList();
+        if (filas.Count == 0) return;
+
+        var titulo = filas.Count == 1
+            ? "Se va a enviar a la papelera"
+            : $"Se van a enviar {filas.Count} archivos a la papelera";
+        var cuerpo = filas.Count == 1
+            ? System.IO.Path.GetFileName(filas[0].RutaArchivo)
+            : string.Join("\n", filas.Take(5).Select(f => System.IO.Path.GetFileName(f.RutaArchivo)))
+              + (filas.Count > 5 ? $"\n… y {filas.Count - 5} más" : "");
+        var ok = await ConfirmDialog.AskAsync(owner, titulo, cuerpo,
+            "Van a la papelera del sistema, así que puedes recuperarlos desde ahí si te arrepientes.",
+            "Enviar a la papelera");
+        if (!ok) return;
+
+        vm.Engine.Preview.Stop();   // si suena, el archivo está abierto y no se puede mover
+        var enviadas = new List<IFilaConArchivo>();
+        var fallos = new List<string>();
+        foreach (var f in filas)
+        {
+            var (bien, error) = Services.Papelera.Enviar(f.RutaArchivo);
+            if (bien) enviadas.Add(f);
+            else fallos.Add($"{System.IO.Path.GetFileName(f.RutaArchivo)}: {error}");
+        }
+
+        // De una sola vez: la biblioteca avisa a todas las pestañas en cada cambio.
+        vm.Engine.Library.RemoveTracks(enviadas.Select(f => f.RutaArchivo));
+
+        // Y fuera de la tabla. La de «Renombrar con IA» va a través de una vista con filtro.
+        var lista = tabla.ItemsSource is Avalonia.Collections.DataGridCollectionView v
+            ? v.SourceCollection as System.Collections.IList
+            : tabla.ItemsSource as System.Collections.IList;
+        foreach (var f in enviadas) lista?.Remove(f);
+
+        vm.Status = fallos.Count == 0
+            ? (enviadas.Count == 1 ? "Enviado a la papelera." : $"{enviadas.Count} archivos enviados a la papelera.")
+              + (ReferenceEquals(tabla, TablaMezcla) ? " Vuelve a ordenar para recalcular las transiciones." : "")
+            : $"{enviadas.Count} enviados, {fallos.Count} con problemas. El primero: {fallos[0]}";
     }
 
     private static MenuItem Opcion(string texto, Action accion)
