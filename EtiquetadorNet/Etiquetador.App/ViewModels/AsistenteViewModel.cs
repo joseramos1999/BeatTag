@@ -727,6 +727,18 @@ public sealed partial class CortadoFila : ObservableObject, IFilaConArchivo, IFi
     string IFilaConArchivo.RutaArchivo => Ruta;
     bool IFilaMarcable.Marcada { get => Aceptar; set => Aceptar = value; }
 
+    /// <summary>
+    /// Escribir el nombre a mano en una fila sin propuesta la marca: si lo has escrito tú, es que lo
+    /// quieres. Y si lo vacías, se desmarca, porque sin nombre no hay nada que renombrar.
+    /// </summary>
+    partial void OnPropuestoChanged(string value)
+    {
+        if (Completado.Origen != OrigenCompletado.SinPropuesta) return;
+        var cambia = value.Trim().Length > 0 && !string.Equals(value.Trim(), Actual, StringComparison.Ordinal);
+        if (Aceptar != cambia) Aceptar = cambia;
+    }
+
+    public bool TienePropuesta => Completado.Origen != OrigenCompletado.SinPropuesta;
     public string Ruta => Completado.Ruta;
     public string Actual => Completado.Actual;
     public string Detalle => Completado.Detalle;
@@ -734,7 +746,8 @@ public sealed partial class CortadoFila : ObservableObject, IFilaConArchivo, IFi
     {
         OrigenCompletado.Etiquetas => "Etiquetas del archivo",
         OrigenCompletado.IaConfirmada => "IA, confirmada en el catálogo",
-        _ => "IA sin confirmar",
+        OrigenCompletado.IaSinConfirmar => "IA sin confirmar",
+        _ => "Sin propuesta: escríbelo tú",
     };
 }
 
@@ -786,47 +799,64 @@ public sealed partial class CompletarNombresViewModel : ObservableObject
         Filas.Clear();
         if (cortados.Count == 0) { Resumen = ""; _p.Status = "No hay nombres cortados en el ámbito elegido."; return; }
 
+        // Se enseñan TODOS los cortados, no solo los que tienen propuesta. Antes la cifra decía 261
+        // y la tabla enseñaba 12: los demás existían pero no había forma de verlos ni de arreglarlos.
+        var resultado = new List<Completado>();
+        static string Nombre(Track t) => Path.GetFileNameWithoutExtension(t.FilePath);
+
         // 1) Las etiquetas del propio archivo. Ni IA ni red: es lo que ya está dentro del archivo.
         var paraIa = new List<Track>();
         foreach (var t in cortados)
         {
             var conTags = NombreCortado.DesdeEtiquetas(t.FilePath, t.Artist ?? "", t.Title ?? "");
             if (conTags != null)
-                Filas.Add(new CortadoFila(new Completado(t.FilePath, Path.GetFileNameWithoutExtension(t.FilePath),
-                                                         conTags, OrigenCompletado.Etiquetas, "Estaba en las etiquetas del archivo")));
+                resultado.Add(new Completado(t.FilePath, Nombre(t), conTags, OrigenCompletado.Etiquetas, "Estaba en las etiquetas del archivo"));
             else paraIa.Add(t);
         }
-        var conEtiquetas = Filas.Count;
+        var conEtiquetas = resultado.Count;
 
         // 2) Los que llegaron sin etiquetas útiles: la IA, y su propuesta se contrasta con el catálogo.
         var conIa = 0;
-        if (UsarIa && _p.IaDisponible && paraIa.Count > 0)
+        var consultarIa = UsarIa && _p.IaDisponible;
+        if (consultarIa && paraIa.Count > 0) _p.Engine.Ai.Reset();
+        for (var i = 0; i < paraIa.Count; i++)
         {
-            _p.Engine.Ai.Reset();
-            for (var i = 0; i < paraIa.Count; i++)
+            ct.ThrowIfCancellationRequested();
+            var t = paraIa[i];
+            string porQueNo;
+            if (!consultarIa)
+                porQueNo = UsarIa ? "Sus etiquetas no lo completan y la IA local no está disponible"
+                                : "Sus etiquetas no lo completan y la IA está desactivada";
+            else
             {
-                ct.ThrowIfCancellationRequested();
-                var t = paraIa[i];
-                var ia = await _p.Engine.Ai.ParseAsync(Path.GetFileNameWithoutExtension(t.FilePath),
-                                                       t.Artist ?? "", t.Title ?? "", _p.Modelo, ct);
+                var ia = await _p.Engine.Ai.ParseAsync(Nombre(t), t.Artist ?? "", t.Title ?? "", _p.Modelo, ct);
                 _p.Progress = 100.0 * (i + 1) / paraIa.Count;
                 _p.Status = $"Consultando a la IA… {i + 1} de {paraIa.Count}";
-                if (ia == null) continue;
 
-                var completo = NombreCortado.DesdeIa(t.FilePath, ia.Artist, ia.Title, ia.Version);
-                if (completo == null) continue;
-
-                var (origen, detalle) = await ConfirmarAsync(ia.Artist, ia.Title, ct);
-                Filas.Add(new CortadoFila(new Completado(t.FilePath, Path.GetFileNameWithoutExtension(t.FilePath),
-                                                         completo, origen, detalle)));
-                conIa++;
+                var completo = ia == null ? null : NombreCortado.DesdeIa(t.FilePath, ia.Artist, ia.Title, ia.Version);
+                if (completo != null)
+                {
+                    var (origen, detalle) = await ConfirmarAsync(ia!.Artist, ia.Title, ct);
+                    resultado.Add(new Completado(t.FilePath, Nombre(t), completo, origen, detalle));
+                    conIa++;
+                    continue;
+                }
+                porQueNo = ia == null
+                    ? "Sus etiquetas no lo completan y la IA no respondió"
+                    : "Sus etiquetas no lo completan y lo que propuso la IA no continuaba el nombre";
             }
+            resultado.Add(new Completado(t.FilePath, Nombre(t), "", OrigenCompletado.SinPropuesta, porQueNo));
         }
 
-        Resumen = $"{cortados.Count} nombres cortados · {conEtiquetas} se completan con sus etiquetas · {conIa} con la IA";
-        _p.Status = !UsarIa || !_p.IaDisponible
-            ? $"{Resumen}. Sin IA solo se usan las etiquetas; los demás se quedan como están."
-            : $"{Resumen}. Lo que sale de las etiquetas va marcado; lo de la IA, no.";
+        // Primero lo que tiene propuesta, de lo más fiable a lo menos; al final, lo que hay que escribir.
+        foreach (var c in resultado.OrderBy(c => c.Origen).ThenBy(c => c.Actual, StringComparer.CurrentCultureIgnoreCase))
+            Filas.Add(new CortadoFila(c));
+
+        var sinPropuesta = cortados.Count - conEtiquetas - conIa;
+        Resumen = $"{cortados.Count} nombres cortados · {conEtiquetas} se completan con sus etiquetas · {conIa} con la IA"
+                + (sinPropuesta > 0 ? $" · {sinPropuesta} sin propuesta" : "");
+        _p.Status = Resumen + ". Lo que sale de las etiquetas va marcado; lo de la IA, no."
+                  + (sinPropuesta > 0 ? " Los que no tienen propuesta van al final: escribe el nombre completo y se marcan solos." : "");
     });
 
     /// <summary>
@@ -849,12 +879,14 @@ public sealed partial class CompletarNombresViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void MarcarTodas() { foreach (var f in Filas) f.Aceptar = true; }
+    // Las filas sin nombre escrito no se marcan: no habría nada con qué renombrarlas.
+    private void MarcarTodas() { foreach (var f in Filas) f.Aceptar = f.Propuesto.Trim().Length > 0; }
 
     [RelayCommand]
     private void MarcarNinguna() { foreach (var f in Filas) f.Aceptar = false; }
 
-    public IReadOnlyList<CortadoFila> Marcadas => Filas.Where(f => f.Aceptar && f.Propuesto.Trim().Length > 0).ToList();
+    public IReadOnlyList<CortadoFila> Marcadas => Filas.Where(f => f.Aceptar && f.Propuesto.Trim().Length > 0
+                                                                   && !string.Equals(f.Propuesto.Trim(), f.Actual, StringComparison.Ordinal)).ToList();
 
     /// <summary>Renombra las marcadas. La confirmación la pide la vista.</summary>
     public Task RenombrarAsync() => _p.TrabajarAsync("Completando nombres…", async ct =>

@@ -177,8 +177,10 @@ public partial class AsistenteView : UserControl
         if (marcadas.Count == 0) { vm.Status = "No hay ninguna propuesta marcada."; return; }
 
         var deIa = marcadas.Count(f => f.Origen.StartsWith("IA", StringComparison.Ordinal));
+        var aMano = marcadas.Count(f => !f.TienePropuesta);
         var nota = "Solo cambia el nombre del archivo, no sus etiquetas. Si ya existe un archivo con el nombre nuevo, ese no se renombra. "
                  + "Se puede deshacer desde Enriquecer. Si usas rekordbox, después repara la colección en Ajustes para no perder los cue points.";
+        if (aMano > 0) nota = $"{aMano} los has escrito tú. " + nota;
         if (deIa > 0) nota = $"⚠ {deIa} vienen de la IA y no de las etiquetas del archivo: comprueba que las has revisado. " + nota;
 
         var ok = await ConfirmDialog.AskAsync(owner,

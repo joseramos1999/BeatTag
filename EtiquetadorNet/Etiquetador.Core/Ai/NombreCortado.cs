@@ -12,6 +12,11 @@ public enum OrigenCompletado
     IaConfirmada,
     /// <summary>La IA lo completó y ningún catálogo lo confirma.</summary>
     IaSinConfirmar,
+    /// <summary>
+    /// Está cortado, pero ni las etiquetas ni la IA dan con el final. Se enseña igualmente para que
+    /// el usuario pueda escribirlo: la cifra de cortados no puede no cuadrar con lo que se ve.
+    /// </summary>
+    SinPropuesta,
 }
 
 /// <summary>Un nombre cortado y cómo quedaría completo.</summary>
