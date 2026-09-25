@@ -99,7 +99,7 @@
                                 IsVisible="{Binding Aviso, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
                             <TextBlock Text="{Binding Aviso}" Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap" />
                         </Border>
-                        <DataGrid ItemsSource="{Binding Vista}" x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
+                        <DataGrid Name="TablaBusqueda" ItemsSource="{Binding Vista}" x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
                                   CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="*" />
@@ -132,7 +132,7 @@
                                 Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" />
                     </WrapPanel>
-                    <DataGrid ItemsSource="{Binding Propuestas}" x:CompileBindings="False" AutoGenerateColumns="False"
+                    <DataGrid Name="TablaFichas" ItemsSource="{Binding Propuestas}" x:CompileBindings="False" AutoGenerateColumns="False"
                               CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
                         <DataGrid.Columns>
                             <DataGridCheckBoxColumn Header="Aceptar" Binding="{Binding Aceptar}" Width="80" />
@@ -162,7 +162,7 @@
                                 Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" />
                     </WrapPanel>
-                    <DataGrid ItemsSource="{Binding Filas}" x:CompileBindings="False" AutoGenerateColumns="False"
+                    <DataGrid Name="TablaGeneros" ItemsSource="{Binding Filas}" x:CompileBindings="False" AutoGenerateColumns="False"
                               CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
                         <DataGrid.Columns>
                             <DataGridCheckBoxColumn Header="Aplicar" Binding="{Binding Aplicar}" Width="80" />
@@ -196,7 +196,7 @@
                                 Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" />
                     </WrapPanel>
-                    <DataGrid ItemsSource="{Binding FilasView}" x:CompileBindings="False" AutoGenerateColumns="False"
+                    <DataGrid Name="TablaRenombrar" ItemsSource="{Binding FilasView}" x:CompileBindings="False" AutoGenerateColumns="False"
                               CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
                         <DataGrid.Columns>
                             <DataGridCheckBoxColumn Header="Aceptar" Binding="{Binding Aceptar}" Width="80" />
@@ -231,7 +231,7 @@
                                 Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" />
                     </WrapPanel>
-                    <DataGrid ItemsSource="{Binding Filas}" x:CompileBindings="False" AutoGenerateColumns="False"
+                    <DataGrid Name="TablaCompletar" ItemsSource="{Binding Filas}" x:CompileBindings="False" AutoGenerateColumns="False"
                               CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
                         <DataGrid.Columns>
                             <DataGridCheckBoxColumn Header="Aceptar" Binding="{Binding Aceptar}" Width="80" />
@@ -259,7 +259,7 @@
                                 Background="#0D9488" Foreground="White" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" TextWrapping="Wrap" />
                     </WrapPanel>
-                    <DataGrid ItemsSource="{Binding Pasos}" x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
+                    <DataGrid Name="TablaMezcla" ItemsSource="{Binding Pasos}" x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
                               CanUserResizeColumns="True" CanUserSortColumns="False" GridLinesVisibility="Horizontal">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="#" Binding="{Binding Posicion}" Width="50" />

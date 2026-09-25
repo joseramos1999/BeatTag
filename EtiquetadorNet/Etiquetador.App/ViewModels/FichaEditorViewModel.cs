@@ -20,7 +20,7 @@ public sealed record Opcion<T>(T? Valor, string Texto) where T : struct
 /// Una canción en una tabla con su ficha de DJ. La usan la página de fichas, las colecciones y la
 /// bandeja, para que las tres enseñen la ficha con las mismas palabras.
 /// </summary>
-public partial class FichaRow : ObservableObject
+public partial class FichaRow : ObservableObject, IFilaConArchivo
 {
     public Track Track { get; }
     public FichaDj? Ficha { get; private set; }
@@ -32,6 +32,7 @@ public partial class FichaRow : ObservableObject
     }
 
     public string FilePath => Track.FilePath;
+    string IFilaConArchivo.RutaArchivo => FilePath;
     public string FileName => Track.FileName;
     public string Artist => Track.Artist ?? "";
     public string Title => Track.Title ?? "";

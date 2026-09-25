@@ -11,7 +11,73 @@ namespace Etiquetador.App.Views;
 
 public partial class AsistenteView : UserControl
 {
-    public AsistenteView() => InitializeComponent();
+    public AsistenteView()
+    {
+        InitializeComponent();
+
+        // El mismo menú contextual que en el resto de pestañas, en las seis tablas. Cada herramienta
+        // tiene su propio tipo de fila; el menú solo necesita saber si la fila es un archivo y si
+        // tiene casilla (IFilaConArchivo, IFilaMarcable).
+        foreach (var tabla in new[] { TablaBusqueda, TablaFichas, TablaGeneros, TablaRenombrar, TablaCompletar, TablaMezcla })
+        {
+            tabla.ContextMenu = CrearMenu(tabla);
+            // El clic derecho selecciona la fila bajo el puntero, para que el menú actúe sobre ella.
+            tabla.AddHandler(PointerPressedEvent, (s, e) => TeclaEnergia.SeleccionarConClicDerecho(s, e),
+                             Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
+        }
+    }
+
+    private ContextMenu CrearMenu(DataGrid tabla)
+    {
+        var escuchar = Opcion("Escuchar / Parar", () => ConArchivo(tabla, (vm, ruta) => vm.Engine.Preview.Toggle(ruta)));
+        var editar = Opcion("Editar etiquetas de esta canción", () => ConArchivo(tabla, (vm, ruta) => vm.Engine.RequestEdit(ruta)));
+        var marcar = Opcion("Marcar las seleccionadas", () => Marcar(tabla, true));
+        var desmarcar = Opcion("Desmarcar las seleccionadas", () => Marcar(tabla, false));
+        var carpeta = Opcion("Abrir carpeta contenedora", () => ConArchivo(tabla, (vm, ruta) => { _ = Services.Shell.OpenContainingFolderAsync(ruta); }));
+        var separaMarcas = new Separator();
+        var separaCarpeta = new Separator();
+
+        var menu = new ContextMenu();
+        foreach (var c in new Control[] { escuchar, editar, separaMarcas, marcar, desmarcar, separaCarpeta, carpeta })
+            menu.Items.Add(c);
+
+        // Qué se enseña depende de la tabla: la de géneros no tiene archivos y la de mezcla no tiene
+        // casillas. Se mira la fila seleccionada o, sin selección, la primera.
+        menu.Opening += (_, _) =>
+        {
+            var muestra = tabla.SelectedItem ?? (tabla.ItemsSource as System.Collections.IEnumerable)?.Cast<object>().FirstOrDefault();
+            var conArchivo = muestra is IFilaConArchivo;
+            var marcable = muestra is IFilaMarcable;
+            escuchar.IsVisible = editar.IsVisible = carpeta.IsVisible = separaCarpeta.IsVisible = conArchivo;
+            marcar.IsVisible = desmarcar.IsVisible = marcable;
+            separaMarcas.IsVisible = conArchivo && marcable;
+
+            var haySeleccion = tabla.SelectedItem != null;
+            escuchar.IsEnabled = editar.IsEnabled = carpeta.IsEnabled = marcar.IsEnabled = desmarcar.IsEnabled = haySeleccion;
+        };
+        return menu;
+    }
+
+    private static MenuItem Opcion(string texto, Action accion)
+    {
+        var item = new MenuItem { Header = texto };
+        item.Click += (_, _) => accion();
+        return item;
+    }
+
+    /// <summary>Ejecuta la acción sobre el archivo de la fila seleccionada; si falla, lo dice en la barra de estado.</summary>
+    private void ConArchivo(DataGrid tabla, Action<AsistenteViewModel, string> accion)
+    {
+        if (DataContext is not AsistenteViewModel vm || tabla.SelectedItem is not IFilaConArchivo fila) return;
+        try { accion(vm, fila.RutaArchivo); }
+        catch (Exception e) { vm.Status = "No se pudo: " + e.Message; }
+    }
+
+    private static void Marcar(DataGrid tabla, bool valor)
+    {
+        foreach (var fila in tabla.SelectedItems.OfType<IFilaMarcable>().ToList())
+            fila.Marcada = valor;
+    }
 
     private async void AplicarGeneros_Click(object? sender, RoutedEventArgs e)
     {

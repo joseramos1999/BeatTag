@@ -127,6 +127,19 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
 }
 
 // =====================================================================================================
+// Menú contextual de las tablas
+// =====================================================================================================
+
+/// <summary>
+/// Una fila que corresponde a un archivo. Es lo que necesita el menú contextual para escuchar,
+/// editar o abrir su carpeta, sea cual sea la herramienta: cada una tiene su propio tipo de fila.
+/// </summary>
+public interface IFilaConArchivo { string RutaArchivo { get; } }
+
+/// <summary>Una fila con casilla (Aceptar o Aplicar), para marcar o desmarcar varias de golpe.</summary>
+public interface IFilaMarcable { bool Marcada { get; set; } }
+
+// =====================================================================================================
 // 1. Buscar con una frase
 // =====================================================================================================
 
@@ -286,7 +299,7 @@ public sealed partial class BusquedaFraseViewModel : ObservableObject
 // 2. Proponer fichas
 // =====================================================================================================
 
-public sealed partial class PropuestaFichaFila : ObservableObject
+public sealed partial class PropuestaFichaFila : ObservableObject, IFilaConArchivo, IFilaMarcable
 {
     public PropuestaFicha Propuesta { get; }
     public Track Track { get; }
@@ -294,6 +307,8 @@ public sealed partial class PropuestaFichaFila : ObservableObject
     public PropuestaFichaFila(PropuestaFicha p, Track t) { Propuesta = p; Track = t; }
 
     [ObservableProperty] private bool _aceptar = true;
+    string IFilaConArchivo.RutaArchivo => Track.FilePath;
+    bool IFilaMarcable.Marcada { get => Aceptar; set => Aceptar = value; }
 
     public string Artist => Track.Artist ?? "";
     public string Title => Track.Title ?? Track.FileName;
@@ -402,7 +417,7 @@ public sealed partial class FichasIaViewModel : ObservableObject
 // 3. Unificar géneros
 // =====================================================================================================
 
-public sealed partial class GeneroFila : ObservableObject
+public sealed partial class GeneroFila : ObservableObject, IFilaMarcable
 {
     public string Original { get; }
     public int Canciones { get; }
@@ -420,6 +435,7 @@ public sealed partial class GeneroFila : ObservableObject
 
     [ObservableProperty] private string _propuesto;
     [ObservableProperty] private bool _aplicar;
+    bool IFilaMarcable.Marcada { get => Aplicar; set => Aplicar = value; }
 
     public bool Cambia => !string.Equals(Original, Propuesto, StringComparison.Ordinal);
     public string PropuestoTexto => Propuesto.Length == 0 ? "(quitar género)" : Propuesto;
@@ -550,7 +566,7 @@ public sealed partial class GenerosIaViewModel : ObservableObject
 // 5. Renombrar con IA
 // =====================================================================================================
 
-public sealed partial class NombreFila : ObservableObject
+public sealed partial class NombreFila : ObservableObject, IFilaConArchivo, IFilaMarcable
 {
     public string Ruta { get; }
     public string Actual { get; }
@@ -571,6 +587,8 @@ public sealed partial class NombreFila : ObservableObject
 
     /// <summary>Todo sale desmarcado: medido, la propuesta es buena en unas 3 de cada 4.</summary>
     [ObservableProperty] private bool _aceptar;
+    string IFilaConArchivo.RutaArchivo => Ruta;
+    bool IFilaMarcable.Marcada { get => Aceptar; set => Aceptar = value; }
 
     public bool HayAvisos => ListaAvisos.Count > 0;
     public string Avisos => string.Join(" ", ListaAvisos.Select(a => "⚠ " + a));
@@ -692,7 +710,7 @@ public sealed partial class RenombrarIaViewModel : ObservableObject
 // 6. Completar nombres cortados
 // =====================================================================================================
 
-public sealed partial class CortadoFila : ObservableObject
+public sealed partial class CortadoFila : ObservableObject, IFilaConArchivo, IFilaMarcable
 {
     public Completado Completado { get; }
     public CortadoFila(Completado c)
@@ -706,6 +724,8 @@ public sealed partial class CortadoFila : ObservableObject
 
     [ObservableProperty] private string _propuesto;
     [ObservableProperty] private bool _aceptar;
+    string IFilaConArchivo.RutaArchivo => Ruta;
+    bool IFilaMarcable.Marcada { get => Aceptar; set => Aceptar = value; }
 
     public string Ruta => Completado.Ruta;
     public string Actual => Completado.Actual;
@@ -869,10 +889,11 @@ public sealed partial class CompletarNombresViewModel : ObservableObject
 // 4. Ordenar para mezclar
 // =====================================================================================================
 
-public sealed class PasoFila
+public sealed class PasoFila : IFilaConArchivo
 {
     public PasoMezcla Paso { get; }
     public PasoFila(PasoMezcla p) => Paso = p;
+    string IFilaConArchivo.RutaArchivo => Paso.Track.FilePath;
 
     public int Posicion => Paso.Posicion;
     public string Artist => Paso.Track.Artist ?? "";
