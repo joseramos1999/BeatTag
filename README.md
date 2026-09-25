@@ -21,7 +21,11 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   que las revises. Cada propuesta lleva un **índice de cambio de 0 a 10**: lo que apenas cambiaría
   el archivo se aparta de la lista, para que solo tengas delante lo que merece un vistazo. Y la
   columna **«Por qué»** explica en claro qué hizo ganar a cada coincidencia, para poder decidir
-  sobre las dudosas sin salir de la aplicación.
+  sobre las dudosas sin salir de la aplicación. Con **«Saltar las que ya están bien»** (activada de
+  serie) no se consultan las canciones cuyo nombre y tags ya coinciden y no les falta nada de lo
+  que se escribe: en una biblioteca real, la mitad. Las ediciones de DJ conservan su versión
+  (también las que van entre corchetes y las acapellas abreviadas: «In Acp», «IOAcp») y un
+  mashup nunca se renombra como uno de sus temas.
 - **Buscador en cada tabla**: filtra por palabras sueltas y en cualquier orden, sin acentos ni
   mayúsculas. Selección múltiple con Ctrl+clic y Mayús+clic para marcar, aplicar o descartar por
   bloques.
@@ -135,7 +139,11 @@ cuánto acierta:
   IA; la IA solo entra en los que no las traen, y su propuesta se contrasta con el catálogo. Solo se
   **añade lo que falta al final**: lo que ya estaba escrito se conserva tal cual, acentos incluidos,
   y nunca se antepone el artista ni se mete la publicidad del pack. Si el resultado seguiría
-  cortado, no se propone nada.
+  cortado, no se propone nada. Los que no tienen propuesta se listan igualmente, para escribir tú
+  el final.
+
+Todas las tablas del Asistente tienen el **menú contextual** del resto de la aplicación: escuchar,
+editar etiquetas, marcar o desmarcar las seleccionadas, abrir la carpeta y enviar a la papelera.
 
 Lo que escriben en tus archivos (géneros y nombres) se puede deshacer. Nada se aplica sin que lo
 marques.
