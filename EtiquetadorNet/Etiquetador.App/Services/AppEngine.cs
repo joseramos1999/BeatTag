@@ -70,6 +70,8 @@ public sealed class AppEngine
     /// </summary>
     public IgnoreList AudioAceptadas { get; }
     public ChartsProvider Charts { get; }
+    /// <summary>Playlists y álbumes de Spotify y Deezer a partir de su enlace (pestaña Playlists).</summary>
+    public PlaylistProvider Playlists { get; }
     public LinkResolver Links { get; }
 
     /// <summary>Fichas de DJ: energía, momento, ambiente… Se guardan en local, no en el archivo.</summary>
@@ -151,6 +153,7 @@ public sealed class AppEngine
         Deezer = new DeezerProvider(Api) { Log = Logger };
         Candidates = new CandidateFinder(Api);
         Charts = new ChartsProvider(Api);
+        Playlists = new PlaylistProvider(Api, Http);
         Loudness = new LoudnessScanner(Paths.LoudnessCachePath, Logger);
         Itunes = new ItunesProvider(Api);
         Spotify = new SpotifyProvider(Api, Logger);

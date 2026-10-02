@@ -1,7 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
 using Etiquetador.App.ViewModels;
 
@@ -35,45 +34,12 @@ public partial class TrendsView : UserControl
     // Copia a una carpeta las canciones del chart que ya tienes.
     private async void CreateFolder_Click(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not TrendsViewModel vm) return;
-        var top = TopLevel.GetTopLevel(this);
-        if (top is null) return;
-
-        var carpetas = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Selecciona dónde crear la carpeta",
-            AllowMultiple = false,
-        });
-        if (carpetas.Count == 0) return;
-        var baseDir = carpetas[0].TryGetLocalPath();
-        if (string.IsNullOrEmpty(baseDir)) return;
-
-        // Subcarpeta con el país y la fecha, para no mezclar tiradas.
-        var nombre = $"Tendencias {vm.SelectedCountry?.Name} {System.DateTime.Now:yyyy-MM-dd}";
-        var destino = System.IO.Path.Combine(baseDir, Etiquetador.Core.TextUtils.Sanitize(nombre));
-        await vm.CopyToFolderAsync(destino);
+        if (DataContext is TrendsViewModel vm) await AccionesLista.CrearCarpetaAsync(this, vm);
     }
 
     // Guardar la lista no copia archivos: apunta a los que ya tienes donde estan.
     private async void ExportM3u_Click(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not TrendsViewModel vm) return;
-        var top = TopLevel.GetTopLevel(this);
-        if (top is null) return;
-
-        var sugerido = $"Tendencias {vm.SelectedCountry?.Name} {System.DateTime.Now:yyyy-MM-dd}";
-        var archivo = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = "Guardar lista de reproducción",
-            SuggestedFileName = Etiquetador.Core.TextUtils.Sanitize(sugerido),
-            DefaultExtension = "m3u8",
-            FileTypeChoices = new[]
-            {
-                new FilePickerFileType("Lista de reproducción") { Patterns = new[] { "*.m3u8" } },
-            },
-        });
-        var destino = archivo?.TryGetLocalPath();
-        if (string.IsNullOrEmpty(destino)) return;
-        vm.ExportarM3u(destino);
+        if (DataContext is TrendsViewModel vm) await AccionesLista.ExportarM3uAsync(this, vm);
     }
 }

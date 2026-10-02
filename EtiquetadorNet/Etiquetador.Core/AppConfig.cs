@@ -95,6 +95,9 @@ public sealed class AppConfig
     /// </summary>
     public bool SaltarYaCorrectas { get; set; } = true;
 
+    /// <summary>El último enlace de playlist consultado, para no tener que volver a pegarlo.</summary>
+    public string UltimaPlaylist { get; set; } = "";
+
     // --- Varios ---
     public bool Cache { get; set; } = true;
 

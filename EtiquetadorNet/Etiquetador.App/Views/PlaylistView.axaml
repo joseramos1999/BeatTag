@@ -1,0 +1,64 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="560"
+             x:Class="Etiquetador.App.Views.PlaylistView"
+             x:CompileBindings="False">
+
+    <DockPanel Margin="8">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="6">
+            <TextBlock Classes="titulo" Text="Playlists" />
+            <TextBlock Classes="desc"
+                       Text="Pega el enlace de una playlist (o un álbum) de Spotify o Deezer y verás qué canciones ya tienes en la biblioteca y cuáles te faltan. De Spotify solo se pueden leer las 100 primeras canciones de cada lista; de Deezer, la lista entera." />
+
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Cancelar" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" Margin="6,0,0,0" />
+                <Button DockPanel.Dock="Right" Content="Ver lista" Command="{Binding LoadCommand}" IsEnabled="{Binding !IsBusy}"
+                        Background="#7C3AED" Foreground="White" FontWeight="SemiBold" Margin="6,0,0,0" />
+                <TextBox Text="{Binding Enlace}" IsEnabled="{Binding !IsBusy}" KeyDown="Enlace_KeyDown"
+                         PlaceholderText="https://open.spotify.com/playlist/…   o   https://www.deezer.com/playlist/…" />
+            </DockPanel>
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <CheckBox Content="Mostrar solo las disponibles" IsChecked="{Binding SoloLasQueTengo}" VerticalAlignment="Center" />
+                <Button Content="Guardar como lista (M3U8)" Click="ExportM3u_Click"
+                        Background="#0D9488" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Guarda las canciones que ya tienes como una lista M3U8, en el orden de la playlist. Se abre directamente en rekordbox, Engine DJ o Serato, sin copiar archivos." />
+                <Button Content="Crear carpeta con las disponibles" Click="CreateFolder_Click"
+                        IsEnabled="{Binding !IsBusy}"
+                        Background="#16A34A" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Copia (no mueve) a una carpeta nueva las grabaciones de la playlist que ya están en la biblioteca, numeradas por su posición." />
+                <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Opacity="0.8" Margin="8,0,0,0" />
+            </StackPanel>
+        </StackPanel>
+
+        <DataGrid Name="RowsGrid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
+                  AutoGenerateColumns="False" IsReadOnly="True" Margin="0,6,0,0"
+                  CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                  DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
+            <DataGrid.Styles>
+                <Style Selector="DataGridRow">
+                    <Setter Property="Background" Value="{Binding StateBrush}" />
+                </Style>
+            </DataGrid.Styles>
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
+                    <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="#" Binding="{Binding Position}" Width="45" MinWidth="40" />
+                <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="180" MinWidth="100" />
+                <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="220" MinWidth="120" />
+                <DataGridTextColumn Header="Dur." Binding="{Binding DurText}" Width="60" MinWidth="50" />
+                <DataGridTextColumn Header="Disponibilidad" Binding="{Binding Estado}" Width="110" MinWidth="90" />
+                <DataGridTextColumn Header="Versión" Binding="{Binding Version}" Width="120" MinWidth="90" />
+                <DataGridTextColumn Header="Archivo en la biblioteca" Binding="{Binding FileName}" Width="*" MinWidth="140" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>

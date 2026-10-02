@@ -43,6 +43,7 @@ public partial class MainWindow : Window
         [14] = (() => new FichasView(),      vm => vm.Fichas),
         [15] = (() => new ColeccionesView(), vm => vm.Colecciones),
         [16] = (() => new AsistenteView(),   vm => vm.Asistente),
+        [17] = (() => new PlaylistView(),    vm => vm.Playlists),
     };
 
     private readonly Dictionary<int, Control> _creadas = new();

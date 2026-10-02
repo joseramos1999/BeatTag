@@ -68,6 +68,7 @@ public partial class MainViewModel : ViewModelBase
     public IdentifyViewModel Identify { get; }
     public StatsViewModel Stats { get; }
     public TrendsViewModel Trends { get; }
+    public PlaylistViewModel Playlists { get; }
     public LoudnessViewModel Loudness { get; }
     public SettingsViewModel Settings { get; }
     public BandejaViewModel Bandeja { get; }
@@ -145,6 +146,7 @@ public partial class MainViewModel : ViewModelBase
         Identify = new IdentifyViewModel(engine);
         Stats = new StatsViewModel(engine);
         Trends = new TrendsViewModel(engine);
+        Playlists = new PlaylistViewModel(engine);
         Loudness = new LoudnessViewModel(engine);
         Settings = new SettingsViewModel(engine);
         Bandeja = new BandejaViewModel(engine);
@@ -198,6 +200,7 @@ public partial class MainViewModel : ViewModelBase
                     // La carga de países no cuenta: es una precarga de fondo, no un proceso del usuario.
                     new() { Indice = 9,  Icono = "🌍", Nombre = "Tendencias", Vm = Trends,
                             Ocupada = () => Trends.IsBusy && !Trends.LoadingCountries },
+                    new() { Indice = 17, Icono = "🎶", Nombre = "Playlists", Vm = Playlists, Ocupada = () => Playlists.IsBusy },
                 },
             },
             new()
@@ -227,7 +230,7 @@ public partial class MainViewModel : ViewModelBase
 
         // Bloqueo global: seguir el estado "ocupado" de todas las pestañas con operación larga.
         foreach (ViewModelBase vm in new ViewModelBase[]
-                 { Library, Enrich, Editor, Duplicates, Quality, Incomplete, NotFound, Identify, Stats, Trends, Loudness, Settings, Bandeja, Fichas, Colecciones, Asistente })
+                 { Library, Enrich, Editor, Duplicates, Quality, Incomplete, NotFound, Identify, Stats, Trends, Playlists, Loudness, Settings, Bandeja, Fichas, Colecciones, Asistente })
             vm.PropertyChanged += OnChildChanged;
 
         // La biblioteca avisa al escanearse y al cambiar las carpetas: es lo que abre el resto de

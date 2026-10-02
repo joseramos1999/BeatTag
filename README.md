@@ -49,6 +49,10 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   pérdida solo existe para MP3: un FLAC, un WAV o un M4A **se miden pero no se tocan**.
 - **Tendencias**: el **chart diario de Spotify** de 77 países (y el Global), marcando lo que ya
   tienes en la biblioteca. Deezer queda como fuente alternativa.
+- **Playlists**: igual que Tendencias, pero con la lista que tú elijas: pega el enlace de una
+  playlist (o un álbum) de **Spotify o Deezer** y verás qué tienes y qué te falta, con la misma
+  exportación a M3U8 o a una carpeta. De Deezer se lee entera; de Spotify, las 100 primeras
+  canciones, que es lo que Spotify deja leer sin iniciar sesión.
 - **Tonalidad**: muestra la clave de cada tema y su código **Camelot**, para mezclar en armónico.
   Se lee de los tags (la escriben rekordbox y similares); BeatTag no la deduce del audio.
 - **Listas M3U8**: exporta lo que hayas filtrado a una lista que abren rekordbox, Engine DJ o Serato.
