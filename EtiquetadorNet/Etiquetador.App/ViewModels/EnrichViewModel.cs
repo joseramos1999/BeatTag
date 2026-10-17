@@ -314,7 +314,13 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
                 if (r.Skip) continue;
                 if (r.Found || r.CleanOnly) { if (!AddRow(r, t)) sinCambio++; }
             }
-            _engine.Analysis.Prune(seen);
+            // Solo se poda dentro de las carpetas que esta pasada ha recorrido de verdad, las que han
+            // aportado canciones. Visto en una biblioteca real: con 42 de 43 carpetas desmarcadas,
+            // analizar 59 canciones dejó analysis-cache.json en 57.730 bytes (antes, ~6 MB). Una
+            // carpeta sin canciones -un disco desconectado- tampoco se poda.
+            var raices = tracks.Select(t => t.Folder).Where(f => !string.IsNullOrEmpty(f))
+                               .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            _engine.Analysis.Prune(seen, raices);
             _engine.Analysis.Save();
             _engine.Marks.Save();
             RowsView.Refresh();
@@ -570,7 +576,9 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             if (!res.None) await _engine.Library.ScanAsync();   // refleja el estado revertido
             Status = res.None
                 ? "No hay ninguna ejecución que deshacer."
-                : $"Deshecho: {res.Reverted} revertidos · {res.Manual} conservados · {res.Missing} ausentes · {res.Errors} errores.";
+                : $"Deshecho: {res.Reverted} revertidos · {res.Manual} conservados · {res.Missing} ausentes · {res.Errors} errores."
+                  + (res.Pendientes > 0 ? $" Quedan {res.Pendientes} pendientes: «Deshacer última» reintentará solo esos." : "")
+                  + (res.Aviso.Length > 0 ? " ⚠ " + res.Aviso : "");
         }
         finally { IsBusy = false; }
     }

@@ -5,16 +5,28 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Etiquetador.Core.Providers;
 
 namespace Etiquetador.Core.Pipeline;
 
-public sealed record UndoResult(string File, int Reverted, int Errors, int Missing, int Manual, bool Clean, bool None);
+/// <summary>Resultado de un deshacer.</summary>
+/// <param name="Aviso">"" si todo fue normal; si no, algo que el usuario debe saber (p. ej. que el manifiesto no se pudo actualizar).</param>
+public sealed record UndoResult(string File, int Reverted, int Errors, int Missing, int Manual, bool Clean, bool None, string Aviso = "")
+{
+    /// <summary>
+    /// Registros que siguen en el manifiesto: el próximo «Deshacer última» reintentará SOLO esos.
+    /// </summary>
+    public int Pendientes => Errors + Missing;
+}
 
 /// <summary>
 /// Deshace la ÚLTIMA ejecución (o un manifiesto dado): renombra a la ruta ABSOLUTA original y
 /// restaura CADA campo solo si su valor actual sigue siendo el que escribió la app. Lee el formato
 /// nuevo (OrigPath/FinalPath/Fields) y también migra el formato antiguo (new/orig/tags/wtitle).
+///
+/// Tras cada pasada, el manifiesto se queda SOLO con lo que no se pudo revertir, y lo revertido se
+/// archiva aparte («run_X.deshecho.jsonl»). Así deshacer se puede repetir sin efectos dobles.
 /// </summary>
 public sealed class UndoEngine
 {
@@ -26,27 +38,63 @@ public sealed class UndoEngine
 
     public UndoEngine(AppPaths paths, Logger? log = null) { _paths = paths; _log = log; }
 
+    // Solo cuentan como «por deshacer» los manifiestos de ejecución puros: run_aaaammdd_hhmmss.jsonl
+    // (con un _N opcional por si dos ejecuciones caen en el mismo segundo).
+    private static readonly Regex ManifiestoPendiente =
+        new(@"^run_\d{8}_\d{6}(_\d+)?\.jsonl$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// ¿Es un manifiesto de ejecución que aún se puede deshacer? Los archivados («.deshecho») no.
+    ///
+    /// Visto en una biblioteca real: el patrón «run_*.jsonl» también casaba con
+    /// run_20260920_230254.deshecho.jsonl, y como renombrar no cambia la fecha de modificación,
+    /// el manifiesto YA deshecho seguía siendo «el último». Un segundo clic lo volvía a procesar:
+    /// con los 29 MP3 ajustados a −3/−4,5 dB el 09-10, los habría dejado 3-4,5 dB por ENCIMA del
+    /// original, y ninguna ejecución anterior se podía alcanzar desde la interfaz.
+    /// </summary>
+    public static bool EsManifiestoPendiente(string nombreArchivo)
+        => ManifiestoPendiente.IsMatch(Path.GetFileName(nombreArchivo));
+
+    /// <summary>
+    /// Manifiestos que aún se pueden deshacer, del más reciente al más antiguo. Se ordenan por el
+    /// NOMBRE, que lleva la fecha de la ejecución, y no por la fecha de modificación: reescribir un
+    /// manifiesto a medio deshacer no lo convierte en más reciente que la ejecución siguiente.
+    /// </summary>
+    public IReadOnlyList<string> ManifiestosPendientes()
+    {
+        if (!Directory.Exists(_paths.UndoDir)) return Array.Empty<string>();
+        return new DirectoryInfo(_paths.UndoDir).EnumerateFiles("run_*.jsonl")
+            .Where(f => EsManifiestoPendiente(f.Name))
+            .OrderByDescending(f => f.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(f => f.FullName)
+            .ToList();
+    }
+
     public UndoResult UndoLastRun(string? manifest = null)
     {
         string? mf;
         if (!string.IsNullOrEmpty(manifest)) mf = File.Exists(manifest) ? manifest : null;
-        else mf = Directory.Exists(_paths.UndoDir)
-            ? new DirectoryInfo(_paths.UndoDir).EnumerateFiles("run_*.jsonl")
-                .OrderByDescending(x => x.LastWriteTime).FirstOrDefault()?.FullName
-            : null;
+        else mf = ManifiestosPendientes().FirstOrDefault();
         if (mf == null) return new UndoResult("", 0, 0, 0, 0, false, true);
 
-        var nodes = new List<JsonNode>();
+        // Cada línea con su texto original: lo que no se pueda revertir vuelve al manifiesto tal cual.
+        var lineas = new List<(string Texto, JsonNode? Nodo)>();
         foreach (var ln in File.ReadAllLines(mf, Encoding.UTF8))
         {
             if (ln.Trim().Length == 0) continue;
-            try { var n = JsonNode.Parse(ln); if (n != null) nodes.Add(n); } catch { }
+            JsonNode? n = null;
+            try { n = JsonNode.Parse(ln); } catch { }
+            if (n == null) _log?.Log("  deshacer: línea ilegible en el manifiesto; se archiva sin tocar ningún archivo", LogKind.Err);
+            lineas.Add((ln, n));
         }
-        nodes.Reverse();
 
+        // Al revés: lo último que se hizo es lo primero que se deshace.
+        var pendiente = new bool[lineas.Count];
         int rev = 0, err = 0, missing = 0, manual = 0;
-        foreach (var node in nodes)
+        for (var i = lineas.Count - 1; i >= 0; i--)
         {
+            var node = lineas[i].Nodo;
+            if (node == null) continue;
             Outcome outcome;
             try
             {
@@ -61,27 +109,110 @@ public sealed class UndoEngine
             switch (outcome)
             {
                 case Outcome.Reverted: rev++; break;
-                case Outcome.Missing: missing++; break;
+                case Outcome.Missing: missing++; pendiente[i] = true; break;
                 case Outcome.Manual: manual++; break;
-                default: err++; break;
+                default: err++; pendiente[i] = true; break;
             }
         }
 
         var clean = err == 0 && missing == 0;
-        if (clean)
+        var aviso = Archivar(mf, lineas.Select(l => l.Texto).ToList(), pendiente);
+        return new UndoResult(Path.GetFileName(mf), rev, err, missing, manual, clean, false, aviso);
+    }
+
+    /// <summary>
+    /// Deja en el manifiesto SOLO los registros que no se pudieron revertir y archiva el resto.
+    ///
+    /// POR QUÉ. Antes, con un solo error o un solo ausente, el manifiesto se conservaba ENTERO para
+    /// reintentar. Los tags aguantaban el reintento -solo se restauran si siguen como los dejó la
+    /// aplicación-, pero el volumen no: se revierte aplicando la ganancia inversa, que es relativa y
+    /// no deja marca. Deshacer un ajuste de 300 MP3 con uno abierto en rekordbox daba 299 revertidos
+    /// y 1 error; al cerrar rekordbox y reintentar, los 299 bajaban OTROS 3 dB.
+    ///
+    /// El orden importa: primero se reescribe el manifiesto y después se escribe el archivado. Si
+    /// algo fallase entre los dos pasos, se pierde el archivado -el historial, que la reparación de
+    /// rekordbox usa para saber qué renombrados se deshicieron- pero nunca queda un registro ya
+    /// revertido esperando a revertirse otra vez.
+    ///
+    /// Devuelve "" si fue bien, o un aviso para el usuario.
+    /// </summary>
+    private string Archivar(string mf, List<string> lineas, bool[] pendiente)
+    {
+        var quedan = lineas.Where((_, i) => pendiente[i]).ToList();
+        var hechas = lineas.Where((_, i) => !pendiente[i]).ToList();
+        var archivado = RutaArchivado(mf);
+        try
         {
-            try
+            if (quedan.Count == 0)
             {
-                var dest = mf.EndsWith(".jsonl") ? mf[..^6] + ".deshecho.jsonl" : mf + ".deshecho";
-                File.Move(mf, dest);
+                // Todo deshecho: el manifiesto entero pasa a archivado de una vez.
+                File.Move(mf, archivado);
+                // Con la fecha del DESHACER: renombrar conserva la de la ejecución, y
+                // RekordboxRelocator la usa para colocar en el tiempo la vuelta al nombre original.
+                try { File.SetLastWriteTime(archivado, DateTime.Now); } catch { }
+                return "";
             }
-            catch { }
+            if (hechas.Count == 0) return "";   // no se pudo nada: el manifiesto se queda como estaba
+
+            var error = ArchivoDatos.Escribir(mf, string.Join("\n", quedan) + "\n");
+            if (error.Length > 0)
+            {
+                var aviso = $"No se pudo actualizar el manifiesto {Path.GetFileName(mf)} ({error}). " +
+                            "NO vuelvas a pulsar «Deshacer última» hasta revisarlo: repetiría también lo ya revertido.";
+                _log?.Log("  deshacer: " + aviso, LogKind.Err);
+                return aviso;
+            }
+            var errArch = ArchivoDatos.Escribir(archivado, string.Join("\n", hechas) + "\n");
+            if (errArch.Length > 0)
+                _log?.Log($"  deshacer: no se pudo archivar lo revertido en {Path.GetFileName(archivado)}: {errArch}", LogKind.Err);
+            _log?.Log($"  deshacer: quedan {quedan.Count} registro(s) en {Path.GetFileName(mf)}; «Deshacer última» reintentará solo esos.", LogKind.No);
+            return "";
         }
-        return new UndoResult(Path.GetFileName(mf), rev, err, missing, manual, clean, false);
+        catch (Exception e)
+        {
+            var aviso = $"No se pudo archivar el manifiesto {Path.GetFileName(mf)} ({e.Message}). " +
+                        "NO vuelvas a pulsar «Deshacer última» hasta revisarlo: repetiría también lo ya revertido.";
+            _log?.Log("  deshacer: " + aviso, LogKind.Err);
+            return aviso;
+        }
+    }
+
+    /// <summary>
+    /// Nombre libre para archivar lo revertido: «run_X.deshecho.jsonl» la primera vez y
+    /// «run_X.deshecho-2.jsonl», «-3»… si un deshacer se completa en varias pasadas. Ninguno casa
+    /// con <see cref="EsManifiestoPendiente"/>, y todos llevan «.deshecho», que es lo que mira
+    /// RekordboxRelocator para saber que esos renombrados se deshicieron.
+    /// </summary>
+    private static string RutaArchivado(string mf)
+    {
+        var dir = Path.GetDirectoryName(mf) ?? "";
+        var nombre = Path.GetFileName(mf);
+        var jsonl = nombre.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase);
+        var raiz = jsonl ? nombre[..^6] : nombre;
+        var ext = jsonl ? ".jsonl" : "";
+        for (var n = 1; ; n++)
+        {
+            var candidato = Path.Combine(dir, raiz + ".deshecho" + (n == 1 ? "" : "-" + n) + ext);
+            if (!File.Exists(candidato)) return candidato;
+        }
     }
 
     /// <summary>Nombre del campo de manifiesto que guarda un cambio de volumen (no es un tag).</summary>
     public const string VolumeField = "Volumen";
+
+    /// <summary>
+    /// Campo de manifiesto de la carátula. Contrato compartido con quien sustituye la carátula:
+    /// ANTES de sustituirla se guarda la frontal anterior en <see cref="AppPaths.PortadasDir"/> y se
+    /// anota un FieldChange de texto con OldStr = ruta absoluta de esa copia ("" si el archivo no
+    /// tenía carátula) y NewStr = <see cref="CoverSustituida"/>.
+    /// </summary>
+    public const string CoverField = "Cover";
+
+    /// <summary>
+    /// Marca de NewStr que dice que OldStr guarda la carátula anterior. Los registros antiguos
+    /// llevan "changed" y ninguna copia, y esos no se pueden devolver.
+    /// </summary>
+    public const string CoverSustituida = "sustituida";
 
     // ---------- Formato nuevo ----------
     private Outcome ProcessNew(UndoRecord r)
@@ -92,7 +223,7 @@ public sealed class UndoEngine
 
         var renamedBack = RenameBack(r.Renamed, ref path, r.FinalPath, r.OrigPath);
 
-        bool restoredAny = false, skippedAny = false, volumenFallido = false;
+        bool restoredAny = false, skippedAny = false, volumenFallido = false, volumenDevuelto = false;
 
         // El volumen no es un tag: se revierte aplicando la ganancia inversa sobre el propio audio.
         // Va antes que los tags porque reescribe el archivo entero.
@@ -102,7 +233,7 @@ public sealed class UndoEngine
             if (pasos != 0)
             {
                 var res = Analysis.Mp3Gain.Apply(path, -pasos);
-                if (res.Ok) { restoredAny = true; _log?.Log($"  deshacer: volumen devuelto ({-pasos * Analysis.Mp3Gain.DbPerStep:+0.0;-0.0} dB) [{Path.GetFileName(path)}]", LogKind.Ok); }
+                if (res.Ok) { restoredAny = volumenDevuelto = true; _log?.Log($"  deshacer: volumen devuelto ({-pasos * Analysis.Mp3Gain.DbPerStep:+0.0;-0.0} dB) [{Path.GetFileName(path)}]", LogKind.Ok); }
                 else
                 {
                     // El audio sigue con el volumen cambiado. Antes esto solo se anotaba y el
@@ -114,17 +245,30 @@ public sealed class UndoEngine
             }
         }
 
-        if (r.Fields is { Count: > 0 })
+        // Los tags solo se abren si hay alguno que restaurar. Un registro de volumen no lleva más
+        // que el volumen, y abrir con TagLib un MP3 que no sabe leer fallaba DESPUÉS de haber
+        // devuelto el audio: el registro quedaba como error y el reintento lo bajaba otra vez.
+        if (r.Fields is { Count: > 0 } && r.Fields.Keys.Any(k => k != VolumeField))
         {
-            var tf = TagLib.File.Create(path);
-            foreach (var (name, fc) in r.Fields)
+            try
             {
-                if (name is "Cover" or VolumeField) continue;
-                var (restored, skipped) = RestoreField(tf.Tag, name, fc);
-                restoredAny |= restored; skippedAny |= skipped;
+                using var tf = TagLib.File.Create(path);
+                var tocado = false;
+                foreach (var (name, fc) in r.Fields)
+                {
+                    if (name is VolumeField) continue;
+                    var (restored, skipped) = name == CoverField ? RestoreCover(tf, fc, path) : RestoreField(tf.Tag, name, fc);
+                    restoredAny |= restored; skippedAny |= skipped; tocado |= restored;
+                }
+                if (tocado) tf.Save();
             }
-            if (restoredAny) tf.Save();
-            tf.Dispose();
+            catch (Exception e) when (volumenDevuelto)
+            {
+                // El volumen ya está en su sitio y no puede quedar pendiente: se da el registro por
+                // cerrado y se dice qué no se pudo hacer.
+                _log?.Log($"  deshacer: volumen devuelto, pero los tags no se pudieron restaurar [{Path.GetFileName(path)}]: {e.Message}", LogKind.Err);
+                return Outcome.Manual;
+            }
         }
 
         // El volumen manda sobre el resto: si el audio no se pudo devolver a su sitio, este registro
@@ -224,6 +368,44 @@ public sealed class UndoEngine
             default:
                 return (false, false);
         }
+    }
+
+    /// <summary>
+    /// Devuelve la carátula frontal que tenía el archivo antes de sustituirla (contrato
+    /// <see cref="CoverField"/>). Solo se toca la FRONTAL: el resto de imágenes (contraportada,
+    /// artista…) se quedan como estén. (restaurado, omitido).
+    /// </summary>
+    private (bool restored, bool skipped) RestoreCover(TagLib.File tf, FieldChange fc, string path)
+    {
+        // Registro antiguo ("changed"): no se guardó la carátula anterior y no hay nada que devolver.
+        if (!string.Equals(fc.NewStr, CoverSustituida, StringComparison.Ordinal)) return (false, false);
+
+        var otras = tf.Tag.Pictures.Where(p => p.Type != TagLib.PictureType.FrontCover).ToList();
+        var copia = fc.OldStr ?? "";
+        if (copia.Length == 0)
+        {
+            // No tenía carátula: se quita la que se puso.
+            tf.Tag.Pictures = otras.ToArray();
+            return (true, false);
+        }
+
+        // Si la carpeta de datos cambió de sitio, la ruta absoluta anotada ya no vale, pero la copia
+        // sigue en la carpeta de portadas actual con el mismo nombre.
+        if (!File.Exists(copia))
+        {
+            var aqui = Path.Combine(_paths.PortadasDir, Path.GetFileName(copia));
+            if (!File.Exists(aqui))
+            {
+                _log?.Log($"  deshacer: falta la copia de la carátula anterior ({Path.GetFileName(copia)}); se conserva la actual [{Path.GetFileName(path)}]", LogKind.Err);
+                return (false, true);
+            }
+            copia = aqui;
+        }
+
+        var anterior = new TagLib.Picture(copia) { Type = TagLib.PictureType.FrontCover, Description = "" };
+        otras.Insert(0, anterior);
+        tf.Tag.Pictures = otras.ToArray();
+        return (true, false);
     }
 
     private static string? Empty(string? s) => string.IsNullOrEmpty(s) ? null : s;

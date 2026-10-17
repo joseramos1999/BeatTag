@@ -1,8 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Text.Json;
 
 namespace Etiquetador.Core.Pipeline;
 
@@ -65,10 +63,35 @@ public sealed class AnalysisCache
         return n;
     }
 
-    public void Prune(ISet<string> livePaths)
+    /// <summary>
+    /// Olvida los resultados de los archivos que ya no están DENTRO de las carpetas analizadas.
+    /// Lo de fuera se conserva, igual que hace <see cref="ScanCache.Prune"/>.
+    ///
+    /// Visto en una biblioteca real: con 42 de las 43 carpetas desmarcadas, analizar las 59
+    /// canciones de Descargas\MUSICA borró los resultados de las otras ~13.500, y
+    /// analysis-cache.json pasó de unos 6 MB a 57.730 bytes. La siguiente pasada completa tuvo que
+    /// volver a consultarlo todo en red e IA (las completas llegaron a durar unas 3 h), y Enriquecer
+    /// y No encontradas perdieron las propuestas pendientes, que solo se cargan de aquí.
+    ///
+    /// <paramref name="raices"/> deben ser las carpetas que la pasada ha recorrido de verdad. Una
+    /// carpeta que no ha aportado ninguna canción -un disco desconectado- no debe ir aquí: todo lo
+    /// suyo parecería borrado. Sin raíces no se poda nada.
+    /// </summary>
+    public void Prune(ISet<string> livePaths, IReadOnlyCollection<string> raices)
     {
-        foreach (var k in _map.Keys.Where(k => !livePaths.Contains(k)).ToList()) { _map.Remove(k); _dirty = true; }
+        if (raices.Count == 0) return;
+        var stale = _map.Keys.Where(k => !livePaths.Contains(k) && raices.Any(r => Rutas.EstaDentroDe(k, r))).ToList();
+        foreach (var k in stale) { _map.Remove(k); _dirty = true; }
     }
+
+    /// <summary>Entradas guardadas (para pruebas y diagnóstico).</summary>
+    public int Count => _map.Count;
+
+    /// <summary>"" si se cargó con normalidad; si no, qué pasó con el archivo (apartado por ilegible…).</summary>
+    public string AvisoCarga { get; private set; } = "";
+
+    // El archivo existe pero no se pudo leer ni apartar: no se guarda encima.
+    private bool _noSobrescribir;
 
     public void Clear()
     {
@@ -77,28 +100,26 @@ public sealed class AnalysisCache
         try { if (File.Exists(_file)) File.Delete(_file); } catch { }
     }
 
-    public void Save()
+    /// <summary>
+    /// Guarda si hubo cambios, de forma atómica (temporal + sustitución): un corte a media escritura
+    /// de un archivo de varios MB dejaba la caché entera inservible. Devuelve "" si fue bien o no
+    /// había nada que guardar, o el motivo del fallo.
+    /// </summary>
+    public string Save()
     {
-        if (!_dirty) return;
-        try
-        {
-            var dir = Path.GetDirectoryName(_file);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            File.WriteAllText(_file, JsonSerializer.Serialize(_map), Encoding.UTF8);
-            _dirty = false;
-        }
-        catch { }
+        if (!_dirty) return "";
+        if (_noSobrescribir) return AvisoCarga;
+        var error = ArchivoDatos.EscribirJson(_file, _map);
+        if (error.Length == 0) _dirty = false;
+        return error;
     }
 
     private void Load()
     {
-        try
-        {
-            if (!File.Exists(_file)) return;
-            var d = JsonSerializer.Deserialize<Dictionary<string, Entry>>(File.ReadAllText(_file, Encoding.UTF8));
-            if (d != null) _map = new Dictionary<string, Entry>(d, System.StringComparer.OrdinalIgnoreCase);
-        }
-        catch { }
+        var leido = ArchivoDatos.LeerJson<Dictionary<string, Entry>>(_file);
+        AvisoCarga = leido.Aviso;
+        _noSobrescribir = leido.NoSobrescribir;
+        if (leido.Datos != null) _map = new Dictionary<string, Entry>(leido.Datos, System.StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool Stat(string path, out long m, out long s)

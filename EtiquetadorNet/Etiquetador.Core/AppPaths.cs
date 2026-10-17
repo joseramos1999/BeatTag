@@ -13,6 +13,12 @@ public sealed class AppPaths
     public string ReportsDir { get; }
     public string CacheDir { get; }
     public string UndoDir { get; }
+
+    /// <summary>
+    /// Copias de las carátulas frontales que la aplicación ha sustituido, para poder devolverlas
+    /// al deshacer (contrato «Cover» de <see cref="Pipeline.UndoEngine.CoverField"/>).
+    /// </summary>
+    public string PortadasDir => Path.Combine(UndoDir, "portadas");
     public string ConfigPath { get; }
     public string DoneLog { get; }
     public string ArtistExceptionsPath { get; }
@@ -68,6 +74,20 @@ public sealed class AppPaths
         FichasDjPath = Path.Combine(DataDir, "fichas-dj.json");
         ColeccionesPath = Path.Combine(DataDir, "colecciones.json");
         BandejaPath = Path.Combine(DataDir, "bandeja.json");
+    }
+
+    /// <summary>
+    /// Ruta del manifiesto de deshacer para una ejecución nueva: «run_aaaammdd_hhmmss.jsonl», o con
+    /// «_2», «_3»… si ya hay uno de ese mismo segundo. Es la forma que reconoce
+    /// <see cref="Pipeline.UndoEngine.EsManifiestoPendiente"/>; hoy el nombre se compone a mano en
+    /// once sitios, y dos ejecuciones en el mismo segundo acababan mezcladas en un solo manifiesto.
+    /// </summary>
+    public string NuevoManifiesto(DateTime? cuando = null)
+    {
+        var raiz = $"run_{(cuando ?? DateTime.Now):yyyyMMdd_HHmmss}";
+        var ruta = Path.Combine(UndoDir, raiz + ".jsonl");
+        for (var n = 2; File.Exists(ruta); n++) ruta = Path.Combine(UndoDir, $"{raiz}_{n}.jsonl");
+        return ruta;
     }
 
     /// <summary>Crea las carpetas de datos si no existen (idempotente).</summary>

@@ -1,6 +1,3 @@
-using System.Text;
-using System.Text.Json;
-
 namespace Etiquetador.Core;
 
 /// <summary>
@@ -86,27 +83,33 @@ public sealed class ScanCache
         try { if (File.Exists(_file)) File.Delete(_file); } catch { /* best-effort */ }
     }
 
-    public void Save()
+    /// <summary>"" si se cargó con normalidad; si no, qué pasó con el archivo (apartado por ilegible…).</summary>
+    public string AvisoCarga { get; private set; } = "";
+
+    // El archivo existe pero no se pudo leer ni apartar: no se guarda encima.
+    private bool _noSobrescribir;
+
+    /// <summary>
+    /// Guarda si hubo cambios, de forma atómica (temporal + sustitución). scan-cache.json pesa unos
+    /// 4 MB, y MEDIDO: releer la biblioteca sin caché costó 340.680 ms para 13.464 canciones frente
+    /// a 7.774 ms con ella; un corte a media escritura no puede tirarla. Devuelve "" si fue bien o
+    /// no había nada que guardar, o el motivo del fallo.
+    /// </summary>
+    public string Save()
     {
-        if (!_dirty) return;
-        try
-        {
-            var dir = Path.GetDirectoryName(_file);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            File.WriteAllText(_file, JsonSerializer.Serialize(_map), Encoding.UTF8);
-            _dirty = false;
-        }
-        catch { /* best-effort */ }
+        if (!_dirty) return "";
+        if (_noSobrescribir) return AvisoCarga;
+        var error = ArchivoDatos.EscribirJson(_file, _map);
+        if (error.Length == 0) _dirty = false;
+        return error;
     }
 
     private void Load()
     {
-        try
-        {
-            if (!File.Exists(_file)) return;
-            var d = JsonSerializer.Deserialize<Dictionary<string, Entry>>(File.ReadAllText(_file, Encoding.UTF8));
-            if (d != null) _map = new Dictionary<string, Entry>(d, StringComparer.OrdinalIgnoreCase);
-        }
-        catch { /* caché corrupta -> se ignora */ }
+        // Una caché dañada se aparta como «.ilegible_fecha» en vez de ignorarse y pisarse.
+        var leido = ArchivoDatos.LeerJson<Dictionary<string, Entry>>(_file);
+        AvisoCarga = leido.Aviso;
+        _noSobrescribir = leido.NoSobrescribir;
+        if (leido.Datos != null) _map = new Dictionary<string, Entry>(leido.Datos, StringComparer.OrdinalIgnoreCase);
     }
 }

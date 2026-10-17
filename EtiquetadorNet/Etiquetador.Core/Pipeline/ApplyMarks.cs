@@ -1,7 +1,4 @@
 using System.Collections.Generic;
-using System.IO;
-using System.Text;
-using System.Text.Json;
 
 namespace Etiquetador.Core.Pipeline;
 
@@ -49,28 +46,36 @@ public sealed class ApplyMarks
         _dirty = true;
     }
 
+    /// <summary>
+    /// "" si se cargó con normalidad; si no, qué pasó con el archivo. Un archivo dañado no impide
+    /// arrancar -se empieza sin marcas-, pero ya no se vacía en silencio: se aparta como
+    /// «.ilegible_fecha» y aquí queda dicho.
+    /// </summary>
+    public string AvisoCarga { get; private set; } = "";
+
+    // El archivo existe pero no se pudo leer ni apartar: guardar encima lo sustituiría por lo poco
+    // que haya en memoria. Mientras dure, Save no escribe.
+    private bool _noSobrescribir;
+
     public void Load()
     {
-        try
-        {
-            if (!File.Exists(_file)) return;
-            var json = File.ReadAllText(_file, Encoding.UTF8);
-            var d = JsonSerializer.Deserialize<Dictionary<string, bool>>(json);
-            if (d != null) _map = new Dictionary<string, bool>(d, System.StringComparer.OrdinalIgnoreCase);
-        }
-        catch { /* un archivo corrupto no puede impedir arrancar: se empieza sin marcas */ }
+        var leido = ArchivoDatos.LeerJson<Dictionary<string, bool>>(_file);
+        AvisoCarga = leido.Aviso;
+        _noSobrescribir = leido.NoSobrescribir;
+        if (leido.Datos != null) _map = new Dictionary<string, bool>(leido.Datos, System.StringComparer.OrdinalIgnoreCase);
     }
 
-    public void Save()
+    /// <summary>
+    /// Guarda si hubo cambios, de forma atómica (temporal + sustitución): marcas-aplicar.json pesa
+    /// unos 84 KB y un corte a media escritura lo dejaba truncado. Devuelve "" si fue bien o no
+    /// había nada que guardar, o el motivo del fallo (los cambios siguen pendientes).
+    /// </summary>
+    public string Save()
     {
-        if (!_dirty) return;
-        try
-        {
-            var dir = Path.GetDirectoryName(_file);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            File.WriteAllText(_file, JsonSerializer.Serialize(_map), Encoding.UTF8);
-            _dirty = false;
-        }
-        catch { }
+        if (!_dirty) return "";
+        if (_noSobrescribir) return AvisoCarga;
+        var error = ArchivoDatos.EscribirJson(_file, _map);
+        if (error.Length == 0) _dirty = false;
+        return error;
     }
 }

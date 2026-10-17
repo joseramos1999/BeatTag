@@ -67,6 +67,81 @@ public class IgnoreListTests
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
+    // Visto en revisión: si el proceso muere mientras se guarda descartadas.json, el archivo queda
+    // truncado; el siguiente arranque lo leía como vacío SIN avisar y el siguiente guardado lo
+    // pisaba: las 84 descartadas a mano volvían a aparecer en Enriquecer. Ahora se aparta tal cual,
+    // con aviso, y lo que se guarde después no lo toca.
+    [Fact]
+    public void Un_archivo_truncado_se_aparta_en_vez_de_pisarse()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var f = Path.Combine(dir, "descartadas.json");
+            var a = new IgnoreList(f);
+            for (var i = 1; i <= 84; i++) a.Add($@"E:\Musica\COMERCIAL\Descartada {i:00}.mp3");
+            Assert.Equal("", a.Save());
+
+            var completo = File.ReadAllText(f);
+            var truncado = completo[..(completo.Length / 2)];   // el corte a media escritura
+            File.WriteAllText(f, truncado);
+
+            var b = new IgnoreList(f);
+            Assert.Equal(0, b.Count);
+            Assert.NotEqual("", b.AvisoCarga);
+            var apartado = Assert.Single(Directory.GetFiles(dir, "descartadas.json.ilegible_*"));
+            Assert.Equal(truncado, File.ReadAllText(apartado));
+
+            b.Add(@"E:\Musica\COMERCIAL\Nueva.mp3");
+            Assert.Equal("", b.Save());
+            Assert.Equal(truncado, File.ReadAllText(apartado));   // lo apartado no se toca
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // La escritura es atómica: va a un temporal y se intercambia, y no deja restos.
+    [Fact]
+    public void Guardar_no_deja_temporales()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var f = Path.Combine(dir, "aplicadas.json");
+            var l = new IgnoreList(f);
+            l.Add(@"E:\Musica\a.mp3");
+            Assert.Equal("", l.Save());
+            l.Add(@"E:\Musica\b.mp3");
+            Assert.Equal("", l.Save());   // segunda vez: sustituye al existente
+
+            Assert.Equal(new[] { "aplicadas.json" }, Directory.GetFiles(dir).Select(Path.GetFileName).ToArray());
+            Assert.Equal(2, new IgnoreList(f).Count);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Si no se puede ni leer (otro programa lo tiene bloqueado), no se guarda encima: el archivo
+    // quizá está perfectamente bien.
+    [WindowsFact]
+    public void Un_archivo_bloqueado_no_se_pisa()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var f = Path.Combine(dir, "aplicadas.json");
+            File.WriteAllText(f, """["E:\\Musica\\a.mp3"]""");
+
+            IgnoreList l;
+            using (new FileStream(f, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                l = new IgnoreList(f);
+
+            Assert.NotEqual("", l.AvisoCarga);
+            l.Add(@"E:\Musica\b.mp3");
+            Assert.NotEqual("", l.Save());                       // se niega y lo dice
+            Assert.Equal("""["E:\\Musica\\a.mp3"]""", File.ReadAllText(f));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
     [Fact]
     public void Clear_vacia_y_borra_el_archivo()
     {

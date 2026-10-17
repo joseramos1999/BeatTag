@@ -194,7 +194,8 @@ public sealed class AppEngine
         Fichas = new AlmacenFichas(Paths.FichasDjPath);
         Colecciones = new AlmacenColecciones(Paths.ColeccionesPath);
         Bandeja = new AlmacenBandeja(Paths.BandejaPath);
-        foreach (var aviso in new[] { Fichas.AvisoCarga, Colecciones.AvisoCarga, Bandeja.AvisoCarga })
+        foreach (var aviso in new[] { Fichas.AvisoCarga, Colecciones.AvisoCarga, Bandeja.AvisoCarga,
+                                      Analysis.AvisoCarga, Ignored.AvisoCarga, Applied.AvisoCarga, Marks.AvisoCarga, AudioAceptadas.AvisoCarga })
             if (aviso.Length > 0) Logger.Err(aviso);
         Logger.Detail($"Fichas de DJ: {Fichas.Count} · colecciones: {Colecciones.Todas.Count}");
 

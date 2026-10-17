@@ -28,8 +28,12 @@ public class InfraTests
         Assert.Equal(UnprotectStatus.CryptoError, Dpapi.TryUnprotect(BadDpapiBlob).Status);           // cabecera DPAPI + basura
     }
 
+    // Antes, con un secreto ilegible, Save se negaba a guardar NADA: así no se perdía la credencial,
+    // pero tampoco las carpetas que el usuario añadía después (los guardados automáticos fallaban en
+    // silencio y al reabrir habían desaparecido). Ahora se guarda todo y el secreto ilegible se
+    // conserva con su cifrado original, carácter a carácter.
     [Fact]
-    public void Config_con_secreto_ilegible_bloquea_el_guardado()
+    public void Config_con_secreto_ilegible_conserva_el_cifrado_original_al_guardar()
     {
         var dir = Path.Combine(Path.GetTempPath(), "etq-cfg-" + Guid.NewGuid().ToString("N"));
         var paths = new AppPaths(dir);
@@ -38,10 +42,17 @@ public class InfraTests
         {
             // Config con un secreto DPAPI ilegible en este perfil.
             File.WriteAllText(paths.ConfigPath, $$"""{"AcoustIdKeyEnc":"{{BadDpapiBlob}}"}""");
-            var cfg = AppConfig.Load(paths);
+            var cfg = AppConfig.Load(paths, out var aviso);
             Assert.True(cfg.SecretsUnreadable);
-            Assert.False(cfg.Save(paths, out var err));    // no se guarda -> no se pierde el original
-            Assert.NotEqual("", err);
+            Assert.Equal(new[] { "AcoustIdKeyEnc" }, cfg.CredencialesIlegibles);
+            Assert.Contains("AcoustID", aviso);            // y se dice, en vez de callarlo
+
+            cfg.Folders.Add(@"E:\Musica");
+            Assert.True(cfg.Save(paths, out var err), err);
+
+            var raw = File.ReadAllText(paths.ConfigPath);
+            Assert.Contains(BadDpapiBlob, raw);            // el original, intacto
+            Assert.Contains("Musica", raw);                // y lo demás, guardado
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
