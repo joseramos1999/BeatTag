@@ -10,7 +10,8 @@ namespace Etiquetador.Core.Dj;
 /// A diferencia de las cachés, esto NO se puede regenerar: es trabajo hecho a mano, canción a
 /// canción. Por eso se escribe a un temporal y se intercambia de golpe (un corte a media escritura
 /// deja el archivo anterior intacto), y si el archivo existe pero no se puede leer NO se trata como
-/// vacío: se aparta con otro nombre antes de que el siguiente guardado lo pise.
+/// vacío: si está dañado se aparta con otro nombre antes de que el siguiente guardado lo pise, y si
+/// no se puede ni leer ni apartar, el almacén queda en solo lectura (ver <see cref="Leer{T}(string, Func{T}, out string, out bool)"/>).
 /// </summary>
 internal static class ArchivoJson
 {
@@ -21,22 +22,82 @@ internal static class ArchivoJson
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public static T Leer<T>(string archivo, Func<T> vacio, out string aviso)
+    /// <summary>Cuántas veces se intenta leer un archivo que otro proceso tiene bloqueado.</summary>
+    internal const int IntentosLectura = 3;
+
+    /// <summary>Lo que se espera entre un intento y el siguiente.</summary>
+    internal static readonly TimeSpan EsperaEntreIntentos = TimeSpan.FromMilliseconds(250);
+
+    public static T Leer<T>(string archivo, Func<T> vacio, out string aviso) => Leer(archivo, vacio, out aviso, out _);
+
+    /// <summary>
+    /// Lee el archivo, o devuelve <paramref name="vacio"/> si no existe.
+    ///
+    /// Si existe y no se puede leer, devolver vacío sin más era perderlo: el siguiente guardado lo
+    /// pisaba con lo poco que se hubiera hecho en la sesión. Pasa si al arrancar otro proceso lo tiene
+    /// abierto sin compartir (otra ventana de BeatTag a mitad de guardar, un antivirus, un cliente de
+    /// sincronización): fallan la lectura y el renombrado, la aplicación arranca con 0 fichas, se pone
+    /// la energía de una canción y se escribe un archivo con 1 ficha encima del que tenía cientos.
+    ///
+    /// Por eso:
+    ///   · Un bloqueo de otro proceso suele ser cuestión de un momento: se reintenta un par de veces.
+    ///   · Si el CONTENIDO está dañado, se aparta con otro nombre y se empieza de cero, como siempre.
+    ///   · Si no se puede leer por un bloqueo o por permisos, el archivo está bien y no se aparta:
+    ///     se devuelve vacío con <paramref name="soloLectura"/> a true, y el almacén no debe escribir
+    ///     encima (<see cref="AvisoSoloLectura"/>). Lo mismo si está dañado y tampoco se puede apartar.
+    /// </summary>
+    public static T Leer<T>(string archivo, Func<T> vacio, out string aviso, out bool soloLectura)
     {
         aviso = "";
-        try
+        soloLectura = false;
+        Exception error;
+        for (var intento = 1; ; intento++)
         {
-            if (!File.Exists(archivo)) return vacio();
-            return JsonSerializer.Deserialize<T>(File.ReadAllText(archivo, Encoding.UTF8), Opciones) ?? vacio();
+            try
+            {
+                if (!File.Exists(archivo)) return vacio();
+                return JsonSerializer.Deserialize<T>(File.ReadAllText(archivo, Encoding.UTF8), Opciones) ?? vacio();
+            }
+            catch (IOException) when (intento < IntentosLectura)
+            {
+                Thread.Sleep(EsperaEntreIntentos);
+            }
+            catch (Exception e)
+            {
+                error = e;
+                break;
+            }
         }
-        catch (Exception e)
+
+        var nombre = Path.GetFileName(archivo);
+        if (error is JsonException)
         {
             var apartado = archivo + $".ilegible_{DateTime.Now:yyyyMMdd_HHmmss}";
-            try { File.Move(archivo, apartado); aviso = $"No se pudo leer {Path.GetFileName(archivo)} ({e.Message}); se ha apartado como {Path.GetFileName(apartado)}."; }
-            catch { aviso = $"No se pudo leer {Path.GetFileName(archivo)}: {e.Message}"; }
-            return vacio();
+            try
+            {
+                File.Move(archivo, apartado);
+                aviso = $"No se pudo leer {nombre} ({error.Message}); se ha apartado como {Path.GetFileName(apartado)}.";
+                return vacio();
+            }
+            catch (Exception e)
+            {
+                soloLectura = true;
+                aviso = $"No se pudo leer {nombre} ({error.Message}) ni apartarlo ({e.Message}). "
+                      + "Para no sobrescribirlo, no se guardarán cambios en él durante esta sesión.";
+                return vacio();
+            }
         }
+
+        soloLectura = true;
+        aviso = $"No se pudo leer {nombre}: {error.Message} Puede que otra ventana de BeatTag u otro programa lo tenga "
+              + "abierto. Para no sobrescribirlo, no se guardarán cambios en él hasta que vuelvas a abrir BeatTag.";
+        return vacio();
     }
+
+    /// <summary>El motivo que devuelve el guardado de un almacén que se abrió en solo lectura.</summary>
+    public static string AvisoSoloLectura(string archivo)
+        => $"No se guarda {Path.GetFileName(archivo)}: al abrir BeatTag no se pudo leer, y escribirlo ahora borraría "
+         + "lo que contiene. Cierra las demás ventanas de BeatTag y vuelve a abrirlo.";
 
     /// <summary>Devuelve "" si fue bien, o el motivo del fallo.</summary>
     public static string Escribir<T>(string archivo, T datos)

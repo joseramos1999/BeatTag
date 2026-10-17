@@ -210,13 +210,17 @@ public sealed class AlmacenColecciones
     public List<ColeccionInteligente> Todas { get; }
     public string AvisoCarga { get; }
 
+    /// <summary>No se pudo leer ni apartar el archivo al abrirlo: <see cref="Guardar"/> no lo pisa.</summary>
+    public bool SoloLectura { get; }
+
     public AlmacenColecciones(string archivo)
     {
         _archivo = archivo;
-        Todas = ArchivoJson.Leer(archivo, () => new List<ColeccionInteligente>(), out var aviso);
+        Todas = ArchivoJson.Leer(archivo, () => new List<ColeccionInteligente>(), out var aviso, out var soloLectura);
         AvisoCarga = aviso;
+        SoloLectura = soloLectura;
     }
 
-    /// <summary>Devuelve "" si fue bien, o el motivo del fallo.</summary>
-    public string Guardar() => ArchivoJson.Escribir(_archivo, Todas);
+    /// <summary>Devuelve "" si fue bien, o el motivo del fallo. En solo lectura no escribe nada.</summary>
+    public string Guardar() => SoloLectura ? ArchivoJson.AvisoSoloLectura(_archivo) : ArchivoJson.Escribir(_archivo, Todas);
 }

@@ -204,12 +204,16 @@ public sealed class AlmacenBandeja
 
     public string AvisoCarga { get; }
 
+    /// <summary>No se pudo leer ni apartar el archivo al abrirlo: <see cref="Guardar"/> no lo pisa.</summary>
+    public bool SoloLectura { get; }
+
     public AlmacenBandeja(string archivo)
     {
         _archivo = archivo;
-        var leidas = ArchivoJson.Leer(archivo, () => new Dictionary<string, EntradaBandeja>(), out var aviso);
+        var leidas = ArchivoJson.Leer(archivo, () => new Dictionary<string, EntradaBandeja>(), out var aviso, out var soloLectura);
         _entradas = new Dictionary<string, EntradaBandeja>(leidas, StringComparer.OrdinalIgnoreCase);
         AvisoCarga = aviso;
+        SoloLectura = soloLectura;
     }
 
     /// <summary>La entrada de un archivo; si es la primera vez que se ve, la crea como recibida.</summary>
@@ -253,8 +257,8 @@ public sealed class AlmacenBandeja
         _ => "Preparada",
     };
 
-    /// <summary>Devuelve "" si fue bien, o el motivo del fallo.</summary>
-    public string Guardar() => ArchivoJson.Escribir(_archivo, _entradas);
+    /// <summary>Devuelve "" si fue bien, o el motivo del fallo. En solo lectura no escribe nada.</summary>
+    public string Guardar() => SoloLectura ? ArchivoJson.AvisoSoloLectura(_archivo) : ArchivoJson.Escribir(_archivo, _entradas);
 }
 
 /// <summary>Resultado de pasar un archivo de la bandeja a la biblioteca.</summary>
