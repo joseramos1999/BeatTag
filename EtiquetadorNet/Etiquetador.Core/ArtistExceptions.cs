@@ -79,7 +79,7 @@ public sealed class ArtistExceptions
     {
         if (string.IsNullOrEmpty(s)) return s ?? "";
         var outList = new List<string>();
-        foreach (var part in Regex.Split(s, @",\s*"))
+        foreach (var part in TextUtils.Rx(@",\s*").Split(s))
         {
             var p = part.Trim();
             if (p.Length == 0) continue;

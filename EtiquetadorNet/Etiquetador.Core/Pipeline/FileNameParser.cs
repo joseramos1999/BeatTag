@@ -13,7 +13,8 @@ public readonly record struct FileNameParseResult(string Base, string RawForOtro
 public static class FileNameParser
 {
     private const RegexOptions IC = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
-    private static string Rep(string s, string pat, string rep) => Regex.Replace(s, pat, rep, IC);
+    // Patrones fijos: van a la caché de TextUtils.Rx (ver allí la medición).
+    private static string Rep(string s, string pat, string rep) => TextUtils.Rx(pat, IC).Replace(s, rep);
 
     public static FileNameParseResult Parse(string fileName)
     {
@@ -25,7 +26,7 @@ public static class FileNameParser
         // webs, alias de quien lo subió- se quita como siempre. Antes se quitaban todos, y con
         // ellos «[Intro Clean]», «[Remix]» o «[Extended Mix]»: medido en 300 renombrados reales,
         // una intro o un remix acababa con nombre de tema original.
-        b = Regex.Replace(b, @"\[([^\]]*)\]", m => EsVersion(m.Groups[1].Value) ? $" ({m.Groups[1].Value.Trim()}) " : " ");
+        b = TextUtils.Rx(@"\[([^\]]*)\]").Replace(b, m => EsVersion(m.Groups[1].Value) ? $" ({m.Groups[1].Value.Trim()}) " : " ");
         b = Rep(b, @"\[[^\]]*\]", " ");
         b = Rep(b, @"\[[^\]]*$", " ");
         b = Rep(b, @"[\[\]]", " ");
@@ -43,8 +44,16 @@ public static class FileNameParser
         var rawForOtros = b;
         b = Rep(b, @"\s*\([^()]*$", " ");
         b = Rep(b, @"\s{2,}", " ").Trim();
-        b = Rep(b, @"\s*-\s*\d{1,2}\s*$", "");
-        b = Rep(b, @"\s+(?:vs\.?|x|&|feat\.?|ft\.?)\s*$", "");
+        // Copia numerada y conector colgando. Visto en una biblioteca real: «Bad Gyal - 44» se leía
+        // como título «Bad Gyal» sin artista y Deezer proponía otra canción, y «Nicky Jam - X»,
+        // «Britney Spears - 3» o «Anuel AA, Ñengo Flow, Sinfonico - 47» solo se salvaban por los
+        // tags. El número o la X que van justo tras el separador SON el título.
+        //  · «-1» pegado al número («Dime Si Te Vas Con El (Edit)-1», «… Zion Y Lennox -1») es
+        //    siempre la copia numerada: se quita como antes.
+        //  · « - 6» con espacios solo es copia si delante queda un «Artista - Título» completo.
+        b = Rep(b, @"\s*-\d{1,2}\s*$", "");
+        b = Rep(b, @"^(.+?\s[-–—]\s.+?)\s*-\s+\d{1,2}\s*$", "$1");
+        b = Rep(b, @"(?<![-–—]\s*)\s+(?:vs\.?|x|&|feat\.?|ft\.?)\s*$", "");
         b = Descriptors.CompleteTruncated(b);
         b = Rep(b, @"\s*[–—]\s*", " - ");
         b = Rep(b, @"_+\s*-\s*_+", " - ");
@@ -59,7 +68,7 @@ public static class FileNameParser
         else { fnArtist = ""; fnTitle = b.Trim(); }
 
         var qTitle = Descriptors.CleanTitle(fnTitle);
-        if (qTitle.Length == 0) qTitle = Regex.Replace(fnTitle, @"\([^)]*\)", "").Trim();
+        if (qTitle.Length == 0) qTitle = TextUtils.Rx(@"\([^)]*\)").Replace(fnTitle, "").Trim();
         if (qTitle.Length == 0) qTitle = fnTitle;
 
         return new FileNameParseResult(b, rawForOtros, fnArtist, fnTitle, qTitle);
@@ -73,8 +82,8 @@ public static class FileNameParser
     {
         var c = contenido.Trim();
         if (c.Length == 0) return false;
-        if (Regex.IsMatch(c, @"https?://|www\.|\.\w{2,4}\b", IC)) return false;
-        if (Regex.IsMatch(c, Descriptors.PoolRe, IC)) return false;
-        return Regex.IsMatch(c, Descriptors.DescRe);
+        if (TextUtils.Rx(@"https?://|www\.|\.\w{2,4}\b", IC).IsMatch(c)) return false;
+        if (TextUtils.Rx(Descriptors.PoolRe, IC).IsMatch(c)) return false;
+        return TextUtils.Rx(Descriptors.DescRe).IsMatch(c);
     }
 }

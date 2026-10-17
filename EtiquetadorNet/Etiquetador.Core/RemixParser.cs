@@ -39,6 +39,8 @@ public static class RemixParser
         @"open\s*show|quick\s*(?:hit|edit)|short\s*edit|" +
         @"re\s*edit|re\s*drum|vip\s*mix|dub\s*mix|club\s*edit|party\s*starter|" +
         @"remix\s*pack|rmx\s*pack|edit\s*pack|extended\s*mix|extended|" +
+        // «Mashboot» (mashup + bootleg): «FIEL (Ayuxx Mashboot)», «(DOUBLE & MATTIA CIPRIANI MASHBOOT)».
+        @"mash\s*-?\s*boot(?:leg)?|" +
         // simples
         @"remix|rmx|bootleg|rework|refix|mashup|flip|blend|vip|dub|edit|" +
         @"intro|outro|starter|transition|segue|redrum|loop|percapella|acapella|instrumental" +
@@ -54,46 +56,105 @@ public static class RemixParser
         "version", "mix", "edit", "remix", "bootleg", "rework", "flip", "blend", "vip", "dub",
     };
 
+    // Palabras de versión que pueden quedar pegadas al principio o al final del autor y nunca son
+    // parte de un nombre (ver Autor). Va aparte de Generic porque ahí están «DJ» o «The», que al borde
+    // sí forman parte del nombre («DJ Nano», «The Magician»). Tampoco están «Hype», «Dirty» o «Clean»:
+    // pueden ser el final de un nombre de verdad (James Hype, Born Dirty).
+    private static readonly HashSet<string> VersionAlBorde = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "extended", "instrumental", "acapella", "percapella", "aca", "intro", "outro", "starter",
+        "transition", "segue", "redrum", "version", "mix", "edit", "remix", "rmx", "bootleg", "rework",
+        "flip", "blend", "coro",
+    };
+
+    // Lo que, si es TODO lo que queda, describe la parte del tema y no a una persona:
+    // «(Coro Acapella Intro)», «(Break Out Acapella)».
+    private static readonly HashSet<string> NoEsAutor = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "coro", "in", "out", "break",
+    };
+
+    // Tipos de dos palabras que pueden quedar al final del autor cuando el tipo de la versión es
+    // otro: «Juankii Hype Intro» (de «… Hype Intro Acapella Out»), «Ahora Dice Acapella Break».
+    private const string TipoCompuestoAlFinal =
+        @"\s+(?:(?:hype|melodic|break|drop|short|long)\s*intro|aca(?:pella)?\s*(?:intro|outro|in|out|starter|break|vocals|studio)|intro\s*outro)$";
+
+    // Fin del nombre sin paréntesis: de más fiable a menos. Doble espacio (lo típico del pool:
+    // "Titulo  Editor Mashup"), luego guion, luego a pelo.
+    private static readonly string[] Colas =
+    {
+        $@"\s{{2,}}(?<who>[^\-–—\(\)\[\]]{{1,60}}?)\s+{KindRe}\s*$",
+        $@"[-–—]\s*(?<who>[^\-–—\(\)\[\]]{{1,60}}?)\s+{KindRe}\s*$",
+        // Con límite de palabra delante del tipo: sin él, «Firestarter» era «Fire» + «Starter» y
+        // «@SAMUVIP» era «@Samu» + «VIP».
+        $@"(?<who>[^\-–—\(\)\[\]]{{0,60}}?)\s*\b{KindRe}\s*$",
+    };
+
+    /// <summary>
+    /// Las versiones con autor que van entre paréntesis o corchetes, en el orden en que aparecen.
+    /// Sirve para conservarlas TODAS en el nombre propuesto: «CHEVERE (premium remix) (Davidmusic Slam
+    /// Acapella)» lleva dos firmas, y quedarse solo con una borraba la otra.
+    /// </summary>
+    public static IEnumerable<RemixInfo> ConAutor(string? text)
+        => TextUtils.Rx(@"[\(\[]([^)\]]{2,80})[\)\]]").Matches(text ?? "")
+               .Select(g => FromFragment(g.Groups[1].Value))
+               .Where(r => r.HasRemixer);
+
     /// <summary>Analiza un nombre de archivo o un título y devuelve el tipo de versión y su autor.</summary>
     public static RemixInfo Parse(string? text)
     {
+        foreach (var r in Candidates(text)) return r;
+        return RemixInfo.None;
+    }
+
+    /// <summary>
+    /// Todas las versiones que nombra el texto, de la que más probablemente es la del archivo a la
+    /// que menos. <see cref="Parse"/> se queda con la primera; quien ya sabe que esa la trae el
+    /// catálogo (FileProcessor) puede pasar a la siguiente.
+    ///
+    /// Entre paréntesis manda el ÚLTIMO que tenga autor: los pools añaden su edición al final del
+    /// nombre. Visto en una biblioteca real: «No Te Quieren Conmigo (Remix) (Miguel Roma Hype Intro)»
+    /// salía como «(Remix) (Hype Intro)», «Titanium (Remix) (Bayne Remix 128bpm)» como «Titanium
+    /// (Remix)», y «RITMO (Bad Boys For Life) (Steve Aoki Remix) (Yaniss X Greg Lassierra Remix)» se
+    /// quedaba con Steve Aoki, que ya traía el catálogo, y perdía la versión del archivo. Hasta 22
+    /// nombres de una tirada acababan sin el editor que los firma.
+    /// </summary>
+    public static IEnumerable<RemixInfo> Candidates(string? text)
+    {
         var s = (text ?? "").Trim();
-        if (s.Length == 0) return RemixInfo.None;
+        if (s.Length == 0) yield break;
 
         // 1) "Remix by X" / "Remixed by X" (explícito, el más fiable).
-        var m = Regex.Match(s, @"\b(?<kind>remix|rework|edit|bootleg|flip)(?:ed)?\s+by\s+(?<who>[^)\]\-–—]{2,60})", IC);
+        var m = TextUtils.Rx(@"\b(?<kind>remix|rework|edit|bootleg|flip)(?:ed)?\s+by\s+(?<who>[^)\]\-–—]{2,60})", IC).Match(s);
         if (m.Success)
         {
             var who = Clean(m.Groups["who"].Value);
-            if (who.Length > 0) return new RemixInfo(who, Norm(m.Groups["kind"].Value));
+            if (who.Length > 0) yield return new RemixInfo(who, Norm(m.Groups["kind"].Value));
         }
 
-        // 2) Entre paréntesis o corchetes: "(Tiesto Remix)", "[Pedro Cabrera Bootleg]".
-        foreach (Match g in Regex.Matches(s, @"[\(\[]([^)\]]{2,80})[\)\]]"))
-        {
-            var inner = g.Groups[1].Value;
-            var r = FromFragment(inner);
-            if (r.IsVersion) return r;
-        }
+        // 2) Entre paréntesis o corchetes: "(Tiesto Remix)", "[Pedro Cabrera Bootleg]". Primero los
+        //    que tienen autor, del último al primero; si ninguno lo tiene, el primero que sea versión.
+        var fragmentos = TextUtils.Rx(@"[\(\[]([^)\]]{2,80})[\)\]]").Matches(s)
+            .Select(g => FromFragment(g.Groups[1].Value))
+            .Where(r => r.IsVersion)
+            .ToList();
+        for (int i = fragmentos.Count - 1; i >= 0; i--)
+            if (fragmentos[i].HasRemixer) yield return fragmentos[i];
+        var sinAutor = fragmentos.FirstOrDefault(r => !r.HasRemixer);
+        if (sinAutor.IsVersion) yield return sinAutor;
 
-        // 3) Al final y sin paréntesis. Se prueban los separadores de más fiable a menos:
-        //    doble espacio (lo típico del pool: "Titulo  Editor Mashup"), luego guion, luego a pelo.
-        foreach (var pat in new[]
+        // 3) Al final y sin paréntesis. Antes se quita la morralla que los pools dejan detrás del
+        //    tipo: «Look At Me Now  Beauz Hard Techno Remix 154bpm» no casaba por el «154bpm» final.
+        var cola = TextUtils.Rx(@"(?:[\s\-–—]*(?:\b\d{2,3}(?:[.,]\d{1,2})?\s*bpm\b|\b\d{1,2}[AB]\b))+[\s\-–—]*$", IC).Replace(s, "");
+        foreach (var pat in Colas)
         {
-            $@"\s{{2,}}(?<who>[^\-–—\(\)\[\]]{{1,60}}?)\s+{KindRe}\s*$",
-            $@"[-–—]\s*(?<who>[^\-–—\(\)\[\]]{{1,60}}?)\s+{KindRe}\s*$",
-            $@"(?<who>[^\-–—\(\)\[\]]{{0,60}}?)\s*{KindRe}\s*$",
-        })
-        {
-            var tail = Regex.Match(s, pat, IC);
+            var tail = TextUtils.Rx(pat, IC).Match(cola);
             if (!tail.Success) continue;
             var who = Clean(tail.Groups["who"].Value);
-            if (who.Length > 0) return new RemixInfo(who, Norm(tail.Groups["kind"].Value));
+            if (who.Length > 0) { yield return new RemixInfo(who, Norm(tail.Groups["kind"].Value)); yield break; }
             // Sin autor reconocible: se devuelve solo el tipo (lo hace el último patrón).
-            if (pat.StartsWith("(?<who>")) return new RemixInfo("", Norm(tail.Groups["kind"].Value));
+            if (ReferenceEquals(pat, Colas[^1])) { yield return new RemixInfo("", Norm(tail.Groups["kind"].Value)); yield break; }
         }
-
-        return RemixInfo.None;
     }
 
     /// <summary>Analiza el contenido de un paréntesis: "Tiesto Remix" -> (Tiesto, Remix).</summary>
@@ -101,11 +162,11 @@ public static class RemixParser
     {
         // El tipo tiene que quedar al final, así que antes se quita la morralla que suelen dejar los
         // pools detrás: "(Myke Roldan Acapella Intro 145Bpm)" o "(… Intro Clean)".
-        var f = Regex.Replace(fragment, @"\b\d{2,3}\s*bpm\b", " ", IC);
-        f = Regex.Replace(f, @"\b\d{1,2}[AB]\b", " ");            // clave Camelot
-        f = Regex.Replace(f, @"\b(clean|dirty|explicit)\b", " ", IC);
-        f = Regex.Replace(f, @"\s{2,}", " ").Trim();
-        var m = Regex.Match(f, $@"^(?<who>.*?)\s*{KindRe}\s*$", IC);
+        var f = TextUtils.Rx(@"\b\d{2,3}\s*bpm\b", IC).Replace(fragment, " ");
+        f = TextUtils.Rx(@"\b\d{1,2}[AB]\b").Replace(f, " ");            // clave Camelot
+        f = TextUtils.Rx(@"\b(clean|dirty|explicit)\b", IC).Replace(f, " ");
+        f = TextUtils.Rx(@"\s{2,}").Replace(f, " ").Trim();
+        var m = TextUtils.Rx($@"^(?<who>.*?)\s*\b{KindRe}\s*$", IC).Match(f);
         if (!m.Success) return RemixInfo.None;
         return new RemixInfo(Clean(m.Groups["who"].Value), Norm(m.Groups["kind"].Value));
     }
@@ -114,9 +175,9 @@ public static class RemixParser
     private static string Clean(string? who)
     {
         var w = (who ?? "").Trim().Trim('-', '–', '—', ',', '&', '.', ' ');
-        w = Regex.Replace(w, @"\b\d{2,3}\s*bpm\b", " ", IC);   // "128 BPM"
-        w = Regex.Replace(w, @"\b\d{1,2}[AB]\b", " ");          // clave Camelot
-        w = Regex.Replace(w, @"\s{2,}", " ").Trim();
+        w = TextUtils.Rx(@"\b\d{2,3}\s*bpm\b", IC).Replace(w, " ");   // "128 BPM"
+        w = TextUtils.Rx(@"\b\d{1,2}[AB]\b").Replace(w, " ");          // clave Camelot
+        w = TextUtils.Rx(@"\s{2,}").Replace(w, " ").Trim();
         if (w.Length == 0) return "";
 
         var words = w.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -127,19 +188,60 @@ public static class RemixParser
 
         // Un record pool NO es el autor de la versión: "…- DJTOOLSVIP" o "(Latin Box Extended)"
         // no firman nada, solo son quien lo distribuye. Si no, acababan pegados al nombre.
-        if (Regex.IsMatch(w, Descriptors.PoolRe)) return "";
+        if (TextUtils.Rx(Descriptors.PoolRe).IsMatch(w)) return "";
 
         // "DJ" y "MC" van en mayúsculas (TitleCase los dejaría como "Dj"/"Mc").
         var t = TextUtils.TitleCase(w);
-        t = Regex.Replace(t, @"\bDj\b", "DJ");
-        t = Regex.Replace(t, @"\bMc\b(?=\s)", "MC");
+        t = TextUtils.Rx(@"\bDj\b").Replace(t, "DJ");
+        t = TextUtils.Rx(@"\bMc\b(?=\s)").Replace(t, "MC");
         return t;
     }
 
-    /// <summary>Unifica el nombre del tipo: rmx -> Remix, re edit -> Re-Edit…</summary>
+    /// <summary>
+    /// Solo la persona que firma la versión, sin las palabras de versión que el pool deja pegadas a su
+    /// nombre. Es lo que va al tag Remixer (TPE4): en el nombre de archivo se conserva el texto tal cual
+    /// lo escribió el pool, pero en una columna por la que se filtra y se ordena «Alex Torres Intro» y
+    /// «Alex Torres» serían dos editores distintos.
+    ///
+    /// Al preferir el último paréntesis con autor aparecían cosas como «(Intro, DJ Nev Intro
+    /// Acapella)» → «Intro, DJ Nev Intro», «(Saul Gallego Hype Intro, Extended)» → «Saul Gallego Hype
+    /// Intro» o «(Antonio Guevara Acapella Break Intro)» → «Antonio Guevara Acapella». Devuelve "" si
+    /// lo que queda no es el nombre de nadie («Coro», «Break Out»).
+    /// </summary>
+    public static string Autor(string? remixer)
+    {
+        var w = (remixer ?? "").Trim();
+        if (w.Length == 0) return "";
+
+        // Lista de descriptores delante, separada por comas («Intro, DJ Nev»): fuera.
+        var partes = w.Split(',').Select(p => p.Trim()).Where(p => p.Length > 0).ToList();
+        while (partes.Count > 1 && partes[0].Split(' ', StringSplitOptions.RemoveEmptyEntries).All(VersionAlBorde.Contains))
+            partes.RemoveAt(0);
+
+        // Palabras de versión detrás («DJ Nev Intro»). Los tipos compuestos van antes que las palabras
+        // sueltas para no dejar el «Hype» de «Hype Intro» colgando.
+        var trozos = string.Join(", ", partes).Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+        while (trozos.Count > 1)
+        {
+            var junto = string.Join(" ", trozos).TrimEnd(',', '.', '&');
+            var cola = TextUtils.Rx(TipoCompuestoAlFinal, IC).Match(junto);
+            if (cola.Success && cola.Index > 0) { trozos = junto[..cola.Index].Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList(); continue; }
+            if (VersionAlBorde.Contains(trozos[^1].Trim(',', '.', '&'))) { trozos.RemoveAt(trozos.Count - 1); continue; }
+            break;
+        }
+        w = string.Join(" ", trozos).Trim().Trim(',', '&', '-', ' ');
+        if (w.Length == 0) return "";
+
+        var palabras = w.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim('.', ',', '&')).ToList();
+        if (palabras.All(x => Generic.Contains(x) || NoEsAutor.Contains(x))) return "";
+        return w;
+    }
+
+    /// <summary>Unifica el nombre del tipo: rmx -> Remix, re edit -> Re-Edit, mash boot -> Mashboot…</summary>
     private static string Norm(string kind)
     {
-        var k = Regex.Replace(kind.Trim().ToLowerInvariant(), @"\s+", " ");
+        var k = TextUtils.Rx(@"\s+").Replace(kind.Trim().ToLowerInvariant(), " ");
+        if (TextUtils.Rx(@"^mash\s*-?\s*boot").IsMatch(k)) return "Mashboot";
         return k switch
         {
             "rmx" => "Remix",

@@ -17,11 +17,14 @@ public static class Descriptors
     // así que no va en esta lista: debe conservarse como autor de la versión.
 
     // Descriptores DJ reconocidos (equivalente a $DescRe). Lleva (?i) inline.
+    // «Mashboot» (mashup + bootleg) es como lo firman varios editores de pool: «FIEL (Ayuxx
+    // Mashboot)». Sin él, ni se conservaba como versión ni se reconocía como mezcla.
     public const string DescRe =
-        @"(?i)\b(" + AcapellaAbreviada + @"|remix|rmx|vip|bootleg|flip|rework|mashup|blend|redrum|extended(?:\s+mix)?|original(?:\s+[a-z]+)?\s+(?:mix|version)|club\s+mix|radio\s+edit|quick\s+(?:hit|edit)|short\s+edit|intro\s*-?\s*outro|hype\s+intro|melodic\s+intro|break\s+intro|acapella(?:\s+(?:in|out|intro|outro|studio|starter|break|vocals))?|aca\s*(?:in|out)|open\s+show|intro|outro|instrumental|transition|segue|starter|live(?:\s+edit)?|clean|dirty|edit|version|remaster(?:ed)?|dub|percapella|loop|hype)\b";
+        @"(?i)\b(" + AcapellaAbreviada + @"|remix|rmx|vip|bootleg|flip|rework|mashup|mash\s*-?\s*boot(?:leg)?|blend|redrum|extended(?:\s+mix)?|original(?:\s+[a-z]+)?\s+(?:mix|version)|club\s+mix|radio\s+edit|quick\s+(?:hit|edit)|short\s+edit|intro\s*-?\s*outro|hype\s+intro|melodic\s+intro|break\s+intro|acapella(?:\s+(?:in|out|intro|outro|studio|starter|break|vocals))?|aca\s*(?:in|out)|open\s+show|intro|outro|instrumental|transition|segue|starter|live(?:\s+edit)?|clean|dirty|edit|version|remaster(?:ed)?|dub|percapella|loop|hype)\b";
 
-    // Mirror de PowerShell -replace (case-insensitive por defecto).
-    private static string Rep(string s, string pat, string rep) => Regex.Replace(s, pat, rep, IC);
+    // Mirror de PowerShell -replace (case-insensitive por defecto). Los patrones son fijos y van a
+    // la caché de TextUtils.Rx (ver allí la medición).
+    private static string Rep(string s, string pat, string rep) => TextUtils.Rx(pat, IC).Replace(s, rep);
 
     /// <summary>Limpia artista/título para construir una query de búsqueda (quita adornos, BPM, feats, editores…).</summary>
     public static string CleanKeywords(string? s)
@@ -41,13 +44,13 @@ public static class Descriptors
         s = Rep(s, @"\b\d{2,3}\s*bpm\b", " ");
         s = Rep(s, @"\b\d{1,2}[AB]\b", " ");
         var s2 = Rep(s, @"\b\d{2,3}\b", " ");                            // quita números sueltos (BPM/pista)...
-        if (Regex.Replace(s2, @"[^\p{L}\d]", "").Length > 0) s = s2;     // ...salvo que dejara vacío: título numérico ("404")
+        if (TextUtils.Rx(@"[^\p{L}\d]").Replace(s2, "").Length > 0) s = s2;     // ...salvo que dejara vacío: título numérico ("404")
         s = Rep(s, "[,_/]", " ");
         // La "x" solo es separador de artistas cuando va SUELTA entre espacios ("Artista A x Artista B").
         // Con \b se comía la X de títulos como "X.O.X.O." (quedaba ".O. .O.") o "X" de Nicky Jam.
         // Además debe haber texto A AMBOS LADOS, o se llevaba por delante la X final de "Lil Nas X".
         s = Rep(s, @"(?<=\S\s)x(?=\s\S)", " ");
-        return Regex.Replace(s, @"\s+", " ").Trim();
+        return TextUtils.Rx(@"\s+").Replace(s, " ").Trim();
     }
 
     /// <summary>Query artista+título limpiando POR SEPARADO (el ft del artista no borra el título).</summary>
@@ -65,7 +68,7 @@ public static class Descriptors
     public static string BuildKwVerbatim(string? a, string? t)
     {
         var s = ((a ?? "").Trim() + " " + (t ?? "").Trim()).Trim();
-        return Regex.Replace(s, @"\s{2,}", " ");
+        return TextUtils.Rx(@"\s{2,}").Replace(s, " ");
     }
 
     /// <summary>Limpia un título para query: quita corchetes/paréntesis, descriptores, BPM y clean/dirty.</summary>
@@ -79,7 +82,7 @@ public static class Descriptors
         s = Rep(s, @"\b\d{1,3}\s*bpm\b", " ");
         s = Rep(s, @"\b\d{1,2}[AB]\b", " ");
         s = Rep(s, @"\b(clean|dirty)\b", " ");
-        return Regex.Replace(s, @"\s+", " ").Trim().Trim('-').Trim();
+        return TextUtils.Rx(@"\s+").Replace(s, " ").Trim().Trim('-').Trim();
     }
 
     /// <summary>Normaliza un título venido de la BD (separa descriptores pegados, quita coletillas de versión).</summary>
@@ -94,14 +97,49 @@ public static class Descriptors
         t = Rep(t, @"\s*[\(\[]\s*(?:main|radio|album|single)\s+version\s*[\)\]]", "");
         t = Rep(t, @"\s*[\(\[]\s*version\s*[\)\]]", "");
         t = Rep(t, @"\s*_\s*[a-z0-9]+\s*fm\b", "");
-        if (!Regex.IsMatch(orig, @"\b(live|vivo|directo|unplugged|sinf|en\s+vivo|en\s+directo)\b", IC))
+        var pideDirecto = TextUtils.Rx(@"\b(live|vivo|directo|unplugged|sinf|en\s+vivo|en\s+directo)\b", IC).IsMatch(orig);
+        if (!pideDirecto)
             t = Rep(t, @"\s*[\(\[][^\)\]]*\b(live|en vivo|en directo|vivo|unplugged|sinfonico|sinfónico)\b[^\)\]]*[\)\]]", "");
-        if (!Regex.IsMatch(orig, @"\bkaraoke\b", IC))
+        if (!TextUtils.Rx(@"\bkaraoke\b", IC).IsMatch(orig))
             t = Rep(t, @"\s*[\(\[][^\)\]]*karaoke[^\)\]]*[\)\]]", "");
-        if (!Regex.IsMatch(orig, @"\bdeluxe\b", IC))
+        if (!TextUtils.Rx(@"\bdeluxe\b", IC).IsMatch(orig))
             t = Rep(t, @"\s*[\(\[][^\)\]]*deluxe[^\)\]]*[\)\]]", "");
+        t = ColetillaTrasGuion(t, pideDirecto);
         t = Rep(t, "_", " ");
-        return Regex.Replace(t, @"\s{2,}", " ").Trim().Trim('-').Trim();
+        return TextUtils.Rx(@"\s{2,}").Replace(t, " ").Trim().Trim('-').Trim();
+    }
+
+    /// <summary>
+    /// La versión que el catálogo escribe tras un guion y no entre paréntesis, que es la convención
+    /// de Deezer y Spotify: «El Motorcito - Remix», «Poblado - Remix», «Song - Radio Edit»,
+    /// «Song - Remastered 2011».
+    ///
+    /// Visto en una biblioteca real: «Gusty DJ, Lolo OG, DobleP - El Motorcito - (Remix).mp3» y
+    /// «J Balvin, KAROL G, … - Poblado - (Remix).mp3». La limpieza de arriba solo miraba los
+    /// paréntesis, así que «- Remix» pasaba tal cual y luego se quedaba un guion colgando; además, al
+    /// releer «Artista - Título - (Remix)» el nombre se partía mal.
+    ///
+    /// Se trata igual que entre paréntesis: lo que allí se quita (remaster, «single version», «radio
+    /// edit», el directo no pedido…) se quita, y el resto de versiones pasa a ir entre paréntesis. Solo
+    /// la cola que nombra una versión: «Song - From "Barbie"» o «Part 1 - Intro» no se tocan.
+    /// </summary>
+    private static string ColetillaTrasGuion(string t, bool pideDirecto)
+    {
+        const string cola = @"\s+[-–—]\s+(?<v>(?:[^-–—()\[\]]|(?<=\S)-(?=\S)){1,60}?)\s*$";
+        var m = TextUtils.Rx(cola, IC).Match(t);
+        if (!m.Success) return t;
+        var v = m.Groups["v"].Value.Trim();
+        var antes = t[..m.Index];
+        if (antes.Trim().Length == 0) return t;
+
+        if (TextUtils.Rx(@"\bremaster", IC).IsMatch(v)
+            || TextUtils.Rx(@"^(?:bonus\s+track|(?:main|radio|album|single)\s+version|version|explicit|clean|radio\s+edit|mixed)$", IC).IsMatch(v))
+            return antes;
+        if (!pideDirecto && TextUtils.Rx(@"\b(?:live|en\s+vivo|en\s+directo|vivo|unplugged|sinf[oó]nico)\b", IC).IsMatch(v))
+            return antes;
+        if (TextUtils.Rx(@"\b(?:remix|rmx|mix|edit|version|rework|bootleg|flip|vip|dub|instrumental|acapella|extended|refix|re-?edit|acoustic|ac[uú]stic[oa]|live|en\s+vivo|en\s+directo)\b", IC).IsMatch(v))
+            return $"{antes} ({v})";
+        return t;
     }
 
     /// <summary>
@@ -139,7 +177,7 @@ public static class Descriptors
     {
         if (string.IsNullOrEmpty(s)) return s ?? "";
         var t = s.TrimEnd();
-        var m = Regex.Match(t, @"\(?\s*([A-Za-z]{4,})$");
+        var m = TextUtils.Rx(@"\(?\s*([A-Za-z]{4,})$").Match(t);
         if (m.Success)
         {
             var frag = m.Groups[1].Value.ToLowerInvariant();
@@ -166,12 +204,23 @@ public static class Descriptors
         return s;
     }
 
-    /// <summary>Extrae los descriptores DJ del nombre original que NO estén ya en el título (para el campo "otros").</summary>
-    public static string[] ExtractOtros(string? origBase, string? title)
+    /// <summary>
+    /// Extrae los descriptores DJ del nombre original que NO estén ya en el título (para el campo "otros").
+    ///
+    /// <paramref name="artistas"/>: nombres de artista que da el catálogo, cuyas palabras no cuentan
+    /// como descriptor fuera de paréntesis. <paramref name="artistaDelNombre"/>: el artista leído del
+    /// nombre de archivo, del que solo se descartan los descriptores que suelen formar parte de un
+    /// nombre (ver <see cref="SinArtistas"/>). Visto en una biblioteca real: «Born Dirty - Samba Sujo»
+    /// salía como «… - Samba Sujo (Dirty)», «James Hype - Ferrari (Remix)» como «… (Remix) (Hype)» (al
+    /// menos 8 propuestas así) y con Clean Bandit pasaría con «(Clean)».
+    /// </summary>
+    public static string[] ExtractOtros(string? origBase, string? title, IEnumerable<string?>? artistas = null,
+        string? artistaDelNombre = null)
     {
-        origBase ??= "";
+        origBase = SinArtistas(origBase, artistas);
+        if (!string.IsNullOrEmpty(artistaDelNombre)) origBase = SinArtistas(origBase, new[] { artistaDelNombre }, soloDebiles: true);
         var found = new List<string>();
-        foreach (Match m in Regex.Matches(origBase, DescRe))
+        foreach (Match m in TextUtils.Rx(DescRe).Matches(origBase))
             found.Add(TextUtils.TitleCase(m.Value));
         var nt = TextUtils.Nk(title);
         var seen = new HashSet<string>();
@@ -187,5 +236,73 @@ public static class Descriptors
             }
         }
         return outList.ToArray();
+    }
+
+    /// <summary>Lo que separa a varios intérpretes en un mismo campo.</summary>
+    private const string SeparaArtistas = @"\s*(?:,|;|&|\+|/|\s(?:x|y|and|vs\.?|feat\.?|ft\.?|featuring|con|with)\s)\s*";
+
+    /// <summary>
+    /// Descriptores que también son palabras corrientes en nombres de artista: Clean Bandit, Born
+    /// Dirty, James Hype, Live, Richie Loop, Manu Vip… Los demás («Remix», «Extended», «Intro»…) casi
+    /// nunca forman parte de un nombre y sí del título en los nombres invertidos del pool.
+    /// </summary>
+    private static readonly HashSet<string> DescriptoresDebiles = new(StringComparer.Ordinal)
+    {
+        "clean", "dirty", "hype", "live", "dub", "loop", "version", "vip", "flip", "blend", "starter", "segue",
+    };
+
+    /// <summary>
+    /// El texto con los descriptores que caen dentro de un nombre de artista tapados por espacios,
+    /// pero SOLO fuera de paréntesis y corchetes: ahí va la versión («(Clean)», «(Dirty)», «(Hype
+    /// Intro)») y eso sí es un descriptor aunque coincida con una palabra del artista. Se tapa con
+    /// espacios de la misma longitud para no mover nada de sitio.
+    ///
+    /// Cada campo se parte en intérpretes («Born Dirty, Diplo» → «Born Dirty», «Diplo») y de cada uno
+    /// se descarta lo que vaya entre paréntesis: en los nombres invertidos del pool la primera mitad
+    /// es el título con su versión («Behaviour (Extended Mix) - James Hype»).
+    ///
+    /// Con <paramref name="soloDebiles"/> solo se tapan los descriptores que suelen ser parte de un
+    /// nombre (<see cref="DescriptoresDebiles"/>). Es para el artista que se lee del nombre de archivo,
+    /// que en los nombres invertidos del pool es en realidad el título: en «Si Tu Te Vas Remix - Mora»
+    /// el «Remix» es la versión y no puede perderse.
+    /// </summary>
+    public static string SinArtistas(string? texto, IEnumerable<string?>? artistas, bool soloDebiles = false)
+    {
+        var s = texto ?? "";
+        if (s.Length == 0 || artistas == null) return s;
+
+        var nombres = artistas
+            .SelectMany(a => TextUtils.Rx(SeparaArtistas, IC).Split(a ?? ""))
+            .Select(n => TextUtils.Rx(@"\([^)]*\)?|\[[^\]]*\]?").Replace(n, " "))
+            .Select(n => TextUtils.Rx(@"\s+").Replace(n, " ").Trim().Trim(',', '-', '.', ' '))
+            .Where(n => TextUtils.Nk(n).Length >= 3)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(n => n.Length)
+            .ToList();
+        if (nombres.Count == 0) return s;
+
+        // Profundidad de paréntesis de cada posición. Tapar con espacios no cambia ningún paréntesis,
+        // así que basta con calcularla una vez.
+        var dentro = new bool[s.Length];
+        var nivel = 0;
+        for (int i = 0; i < s.Length; i++)
+        {
+            if (s[i] is '(' or '[') nivel++;
+            dentro[i] = nivel > 0;
+            if (s[i] is ')' or ']' && nivel > 0) nivel--;
+        }
+
+        var desc = TextUtils.Rx(DescRe);
+        string Tapar(Match m)
+            => dentro[m.Index] ? m.Value
+             : desc.Replace(m.Value, d => soloDebiles && !DescriptoresDebiles.Contains(TextUtils.Nk(d.Value)) ? d.Value : new string(' ', d.Length));
+
+        foreach (var n in nombres)
+        {
+            // Patrón que depende de los datos: Regex estático, nunca la caché de TextUtils.Rx.
+            var pat = @"(?<![\p{L}\p{N}])" + Regex.Escape(n).Replace(@"\ ", @"\s+") + @"(?![\p{L}\p{N}])";
+            s = Regex.Replace(s, pat, Tapar, IC);
+        }
+        return s;
     }
 }

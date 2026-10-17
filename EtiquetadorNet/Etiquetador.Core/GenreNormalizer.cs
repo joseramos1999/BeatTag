@@ -53,7 +53,7 @@ public static class GenreNormalizer
         if (string.IsNullOrWhiteSpace(raw)) return "";
         // Segmento principal si viene con separadores (Pop/Rock, "Hip-Hop; Rap"...)
         var first = raw;
-        foreach (var part in Regex.Split(raw, @"\s*[/;,|]\s*"))
+        foreach (var part in TextUtils.Rx(@"\s*[/;,|]\s*").Split(raw))
             if (!string.IsNullOrWhiteSpace(part)) { first = part.Trim(); break; }
 
         var key = Loose(first);
@@ -68,7 +68,7 @@ public static class GenreNormalizer
     private static string Loose(string s)
     {
         var d = TextUtils.RemoveDiacritics(s).ToLowerInvariant();
-        d = Regex.Replace(d, "[^a-z0-9& ]", " ");
-        return Regex.Replace(d, @"\s+", " ").Trim();
+        d = TextUtils.Rx("[^a-z0-9& ]").Replace(d, " ");
+        return TextUtils.Rx(@"\s+").Replace(d, " ").Trim();
     }
 }

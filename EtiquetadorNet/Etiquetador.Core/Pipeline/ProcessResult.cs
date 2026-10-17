@@ -29,6 +29,13 @@ public sealed class ProcessResult
     public string Genre { get; set; } = "";
     public string CoverUrl { get; set; } = "";
     public string Bpm { get; set; } = "";
+
+    /// <summary>
+    /// El BPM propuesto cuando sale del catálogo (no del nombre del archivo); vacío si no. Sirve para
+    /// no pisar con él el BPM que el archivo ya tiene, ni con «Sobrescribir» (ver Tagging). Si el
+    /// usuario cambia el BPM en la tabla, deja de coincidir y se escribe el suyo.
+    /// </summary>
+    public string BpmCatalogo { get; set; } = "";
     public bool Found { get; set; }
     public bool GenreOnly { get; set; }
     public string Source { get; set; } = "-";
@@ -62,6 +69,14 @@ public sealed class ProcessResult
     /// sin abrir el registro. Vacio si no hubo coincidencia de catalogo.
     /// </summary>
     public string Why { get; set; } = "";
+
+    /// <summary>
+    /// Por qué esta propuesta no debe aplicarse sin mirarla, o "" si no hay motivo. La rellenan
+    /// FileProcessor (lo que solo identificó una fuente de rescate) y <see cref="NombrePropuesto"/>
+    /// (huellas de una regla que ha fallado: guion colgando, título vacío…). La interfaz desmarca la
+    /// fila y enseña el motivo; el motivo va también al principio de <see cref="Why"/>.
+    /// </summary>
+    public string Revisar { get; set; } = "";
 
     public string FieldSrc { get; set; } = "";
 }

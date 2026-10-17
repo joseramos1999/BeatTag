@@ -368,7 +368,13 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
 
         var row = new PreviewRow { Result = r, Old = r.Old, Folder = t.Folder, Duration = t.Duration, Quality = t.Quality, Cambio = indice, Why = r.Why };
         row.UpdateFrom(r);
-        if (double.TryParse(r.Score, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sc) && sc < LowConfidence)
+        if (r.Revisar.Length > 0)
+        {
+            // Fuente de rescate o nombre con huellas de una regla fallida (ProcessResult.Revisar).
+            row.Apply = false;
+            row.RowStatus = "⚠ revisar: " + r.Revisar;
+        }
+        else if (double.TryParse(r.Score, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sc) && sc < LowConfidence)
         {
             row.Apply = false;
             row.RowStatus = "⚠ baja confianza — revisar";

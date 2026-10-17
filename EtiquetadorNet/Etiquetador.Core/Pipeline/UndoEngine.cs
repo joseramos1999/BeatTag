@@ -209,6 +209,9 @@ public sealed class UndoEngine
             case "Key":   // clave musical (importación de rekordbox)
                 if ((tag.InitialKey ?? "") == (fc.NewStr ?? "")) { tag.InitialKey = Empty(fc.OldStr); return (true, false); }
                 return (false, true);
+            case "Remixer":   // quién firma la versión (TPE4), lo escribe Tagging junto al título
+                if ((tag.RemixedBy ?? "") == (fc.NewStr ?? "")) { tag.RemixedBy = Empty(fc.OldStr); return (true, false); }
+                return (false, true);
             case "Artist":
                 if (SeqEq(tag.Performers, fc.NewArr)) { tag.Performers = (fc.OldArr ?? new()).ToArray(); return (true, false); }
                 return (false, true);

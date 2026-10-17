@@ -40,7 +40,7 @@ public static class YaCorrecta
         if (ta.Length == 0 || tt.Length == 0) return false;
 
         var nombre = Path.GetFileNameWithoutExtension(rutaArchivo);
-        var m = Regex.Match(nombre, @"^(.+?)\s+[-–]\s+(.+)$");
+        var m = TextUtils.Rx(@"^(.+?)\s+[-–]\s+(.+)$").Match(nombre);
         if (!m.Success) return false;
         if (RenombradoIa.PareceSucio(rutaArchivo)) return false;
 
