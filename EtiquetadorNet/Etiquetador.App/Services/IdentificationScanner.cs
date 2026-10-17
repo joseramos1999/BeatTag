@@ -231,6 +231,19 @@ public sealed class IdentificationScanner
         if (!gratisOn && !pagoOn)
             return new Resumen(0, 0, 0, 0, 0, "no hay ningún motor disponible: falta la clave de AcoustID y la de AudD");
 
+        // fpcalc se prepara UNA vez, antes de empezar (hallazgo T6). Si no se puede (la primera vez
+        // y sin conexión), no se sigue: cada canción contaría como «el gratuito no lo sabe» y, con
+        // el motor de pago activo, se pagaría en AudD lo que AcoustID habría reconocido gratis.
+        if (gratisOn)
+        {
+            try
+            {
+                if (await _huellas.EnsureFpcalcAsync(_http, ct).ConfigureAwait(false) == null)
+                    return new Resumen(0, 0, 0, 0, 0, "no se pudo preparar fpcalc, la herramienta que calcula la huella acústica; revisa la conexión y vuelve a intentarlo");
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return new Resumen(0, 0, 0, 0, 0, "", Cancelada: true); }
+        }
+
         _log?.Head($"Identificación: {pendientes.Count} por comprobar de {paths.Count}"
                  + $" · gratuito={(gratisOn ? "AcoustID" : "no")}"
                  + $" · pago={(pagoOn ? $"AudD (máx. {o.MaxPago})" : "no")}");

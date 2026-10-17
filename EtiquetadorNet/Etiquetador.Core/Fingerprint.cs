@@ -8,6 +8,12 @@ namespace Etiquetador.Core;
 public readonly record struct FingerprintResult(double Duration, string Fingerprint);
 
 /// <summary>
+/// Lo que dejó un programa externo al terminar: código de salida y lo que escribió. Si
+/// <paramref name="Colgado"/> es true, no terminó dentro del plazo y se le paró.
+/// </summary>
+public sealed record SalidaProceso(int Codigo, string Salida, string Errores, bool Colgado);
+
+/// <summary>
 /// Huella acústica con Chromaprint (fpcalc.exe). Reutiliza el fpcalc que ya descargó
 /// la app PowerShell en la carpeta lib compartida; si no está, lo descarga una vez.
 /// Port de Ensure-Fpcalc / Get-Fingerprint del .ps1.
@@ -35,6 +41,24 @@ public sealed class Fingerprint
 
     public Fingerprint(AppPaths paths, Logger? log = null) { _paths = paths; _log = log; }
 
+    /// <summary>
+    /// Pasado este tiempo, fpcalc está colgado y se le para. Una canción normal tarda uno o dos
+    /// segundos, así que solo se llega aquí si algo va mal; es el mismo límite que usa
+    /// FingerprintScanner. Antes no había ninguno: un archivo dañado que dejara a fpcalc sin
+    /// terminar paraba la pasada de Enriquecer en esa canción hasta que el usuario cancelaba.
+    /// </summary>
+    public TimeSpan TiempoLimite { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Una sola descarga de fpcalc a la vez en toda la aplicación. «Comprobar audio» identifica 4
+    /// canciones a la vez y, la primera vez en un equipo sin fpcalc, las 4 se ponían a descargar
+    /// al mismo fpcalc.zip y a descomprimir en la misma carpeta: las que perdían la carrera
+    /// fallaban por archivo en uso o porque otra les borraba la carpeta, y con el motor de pago
+    /// activo esas canciones acababan en AudD, pagando lo que AcoustID habría reconocido gratis.
+    /// Es estática porque la carpeta lib es una sola para todas las instancias.
+    /// </summary>
+    private static readonly SemaphoreSlim UnaDescarga = new(1, 1);
+
     /// <summary>Ruta del ejecutable. Fuera de Windows no lleva extensión, como todo en Unix.</summary>
     public string FpcalcPath => Path.Combine(_paths.LibDir, EsWindows ? "fpcalc.exe" : "fpcalc");
 
@@ -43,6 +67,24 @@ public sealed class Fingerprint
     {
         var exe = FpcalcPath;
         if (File.Exists(exe)) return exe;
+
+        await UnaDescarga.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // Mientras se esperaba el turno, otra llamada puede haberlo dejado listo.
+            if (File.Exists(exe)) return exe;
+            return await DescargarAsync(http, exe, ct).ConfigureAwait(false);
+        }
+        finally { UnaDescarga.Release(); }
+    }
+
+    private async Task<string?> DescargarAsync(HttpClient http, string exe, CancellationToken ct)
+    {
+        // Nombres propios de esta descarga: la carpeta lib la comparte la app PowerShell, y dos
+        // descargas nunca deben escribir en el mismo comprimido ni en la misma carpeta.
+        var unico = Guid.NewGuid().ToString("N")[..8];
+        var comprimido = Path.Combine(_paths.LibDir, "fpcalc-" + unico + (EsWindows ? ".zip" : ".tar.gz"));
+        var ex = Path.Combine(_paths.LibDir, "fpc-" + unico);
         try
         {
             if (!DownloadUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
@@ -50,7 +92,6 @@ public sealed class Fingerprint
 
             _log?.Log("Descargando Chromaprint (fpcalc, una sola vez)...");
             Directory.CreateDirectory(_paths.LibDir);
-            var comprimido = Path.Combine(_paths.LibDir, EsWindows ? "fpcalc.zip" : "fpcalc.tar.gz");
             var bytes = await http.GetByteArrayAsync(DownloadUrl, ct).ConfigureAwait(false);
             // Verifica el SHA-256 contra el checksum oficial conocido (no ejecutar una descarga manipulada).
             var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
@@ -60,8 +101,6 @@ public sealed class Fingerprint
                 return null;
             }
             await File.WriteAllBytesAsync(comprimido, bytes, ct).ConfigureAwait(false);
-            var ex = Path.Combine(_paths.LibDir, "fpc");
-            if (Directory.Exists(ex)) Directory.Delete(ex, true);
             Descomprimir(comprimido, ex);
 
             var nombre = EsWindows ? "fpcalc.exe" : "fpcalc";
@@ -73,10 +112,16 @@ public sealed class Fingerprint
                 if (!EsWindows) MarcarEjecutable(exe);
             }
             else _log?.Log("fpcalc: el archivo extraído no parece un ejecutable válido para este sistema; se descarta.", LogKind.Err);
-            try { File.Delete(comprimido); Directory.Delete(ex, true); } catch { }
             if (File.Exists(exe)) { _log?.Log("  fpcalc listo."); return exe; }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception e) { _log?.Log("No se pudo obtener fpcalc: " + e.Message, LogKind.No); }
+        finally
+        {
+            // Pase lo que pase, sin restos: antes, si fallaba a medias, el comprimido se quedaba.
+            try { if (File.Exists(comprimido)) File.Delete(comprimido); } catch { }
+            try { if (Directory.Exists(ex)) Directory.Delete(ex, true); } catch { }
+        }
         return null;
     }
 
@@ -149,28 +194,22 @@ public sealed class Fingerprint
         if (fpcalc == null) { _log?.Detail("      huella: fpcalc no disponible"); return null; }
         try
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName = fpcalc,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
+            var psi = new ProcessStartInfo { FileName = fpcalc };
             psi.ArgumentList.Add("-json");
             psi.ArgumentList.Add(path);
-            using var proc = Process.Start(psi);
-            if (proc == null) { _log?.Detail("      huella: no se pudo arrancar fpcalc"); return null; }
-            // Leer stdout Y stderr en paralelo: si no se vacía stderr, fpcalc puede bloquearse al llenar el búfer.
-            var outTask = proc.StandardOutput.ReadToEndAsync(ct);
-            var errTask = proc.StandardError.ReadToEndAsync(ct);
-            await proc.WaitForExitAsync(ct).ConfigureAwait(false);
-            var outText = await outTask.ConfigureAwait(false);
-            var errText = await errTask.ConfigureAwait(false);
+            var r = await EjecutarConLimiteAsync(psi, TiempoLimite, ct).ConfigureAwait(false);
+            if (r == null) { _log?.Detail("      huella: no se pudo arrancar fpcalc"); return null; }
+            if (r.Colgado)
+            {
+                _log?.Detail($"      huella: fpcalc no respondió en {TiempoLimite.TotalSeconds:0} s y se detuvo · {Path.GetFileName(path)}");
+                return null;
+            }
+            var outText = r.Salida;
+            var errText = r.Errores;
             if (string.IsNullOrWhiteSpace(outText))
             {
                 // Causa habitual: audio ilegible o dañado. fpcalc lo explica en stderr.
-                _log?.Detail($"      huella: fpcalc no devolvió nada (código {proc.ExitCode})"
+                _log?.Detail($"      huella: fpcalc no devolvió nada (código {r.Codigo})"
                            + (string.IsNullOrWhiteSpace(errText) ? "" : $" · {Corto(errText)}"));
                 return null;
             }
@@ -182,5 +221,48 @@ public sealed class Fingerprint
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception e) { _log?.Detail($"      huella: fallo al calcularla · {e.Message}"); return null; }
+    }
+
+    /// <summary>
+    /// Ejecuta un programa de consola con un plazo máximo y devuelve lo que escribió. Si no termina
+    /// a tiempo, o si se cancela, se mata el proceso con todo lo que haya lanzado: un fpcalc colgado
+    /// no puede quedarse vivo ni parar la pasada. Al vencer el plazo devuelve Colgado = true; si lo
+    /// canceló quien llama, lanza OperationCanceledException. null si el programa no arrancó.
+    ///
+    /// Las dos salidas se vacían siempre y sin token: si se dejaran de leer al cancelar, el programa
+    /// se bloquearía al llenar la tubería y ya no terminaría nunca por sí solo.
+    /// </summary>
+    public static async Task<SalidaProceso?> EjecutarConLimiteAsync(ProcessStartInfo psi, TimeSpan limite, CancellationToken ct = default)
+    {
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.UseShellExecute = false;
+        psi.CreateNoWindow = true;
+
+        using var proc = Process.Start(psi);
+        if (proc == null) return null;
+
+        var outTask = proc.StandardOutput.ReadToEndAsync();
+        var errTask = proc.StandardError.ReadToEndAsync();
+
+        using var plazo = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        plazo.CancelAfter(limite);
+        try
+        {
+            await proc.WaitForExitAsync(plazo.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            try { proc.Kill(entireProcessTree: true); } catch { /* ya había terminado */ }
+            // Muerto el proceso se cierran sus tuberías y las lecturas acaban; se espera un poco a
+            // que lo hagan para no dejar nada a medias.
+            try { await Task.WhenAll(outTask, errTask).WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); } catch { }
+            ct.ThrowIfCancellationRequested();
+            return new SalidaProceso(-1, "", "", Colgado: true);
+        }
+
+        var salida = await outTask.ConfigureAwait(false);
+        var errores = await errTask.ConfigureAwait(false);
+        return new SalidaProceso(proc.ExitCode, salida, errores, Colgado: false);
     }
 }
