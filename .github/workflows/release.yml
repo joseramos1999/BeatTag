@@ -5,24 +5,64 @@ name: Release
 # Lo que se adjunta a una Release SÍ se descarga con un enlace directo, sin cuenta de GitHub ni
 # iniciar sesión: es la forma de pasarle la aplicación a alguien. Los artefactos de la CI, en
 # cambio, solo los puede bajar quien tenga sesión iniciada.
+#
+# Seguridad de la cadena de publicación:
+#   - Permisos mínimos: todo el flujo solo LEE el repositorio. Los trabajos que compilan ejecutan
+#     código de paquetes de terceros (coverlet, las tareas de compilación de Avalonia…) y no tienen
+#     por qué poder escribir en él ni tocar los adjuntos de una Release. Solo «publicar» escribe.
+#   - Acciones fijadas por commit (con su versión al lado): una etiqueta como «v4» se puede mover
+#     a otro código sin que aquí cambie nada.
+#   - Se publican las sumas SHA-256 de lo que se adjunta, comprobadas contra las que calculó cada
+#     trabajo al compilar: los binarios no están firmados y es la forma de verificar la descarga.
+#   - La etiqueta tiene que coincidir con AppInfo.Version: de ahí sacan la versión el .exe y el .app.
 on:
   push:
     tags: [ 'v*' ]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  version:
+    name: Comprobar la versión
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # Empujar v1.9.3 con AppInfo en 1.9.2 publicaba una Release cuyo .exe y .app decían 1.9.2.
+      - name: La etiqueta coincide con AppInfo.Version
+        shell: bash
+        run: |
+          etiqueta="${GITHUB_REF_NAME#v}"
+          version=$(grep -oE 'Version = "[0-9]+\.[0-9]+\.[0-9]+"' EtiquetadorNet/Etiquetador.Core/AppInfo.cs \
+                    | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
+          if [ -z "$version" ]; then
+            echo "::error title=Versión no encontrada::No se pudo leer la versión de EtiquetadorNet/Etiquetador.Core/AppInfo.cs"
+            exit 1
+          fi
+          if [ "$etiqueta" != "$version" ]; then
+            echo "::error title=Versión desalineada::La etiqueta $GITHUB_REF_NAME no coincide con AppInfo.Version ($version). Cambia la versión en AppInfo.cs o corrige la etiqueta."
+            exit 1
+          fi
+          echo "Versión $version"
+
   windows:
+    needs: version
     runs-on: windows-latest
+    outputs:
+      sha256: ${{ steps.suma.outputs.sha256 }}
     defaults:
       run:
         working-directory: EtiquetadorNet
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: '9.0.x'
 
@@ -36,22 +76,35 @@ jobs:
           -p:PublishSingleFile=true
           -o publicado
 
-      - uses: actions/upload-artifact@v4
+      - name: Suma SHA-256
+        id: suma
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash publicado/BeatTag.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "sha256=$h" >> $env:GITHUB_OUTPUT
+          "BeatTag.exe  $h"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows
           path: EtiquetadorNet/publicado/BeatTag.exe
           if-no-files-found: error
 
   macos:
+    needs: version
     runs-on: macos-latest
+    outputs:
+      sha256: ${{ steps.suma.outputs.sha256 }}
     defaults:
       run:
         working-directory: EtiquetadorNet
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: '9.0.x'
 
@@ -64,7 +117,15 @@ jobs:
         shell: bash
         run: ../scripts/empaquetar-macos.sh
 
-      - uses: actions/upload-artifact@v4
+      - name: Suma SHA-256
+        id: suma
+        shell: bash
+        run: |
+          h=$(shasum -a 256 ../BeatTag-macos-universal.tar.gz | cut -d' ' -f1)
+          echo "sha256=$h" >> "$GITHUB_OUTPUT"
+          echo "BeatTag-macos-universal.tar.gz  $h"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: macos
           path: BeatTag-macos-universal.tar.gz
@@ -73,26 +134,62 @@ jobs:
   publicar:
     needs: [ windows, macos ]
     runs-on: ubuntu-latest
+    # El único trabajo que escribe: crea la Release y sube los adjuntos.
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: entregas
 
       - name: Ver qué se va a publicar
         run: find entregas -type f -exec ls -lh {} \;
 
+      # Lo que se publica tiene que ser exactamente lo que compiló cada trabajo.
+      - name: Sumas SHA-256
+        env:
+          SHA_WINDOWS: ${{ needs.windows.outputs.sha256 }}
+          SHA_MACOS: ${{ needs.macos.outputs.sha256 }}
+        run: |
+          ( cd entregas/windows && sha256sum BeatTag.exe ) > entregas/SHA256SUMS.txt
+          ( cd entregas/macos && sha256sum BeatTag-macos-universal.tar.gz ) >> entregas/SHA256SUMS.txt
+          cat entregas/SHA256SUMS.txt
+          if ! grep -qxF "$SHA_WINDOWS  BeatTag.exe" entregas/SHA256SUMS.txt; then
+            echo "::error title=Suma distinta::BeatTag.exe no coincide con la suma calculada al compilarlo"
+            exit 1
+          fi
+          if ! grep -qxF "$SHA_MACOS  BeatTag-macos-universal.tar.gz" entregas/SHA256SUMS.txt; then
+            echo "::error title=Suma distinta::BeatTag-macos-universal.tar.gz no coincide con la suma calculada al compilarlo"
+            exit 1
+          fi
+          {
+            echo "### SHA-256"
+            echo '```'
+            cat entregas/SHA256SUMS.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Crear la Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             entregas/windows/BeatTag.exe
             entregas/macos/BeatTag-macos-universal.tar.gz
+            entregas/SHA256SUMS.txt
           generate_release_notes: true
           body: |
             ## Descargas
 
             - **Windows**: `BeatTag.exe` — un solo archivo, no necesita instalación.
             - **macOS**: `BeatTag-macos-universal.tar.gz` — universal (Apple Silicon e Intel).
+            - `SHA256SUMS.txt` — sumas para comprobar que la descarga es la que compiló GitHub.
+
+            ### Comprobar la descarga
+
+            Windows (PowerShell): `Get-FileHash BeatTag.exe -Algorithm SHA256`
+            macOS (Terminal): `shasum -a 256 BeatTag-macos-universal.tar.gz`
+
+            El resultado tiene que coincidir con la línea correspondiente de `SHA256SUMS.txt`.
 
             ### Primera vez en macOS
 
