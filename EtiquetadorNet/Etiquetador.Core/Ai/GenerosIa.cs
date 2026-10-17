@@ -88,9 +88,19 @@ public static class GenerosIa
         return NoGenero.IsMatch(s) || Pool.IsMatch(s);
     }
 
+    /// <summary>Los mismos separadores con los que <see cref="GenreNormalizer.Canonical"/> parte una lista de géneros.</summary>
+    private static readonly Regex SeparadorGeneros = new(@"\s*[/;,|]\s*");
+
+    private static List<string> Segmentos(string valor)
+        => SeparadorGeneros.Split(valor).Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+
+    /// <summary>El valor lista varios géneros: «Rap; Hip Hop; Latino», «Pop/Rock».</summary>
+    public static bool EsLista(string valor) => Segmentos(valor).Count > 1;
+
     /// <summary>Lo que proponen las reglas, sin IA. <see cref="OrigenGenero.SinCambio"/> si no saben qué hacer.</summary>
     public static PropuestaGenero PorReglas(string original, int canciones)
     {
+        if (EsLista(original)) return PorReglasLista(original, canciones);
         if (NoEsGenero(original)) return new PropuestaGenero(original, canciones, "", OrigenGenero.NoEsGenero);
         // Solo cuenta como regla si lleva a un nombre que el normalizador CONOCE. Para lo demás,
         // Canonical() solo pone mayúsculas («Latijnse muziek» → «Latijnse Muziek»): reescribir las
@@ -103,6 +113,45 @@ public static class GenerosIa
         if (!string.Equals(original.Trim(), original, StringComparison.Ordinal))
             return new PropuestaGenero(original, canciones, original.Trim(), OrigenGenero.Regla);
         return new PropuestaGenero(original, canciones, original, OrigenGenero.SinCambio);
+    }
+
+    /// <summary>
+    /// Una lista de géneros se unifica género a género, y la lista se conserva.
+    ///
+    /// Antes se pasaba entera por <see cref="GenreNormalizer.Canonical"/>, que se queda con el
+    /// PRIMERO, y salía como regla fiable, marcada por defecto. MEDIDO en una biblioteca real: de
+    /// 159 canciones con varios géneros, unas 21 perdían uno de verdad al aplicar lo marcado
+    /// («Reggaeton; Latino» → «Reggaeton», «Rap; Hip Hop; Latino» → «Hip Hop»).
+    ///
+    /// Solo se quitan los sinónimos repetidos («Rap; Hip Hop» → «Hip Hop», que no pierde nada) y lo
+    /// que no es un género («Pop; z1.fm» → «Pop»). Si no queda nada que cambiar, no se propone nada.
+    /// </summary>
+    private static PropuestaGenero PorReglasLista(string original, int canciones)
+    {
+        var segmentos = Segmentos(original);
+        var quedan = new List<string>();
+        foreach (var s in segmentos)
+        {
+            // Una sola letra no es un género: así «n/a» sigue sin serlo aunque tenga una barra.
+            if (NoEsGenero(s) || s.Count(char.IsLetter) < 2) continue;
+            var canonico = GenreNormalizer.Canonical(s);
+            var nombre = GenreNormalizer.Conocidos.Contains(canonico, StringComparer.Ordinal) ? canonico : s;
+            if (!quedan.Contains(nombre, StringComparer.OrdinalIgnoreCase)) quedan.Add(nombre);
+        }
+
+        if (quedan.Count == 0) return new PropuestaGenero(original, canciones, "", OrigenGenero.NoEsGenero);
+        if (quedan.SequenceEqual(segmentos, StringComparer.Ordinal))
+            return new PropuestaGenero(original, canciones, original, OrigenGenero.SinCambio);
+
+        // Con el mismo separador que traía: «;» sigue siendo «; », «/» sigue siendo «/».
+        var separador = Regex.Match(original, @"[/;,|]").Value switch
+        {
+            ";" => "; ",
+            "," => ", ",
+            "|" => " | ",
+            _ => "/",
+        };
+        return new PropuestaGenero(original, canciones, string.Join(separador, quedan), OrigenGenero.Regla);
     }
 
     /// <summary>
@@ -119,7 +168,8 @@ public static class GenerosIa
         var umbral = Math.Max(MinimoParaDestino, (int)Math.Ceiling(total * ProporcionParaDestino));
         var conocidos = new HashSet<string>(GenreNormalizer.Conocidos, StringComparer.OrdinalIgnoreCase);
 
-        return propuestas.Where(p => p.Origen != OrigenGenero.NoEsGenero)
+        // Una lista («Hip Hop; Latino») no es un destino: es a donde no hay que llevar un género suelto.
+        return propuestas.Where(p => p.Origen != OrigenGenero.NoEsGenero && !EsLista(p.Propuesto))
                          .GroupBy(p => p.Propuesto, StringComparer.OrdinalIgnoreCase)
                          .Where(g => conocidos.Contains(g.Key) || g.Sum(p => p.Canciones) >= umbral)
                          .Select(g => g.OrderByDescending(p => p.Canciones).First().Propuesto)
@@ -131,11 +181,15 @@ public static class GenerosIa
     /// Los que se le preguntan a la IA: los que las reglas dejaron igual y no son un nombre que el
     /// normalizador ya conozca. Un género frecuente también se pregunta («Latin» puede ser «Latino»):
     /// si la IA no ve un equivalente claro, lo devuelve igual y no cambia nada.
+    ///
+    /// Las listas de géneros no se preguntan: la IA solo puede contestar UNO de los destinos, así que
+    /// lo único que podría hacer con «Pop; Latino» es quitarle uno de los dos.
     /// </summary>
     public static IReadOnlyList<string> ParaIa(IEnumerable<PropuestaGenero> propuestas)
     {
         var conocidos = new HashSet<string>(GenreNormalizer.Conocidos, StringComparer.OrdinalIgnoreCase);
-        return propuestas.Where(p => p.Origen == OrigenGenero.SinCambio && !conocidos.Contains(p.Original.Trim()))
+        return propuestas.Where(p => p.Origen == OrigenGenero.SinCambio && !conocidos.Contains(p.Original.Trim())
+                                     && !EsLista(p.Original))
                          .Select(p => p.Original).ToList();
     }
 
