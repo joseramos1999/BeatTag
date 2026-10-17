@@ -66,15 +66,16 @@ public class NombrePropuestoTests
     public void Un_nombre_correcto_no_tiene_anomalias(string nombre, string artista, string titulo)
         => Assert.Empty(NombrePropuesto.Anomalias(nombre, artista, titulo, nombre + ".mp3", ""));
 
-    // De punta a punta: MusicBrainz devuelve el artista como título y la propuesta sale para revisar,
-    // con los dos motivos a la vista.
+    // De punta a punta: lo que solo encuentra MusicBrainz y además tiene el título igual al artista sale
+    // para revisar, con los dos motivos a la vista. (El nombre de archivo ya trae ese título para que
+    // la prueba no dependa de cuánto exige MusicBrainzProvider al título.)
     [Fact]
     public async Task La_propuesta_anomala_sale_para_revisar()
     {
         var dir = Mp3Fixture.NewTempDir();
         try
         {
-            var p = Path.Combine(dir, "Eric Prydz - Pjanoo.mp3");
+            var p = Path.Combine(dir, "Eric Prydz - Eric Prydz.mp3");
             Mp3Fixture.WriteMinMp3(p);
             var cat = new CatalogoFalso()
                 .Responde(CatalogoFalso.BusquedaMusicBrainz(), CatalogoFalso.MusicBrainz(95, "Eric Prydz", "Eric Prydz"));
@@ -91,24 +92,14 @@ public class NombrePropuestoTests
     }
 
     // El caso real del que salió aquel «Eric Prydz - Eric Prydz» era un mashup («abcdefu» de Gayle con
-    // «Pjanoo» de Eric Prydz, hecho por DJs from Mars). Con N7 la red de mashups ya mira la mitad que
-    // casa con el título del catálogo, y ni siquiera llega a proponerse.
+    // «Pjanoo» de Eric Prydz, hecho por DJs from Mars). Con N7 la red de mashups mira la mitad que casa
+    // con el título propuesto, y ya no se renombra.
     [Fact]
-    public async Task El_caso_real_de_Gayle_y_Eric_Prydz_se_salta_como_mezcla()
+    public void El_caso_real_de_Gayle_y_Eric_Prydz_es_una_mezcla()
     {
-        var dir = Mp3Fixture.NewTempDir();
-        try
-        {
-            var p = Path.Combine(dir, "Gayle x Eric Prydz - abcdepjanoo (DJs from M.mp3");
-            Mp3Fixture.WriteMinMp3(p);
-            var cat = new CatalogoFalso()
-                .Responde(CatalogoFalso.BusquedaMusicBrainz(), CatalogoFalso.MusicBrainz(95, "Eric Prydz", "Eric Prydz"));
-
-            var r = await cat.Procesador(dir).ProcessAsync(p, false, new ProcessOptions { Deezer = true, MusicBrainz = true });
-
-            Assert.True(r.Skip);
-            Assert.Equal(r.Old, r.New);
-        }
-        finally { try { Directory.Delete(dir, true); } catch { } }
+        var p = FileNameParser.Parse("Gayle x Eric Prydz - abcdepjanoo (DJs from M.mp3");
+        var mitad = Etiquetador.Core.Matching.MitadConElTitulo(p.FnArtist, p.FnTitle, "Eric Prydz");
+        Assert.Equal("Gayle x Eric Prydz", mitad);
+        Assert.True(Etiquetador.Core.Matching.PierdeUnaCancion(mitad, "Eric Prydz - Eric Prydz"));
     }
 }

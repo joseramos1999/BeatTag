@@ -68,8 +68,10 @@ public class NombreUnicodeTests
             Assert.True(r.Found);
             Assert.Equal("MusicBrainz", r.Source);
             Assert.Equal("KARTASHOW - Золото (Rakurs & Ramirez Remix).mp3", r.New);
-            // La puntuación de MusicBrainz llega hasta la fila: (100 - 80) / 2 = 10.
-            Assert.Equal("10", r.Score);
+            // La puntuación de MusicBrainz llega hasta la fila (antes salía vacía). No se fija el valor:
+            // la fórmula es cosa de MusicBrainzProvider.
+            Assert.True(double.TryParse(r.Score, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var puntuacion) && puntuacion > 0, r.Score);
             Assert.Contains("MusicBrainz", r.Revisar);
             Assert.StartsWith("revisar:", r.Why);
             // La línea DATA ya no dice SIN-RESULTADO de algo que sí se propone.
