@@ -73,11 +73,9 @@ public partial class PlaylistViewModel : ListaFrenteBibliotecaViewModel
 
             var tengo = Cruzar(lista.Pistas);
             Status = $"«{lista.Nombre}» ({lista.Plataforma}): {Rows.Count} canciones. {Resumen}. Faltan {Rows.Count - tengo}."
-                   + (lista.Recortada
-                       ? $" Spotify solo deja leer las {PlaylistProvider.LimiteSpotify} primeras canciones de una lista: si tiene más, las demás no aparecen."
-                       : "");
+                   + (lista.Recortada ? " " + lista.Aviso : "");
             _engine.Logger.Sum($"Playlists «{lista.Nombre}» ({lista.Plataforma}): tienes {tengo} de {Rows.Count}"
-                             + (lista.Recortada ? " (Spotify: solo las 100 primeras)" : ""));
+                             + (lista.Recortada ? $" (incompleta: {lista.Aviso})" : ""));
         }
         catch (OperationCanceledException) { Status = "Consulta cancelada."; }
         catch (Exception e) { Status = "No se pudo leer la lista: " + e.Message; }

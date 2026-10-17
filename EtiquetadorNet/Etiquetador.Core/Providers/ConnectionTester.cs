@@ -44,7 +44,9 @@ public sealed class ConnectionTester
         var id = cfg.SpotifyId.Trim(); var sec = cfg.SpotifySecret.Trim();
         if (id.Length > 0 && sec.Length > 0)
         {
-            var tok = await _sp.GetTokenAsync(id, sec, ct);
+            // Siempre un token NUEVO: comprobar con el guardado decía «OK» aunque las credenciales
+            // recién escritas en Ajustes estuvieran mal copiadas.
+            var tok = await _sp.GetTokenAsync(id, sec, ct, forzarNuevo: true);
             if (tok != null)
             {
                 var r = await _api.GetAsync($"https://api.spotify.com/v1/search?type=track&limit=1&q={TextUtils.UrlEnc("Bad Bunny Titi")}", new Dictionary<string, string> { ["Authorization"] = "Bearer " + tok }, 0, ct, useCache: false);

@@ -45,7 +45,7 @@ public sealed class CandidateFinder
 
         if (deezer)
         {
-            var r = await _api.GetAsync($"https://api.deezer.com/search?q={TextUtils.UrlEnc(kw)}&limit=12", null, 350, ct).ConfigureAwait(false);
+            var r = await _api.GetAsync($"https://api.deezer.com/search?q={TextUtils.UrlEnc(kw)}&limit=12", ct: ct).ConfigureAwait(false);
             foreach (var x in J.A(J.P(r, "data")) ?? new())
             {
                 var t = J.S(J.P(x, "title"));
@@ -58,7 +58,7 @@ public sealed class CandidateFinder
 
         if (itunes)
         {
-            var r = await _api.GetAsync($"https://itunes.apple.com/search?term={TextUtils.UrlEnc(kw)}&entity=song&limit=12", null, 200, ct).ConfigureAwait(false);
+            var r = await _api.GetAsync($"https://itunes.apple.com/search?term={TextUtils.UrlEnc(kw)}&entity=song&limit=12", ct: ct).ConfigureAwait(false);
             foreach (var x in J.A(J.P(r, "results")) ?? new())
             {
                 var t = J.S(J.P(x, "trackName"));

@@ -47,6 +47,5 @@ public static class PlaylistLinkParser
     /// Un enlace corto de los que dan los botones «Compartir» de las aplicaciones móviles
     /// (link.deezer.com, deezer.page.link, spotify.link). No dice a qué lista apunta hasta seguirlo.
     /// </summary>
-    public static bool EsCorto(string? texto)
-        => Regex.IsMatch((texto ?? "").Trim(), @"^(?:https?://)?(?:link\.deezer\.com|deezer\.page\.link|spotify\.link|spotify\.app\.link)/\S+$", IC);
+    public static bool EsCorto(string? texto) => EnlaceCorto.Es(texto);
 }

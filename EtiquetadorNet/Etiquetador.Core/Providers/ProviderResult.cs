@@ -24,4 +24,11 @@ public sealed record ProviderResult
     /// permite juzgar una propuesta dudosa sin salir de la aplicacion.
     /// </summary>
     public string Why { get; init; } = "";
+
+    /// <summary>
+    /// Solo Discogs: el género sale de OTRO disco del mismo artista, no de esta canción. Vale para
+    /// rellenar el hueco si ninguna otra fuente da género, pero no para pisar el de Deezer,
+    /// Spotify o iTunes.
+    /// </summary>
+    public bool SoloArtista { get; init; }
 }

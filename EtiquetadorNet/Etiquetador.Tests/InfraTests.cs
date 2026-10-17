@@ -50,15 +50,23 @@ public class InfraTests
     public void Dpapi_texto_en_claro_se_devuelve_tal_cual()   // config heredada sin cifrar
         => Assert.Equal("no-es-hex-dpapi", Dpapi.Unprotect("no-es-hex-dpapi"));
 
-    // --- InferThrottle ---
+    // --- Límite por servidor ---
+    // Antes era InferThrottle: una espera FIJA antes de cada petición (Deezer 350 ms, Discogs
+    // 1000 ms…), se hubiera esperado ya o no. Se sustituyó por un limitador real con los límites
+    // que publica cada servicio (ver ApiClient.LimitePara y CatalogosLimitadorTests), así que la
+    // prueba comprueba ahora esos límites: N peticiones cada tantos milisegundos.
     [Theory]
-    [InlineData("https://musicbrainz.org/ws/2/recording?x", 1100)]
-    [InlineData("https://api.discogs.com/database/search?q=x", 1000)]
-    [InlineData("https://api.deezer.com/search?q=x", 350)]
-    [InlineData("https://api.spotify.com/v1/search?q=x", 150)]
-    [InlineData("https://itunes.apple.com/search?term=x", 200)]
-    public void InferThrottle_por_dominio(string url, int expected)
-        => Assert.Equal(expected, ApiClient.InferThrottle(url));
+    [InlineData("https://musicbrainz.org/ws/2/recording?x", 1, 1100)]
+    [InlineData("https://api.deezer.com/search?q=x", 45, 5000)]
+    [InlineData("https://api.spotify.com/v1/search?q=x", 1, 150)]
+    [InlineData("https://itunes.apple.com/search?term=x", 20, 60000)]
+    [InlineData("https://api.discogs.com/database/search?q=x", 22, 60000)]
+    public void Limite_por_dominio(string url, int peticiones, int ventanaMs)
+    {
+        var (_, limite) = ApiClient.LimitePara(url);
+        Assert.Equal(peticiones, limite.Peticiones);
+        Assert.Equal(TimeSpan.FromMilliseconds(ventanaMs), limite.Ventana);
+    }
 
     // --- CachePath (MD5 hex, subcarpeta de 2 chars, .json) ---
     [Fact]
