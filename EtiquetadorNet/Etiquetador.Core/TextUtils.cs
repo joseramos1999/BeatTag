@@ -113,6 +113,26 @@ public static class TextUtils
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Como <see cref="Nk"/>, pero cuando el texto solo tiene letras de otros alfabetos (cirílico,
+    /// griego, CJK…) no lo deja vacío: conserva esas letras, en minúscula y sin diacríticos.
+    ///
+    /// Nk descarta todo lo que no sea a-z/0-9, y para comparar «Золото» con «Золото» eso da "" frente
+    /// a "", que no casa con nada. Visto al unir las comprobaciones de título de MusicBrainz con los
+    /// nombres en cirílico: «KARTASHOW - Золото» dejaba de identificarse. Solo se usa donde comparar
+    /// vacío con vacío haría rechazar algo válido; el resto del programa sigue con Nk.
+    /// </summary>
+    public static string NkClave(string? s)
+    {
+        var n = Nk(s);
+        if (n.Length > 0 || string.IsNullOrEmpty(s)) return n;
+        var d = RemoveDiacritics(s).ToLowerInvariant();
+        var sb = new StringBuilder(d.Length);
+        foreach (var c in d)
+            if (char.IsLetterOrDigit(c)) sb.Append(c);
+        return sb.ToString();
+    }
+
     /// <summary>Limpia un texto para usarlo como nombre de archivo (quita ilegales, colapsa espacios).</summary>
     public static string Sanitize(string? s)
     {

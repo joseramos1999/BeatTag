@@ -135,8 +135,8 @@ public static class ReglasCatalogo
     public static bool TituloVerificado(string? tituloArchivo, string? tituloCatalogo, out bool exacto)
     {
         exacto = false;
-        var nt = TextUtils.Nk(Descriptors.CleanKeywords(tituloArchivo));
-        var rn = TextUtils.Nk(Descriptors.CleanKeywords(tituloCatalogo));
+        var nt = TextUtils.NkClave(Descriptors.CleanKeywords(tituloArchivo));
+        var rn = TextUtils.NkClave(Descriptors.CleanKeywords(tituloCatalogo));
         if (nt.Length == 0 || rn.Length == 0) return false;
         if (nt == rn) { exacto = true; return true; }
 

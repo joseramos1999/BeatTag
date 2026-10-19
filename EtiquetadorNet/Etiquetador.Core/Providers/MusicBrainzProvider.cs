@@ -20,7 +20,7 @@ public sealed class MusicBrainzProvider
         ca = Regex.Replace(ca, @"(?i)(feat\.?|ft\.?|featuring).*$", "").Trim();
         if (ca.Length == 0) ca = artist ?? "";
         // Sin artista no hay forma de comprobar de quién es lo que devuelva: no se pregunta.
-        if (TextUtils.Nk(ca).Length == 0) return null;
+        if (TextUtils.NkClave(ca).Length == 0) return null;
 
         // El ritmo (1 petición por segundo, lo que publica MusicBrainz) lo pone ApiClient.
         var headers = new Dictionary<string, string> { ["User-Agent"] = ua };
@@ -60,7 +60,7 @@ public sealed class MusicBrainzProvider
     {
         var recs = J.A(J.P(r, "recordings"));
         if (recs == null || recs.Count == 0) return null;
-        var nka = TextUtils.Nk(artist);
+        var nka = TextUtils.NkClave(artist);
         if (nka.Length == 0) return null;
 
         // De mayor a menor puntuación, y a igualdad, en el orden en que vienen.
@@ -72,7 +72,7 @@ public sealed class MusicBrainzProvider
             if (!consultaLibre && bestScore < ScoreMinimo) break;
 
             var credit = Credito(best);
-            var nkc = TextUtils.Nk(credit);
+            var nkc = TextUtils.NkClave(credit);
             if (nkc.Length == 0) continue;
             if (!nkc.Contains(nka) && !nka.Contains(nkc)) continue;
             if (!ReglasCatalogo.TituloVerificado(title, J.S(J.P(best, "title")), out var exacto)) continue;
