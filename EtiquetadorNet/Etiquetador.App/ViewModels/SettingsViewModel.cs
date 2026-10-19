@@ -239,6 +239,9 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
         c.Cache = Cache;
         // La dirección se aplica en caliente: así "Detectar" y "Descargar" usan lo que hay en pantalla.
         _engine.Ai.Host = c.AiHost.Length > 0 ? c.AiHost : Core.Ai.OllamaClient.DefaultHost;
+        // Una credencial ilegible que se acaba de volver a escribir ya no lo es: sin esto, el aviso
+        // amarillo seguía hasta reiniciar aunque la clave de Spotify o Discogs ya fuese la nueva.
+        ActualizarAvisosConfiguracion();
     }
 
     /// <summary>
@@ -537,13 +540,27 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
               + "cada canción en los catálogos y en la IA local: en una biblioteca grande, eso lleva bastante tiempo.");
     }
 
+    /// <summary>
+    /// «Vaciar caché» entero: mira qué hay, pregunta con <paramref name="confirmar"/> y vacía. La
+    /// página queda ocupada desde el clic, también durante el recuento (unos segundos con ~69.000
+    /// archivos) y la confirmación: ocupada, ninguna otra pestaña puede estar analizando y leyendo o
+    /// escribiendo estas mismas cachés, y un doble clic no abre dos confirmaciones
+    /// (ver <see cref="TareaExclusiva"/>).
+    /// </summary>
+    public Task VaciarCacheAsync(Func<ContenidoCache, Task<bool>> confirmar)
+        => TareaExclusiva.EjecutarAsync(() => IsBusy, ocupada => IsBusy = ocupada, async () =>
+        {
+            Status = "Mirando qué hay en la caché…";
+            var contenido = await InspeccionarCacheAsync();
+            if (contenido.Vacia) { Status = "La caché ya está vacía."; return; }
+            Status = "";
+            if (!await confirmar(contenido)) return;
+            await VaciarAsync();
+        });
+
     /// <summary>Vacía las cachés ya confirmado, sin congelar la ventana y diciendo por dónde va.</summary>
-    public async Task VaciarCacheAsync()
+    private async Task VaciarAsync()
     {
-        if (IsBusy) return;
-        // Ocupada a propósito: mientras se borra, ninguna otra pestaña puede estar analizando y
-        // leyendo o escribiendo estas mismas cachés.
-        IsBusy = true;
         Status = "Vaciando la caché…";
         try
         {
@@ -557,7 +574,6 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
             _engine.Logger.Log($"Caché vaciada: {borrados} respuestas borradas, {fallidos} sin poder borrar.");
         }
         catch (Exception e) { Status = "No se pudo vaciar del todo la caché: " + e.Message; }
-        finally { IsBusy = false; }
     }
 
     /// <summary>
@@ -755,8 +771,9 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
 
     /// <summary>
     /// Los dos avisos, por separado: el del archivo se queda toda la sesión; el de las credenciales
-    /// desaparece en cuanto se sustituyen o se olvidan. Cuando el único problema al cargar fueron las
-    /// credenciales, el aviso de carga es ese mismo y no se repite.
+    /// desaparece en cuanto se sustituyen (al guardar o probar las claves: lo recalcula PushToConfig)
+    /// o se olvidan. Cuando el único problema al cargar fueron las credenciales
+    /// (<see cref="AppConfig.AvisoCargaSoloCredenciales"/>), el aviso de carga es ese mismo y no se repite.
     /// </summary>
     public static (string Archivo, string Credenciales) AvisosConfiguracion(AppConfig cfg)
     {
@@ -765,8 +782,7 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
             : $"No se pueden descifrar en este equipo las credenciales de {NombresCredenciales(ilegibles)}: "
             + "probablemente se guardaron en otro equipo o con otro usuario. Se conservan cifradas tal cual; "
             + "vuelve a introducirlas en «Claves de API» o pulsa «Olvidar credenciales ilegibles».";
-        var soloCredenciales = cfg.AvisoCarga.Contains("credenciales guardadas que no se pueden descifrar", StringComparison.Ordinal);
-        return (soloCredenciales ? "" : cfg.AvisoCarga, credenciales);
+        return (cfg.AvisoCargaSoloCredenciales ? "" : cfg.AvisoCarga, credenciales);
     }
 
     private static string NombresCredenciales(IEnumerable<string> campos)

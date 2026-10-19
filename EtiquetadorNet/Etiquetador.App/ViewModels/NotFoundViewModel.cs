@@ -242,7 +242,7 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
 
                 // Solo artista y título: lo demás (álbum, año, género, BPM) no lo sabe la IA, y
                 // sobrescribir a ciegas se pisa: el usuario ha aceptado un NOMBRE, no una ficha entera.
-                var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(info, over: true, campos, "keep", null, undo, _engine.Paths.DoneLog));
+                var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(info, over: true, campos, "keep", null, undo, _engine.Paths.DoneLog, aplicada: true));
                 ultimo = res;
                 if (res.UndoErr.Length > 0) sinHistorial++;
 
@@ -393,7 +393,7 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
             }
             var fields = _engine.BuildFields();
             var undo = _engine.Paths.NuevoManifiesto();
-            var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog));
+            var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog, aplicada: true));
             await _engine.Library.ScanAsync();
             var sinAnotar = res.UndoErr.Length > 0
                 ? $"  ⚠ el cambio NO quedó anotado, no se podrá deshacer ({res.UndoErr})"

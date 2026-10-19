@@ -72,6 +72,37 @@ public class VaciarCacheTests : IDisposable
         Assert.True(new SettingsViewModel.ContenidoCache(0, 0, 0, false).Vacia);
     }
 
+    // Visto en revisión: el recuento de ~69.000 archivos tarda unos segundos, y mientras tanto la
+    // página estaba libre. Un doble clic abría dos confirmaciones, y se podía cambiar de pestaña y
+    // lanzar un análisis que usaría la caché de análisis mientras se vaciaba.
+    [Fact]
+    public async Task La_pagina_queda_ocupada_desde_el_clic_y_un_doble_clic_no_hace_nada()
+    {
+        var ocupada = false;
+        var veces = 0;
+        var recuento = new TaskCompletionSource();
+        Task MirarPreguntarYVaciar() { veces++; return recuento.Task; }
+
+        var primero = TareaExclusiva.EjecutarAsync(() => ocupada, v => ocupada = v, MirarPreguntarYVaciar);
+        Assert.True(ocupada);   // ya durante el recuento: botón deshabilitado y demás pestañas bloqueadas
+
+        Assert.False(await TareaExclusiva.EjecutarAsync(() => ocupada, v => ocupada = v, MirarPreguntarYVaciar));
+
+        recuento.SetResult();
+        Assert.True(await primero);
+        Assert.False(ocupada);
+        Assert.Equal(1, veces);
+    }
+
+    [Fact]
+    public async Task Si_algo_falla_la_pagina_no_se_queda_bloqueada()
+    {
+        var ocupada = false;
+        await Assert.ThrowsAsync<IOException>(() =>
+            TareaExclusiva.EjecutarAsync(() => ocupada, v => ocupada = v, () => throw new IOException("archivo en uso")));
+        Assert.False(ocupada);
+    }
+
     /// <summary>Progress&lt;T&gt; que apunta en el momento (el normal lo manda al contexto de sincronización).</summary>
     private sealed class ProgresoInmediato(List<int> destino) : IProgress<int>
     {
@@ -201,6 +232,43 @@ public class AvisosConfiguracionTests : IDisposable
         Assert.Equal(cfg.AvisoCarga, archivo);
         Assert.Contains("config.net.json.ilegible_", archivo);
         Assert.Equal("", credenciales);
+    }
+
+    // Visto en revisión: el aviso solo se calculaba al abrir Ajustes y al olvidar las ilegibles. Si
+    // el usuario volvía a escribir la clave en «Claves de API», seguía hasta reiniciar. Ahora lo
+    // recalcula PushToConfig (al guardar o probar las claves) con lo que hay en la configuración.
+    [Fact]
+    public void Al_volver_a_escribir_la_clave_el_aviso_se_va()
+    {
+        File.WriteAllText(_paths.ConfigPath, $$"""{"SpotifySecretEnc":"{{BlobAjeno}}","DiscogsTokenEnc":"{{BlobAjeno}}"}""");
+        var cfg = AppConfig.Load(_paths);
+        Assert.True(cfg.AvisoCargaSoloCredenciales);
+
+        cfg.SpotifySecret = "secreto-nuevo";   // lo que PushToConfig copia de «Claves de API»
+        var (archivo, credenciales) = SettingsViewModel.AvisosConfiguracion(cfg);
+        Assert.Equal("", archivo);
+        Assert.Contains("Discogs", credenciales);
+        Assert.DoesNotContain("Spotify", credenciales);
+
+        cfg.DiscogsToken = "token-nuevo";
+        Assert.Equal(("", ""), SettingsViewModel.AvisosConfiguracion(cfg));
+    }
+
+    // El caso «solo credenciales» se sabe por una propiedad, no buscando un trozo del mensaje: con
+    // otro problema al cargar, salen los dos avisos, cada uno una vez.
+    [Fact]
+    public void El_aviso_del_archivo_y_el_de_credenciales_no_se_confunden()
+    {
+        File.WriteAllText(_paths.ConfigPath, $$"""{"CompactRows":"si","SpotifySecretEnc":"{{BlobAjeno}}","Folders":["E:\\Musica"]}""");
+        var cfg = AppConfig.Load(_paths);
+
+        var (archivo, credenciales) = SettingsViewModel.AvisosConfiguracion(cfg);
+
+        Assert.False(cfg.AvisoCargaSoloCredenciales);
+        Assert.Contains("CompactRows", archivo);
+        Assert.DoesNotContain("descifrar", archivo);
+        Assert.Contains("Spotify", credenciales);
+        Assert.Equal(new[] { @"E:\Musica" }, cfg.Folders);   // el resto se conserva
     }
 
     [Fact]

@@ -182,3 +182,30 @@ public static class ResultadoAplicacion
         _ => "✔ aplicada",
     };
 }
+
+/// <summary>
+/// Una acción larga de una página que la deja OCUPADA desde el primer instante: también mientras
+/// mira qué hay y mientras pregunta, no solo mientras hace el trabajo.
+///
+/// Visto en revisión: «Vaciar caché» contaba unos 69.000 archivos antes de preguntar (unos segundos)
+/// con el botón habilitado y la página libre. Un doble clic abría dos confirmaciones, y entretanto se
+/// podía cambiar de pestaña y lanzar un análisis: al confirmar, se vaciaba la caché de análisis
+/// mientras Enriquecer la usaba desde Task.Run. Con la página ocupada, el botón se deshabilita y las
+/// demás pestañas quedan bloqueadas hasta terminar o cancelar la confirmación.
+/// </summary>
+public static class TareaExclusiva
+{
+    /// <summary>
+    /// Ejecuta <paramref name="trabajo"/> con la página marcada como ocupada, y la libera al terminar
+    /// (también si falla). Devuelve false, sin hacer nada, si ya estaba ocupada.
+    /// </summary>
+    public static async System.Threading.Tasks.Task<bool> EjecutarAsync(
+        Func<bool> ocupada, Action<bool> marcar, Func<System.Threading.Tasks.Task> trabajo)
+    {
+        if (ocupada()) return false;
+        marcar(true);
+        try { await trabajo(); }
+        finally { marcar(false); }
+        return true;
+    }
+}

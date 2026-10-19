@@ -206,6 +206,14 @@ public sealed class AppConfig
     [JsonIgnore] public string AvisoCarga { get; private set; } = "";
 
     /// <summary>
+    /// true si lo único que pasó al cargar fue que hay credenciales que no se pueden descifrar: en
+    /// ese caso <see cref="AvisoCarga"/> es ese aviso, y Ajustes ya lo da aparte (y lo quita en cuanto
+    /// se sustituyen). Explícito para no tener que reconocer el aviso por su texto: si el texto
+    /// cambiaba, el aviso salía dos veces.
+    /// </summary>
+    [JsonIgnore] public bool AvisoCargaSoloCredenciales { get; private set; }
+
+    /// <summary>
     /// config.net.json existe pero no se pudo leer NI apartar. Mientras sea true, Save no escribe:
     /// sustituiría por los valores de fábrica un archivo que quizá solo estaba bloqueado.
     /// </summary>
@@ -250,6 +258,7 @@ public sealed class AppConfig
             if (cfg != null)
             {
                 // Se puede seguir, pero hay que decirlo: antes solo bloqueaba el guardado en silencio.
+                cfg.AvisoCargaSoloCredenciales = cfg.SecretsUnreadable;
                 if (cfg.SecretsUnreadable)
                     error = cfg.AvisoCarga =
                         $"Hay credenciales guardadas que no se pueden descifrar en este equipo ({string.Join(", ", cfg.CredencialesIlegibles.Select(NombreVisible))}); " +

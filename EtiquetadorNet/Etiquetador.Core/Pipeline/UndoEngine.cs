@@ -20,11 +20,21 @@ public sealed record UndoResult(string File, int Reverted, int Errors, int Missi
     public int Pendientes => Errors + Missing;
 
     /// <summary>
-    /// Rutas de lo revertido (la de antes y la de después de aplicar, de cada registro), para que
-    /// quien llama olvide esas canciones como «ya aplicadas». Sin esto, una canción que solo cambió
-    /// tags seguía en aplicadas.json después de deshacerla y Analizar no la volvía a proponer nunca.
+    /// Rutas de lo revertido cuyo nombre o etiquetas han vuelto atrás (la de antes y la de después,
+    /// de cada registro), venga de donde venga: lo que se calculó sobre ellas (una propuesta en
+    /// pantalla) ya no vale. Un registro que solo devuelve el volumen no entra: el audio cambia, pero
+    /// el nombre y las etiquetas, que es de lo que sale la propuesta, siguen igual.
     /// </summary>
     public IReadOnlyList<string> Revertidas { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Rutas de lo revertido que había dado la canción por aplicada (<see cref="UndoRecord.Aplicada"/>),
+    /// para que quien llama la olvide como «ya aplicada». Sin esto, una canción que solo cambió tags
+    /// seguía en aplicadas.json después de deshacerla y Analizar no la volvía a proponer nunca.
+    /// Solo estas: deshacer un ajuste de volumen no puede devolver a pendientes las aplicadas en
+    /// Enriquecer (ver <see cref="UndoEngine.DioPorAplicada"/>).
+    /// </summary>
+    public IReadOnlyList<string> AplicadasRevertidas { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>
@@ -98,6 +108,8 @@ public sealed class UndoEngine
         // Al revés: lo último que se hizo es lo primero que se deshace.
         var pendiente = new bool[lineas.Count];
         var revertidas = new List<string>();
+        var aplicadasRevertidas = new List<string>();
+        var legadoDeAplicar = ManifiestoAntiguoDeAplicar(lineas.Select(l => l.Nodo));
         int rev = 0, err = 0, missing = 0, manual = 0;
         for (var i = lineas.Count - 1; i >= 0; i--)
         {
@@ -116,7 +128,12 @@ public sealed class UndoEngine
             }
             switch (outcome)
             {
-                case Outcome.Reverted: rev++; revertidas.AddRange(RutasDe(node)); break;
+                case Outcome.Reverted:
+                    rev++;
+                    var rutas = RutasDe(node).ToList();
+                    if (!SoloVolumen(node)) revertidas.AddRange(rutas);
+                    if (DioPorAplicada(node, legadoDeAplicar)) aplicadasRevertidas.AddRange(rutas);
+                    break;
                 case Outcome.Missing: missing++; pendiente[i] = true; break;
                 case Outcome.Manual: manual++; break;
                 default: err++; pendiente[i] = true; break;
@@ -125,8 +142,85 @@ public sealed class UndoEngine
 
         var clean = err == 0 && missing == 0;
         var aviso = Archivar(mf, lineas.Select(l => l.Texto).ToList(), pendiente);
-        return new UndoResult(Path.GetFileName(mf), rev, err, missing, manual, clean, false, aviso) { Revertidas = revertidas };
+        return new UndoResult(Path.GetFileName(mf), rev, err, missing, manual, clean, false, aviso)
+        {
+            Revertidas = revertidas,
+            AplicadasRevertidas = aplicadasRevertidas,
+        };
     }
+
+    // --- ¿Dio este registro la canción por aplicada? ---
+    //
+    // «Deshacer última» deshace el último manifiesto pendiente, sea de lo que sea. Visto en revisión:
+    // con 640 canciones aplicadas en Enriquecer y un ajuste de volumen posterior de la biblioteca,
+    // deshacer el volumen las sacaba todas de aplicadas.json, sin forma de recuperarlas, y el estado
+    // decía «640 canciones vuelven a estar pendientes».
+
+    /// <summary>
+    /// Campos que la aplicación de propuestas (Tagging.ApplyTags) no escribe nunca: el volumen, la
+    /// clave (importación de rekordbox) y el comentario (fichas de DJ al comentario).
+    /// </summary>
+    private static readonly HashSet<string> CamposAjenosAAplicar = new(StringComparer.Ordinal) { VolumeField, "Key", "Comment" };
+
+    /// <summary>
+    /// Campos que, en un manifiesto antiguo, solo escribía aplicar una propuesta (o el Editor):
+    /// Unificar géneros solo toca el género, y la importación de rekordbox, BPM y clave.
+    /// </summary>
+    private static readonly HashSet<string> CamposDeAplicar = new(StringComparer.Ordinal)
+        { "Title", "Artist", "Album", "Year", "Remixer", CoverField };
+
+    /// <summary>
+    /// ¿Dio este registro la canción por aplicada? Los de esta versión lo dicen
+    /// (<see cref="UndoRecord.Aplicada"/>, que se escribe siempre). Los anteriores no lo llevan, y por
+    /// ellos decide <paramref name="manifiestoAntiguoDeAplicar"/>
+    /// (<see cref="ManifiestoAntiguoDeAplicar"/>).
+    /// </summary>
+    public static bool DioPorAplicada(JsonNode? registro, bool manifiestoAntiguoDeAplicar)
+    {
+        if (registro is not JsonObject o) return false;
+        if (o.TryGetPropertyValue(nameof(UndoRecord.Aplicada), out var marca))
+            return marca is JsonValue v && v.TryGetValue<bool>(out var b) && b;
+        return manifiestoAntiguoDeAplicar;
+    }
+
+    /// <summary>
+    /// Para los registros sin marca (manifiestos anteriores a ella): ¿es el manifiesto, entero, de
+    /// aplicar propuestas? Ante la duda, NO. Dejar una canción como aplicada es lo que ya pasaba y
+    /// tiene arreglo; sacarla de aplicadas.json por error no lo tiene.
+    ///
+    /// Un manifiesto es de una sola operación, así que se mira entero:
+    ///   · el formato antiguo (new/orig) solo lo escribía aplicar propuestas: sí;
+    ///   · un registro sin campos (Renombrar con IA, Bandeja) o con volumen, clave o comentario lo
+    ///     delata como de otra cosa: no;
+    ///   · si no, hace falta alguna señal de aplicar: título, artista, álbum, año, remixer, carátula,
+    ///     o un renombrado con campos. Un manifiesto que solo cambia géneros (Unificar géneros) o BPM
+    ///     (rekordbox) no la tiene: no.
+    /// Lo que se escapa es el Editor, cuyos registros son como los de aplicar; solo pasa con un
+    /// manifiesto de antes de esta versión.
+    /// </summary>
+    public static bool ManifiestoAntiguoDeAplicar(IEnumerable<JsonNode?> registros)
+    {
+        var senal = false;
+        foreach (var n in registros)
+        {
+            if (n is not JsonObject o || o.ContainsKey(nameof(UndoRecord.Aplicada))) continue;
+            if (!o.ContainsKey("OrigPath")) { senal = true; continue; }   // formato antiguo new/orig
+            if (o["Fields"] is not JsonObject campos) return false;        // solo renombrar: otra herramienta
+            foreach (var (campo, _) in campos)
+            {
+                if (CamposAjenosAAplicar.Contains(campo)) return false;
+                if (CamposDeAplicar.Contains(campo)) senal = true;
+            }
+            if (campos.Count == 0 || (o["Renamed"] is JsonValue r && r.TryGetValue<bool>(out var ren) && ren)) senal = true;
+        }
+        return senal;
+    }
+
+    /// <summary>¿Es un registro de la pestaña Volumen (sin renombrado y sin más campo que el volumen)?</summary>
+    private static bool SoloVolumen(JsonNode node)
+        => node is JsonObject o
+           && o["Fields"] is JsonObject campos && campos.Count == 1 && campos.ContainsKey(VolumeField)
+           && !(o["Renamed"] is JsonValue r && r.TryGetValue<bool>(out var ren) && ren);
 
     /// <summary>Las dos rutas de un registro (formato nuevo o antiguo); vacías las que no consten.</summary>
     private static IEnumerable<string> RutasDe(JsonNode node)

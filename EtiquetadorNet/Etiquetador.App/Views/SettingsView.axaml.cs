@@ -26,20 +26,18 @@ public partial class SettingsView : UserControl
             _ = vm.ActualizarRenombradosAsync();
     }
 
-    // Vaciar la caché no toca la música, pero sale caro después: se dice qué se borra y cuánto.
+    // Vaciar la caché no toca la música, pero sale caro después: se dice qué se borra y cuánto. La
+    // página queda ocupada desde el clic (recuento incluido), así que un segundo clic no hace nada.
     private async void ClearCache_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.SettingsViewModel vm || vm.IsBusy) return;
         if (TopLevel.GetTopLevel(this) is not Window owner) return;
 
-        vm.Status = "Mirando qué hay en la caché…";
-        var contenido = await vm.InspeccionarCacheAsync();
-        if (contenido.Vacia) { vm.Status = "La caché ya está vacía."; return; }
-        vm.Status = "";
-
-        var (cuerpo, nota) = ViewModels.SettingsViewModel.TextosVaciarCache(contenido);
-        var ok = await ConfirmDialog.AskAsync(owner, "Vaciar la caché", cuerpo, nota, "Vaciar caché");
-        if (ok) await vm.VaciarCacheAsync();
+        await vm.VaciarCacheAsync(contenido =>
+        {
+            var (cuerpo, nota) = ViewModels.SettingsViewModel.TextosVaciarCache(contenido);
+            return ConfirmDialog.AskAsync(owner, "Vaciar la caché", cuerpo, nota, "Vaciar caché");
+        });
     }
 
     // Olvidar aplicadas no se puede deshacer y afecta a todas de golpe.

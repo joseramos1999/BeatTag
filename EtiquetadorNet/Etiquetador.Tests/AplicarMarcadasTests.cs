@@ -339,4 +339,77 @@ public class CasillaPorPropuestaTests : IDisposable
         Assert.Equal((false, "⚠ revisar: solo lo identificó MusicBrainz"), EnrichViewModel.EstadoInicial(p));
         Assert.Equal((true, ""), EnrichViewModel.EstadoInicial(Propuesta("Bad Bunny - MONACO.mp3", "Deezer", "12")));
     }
+
+    // --- Poda de las casillas de propuestas que ya no son la vigente ---
+    //
+    // Visto en revisión: con la huella en la clave, cada reanálisis que daba otra propuesta dejaba la
+    // clave de la anterior para siempre, y «Marcar todo» escribe una por fila: marcas-aplicar.json
+    // (84 KB en el equipo del usuario) crecía con cada «Reanalizar todo».
+
+    private static ProcessResult Encontrada(string ruta, string nuevo, string source, string score)
+        => new() { FilePath = ruta, Old = Path.GetFileName(ruta), New = nuevo, Artist = "Bad Bunny", Title = "MONACO", Source = source, Score = score, Found = true };
+
+    [Fact]
+    public void Reanalizar_todo_no_acumula_casillas_de_propuestas_viejas()
+    {
+        const string Otra = @"E:\Musica\COMERCIAL\Bad Bunny - Neverita.mp3";
+        var neverita = Encontrada(Otra, "Bad Bunny - NEVERITA.mp3", "Deezer", "12");
+        var marcas = new ApplyMarks(Archivo);
+
+        // Cinco «Reanalizar todo» seguidos, cada uno con otra coincidencia para Monaco, y «Marcar
+        // todo» después de cada uno.
+        var fuentes = new[] { ("Deezer", "12"), ("iTunes", "0.8"), ("Spotify", "9"), ("MusicBrainz", "7"), ("Deezer", "4") };
+        foreach (var (fuente, score) in fuentes)
+        {
+            var monaco = Encontrada(Ruta, "Bad Bunny - MONACO.mp3", fuente, score);
+            EnrichViewModel.PodarMarcas(marcas, EnrichViewModel.HuellasVigentes(new[] { monaco, neverita }));
+            EnrichViewModel.GuardarDecision(marcas, Ruta, EnrichViewModel.HuellaPropuesta(monaco), true);
+            EnrichViewModel.GuardarDecision(marcas, Otra, EnrichViewModel.HuellaPropuesta(neverita), true);
+            Assert.Equal(2, marcas.Count);   // una por canción, no una por pasada
+        }
+
+        Assert.Equal("", marcas.Save());
+        var reabierta = new ApplyMarks(Archivo);
+        Assert.Equal(2, reabierta.Count);
+        var ultima = Encontrada(Ruta, "Bad Bunny - MONACO.mp3", "Deezer", "4");
+        Assert.True(EnrichViewModel.DecisionGuardada(reabierta, Ruta, EnrichViewModel.HuellaPropuesta(ultima)));
+    }
+
+    // Solo se poda lo que seguro sobra: de las canciones vistas, las casillas de OTRA propuesta.
+    [Fact]
+    public void La_poda_respeta_lo_que_no_se_ha_visto_y_la_vigente()
+    {
+        const string Desconectada = @"F:\Externo\Bad Bunny - Titi Me Pregunto.mp3";   // un disco sin conectar
+        var vigente = Encontrada(Ruta, "Bad Bunny - MONACO.mp3", "Deezer", "12");
+        var marcas = new ApplyMarks(Archivo);
+        EnrichViewModel.GuardarDecision(marcas, Ruta, EnrichViewModel.HuellaPropuesta(vigente), false);
+        EnrichViewModel.GuardarDecision(marcas, Ruta, "0123456789abcdef", true);   // la de una propuesta anterior
+        EnrichViewModel.GuardarDecision(marcas, Desconectada, "fedcba9876543210", true);
+        marcas.Set(@"E:\Musica\COMERCIAL\antigua.mp3", false);                      // casilla antigua, solo por ruta
+
+        var podadas = EnrichViewModel.PodarMarcas(marcas, EnrichViewModel.HuellasVigentes(new[] { vigente }));
+
+        Assert.Equal(1, podadas);
+        Assert.Null(marcas.Get(EnrichViewModel.ClaveMarca(Ruta, "0123456789abcdef")));
+        Assert.False(marcas.Get(EnrichViewModel.ClaveMarca(Ruta, EnrichViewModel.HuellaPropuesta(vigente))));
+        Assert.True(marcas.Get(EnrichViewModel.ClaveMarca(Desconectada, "fedcba9876543210")));
+        Assert.False(marcas.Get(@"E:\Musica\COMERCIAL\antigua.mp3"));
+        Assert.Equal(0, EnrichViewModel.PodarMarcas(marcas, EnrichViewModel.HuellasVigentes(Array.Empty<ProcessResult>())));
+    }
+
+    // Solo cuentan las que tienen propuesta: de las demás no se sabe qué casilla sobra.
+    [Fact]
+    public void Huellas_vigentes_solo_de_las_que_tienen_propuesta()
+    {
+        var encontrada = Encontrada(Ruta, "Bad Bunny - MONACO.mp3", "Deezer", "12");
+        var limpieza = new ProcessResult { FilePath = @"E:\Musica\b.mp3", New = "b.mp3", CleanOnly = true };
+        var sinResultado = new ProcessResult { FilePath = @"E:\Musica\c.mp3" };
+        var saltada = new ProcessResult { FilePath = @"E:\Musica\d.mp3", Found = true, Skip = true };
+
+        var vigentes = EnrichViewModel.HuellasVigentes(new[] { encontrada, limpieza, sinResultado, saltada });
+
+        Assert.Equal(2, vigentes.Count);
+        Assert.Equal(EnrichViewModel.HuellaPropuesta(encontrada), vigentes[Ruta.ToUpperInvariant()]);   // sin distinguir mayúsculas
+        Assert.True(vigentes.ContainsKey(@"E:\Musica\b.mp3"));
+    }
 }

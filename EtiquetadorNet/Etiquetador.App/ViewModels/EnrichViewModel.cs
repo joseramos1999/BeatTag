@@ -477,6 +477,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
                                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             _engine.Analysis.Prune(seen, raices);
             _engine.Analysis.Save();
+            PodarMarcas(_engine.Marks, HuellasVigentes(seenResults));
             _engine.Marks.Save();
             RowsView.Refresh();
             Progress = 100;
@@ -502,6 +503,8 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         catch (OperationCanceledException)
         {
             _engine.Analysis.Save(); RowsView.Refresh();
+            PodarMarcas(_engine.Marks, HuellasVigentes(seenResults));   // de lo que sí se llegó a ver
+            _engine.Marks.Save();
             Status = $"Análisis cancelado ({Rows.Count} propuestas hasta ahora)."
                    + (AvisoIa.Length > 0 ? "  ⚠ " + AvisoIa : "");
             _engine.Logger.Err($"Análisis cancelado por el usuario ({Rows.Count} propuestas hasta ahora).");
@@ -611,6 +614,43 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         marcas.Forget(ruta);
     }
 
+    /// <summary>
+    /// La huella de la propuesta vigente de cada canción vista en una pasada (analizar o cargar de la
+    /// caché). Las que no tienen propuesta no entran: de esas no se sabe qué casilla sobra.
+    /// </summary>
+    public static Dictionary<string, string> HuellasVigentes(IEnumerable<ProcessResult> vistas)
+    {
+        var vigentes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in vistas)
+            if (!r.Skip && (r.Found || r.CleanOnly) && r.FilePath.Length > 0)
+                vigentes[r.FilePath] = HuellaPropuesta(r);
+        return vigentes;
+    }
+
+    /// <summary>
+    /// Olvida las casillas de propuestas que ya no son la vigente: misma ruta, otra huella. Devuelve
+    /// cuántas.
+    ///
+    /// Visto en revisión: con la huella en la clave, cada reanálisis que daba otra propuesta dejaba
+    /// la clave de la anterior para siempre, y «Marcar todo» o «Desmarcar todo» escriben una por fila.
+    /// Antes había una sola clave por ruta; marcas-aplicar.json (84 KB en el equipo del usuario)
+    /// crecía con cada «Reanalizar todo». Esa casilla ya no se puede usar: la propuesta a la que se
+    /// refería no es la que hay. Las de canciones que no se han visto en esta pasada (carpetas
+    /// desmarcadas, un disco desconectado) y las antiguas guardadas solo por ruta (las migra
+    /// <see cref="DecisionGuardada"/>) se quedan.
+    /// </summary>
+    public static int PodarMarcas(ApplyMarks marcas, IReadOnlyDictionary<string, string> huellaVigente)
+    {
+        if (huellaVigente.Count == 0) return 0;
+        return marcas.OlvidarSi(clave =>
+        {
+            var corte = clave.LastIndexOf('\u001F');
+            return corte > 0
+                && huellaVigente.TryGetValue(clave[..corte], out var vigente)
+                && !string.Equals(clave[(corte + 1)..], vigente, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
     private void RowChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName != nameof(PreviewRow.Apply) || sender is not PreviewRow row) return;
@@ -626,10 +666,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     }
 
     /// <summary>Al iniciar: rellena la previsualización SOLO con lo que ya hay en la caché (sin red).</summary>
-    public void LoadCached() => LoadCached(anunciar: true);
-
-    /// <param name="anunciar">Dice en el estado cuántas se han cargado (no tras deshacer, que tiene su propio mensaje).</param>
-    private void LoadCached(bool anunciar)
+    public void LoadCached()
     {
         if (IsBusy) return;
         var tracks = _engine.Library.Tracks.ToList();
@@ -638,6 +675,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         Rows.Clear();
         int loaded = 0;
         var campos = _engine.BuildFields();
+        var vistas = new List<ProcessResult>();
         foreach (var t in tracks)
         {
             if (_engine.Ignored.Contains(t.FilePath)) continue;   // descartada por el usuario
@@ -646,10 +684,12 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             if (SeSalta(t, campos)) continue;
             var c = _engine.Analysis.Get(t.FilePath, sig);
             if (c == null || c.Skip) continue;
+            vistas.Add(c);
             if (c.Found || c.CleanOnly) { if (AddRow(c, t)) loaded++; }
         }
+        PodarMarcas(_engine.Marks, HuellasVigentes(vistas));
         RowsView.Refresh();
-        if (anunciar && loaded > 0) Status = $"{loaded} propuestas cargadas de la caché. Pulsa Analizar para completar el resto.";
+        if (loaded > 0) Status = $"{loaded} propuestas cargadas de la caché. Pulsa Analizar para completar el resto.";
     }
 
     [RelayCommand]
@@ -843,7 +883,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
                 try
                 {
                     row.SyncToResult();   // respeta lo editado en la tabla (nombre y tags)
-                    var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(row.Result, Overwrite, fields, CoverMode, png, undoFile, doneLog, ct), ct);
+                    var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(row.Result, Overwrite, fields, CoverMode, png, undoFile, doneLog, ct, aplicada: true), ct);
                     row.RowStatus = res is { TagOk: true, RenOk: true }
                         ? (res.UndoErr.Length > 0 ? "✔ aplicado (sin marcha atrás)" : "✔ aplicado")
                         : $"⚠ {res.TagErr}{res.RenErr}";
@@ -911,7 +951,9 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         {
             res = await Task.Run(() => _engine.Undo.UndoLastRun());
             _engine.Logger.Sum($"Deshacer: {res.Reverted} revertidos · {res.Manual} conservados · {res.Missing} ausentes · {res.Errors} errores.");
-            vuelven = OlvidarRevertidas(_engine.Applied, _engine.Marks, res.Revertidas);
+            // Solo lo que se había dado por aplicado: deshacer un ajuste de volumen, Unificar géneros
+            // o la importación de rekordbox no devuelve a pendientes nada de Enriquecer.
+            vuelven = OlvidarRevertidas(_engine.Applied, _engine.Marks, res.AplicadasRevertidas);
             if (vuelven > 0)
             {
                 _engine.Applied.Save();
@@ -922,16 +964,41 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         }
         finally { IsBusy = false; }
 
-        // La lista se rehace con lo que hay ahora en la caché. Las revertidas no estarán: deshacer
-        // cambia su fecha de modificación y la caché de análisis se valida por fecha y tamaño, así que
-        // vuelven con «Analizar», que solo consulta esas (lo demás sale de la caché).
-        if (!res.None) LoadCached(anunciar: false);
+        // Salen de la lista SOLO las propuestas de los archivos cuyo nombre o etiquetas acaba de
+        // devolver el deshacer (no las de un deshacer de volumen): se calcularon sobre etiquetas o
+        // nombres que ya no son los que hay. Antes se rehacía la lista
+        // entera desde la caché, que da lo mismo para esas (deshacer cambia la fecha del archivo y su
+        // caché deja de valer) pero tiraba lo editado en las celdas y los avisos «⚠» de todas las
+        // demás, y miraba en disco las 15-20k pistas desde el hilo de la interfaz.
+        var retiradas = 0;
+        if (!res.None)
+        {
+            var quitar = FilasRevertidas(Rows, res.Revertidas);
+            if (quitar.Count > 0)
+            {
+                using (Recuento.EnLote())
+                    foreach (var f in quitar) Rows.Remove(f);
+                RowsView.Refresh();
+                retiradas = quitar.Count;
+            }
+        }
         Status = res.None
             ? "No hay ninguna ejecución que deshacer."
             : $"Deshecho: {res.Reverted} revertidos · {res.Manual} conservados · {res.Missing} ausentes · {res.Errors} errores."
               + (res.Pendientes > 0 ? $" Quedan {res.Pendientes} pendientes: «Deshacer última» reintentará solo esos." : "")
               + (vuelven > 0 ? $" {(vuelven == 1 ? "1 canción vuelve" : $"{vuelven} canciones vuelven")} a estar pendiente{(vuelven == 1 ? "" : "s")}: pulsa «Analizar» para ver de nuevo sus propuestas." : "")
+              + (retiradas > 0 ? $" {(retiradas == 1 ? "Se retira 1 propuesta" : $"Se retiran {retiradas} propuestas")} de la lista porque su archivo ha cambiado: «Analizar» la{(retiradas == 1 ? "" : "s")} vuelve a calcular." : "")
               + (res.Aviso.Length > 0 ? " ⚠ " + res.Aviso : "");
+    }
+
+    /// <summary>
+    /// Filas cuyo archivo acaba de revertirse (por su ruta antes o después del cambio deshecho).
+    /// </summary>
+    public static List<PreviewRow> FilasRevertidas(IEnumerable<PreviewRow> filas, IEnumerable<string> rutas)
+    {
+        var revertidas = new HashSet<string>(rutas, StringComparer.OrdinalIgnoreCase);
+        return revertidas.Count == 0 ? new List<PreviewRow>()
+             : filas.Where(f => revertidas.Contains(f.Result.FilePath)).ToList();
     }
 
     /// <summary>
@@ -942,6 +1009,9 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     /// solo cambió tags conserva la misma ruta al aplicarse, así que tras deshacerla seguía omitida
     /// como «ya aplicada» para siempre; las renombradas sí volvían porque su ruta cambiaba. La única
     /// salida era «Olvidar aplicadas», que devolvía también las miles aplicadas de verdad.
+    ///
+    /// Recibe <see cref="UndoResult.AplicadasRevertidas"/>, no todo lo revertido: si no, deshacer un
+    /// ajuste de volumen de la biblioteca devolvía a pendientes las 640 aplicadas en Enriquecer.
     /// </summary>
     public static int OlvidarRevertidas(IgnoreList aplicadas, ApplyMarks marcas, IEnumerable<string> rutas)
     {
