@@ -122,4 +122,23 @@ public static class ArchivoDatos
         }
         catch { return ""; }
     }
+
+    /// <summary>
+    /// Como <see cref="Apartar"/>, pero COPIANDO: el original se queda donde estaba hasta que quien
+    /// llama haya escrito algo mejor encima. Devuelve la ruta de la copia, o "" si no se pudo hacer.
+    ///
+    /// Es lo que necesita la configuración: si se mueve el original y el proceso muere antes de
+    /// guardar lo rescatado, el siguiente arranque no encuentra nada y empieza de fábrica sin avisar.
+    /// </summary>
+    public static string CopiarApartado(string archivo)
+    {
+        var destino = archivo + $".ilegible_{DateTime.Now:yyyyMMdd_HHmmss}";
+        try
+        {
+            if (File.Exists(destino)) destino += "_" + Guid.NewGuid().ToString("N")[..6];
+            File.Copy(archivo, destino, overwrite: false);
+            return destino;
+        }
+        catch { return ""; }
+    }
 }

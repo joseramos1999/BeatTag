@@ -362,7 +362,10 @@ public static class Mp3Gain
     ///   MP3GAIN_MINMAX y _ALBUM_MINMAX += pasos en el mínimo y el máximo (entre 0 y 255)
     ///   MP3GAIN_UNDO                  −= pasos en los dos canales: guarda lo que hay que aplicar
     ///                                 para volver al original, así que si se baja, el deshacer
-    ///                                 sube. Al llegar a cero se quita, como hace MP3Gain.
+    ///                                 sube. Al llegar a cero se quita: MP3Gain lo dejaría a
+    ///                                 «+000,+000,N» (en mp3gain.c, changeGainAndTag pone siempre
+    ///                                 haveUndo), pero trata la falta de UNDO como cero, y así la
+    ///                                 ida y vuelta de BeatTag deja la etiqueta idéntica byte a byte.
     /// MEDIDO en la biblioteca (seis MP3 de E:\Musica\COMERCIAL\Afro):
     ///   · Los REPLAYGAIN_TRACK_GAIN que dejó MP3Gain tras aplicar 1, 2 o 3 pasos («-6.395000»,
     ///     «-5.520000», «-5.345000») salen de una medida de dos decimales más 1,505 dB por paso. Con
@@ -433,7 +436,12 @@ public static class Mp3Gain
             var conCabecera = (flags & TieneCabecera) != 0;
             var inicio = conCabecera ? primero - Bloque : primero;
             if (inicio < 0 || (conCabecera && !EmpiezaPor(b, inicio, "APETAGEX"))) return null;
-            finAudio = inicio;
+            // OJO: finAudio = inicio solo cuando la etiqueta se ha entendido ENTERA (abajo). Antes se
+            // ponía aquí, y un pie «APETAGEX» con un tamaño corrupto y sin cabecera podía dejar
+            // «inicio» en mitad del audio: Leer devolvía null, pero el recorrido se paraba ahí y
+            // Apply ajustaba solo parte de la canción, un salto de volumen a mitad de tema sin aviso.
+            // Si no se entiende, el recorrido sigue hasta el final y se fía de la confirmación de la
+            // trama siguiente, como antes.
 
             var elementos = new List<Elemento>();
             var p = primero;
@@ -454,6 +462,7 @@ public static class Mp3Gain
             }
             if (p != pie) return null;   // sobran o faltan bytes: algo no cuadra y mejor no tocarla
 
+            finAudio = inicio;
             return new EtiquetaApe(inicio, fin, conCabecera ? b[inicio..(inicio + Bloque)] : null,
                                    b[pie..fin], elementos);
         }
@@ -500,7 +509,8 @@ public static class Mp3Gain
 
             if (izq == 0 && der == 0)
             {
-                // Vuelve a estar como lo dejó el original: MP3Gain quita el elemento.
+                // Vuelve a estar como lo dejó el original. A diferencia de MP3Gain, que lo deja a
+                // «+000,+000,N», aquí se quita para que deshacer devuelva la etiqueta idéntica.
                 if (deshacer != null) { _elementos.Remove(deshacer); cambio = true; }
                 return cambio;
             }

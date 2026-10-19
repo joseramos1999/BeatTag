@@ -90,8 +90,8 @@ public sealed class DiscogsProvider
     /// </summary>
     private static IEnumerable<(JsonNode Item, string Disco)> DelArtista(JsonArray resultados, string artist)
     {
-        var na = TextUtils.Nk(artist);
-        if (na.Length == 0) yield break;
+        var delArchivo = Interpretes(artist);
+        if (delArchivo.Count == 0) yield break;
         foreach (var it in resultados)
         {
             if (it == null) continue;
@@ -99,11 +99,43 @@ public sealed class DiscogsProvider
             if (!m.Success) continue;
             var a = m.Groups[1].Value;
             if (Regex.IsMatch(a, @"^\s*Various\b", IC)) continue;
-            var nka = TextUtils.Nk(a);
-            if (nka.Length < 2) continue;
-            // «Mad Mind (2)»: Discogs numera a los homónimos; contiene igualmente el nombre.
-            if (nka.Contains(na) || (nka.Length >= 3 && na.Contains(nka)) || Matching.ArtistMatch(na, nka))
+            if (Interpretes(a).Any(d => delArchivo.Any(f => MismoInterprete(f, d))))
                 yield return (it, m.Groups[2].Value);
         }
+    }
+
+    // Separadores de un crédito con varios intérpretes: «Anuel AA, Ñengo Flow, Sinfonico»,
+    // «Wisin & Yandel», «Bad Bunny x Jhay Cortez», «Daddy Yankee feat. Snow».
+    private const string SeparadorInterpretes =
+        @"\s*(?:,|&|\+|/|;|\bx\b|\bvs\.?(?=\s)|\bfeat\.?(?=\s)|\bft\.?(?=\s)|\bfeaturing\b|\band\b|\by\b|\be\b)\s*";
+
+    /// <summary>Los intérpretes de un crédito, cada uno normalizado (Nk); sin los vacíos.</summary>
+    internal static List<string> Interpretes(string? credito)
+        => Regex.Split(credito ?? "", SeparadorInterpretes, IC)
+                .Select(TextUtils.Nk)
+                .Where(s => s.Length >= 2)
+                .Distinct()
+                .ToList();
+
+    /// <summary>
+    /// ¿Son el mismo intérprete? Comparando UNO a UNO, nunca el crédito entero.
+    ///
+    /// Visto en revisión (C4a): con el crédito concatenado («Anuel AA, Ñengo Flow, Sinfonico» →
+    /// «anuelaanengoflowsinfonico») casaba por subcadena cualquier artista de Discogs de tres letras
+    /// o más contenido ahí («Flow», «Sin»), y ArtistMatch añadía un StartsWith sin longitud mínima:
+    /// «Arca» casaba con «Arcangel». Ahora tienen que ser el mismo nombre, el mismo con el número
+    /// con que Discogs distingue a los homónimos («Mad Mind (2)»), o un alias conocido.
+    /// </summary>
+    internal static bool MismoInterprete(string delArchivo, string deDiscogs)
+    {
+        if (delArchivo.Length == 0 || deDiscogs.Length == 0) return false;
+        // «The Weeknd» y «Weeknd» son el mismo: el artículo no cuenta.
+        var f = SinArticulo(delArchivo);
+        var d = SinArticulo(deDiscogs);
+        if (f == d) return true;
+        if (d.StartsWith(f, StringComparison.Ordinal) && d[f.Length..].All(char.IsAsciiDigit)) return true;
+        return ArtistAliases.Current.SameArtist(delArchivo, deDiscogs);
+
+        static string SinArticulo(string s) => s.Length > 5 && s.StartsWith("the", StringComparison.Ordinal) ? s[3..] : s;
     }
 }

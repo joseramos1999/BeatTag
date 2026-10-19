@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Enumeration;
 using System.Linq;
 
 namespace Etiquetador.Core;
@@ -49,9 +50,10 @@ public static class LibraryScanner
     /// carpeta podada y la biblioteca dada por escaneada. MEDIDO: volver a leer sin caché costó
     /// 340.680 ms para 13.464 canciones, frente a 7.774 ms con ella.
     ///
-    /// Ahora lo que no se puede leer se salta, y también lo oculto y de sistema ($RECYCLE.BIN,
-    /// «System Volume Information», .Trashes de macOS). Los «._*» que deja macOS en discos
-    /// externos tampoco entran: llevan la extensión del audio pero no son audio.
+    /// Ahora lo que no se puede leer se salta, y también las carpetas de sistema ($RECYCLE.BIN,
+    /// «System Volume Information», .Trashes de macOS; ver <see cref="SaltarCarpeta"/>). Los «._*»
+    /// que deja macOS en discos externos tampoco entran: llevan la extensión del audio pero no son
+    /// audio.
     /// </summary>
     public static CarpetaRecorrida Recorrer(string folder, bool recursive = true)
     {
@@ -67,15 +69,27 @@ public static class LibraryScanner
             using (var e = Directory.EnumerateFileSystemEntries(folder, "*", new EnumerationOptions { IgnoreInaccessible = false, RecurseSubdirectories = false }).GetEnumerator())
                 e.MoveNext();
 
+            // AttributesToSkip = 0 a propósito (el valor por defecto de EnumerationOptions es
+            // Hidden | System): con él se saltaba CUALQUIER carpeta que tuviera uno solo de los dos
+            // atributos, y Windows pone System (o ReadOnly) a las carpetas personalizadas con
+            // desktop.ini -icono o vista propios-. Una carpeta de música personalizada desaparecía
+            // de la biblioteca sin aviso, y ScanCache y AnalysisCache podaban sus entradas porque
+            // cuelga de una raíz recorrida. Qué se salta lo decide SaltarCarpeta, entrada a entrada.
             var opciones = new EnumerationOptions
             {
                 RecurseSubdirectories = recursive,
                 IgnoreInaccessible = true,
-                AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
+                AttributesToSkip = 0,
             };
-            var archivos = Directory.EnumerateFiles(folder, "*", opciones)
-                .Where(EsAudio)
-                .ToList();
+            var enumerador = new FileSystemEnumerable<string>(folder,
+                (ref FileSystemEntry entrada) => entrada.ToFullPath(), opciones)
+            {
+                ShouldIncludePredicate = (ref FileSystemEntry entrada) =>
+                    !entrada.IsDirectory && !SaltarArchivo(entrada.Attributes) && EsAudio(entrada.FileName.ToString()),
+                ShouldRecursePredicate = (ref FileSystemEntry entrada) =>
+                    !SaltarCarpeta(entrada.FileName.ToString(), entrada.Attributes),
+            };
+            var archivos = enumerador.ToList();
             return new CarpetaRecorrida(archivos, true, "");
         }
         catch (Exception e)
@@ -83,6 +97,44 @@ public static class LibraryScanner
             // Falló a mitad (el disco se desconectó, por ejemplo): lo leído no es la carpeta entera.
             return new CarpetaRecorrida(Array.Empty<string>(), false, e.Message);
         }
+    }
+
+    // Carpetas que el sistema crea en la raíz de un disco y que nunca son música del usuario. Se
+    // saltan por NOMBRE porque sus atributos no son fiables: en macOS (y en un disco exFAT escrito
+    // desde un Mac) no llevan System, y una «$RECYCLE.BIN» copiada de otro disco puede llegar sin
+    // ninguno. Dentro de ellas hay audio de verdad (lo borrado), que no debe volver a la biblioteca.
+    private static readonly HashSet<string> CarpetasDeSistema = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "$RECYCLE.BIN", "RECYCLER", "System Volume Information",
+        ".Trashes", ".Trash", ".Spotlight-V100", ".fseventsd", ".TemporaryItems", ".DocumentRevisions-V100",
+        // Los de los NAS (Synology, QNAP, netatalk), donde muchos DJs guardan la música: papeleras
+        // con audio borrado de verdad, miniaturas y las bifurcaciones de recursos de macOS, que se
+        // llaman igual que la canción («.AppleDouble\x.mp3») pero no son audio.
+        "#recycle", "@Recycle", "@eaDir", ".@__thumb", ".AppleDouble", ".AppleDB", ".AppleDesktop",
+    };
+
+    /// <summary>
+    /// ¿Se salta esta subcarpeta al recorrer la biblioteca? Solo las de sistema por nombre, o las
+    /// que tienen a la vez Hidden y System, que es como Windows marca las suyas.
+    /// </summary>
+    /// <remarks>
+    /// Visto en una biblioteca real: con «Hidden o System» se perdía una carpeta personalizada con
+    /// desktop.ini, porque Windows le pone System (o ReadOnly) para que lea el desktop.ini. Una carpeta
+    /// que el usuario solo oculta tampoco se salta: sigue siendo suya y antes se escaneaba.
+    /// </remarks>
+    public static bool SaltarCarpeta(string nombre, FileAttributes atributos)
+    {
+        if (CarpetasDeSistema.Contains(nombre)) return true;
+        const FileAttributes ocultaYDeSistema = FileAttributes.Hidden | FileAttributes.System;
+        return (atributos & ocultaYDeSistema) == ocultaYDeSistema;
+    }
+
+    // Un archivo se salta con la misma regla de atributos (oculto Y de sistema); los «._*» de macOS
+    // ya los quita EsAudio por nombre.
+    private static bool SaltarArchivo(FileAttributes atributos)
+    {
+        const FileAttributes ocultoYDeSistema = FileAttributes.Hidden | FileAttributes.System;
+        return (atributos & ocultoYDeSistema) == ocultoYDeSistema;
     }
 
     /// <summary>¿Es un archivo de audio de la biblioteca? Por extensión, y sin los «._*» de macOS.</summary>

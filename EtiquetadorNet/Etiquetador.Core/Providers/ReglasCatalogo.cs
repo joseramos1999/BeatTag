@@ -24,12 +24,26 @@ public static class ReglasCatalogo
         new(@"\b(?:instrumental(?:es)?|karaoke|playback|backing\s*tracks?)\b|\binst\b\.?", IC);
 
     /// <summary>
+    /// Ediciones de DJ que empiezan o acaban con la voz sola: «Acapella In», «Acapella Intro»,
+    /// «Aca Out», «Acapella In &amp; Out», «Intro Acapella». Llevan la canción ENTERA, así que no
+    /// son una herramienta, aunque <see cref="Identificacion.MencionaAcapella"/> las reconozca.
+    /// </summary>
+    private static readonly Regex EdicionConAcapellaRe = new(
+        @"\b(?:(?:a\s*c{1,2}a+|perc?a)p{1,2}e+l{1,2}a+s?|aca)\s*(?:in|intro|out|outro)\b(?:\s*(?:&|and|y|/|\+)\s*(?:in|intro|out|outro)\b)?" +
+        @"|\b(?:intro|outro)\s+(?:a\s*c{1,2}a+|perc?a)p{1,2}e+l{1,2}a+s?\b", IC);
+
+    /// <summary>
     /// ¿El texto nombra una versión instrumental o acapella? Las acapellas se reconocen con la
     /// misma regla que ya usa la comprobación de audio (<see cref="Identificacion.MencionaAcapella"/>),
-    /// que admite todas sus grafías.
+    /// que admite todas sus grafías, salvo las ediciones «Acapella In/Out/Intro», que llevan la
+    /// canción entera.
     /// </summary>
     public static bool EsHerramienta(string? texto)
-        => !string.IsNullOrEmpty(texto) && (HerramientaRe.IsMatch(texto) || Identificacion.MencionaAcapella(texto));
+    {
+        if (string.IsNullOrEmpty(texto)) return false;
+        var sinEdiciones = EdicionConAcapellaRe.Replace(texto, " ");
+        return HerramientaRe.IsMatch(sinEdiciones) || Identificacion.MencionaAcapella(sinEdiciones);
+    }
 
     /// <summary>
     /// Parecido mínimo entre títulos para el respaldo aproximado. Estaba en 0,88/0,90 y era
@@ -92,8 +106,13 @@ public static class ReglasCatalogo
             var tFuzzy = nt.Length >= 5 && tn.Length >= 5 && Matching.JaroWinkler(nt, tn) >= UmbralTituloAproximado;
             var conocida = localDur > 0 && c.Dur > 0;
             var durOk = conocida && Math.Abs(c.Dur - localDur) <= ToleranciaDuracion;
-            // Sin las dos duraciones no hay contradicción que ver; con ellas, deben cuadrar.
-            var durSinContradiccion = !conocida || durOk;
+            // Sin las dos duraciones no hay contradicción que ver; con ellas, deben cuadrar. Salvo en
+            // una edición (Extended, Intro…): dura más que el original por definición, y la vía
+            // normal tampoco le penaliza la duración. Visto en revisión: «Bad Buny - Titi Me
+            // Pregunto (Extended)» (300 s frente a los 243 s del catálogo) se quedaba sin identificar
+            // por la errata del artista. Los remixes y directos no pedidos ya los filtra
+            // VersionNoPedida, así que esto no reabre el caso de «Beso a Beso».
+            var durSinContradiccion = !conocida || durOk || isEdit;
 
             if ((aFuzzy && tStrict && durSinContradiccion) || (aStrict && tFuzzy && durOk && !isEdit))
             {

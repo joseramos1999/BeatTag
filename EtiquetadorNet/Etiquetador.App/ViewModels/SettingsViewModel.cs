@@ -506,7 +506,7 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
     }
 
     /// <summary>Cuántos renombrados hay anotados y podrían repararse en rekordbox.</summary>
-    public int RenombradosAnotados => RekordboxRelocator.ReadRenames(_engine.Paths.UndoDir).Count;
+    public int RenombradosAnotados => RekordboxRelocator.RenombradosVigentes(_engine.Paths.UndoDir).Count;
 
     /// <summary>
     /// Reescribe las rutas de una colección de rekordbox exportada, para que vuelva a encontrar los

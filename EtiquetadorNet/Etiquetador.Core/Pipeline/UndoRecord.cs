@@ -33,9 +33,13 @@ public sealed class FieldChange
     /// <see cref="UndoEngine.CoverField"/>): <paramref name="copiaAnterior"/> es la ruta absoluta de
     /// la copia de la carátula anterior en <see cref="AppPaths.PortadasDir"/>, o "" si el archivo no
     /// tenía. Deshacer la vuelve a poner como frontal, o quita la frontal si no había.
+    ///
+    /// <paramref name="puesta"/> son los bytes de la carátula que se pone: su SHA-1 va en NewStr
+    /// («sustituida:&lt;sha1&gt;») para que deshacer no pise una carátula cambiada a mano después.
+    /// Sin ella se anota la marca sola, como en la 1.9.x, y deshacer no puede comprobarlo.
     /// </summary>
-    public static FieldChange Portada(string? copiaAnterior)
-        => Str(copiaAnterior ?? "", UndoEngine.CoverSustituida);
+    public static FieldChange Portada(string? copiaAnterior, byte[]? puesta = null)
+        => Str(copiaAnterior ?? "", UndoEngine.MarcaCover(puesta));
 }
 
 /// <summary>Una línea del manifiesto reversible: rutas absolutas + cambios por campo.</summary>

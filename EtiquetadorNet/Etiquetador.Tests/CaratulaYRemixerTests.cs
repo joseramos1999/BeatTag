@@ -83,7 +83,7 @@ public class CaratulaYRemixerTests
             // La anterior, guardada con su SHA-1 por nombre y anotada con su ruta absoluta.
             var cambio = log["Cover"];
             Assert.Equal(FieldKind.Str, cambio.Kind);
-            Assert.Equal(Tagging.CaratulaSustituida, cambio.NewStr);
+            Assert.Equal(UndoEngine.MarcaCover(DelCatalogo), cambio.NewStr);   // la marca y la huella de la puesta
             Assert.True(Path.IsPathRooted(cambio.OldStr));
             Assert.True(File.Exists(cambio.OldStr));
             Assert.Equal(PortadaPropia, File.ReadAllBytes(cambio.OldStr!));

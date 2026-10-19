@@ -98,10 +98,26 @@ public sealed class ScanCache
     public string Save()
     {
         if (!_dirty) return "";
-        if (_noSobrescribir) return AvisoCarga;
+        if (_noSobrescribir && !Releer()) return AvisoCarga;
         var error = ArchivoDatos.EscribirJson(_file, _map);
         if (error.Length == 0) _dirty = false;
         return error;
+    }
+
+    /// <summary>
+    /// Si al arrancar el archivo no se pudo leer (bloqueado un momento), se vuelve a intentar al
+    /// guardar y se junta lo guardado con lo de esta sesión, que manda. Antes no se reintentaba
+    /// nunca y la caché de la sesión se perdía al cerrar (T10).
+    /// </summary>
+    private bool Releer()
+    {
+        var leido = ArchivoDatos.LeerJson<Dictionary<string, Entry>>(_file);
+        AvisoCarga = leido.Aviso;
+        if (leido.NoSobrescribir) return false;
+        if (leido.Datos != null)
+            foreach (var (ruta, entrada) in leido.Datos) _map.TryAdd(ruta, entrada);
+        _noSobrescribir = false;
+        return true;
     }
 
     private void Load()

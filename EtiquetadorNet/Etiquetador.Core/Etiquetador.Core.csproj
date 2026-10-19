@@ -11,4 +11,10 @@
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
   </ItemGroup>
 
+  <!-- Las pruebas comprueban la decisión «leer, crear o fallar» del Llavero (LlaveroMac) con un
+       `security` simulado. Igual que en Etiquetador.App.csproj. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Etiquetador.Tests" />
+  </ItemGroup>
+
 </Project>

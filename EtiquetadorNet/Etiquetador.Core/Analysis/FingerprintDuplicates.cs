@@ -46,10 +46,10 @@ public static class FingerprintDuplicates
     /// la elección no depende de qué bits de la huella cambian más, y sale uno de cada 8 aunque
     /// los valores no estén repartidos por igual.
     /// </summary>
-    private static bool SeIndexa(int valor) => unchecked((uint)valor * 2654435761u) >> (32 - BitsDeMuestreo) == 0;
+    internal static bool SeIndexa(int valor) => unchecked((uint)valor * 2654435761u) >> (32 - BitsDeMuestreo) == 0;
 
     /// <summary>Valores compartidos a partir de los cuales merece la pena comparar a fondo.</summary>
-    private const int MinimoValoresComunes = 3;
+    internal const int MinimoValoresComunes = 3;
 
     /// <summary>
     /// Un valor que aparece en muchísimas canciones no distingue nada (silencios, tonos planos) y
@@ -83,7 +83,8 @@ public static class FingerprintDuplicates
         // un Dictionary<int, List<int>> con una lista pequeña por cada valor distinto. MEDIDO con
         // 13.800 huellas de 960 valores, 300 de ellas copias desplazadas de 1 a 30 elementos: el
         // índice por posición encontraba 30 parejas (solo las de desfase múltiplo de 8) y pedía
-        // unos 2 GB de memoria en total; este las encuentra las 300 en medio segundo con 16 MB.
+        // unos 200 MB de memoria en total (195 MB, medido de nuevo en la revisión; una primera cifra de
+        // «2 GB» estaba inflada unas diez veces); este las encuentra las 300 en medio segundo con 15 MB.
         var total = 0;
         foreach (var (_, f) in conHuella)
             foreach (var v in f)

@@ -59,7 +59,25 @@ public static class RekordboxImporter
 
         // Ruta de red (el host es el servidor): «\\servidor\recurso\x.mp3» en Windows.
         if (servidor)
+        {
+            // «file://D:/x.mp3»: algunos programas ponen la unidad donde va el host. No es un
+            // servidor llamado «D:»; sin esta comprobación salía «\\D:\x.mp3», que no existe.
+            if (s.Length >= 2 && char.IsAsciiLetter(s[0]) && s[1] == ':')
+                return s.Replace('/', '\\');
             return OperatingSystem.IsWindows() ? @"\\" + s.Replace('/', '\\') : "//" + s;
+        }
+
+        // Ruta de red con el host vacío o «localhost» y la doble barra en la ruta:
+        // «file://localhost///NAS/Musica/x.mp3». Es el formato que escribía BeatTag hasta la 1.9.2
+        // (y probablemente rekordbox) para «\\NAS\Musica\x.mp3». Sin esto, la regresión de M11
+        // devolvía «///NAS/Musica/x.mp3» en Windows y la pista dejaba de casar con la biblioteca.
+        // En macOS/Linux una ruta con «//» al principio es la misma que con una sola barra (y es lo
+        // que escribía el PathToLocation antiguo para «/Users/…»), así que se deja con una.
+        if (s.StartsWith("//", StringComparison.Ordinal))
+        {
+            var resto = s.TrimStart('/');
+            return OperatingSystem.IsWindows() ? @"\\" + resto.Replace('/', '\\') : "/" + resto;
+        }
 
         // Ruta absoluta de macOS/Linux: tal cual, en cualquier sistema (es su forma).
         if (s.StartsWith('/')) return s;

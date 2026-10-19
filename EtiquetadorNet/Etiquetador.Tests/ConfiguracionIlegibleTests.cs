@@ -86,25 +86,33 @@ public class ConfiguracionIlegibleTests
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
-    // Si no se puede ni apartar (otro programa lo tiene abierto), no se escribe encima en toda la
-    // sesión: más vale perder los cambios de hoy que la configuración de siempre.
+    // Otro programa lo tiene abierto (solo lectura compartida): ahora el original se COPIA, así que
+    // se puede apartar aunque no se pueda mover. Lo que no se puede es escribir encima mientras siga
+    // abierto: el original se queda intacto, y en cuanto se libera, el guardado sale bien sin perder
+    // nada (la copia ya estaba hecha). Antes, con el Move fallido, no se guardaba en toda la sesión.
     [WindowsFact]
-    public void Si_no_se_puede_apartar_no_se_guarda_encima()
+    public void Si_el_original_esta_abierto_se_copia_y_no_se_pisa_mientras_tanto()
     {
         var paths = Nueva(out var dir);
         try
         {
-            const string roto = """{"Folders":["E:\\Musica"],""";
+            const string roto = """{"Folders":["E:\\Musica"],"PriorityFolders":[""";
             File.WriteAllText(paths.ConfigPath, roto);
 
             AppConfig cfg;
             using (new FileStream(paths.ConfigPath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                cfg = AppConfig.Load(paths, out _);
-
-            Assert.True(cfg.GuardadoBloqueado);
-            Assert.False(cfg.Save(paths, out var error));
-            Assert.NotEqual("", error);
+            {
+                cfg = AppConfig.Load(paths, out var aviso);
+                Assert.Contains("No se pudo guardar todavía", aviso);
+                Assert.False(cfg.Save(paths, out var error));
+                Assert.NotEqual("", error);
+            }
+            Assert.False(cfg.GuardadoBloqueado);
             Assert.Equal(roto, File.ReadAllText(paths.ConfigPath));
+            Assert.Equal(roto, File.ReadAllText(Assert.Single(Apartados(paths))));
+
+            Assert.True(cfg.Save(paths, out var errorLibre), errorLibre);
+            Assert.Equal(roto, File.ReadAllText(Assert.Single(Apartados(paths))));
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }

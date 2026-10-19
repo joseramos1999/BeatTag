@@ -18,6 +18,22 @@ public sealed record UndoResult(string File, int Reverted, int Errors, int Missi
     /// Registros que siguen en el manifiesto: el próximo «Deshacer última» reintentará SOLO esos.
     /// </summary>
     public int Pendientes => Errors + Missing;
+
+    /// <summary>
+    /// Esta pasada no ha deshecho NADA y siguen quedando pendientes: el manifiesto está atascado
+    /// (un archivo enviado a la papelera, uno que falla siempre). Es cuando la interfaz debe ofrecer
+    /// <see cref="UndoEngine.DarPorPerdidos"/>; si no, las ejecuciones anteriores no se alcanzan.
+    /// </summary>
+    public bool SinAvance => !None && Pendientes > 0 && Reverted == 0 && Manual == 0;
+}
+
+/// <summary>Resultado de <see cref="UndoEngine.DarPorPerdidos"/>.</summary>
+/// <param name="Archivo">El manifiesto que se ha sacado de la cola ("" si no había ninguno).</param>
+/// <param name="Registros">Cuántos registros pendientes se han dado por perdidos.</param>
+/// <param name="Error">"" si fue bien; si no, por qué el manifiesto sigue pendiente.</param>
+public sealed record PendientesDescartados(string Archivo, int Registros, string Error = "")
+{
+    public bool Ok => Error.Length == 0;
 }
 
 /// <summary>
@@ -74,7 +90,7 @@ public sealed class UndoEngine
     {
         string? mf;
         if (!string.IsNullOrEmpty(manifest)) mf = File.Exists(manifest) ? manifest : null;
-        else mf = ManifiestosPendientes().FirstOrDefault();
+        else mf = PrimeroConRegistros();
         if (mf == null) return new UndoResult("", 0, 0, 0, 0, false, true);
 
         // Cada línea con su texto original: lo que no se pueda revertir vuelve al manifiesto tal cual.
@@ -117,7 +133,95 @@ public sealed class UndoEngine
 
         var clean = err == 0 && missing == 0;
         var aviso = Archivar(mf, lineas.Select(l => l.Texto).ToList(), pendiente);
-        return new UndoResult(Path.GetFileName(mf), rev, err, missing, manual, clean, false, aviso);
+        var res = new UndoResult(Path.GetFileName(mf), rev, err, missing, manual, clean, false, aviso);
+
+        // E2: un registro ausente para siempre (archivo enviado a la papelera) o con un error que no
+        // se arregla deja el manifiesto como «el último» indefinidamente: cada clic da lo mismo y las
+        // ejecuciones anteriores no se alcanzan. Se dice claramente; la salida es DarPorPerdidos.
+        if (res.SinAvance && aviso.Length == 0)
+        {
+            var motivo = missing > 0 && err > 0 ? $"{missing} no aparecen y {err} dan error"
+                       : missing > 0 ? (missing == 1 ? "el archivo no aparece" : $"{missing} archivos no aparecen")
+                       : (err == 1 ? "da error" : $"{err} dan error");
+            var cuales = res.Pendientes == 1
+                ? $"el registro pendiente de {Path.GetFileName(mf)}"
+                : $"ninguno de los {res.Pendientes} registros pendientes de {Path.GetFileName(mf)}";
+            res = res with
+            {
+                Aviso = $"No se ha podido deshacer {cuales} ({motivo}). " +
+                        "Mientras quede pendiente, «Deshacer última» volverá a esta ejecución antes que a las anteriores. " +
+                        "Si esos archivos no van a volver, se pueden dar por perdidos.",
+            };
+        }
+
+        // Lo que se acaba de archivar ya no necesita sus copias de carátula.
+        if (rev + manual > 0) PodarPortadas();
+        return res;
+    }
+
+    /// <summary>
+    /// El manifiesto pendiente más reciente que tenga algún registro. Un manifiesto vacío es el resto
+    /// de un archivado que no pudo terminar (ver <see cref="Archivar"/>): no hay nada que deshacer en
+    /// él y no puede tapar a los anteriores, así que se borra (o, si no se puede, se salta).
+    /// </summary>
+    private string? PrimeroConRegistros()
+    {
+        foreach (var mf in ManifiestosPendientes())
+        {
+            bool vacio;
+            try { vacio = File.ReadLines(mf, Encoding.UTF8).All(l => l.Trim().Length == 0); }
+            catch { return mf; }   // no se puede mirar: que lo intente UndoLastRun y lo cuente
+            if (!vacio) return mf;
+            try { File.Delete(mf); } catch { }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Saca de la cola un manifiesto cuyos pendientes no se van a poder deshacer (por defecto, el
+    /// más reciente): se archiva como «run_X.perdidos.jsonl» con los registros tal cual, sin tocar
+    /// ningún archivo.
+    ///
+    /// POR QUÉ. Visto en la revisión de E2: un registro ausente para siempre o con un error
+    /// permanente deja su manifiesto como «el último» y «Deshacer última» ya no llega nunca a las
+    /// ejecuciones anteriores; antes la única salida era borrar el manifiesto a mano. Es una acción
+    /// EXPLÍCITA porque un archivo ausente puede volver (un disco externo sin conectar).
+    ///
+    /// No lleva «.deshecho» a propósito: esos renombrados NO se deshicieron, y RekordboxRelocator
+    /// debe seguir leyéndolos como vigentes (A→B), no como vueltas al nombre original.
+    /// </summary>
+    public PendientesDescartados DarPorPerdidos(string? manifest = null)
+    {
+        var mf = !string.IsNullOrEmpty(manifest)
+            ? (File.Exists(manifest) && EsManifiestoPendiente(manifest) ? manifest : null)
+            : PrimeroConRegistros();
+        if (mf == null) return new PendientesDescartados("", 0);
+
+        string[] lineas;
+        try { lineas = File.ReadAllLines(mf, Encoding.UTF8).Where(l => l.Trim().Length > 0).ToArray(); }
+        catch (Exception e) { return new PendientesDescartados(Path.GetFileName(mf), 0, e.Message); }
+
+        var destino = RutaArchivado(mf, ".perdidos");
+        try
+        {
+            File.Move(mf, destino);
+        }
+        catch (Exception e)
+        {
+            // Bloqueado (antivirus, OneDrive): se copia lo pendiente y se vacía el manifiesto, que
+            // es lo que de verdad lo saca de la cola. Si ni eso se puede, sigue pendiente.
+            var errCopia = ArchivoDatos.Escribir(destino, string.Join("\n", lineas) + "\n");
+            var errVaciar = errCopia.Length == 0 ? ArchivoDatos.Escribir(mf, "") : errCopia;
+            if (errVaciar.Length > 0)
+            {
+                _log?.Log($"  deshacer: no se pudo dar por perdido {Path.GetFileName(mf)}: {e.Message}", LogKind.Err);
+                return new PendientesDescartados(Path.GetFileName(mf), 0, e.Message);
+            }
+            try { File.Delete(mf); } catch { }
+        }
+        _log?.Log($"  deshacer: {lineas.Length} registro(s) de {Path.GetFileName(mf)} dados por perdidos; se guardan en {Path.GetFileName(destino)}.", LogKind.No);
+        PodarPortadas();
+        return new PendientesDescartados(Path.GetFileName(mf), lineas.Length);
     }
 
     /// <summary>
@@ -146,15 +250,28 @@ public sealed class UndoEngine
             if (quedan.Count == 0)
             {
                 // Todo deshecho: el manifiesto entero pasa a archivado de una vez.
-                File.Move(mf, archivado);
-                // Con la fecha del DESHACER: renombrar conserva la de la ejecución, y
-                // RekordboxRelocator la usa para colocar en el tiempo la vuelta al nombre original.
-                try { File.SetLastWriteTime(archivado, DateTime.Now); } catch { }
-                return "";
+                try
+                {
+                    File.Move(mf, archivado);
+                    // Con la fecha del DESHACER: renombrar conserva la de la ejecución, y
+                    // RekordboxRelocator la usa para colocar en el tiempo la vuelta al nombre original.
+                    try { File.SetLastWriteTime(archivado, DateTime.Now); } catch { }
+                    return "";
+                }
+                catch (Exception e)
+                {
+                    // M3: el manifiesto bloqueado (antivirus, OneDrive) hacía fallar el Move y se
+                    // quedaba ENTERO como pendiente con todo ya revertido: un reintento habría vuelto
+                    // a aplicar la ganancia inversa a todos los MP3. Se sigue por el camino de la
+                    // rama parcial: primero se VACÍA el manifiesto (lo que impide repetir nada) y
+                    // después se escribe el archivado. Un manifiesto vacío ya no tapa a los
+                    // anteriores (PrimeroConRegistros lo salta).
+                    _log?.Log($"  deshacer: no se pudo mover {Path.GetFileName(mf)} al archivo ({e.Message}); se vacía y se archiva aparte.", LogKind.Err);
+                }
             }
             if (hechas.Count == 0) return "";   // no se pudo nada: el manifiesto se queda como estaba
 
-            var error = ArchivoDatos.Escribir(mf, string.Join("\n", quedan) + "\n");
+            var error = ArchivoDatos.Escribir(mf, quedan.Count == 0 ? "" : string.Join("\n", quedan) + "\n");
             if (error.Length > 0)
             {
                 var aviso = $"No se pudo actualizar el manifiesto {Path.GetFileName(mf)} ({error}). " +
@@ -165,6 +282,12 @@ public sealed class UndoEngine
             var errArch = ArchivoDatos.Escribir(archivado, string.Join("\n", hechas) + "\n");
             if (errArch.Length > 0)
                 _log?.Log($"  deshacer: no se pudo archivar lo revertido en {Path.GetFileName(archivado)}: {errArch}", LogKind.Err);
+            if (quedan.Count == 0)
+            {
+                // Ya vacío, no repite nada; si tampoco se deja borrar, PrimeroConRegistros lo salta.
+                try { File.Delete(mf); } catch { }
+                return "";
+            }
             _log?.Log($"  deshacer: quedan {quedan.Count} registro(s) en {Path.GetFileName(mf)}; «Deshacer última» reintentará solo esos.", LogKind.No);
             return "";
         }
@@ -183,7 +306,7 @@ public sealed class UndoEngine
     /// con <see cref="EsManifiestoPendiente"/>, y todos llevan «.deshecho», que es lo que mira
     /// RekordboxRelocator para saber que esos renombrados se deshicieron.
     /// </summary>
-    private static string RutaArchivado(string mf)
+    private static string RutaArchivado(string mf, string sufijo = ".deshecho")
     {
         var dir = Path.GetDirectoryName(mf) ?? "";
         var nombre = Path.GetFileName(mf);
@@ -192,8 +315,62 @@ public sealed class UndoEngine
         var ext = jsonl ? ".jsonl" : "";
         for (var n = 1; ; n++)
         {
-            var candidato = Path.Combine(dir, raiz + ".deshecho" + (n == 1 ? "" : "-" + n) + ext);
+            var candidato = Path.Combine(dir, raiz + sufijo + (n == 1 ? "" : "-" + n) + ext);
             if (!File.Exists(candidato)) return candidato;
+        }
+    }
+
+    /// <summary>
+    /// Antigüedad mínima de una copia de carátula para poder borrarla. Tagging guarda la copia
+    /// ANTES de que ApplyEngine escriba la línea del manifiesto que la cita: sin este margen, una
+    /// poda que coincidiera con una aplicación en curso borraría la copia recién hecha.
+    /// </summary>
+    public static readonly TimeSpan MargenPortadas = TimeSpan.FromDays(2);
+
+    // Los nombres de las copias: SHA-1 de los bytes + extensión (Tagging.GuardarCaratula).
+    private static readonly Regex NombreCopiaPortada =
+        new(@"[0-9a-f]{40}\.(?:jpg|png|gif|bmp|webp)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Política de retención de las copias de carátula (<see cref="AppPaths.PortadasDir"/>): se borra
+    /// una copia SOLO si ningún manifiesto pendiente la cita y tiene más de
+    /// <see cref="MargenPortadas"/>. Los manifiestos (pendientes y archivados) no se borran nunca:
+    /// son texto, pesan poco y RekordboxRelocator los usa como historial de renombrados.
+    ///
+    /// POR QUÉ. Las copias solo sirven para deshacer: una vez deshecha (o dada por perdida) la
+    /// ejecución que las cita, ya no las necesita nadie, y antes se quedaban para siempre. Si no se
+    /// puede leer algún manifiesto pendiente no se borra nada: no se sabría qué cita.
+    ///
+    /// Devuelve cuántas copias se han borrado.
+    /// </summary>
+    public int PodarPortadas()
+    {
+        try
+        {
+            if (!Directory.Exists(_paths.PortadasDir)) return 0;
+            var citadas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var mf in ManifiestosPendientes())
+            {
+                // Se busca el NOMBRE en el texto en bruto, no se interpreta el JSON: así también
+                // cuenta una línea que no se deja leer, y una ruta absoluta de otra carpeta de datos.
+                foreach (Match m in NombreCopiaPortada.Matches(File.ReadAllText(mf, Encoding.UTF8)))
+                    citadas.Add(m.Value);
+            }
+
+            var limite = DateTime.Now - MargenPortadas;
+            var borradas = 0;
+            foreach (var f in new DirectoryInfo(_paths.PortadasDir).EnumerateFiles())
+            {
+                if (citadas.Contains(f.Name) || f.LastWriteTime > limite) continue;
+                try { f.Delete(); borradas++; } catch { }
+            }
+            if (borradas > 0) _log?.Log($"  deshacer: {borradas} copia(s) de carátula que ya no cita ninguna ejecución pendiente, borradas.", LogKind.No);
+            return borradas;
+        }
+        catch (Exception e)
+        {
+            _log?.Log("  deshacer: no se pudieron revisar las copias de carátula: " + e.Message, LogKind.Err);
+            return 0;
         }
     }
 
@@ -204,15 +381,28 @@ public sealed class UndoEngine
     /// Campo de manifiesto de la carátula. Contrato compartido con quien sustituye la carátula:
     /// ANTES de sustituirla se guarda la frontal anterior en <see cref="AppPaths.PortadasDir"/> y se
     /// anota un FieldChange de texto con OldStr = ruta absoluta de esa copia ("" si el archivo no
-    /// tenía carátula) y NewStr = <see cref="CoverSustituida"/>.
+    /// tenía carátula) y NewStr = <see cref="MarcaCover"/> de la carátula puesta
+    /// («sustituida:&lt;sha1&gt;»; ver <see cref="FieldChange.Portada"/>).
     /// </summary>
     public const string CoverField = "Cover";
 
     /// <summary>
-    /// Marca de NewStr que dice que OldStr guarda la carátula anterior. Los registros antiguos
-    /// llevan "changed" y ninguna copia, y esos no se pueden devolver.
+    /// Marca de NewStr que dice que OldStr guarda la carátula anterior. Es la ÚNICA definición (antes
+    /// había otra igual en Tagging). Los registros escritos por la 1.9.x llevan la marca sola; los
+    /// nuevos, «sustituida:&lt;sha1 de la carátula puesta&gt;». Los antiguos de verdad llevan
+    /// "changed" y ninguna copia, y esos no se pueden devolver.
     /// </summary>
     public const string CoverSustituida = "sustituida";
+
+    /// <summary>
+    /// NewStr de una sustitución de carátula: la marca y el SHA-1 de la carátula que se PUSO, para
+    /// que deshacer sepa si la frontal sigue siendo la de la aplicación (ver RestoreCover).
+    /// </summary>
+    public static string MarcaCover(byte[]? puesta)
+        => puesta is { Length: > 0 } ? CoverSustituida + ":" + Sha1(puesta) : CoverSustituida;
+
+    private static string Sha1(byte[] datos)
+        => Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(datos)).ToLowerInvariant();
 
     // ---------- Formato nuevo ----------
     private Outcome ProcessNew(UndoRecord r)
@@ -381,7 +571,25 @@ public sealed class UndoEngine
     private (bool restored, bool skipped) RestoreCover(TagLib.File tf, FieldChange fc, string path)
     {
         // Registro antiguo ("changed"): no se guardó la carátula anterior y no hay nada que devolver.
-        if (!string.Equals(fc.NewStr, CoverSustituida, StringComparison.Ordinal)) return (false, false);
+        var marca = fc.NewStr ?? "";
+        string? huellaPuesta;
+        if (string.Equals(marca, CoverSustituida, StringComparison.Ordinal)) huellaPuesta = null;   // 1.9.x: sin huella
+        else if (marca.StartsWith(CoverSustituida + ":", StringComparison.Ordinal)) huellaPuesta = marca[(CoverSustituida.Length + 1)..];
+        else return (false, false);
+
+        // Como con los demás campos: solo se devuelve si la frontal sigue siendo la que puso la
+        // aplicación. Antes se devolvía siempre, y una carátula cambiada a mano DESPUÉS de la
+        // ejecución (otra portada elegida en Mp3tag, por ejemplo) se pisaba al deshacer.
+        if (huellaPuesta != null)
+        {
+            var frontal = tf.Tag.Pictures.FirstOrDefault(p => p.Type == TagLib.PictureType.FrontCover);
+            var datos = frontal?.Data?.Data;
+            if (datos is not { Length: > 0 } || !string.Equals(Sha1(datos), huellaPuesta, StringComparison.OrdinalIgnoreCase))
+            {
+                _log?.Log($"  deshacer: la carátula se cambió después de aplicar; se conserva la actual [{Path.GetFileName(path)}]", LogKind.No);
+                return (false, true);
+            }
+        }
 
         var otras = tf.Tag.Pictures.Where(p => p.Type != TagLib.PictureType.FrontCover).ToList();
         var copia = fc.OldStr ?? "";

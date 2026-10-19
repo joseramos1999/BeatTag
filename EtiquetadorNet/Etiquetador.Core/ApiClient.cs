@@ -51,9 +51,11 @@ public sealed class ApiClient : IDisposable
 
     /// <summary>
     /// Peticiones que se quedaron SIN respuesta válida desde que se creó el cliente: sin conexión,
-    /// tiempo de espera agotado, error 5xx, 429 o la «cuota agotada» de Deezer, ya contado el
-    /// reintento. Una búsqueda que responde bien sin resultados, o un 404, NO cuenta: eso sí es
-    /// una respuesta.
+    /// tiempo de espera agotado, error 5xx, 429, la «cuota agotada» de Deezer, el 403 con que iTunes
+    /// avisa de su límite, un 200 que no es JSON cuando se pedía JSON (una página de mantenimiento) o
+    /// una petición que no se hizo porque el servidor estaba en pausa (<see cref="Cortacircuitos"/>),
+    /// ya contado el reintento. Una búsqueda que responde bien sin resultados, un 404 (también de una
+    /// carátula) o un 401/403 de clave mala NO cuentan: eso sí es una respuesta.
     ///
     /// Existe para no confundir «no está en el catálogo» con «no se pudo preguntar». Visto en los
     /// registros reales: 98 respuestas «musicbrainz.org HTTP 503» y 23 «se abandona tras 2
@@ -70,6 +72,8 @@ public sealed class ApiClient : IDisposable
     {
         _paths = paths;
         Limitador = limitador ?? new LimitadorPeticiones();
+        // Con el reloj del limitador: las pruebas que lo simulan simulan también las pausas.
+        Cortacircuitos = new CortacircuitosRed(() => Limitador.Ahora);
         if (http != null) { _http = http; _ownsHttp = false; }
         else
         {
@@ -279,7 +283,14 @@ public sealed class ApiClient : IDisposable
         static bool Es(string h, string dominio) => h == dominio || h.EndsWith("." + dominio, StringComparison.Ordinal);
     }
 
-    private Task TurnoAsync(string url, IDictionary<string, string>? headers, int throttleMs, CancellationToken ct)
+    /// <summary>
+    /// Espera a partir de la cual se deja constancia en el registro. Visto en revisión (C9): con
+    /// iTunes a 20 por minuto, una racha de canciones que Deezer no tiene hace esperar hasta ~60 s
+    /// por petición, y el registro no decía nada; parecía que la aplicación se había colgado.
+    /// </summary>
+    public static readonly TimeSpan EsperaQueSeAnota = TimeSpan.FromSeconds(3);
+
+    private async Task TurnoAsync(string url, IDictionary<string, string>? headers, int throttleMs, CancellationToken ct)
     {
         var conToken = false;
         if (headers != null)
@@ -287,7 +298,47 @@ public sealed class ApiClient : IDisposable
                 if (kv.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
                     && kv.Value.StartsWith("Discogs", StringComparison.OrdinalIgnoreCase)) conToken = true;
         var (servidor, limite) = LimitePara(url, throttleMs, conToken);
-        return Limitador.EsperarTurnoAsync(servidor, limite, ct);
+        var esperado = await Limitador.EsperarTurnoAsync(servidor, limite, ct).ConfigureAwait(false);
+        if (esperado >= EsperaQueSeAnota)
+            Log?.Detail($"    espera de {esperado.TotalSeconds:0} s por el límite de peticiones de {servidor.Split('#')[0]} " +
+                        $"({limite.Peticiones} cada {limite.Ventana.TotalSeconds:0.#} s)");
+    }
+
+    // ------------------------------------------------------------------ Cortacircuitos
+
+    /// <summary>Deja de preguntar un rato a un servidor que no responde (ver <see cref="CortacircuitosRed"/>).</summary>
+    public CortacircuitosRed Cortacircuitos { get; }
+
+    private static string Servidor(string url)
+    {
+        try { return new Uri(url).Host.ToLowerInvariant(); }
+        catch { return ""; }
+    }
+
+    /// <summary>
+    /// Si el servidor está en pausa por el cortacircuitos, cuenta la petición como fallo de red
+    /// SIN hacerla y devuelve true. Así un servidor muerto cuesta un instante por petición y no los
+    /// 62 s de dos tiempos agotados más la espera.
+    /// </summary>
+    private bool EnPausa(string url, string metodo)
+    {
+        var servidor = Servidor(url);
+        if (Cortacircuitos.PuedePasar(servidor, out var falta)) return false;
+        LastApiError = $"{servidor} no responde; no se le pregunta durante {Math.Ceiling(falta.TotalSeconds):0} s más";
+        Log?.Detail($"    {metodo} {Short(url)} · {LastApiError}");
+        AnotarFalloDeRed();
+        return true;
+    }
+
+    /// <summary>Anota cómo acabó una petición en el cortacircuitos (y avisa si con ella se abre).</summary>
+    private void AnotarEnCortacircuitos(string url, bool fallo)
+    {
+        var servidor = Servidor(url);
+        if (!fallo) { Cortacircuitos.Exito(servidor); return; }
+        if (Cortacircuitos.Fallo(servidor) is { } pausa)
+            Log?.Log($"{servidor} no responde ({CortacircuitosRed.FallosParaAbrir} peticiones seguidas sin respuesta): " +
+                     $"se deja de preguntarle durante {pausa.TotalSeconds:0} s. Lo que se analice mientras tanto no se guarda como «no encontrada».",
+                     LogKind.Err);
     }
 
     // ------------------------------------------------------------------ GET
@@ -328,20 +379,34 @@ public sealed class ApiClient : IDisposable
         var cached = TryReadCache(cp, maxAge);
         if (cached != null)
         {
-            if (EsLegible(cached, json))
+            // Se interpreta UNA vez y el nodo viaja en la respuesta: antes se leía aquí para ver si
+            // era legible y otra vez en Json(), unos 100.000 análisis de JSON de más en un
+            // reanálisis de 15-20k canciones servido desde la caché.
+            JsonNode? nodo = null;
+            var legible = json ? (nodo = Parse(cached)) != null : !string.IsNullOrWhiteSpace(cached);
+            // C10: las versiones anteriores guardaban la «cuota agotada» de Deezer ({"error":{"code":4}}
+            // con HTTP 200) como si fuera la respuesta. Es JSON legible, y se servía hasta 30 días
+            // como «0 resultados»; se borra y se vuelve a preguntar.
+            var cuota = legible && EsErrorPasajeroDeDeezer(url, cached, out _);
+            if (legible && !cuota)
             {
                 Log?.Detail($"    GET {Short(url)} · caché");
-                return new RespuestaApi(cached, 200, DeCache: true, FalloDeRed: false);
+                return new RespuestaApi(cached, 200, DeCache: true, FalloDeRed: false) { Nodo = nodo };
             }
-            Log?.Detail($"    GET {Short(url)} · la caché no se puede leer, se descarta");
+            Log?.Detail(cuota
+                ? $"    GET {Short(url)} · la caché guarda un aviso de cuota de Deezer, se descarta"
+                : $"    GET {Short(url)} · la caché no se puede leer, se descarta");
             BorrarSinFallar(cp!);
         }
+
+        if (EnPausa(url, "GET")) return new RespuestaApi(null, 0, DeCache: false, FalloDeRed: true);
 
         var sw = Stopwatch.StartNew();
         for (int intento = 1; ; intento++)
         {
             await TurnoAsync(url, headers, throttleMs, ct).ConfigureAwait(false);
             string motivo;
+            var noContesta = true;   // para el cortacircuitos: un límite de peticiones SÍ es una respuesta
             int codigo;
             TimeSpan espera;
             try
@@ -354,31 +419,51 @@ public sealed class ApiClient : IDisposable
                 codigo = (int)resp.StatusCode;
                 if (resp.IsSuccessStatusCode)
                 {
-                    if (!EsErrorPasajeroDeDeezer(url, tx, out var codDeezer))
+                    JsonNode? nodo = null;
+                    var legible = json ? (nodo = Parse(tx)) != null : true;
+                    if (!legible)
+                    {
+                        // C8a: un 200 que no es JSON cuando se pedía JSON es una página de
+                        // mantenimiento o de Cloudflare, no una búsqueda vacía. Antes salía como
+                        // «0 resultados» sin contar como fallo, y la canción se guardaba como no
+                        // encontrada.
+                        motivo = $"HTTP {codigo} sin JSON ({Trunc(tx, 60)})";
+                        LastApiError = motivo;
+                        espera = TimeSpan.FromSeconds(2);
+                    }
+                    else if (!EsErrorPasajeroDeDeezer(url, tx, out var codDeezer))
                     {
                         Interlocked.Increment(ref _cacheMiss);
-                        if (cp != null && EsLegible(tx, json)) CacheStore(cp, tx);
+                        if (cp != null && EsLegible(tx, json: false)) CacheStore(cp, tx);   // el JSON ya se ha comprobado arriba
                         Log?.Detail($"    GET {Short(url)} · HTTP {codigo} · {tx.Length} B · {sw.ElapsedMilliseconds} ms");
-                        return new RespuestaApi(tx, codigo, DeCache: false, FalloDeRed: false);
+                        AnotarEnCortacircuitos(url, fallo: false);
+                        return new RespuestaApi(tx, codigo, DeCache: false, FalloDeRed: false) { Nodo = nodo };
                     }
-                    // Deezer avisa de la cuota con un 200 y un JSON de error. Antes se guardaba en
-                    // caché como si fuera la respuesta: esa búsqueda daba «0 resultados» un mes.
-                    motivo = $"Deezer: cuota agotada (código {codDeezer})";
-                    LastApiError = motivo;
-                    espera = TimeSpan.FromSeconds(5);
+                    else
+                    {
+                        // Deezer avisa de la cuota con un 200 y un JSON de error. Antes se guardaba en
+                        // caché como si fuera la respuesta: esa búsqueda daba «0 resultados» un mes.
+                        motivo = $"Deezer: cuota agotada (código {codDeezer})";
+                        LastApiError = motivo;
+                        espera = TimeSpan.FromSeconds(5);
+                        noContesta = false;
+                    }
                 }
                 else
                 {
                     LastApiError = ($"HTTP {codigo} {tx}").Trim();
-                    if (!EsPasajero(codigo))
+                    if (!EsPasajero(url, codigo))
                     {
                         // 4xx: el servidor ha contestado («no existe», «sin permiso»). Es una
                         // respuesta, no un fallo de red, y reintentar daría lo mismo.
                         Log?.Detail($"    GET {Short(url)} · HTTP {codigo} · {Trunc(tx, 200)}");
+                        AnotarEnCortacircuitos(url, fallo: false);
                         return new RespuestaApi(null, codigo, DeCache: false, FalloDeRed: false);
                     }
-                    motivo = $"HTTP {codigo}";
-                    espera = TimeSpan.FromSeconds(codigo is 429 or 503 ? RetryAfterSeconds(resp.Headers.RetryAfter) : 2);
+                    motivo = codigo == 403 ? $"HTTP 403 (límite de peticiones de {Servidor(url)})" : $"HTTP {codigo}";
+                    espera = TimeSpan.FromSeconds(codigo is 429 or 503 ? RetryAfterSeconds(resp.Headers.RetryAfter)
+                                                 : codigo == 403 ? 5 : 2);
+                    noContesta = NoContesta(codigo);
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -399,6 +484,7 @@ public sealed class ApiClient : IDisposable
             {
                 Log?.Detail($"    GET {Short(url)} · {motivo}, se abandona tras {intento} intentos");
                 AnotarFalloDeRed();
+                AnotarEnCortacircuitos(url, fallo: noContesta);
                 return new RespuestaApi(null, codigo, DeCache: false, FalloDeRed: true);
             }
             Log?.Detail($"    GET {Short(url)} · {motivo}, reintento en {espera.TotalSeconds:0}s");
@@ -406,8 +492,28 @@ public sealed class ApiClient : IDisposable
         }
     }
 
-    /// <summary>Códigos que hablan del servidor y no de la petición: merece la pena volver a intentarlo.</summary>
-    private static bool EsPasajero(int codigo) => codigo is 408 or 429 || codigo >= 500;
+    /// <summary>
+    /// Para el cortacircuitos: ¿el servidor NO ha contestado? Sin respuesta (0), 408 o 5xx. Un 429,
+    /// el 403 de iTunes o la cuota de Deezer sí son respuestas -«más despacio»-: de eso se encargan
+    /// el limitador y cada proveedor (Spotify lleva su propio bloqueo por 429), no esta pausa.
+    /// </summary>
+    private static bool NoContesta(int codigo) => codigo is 0 or 408 || codigo >= 500;
+
+    /// <summary>
+    /// Códigos que hablan del servidor y no de la petición: merece la pena volver a intentarlo, y si
+    /// no responde, es un fallo de red.
+    ///
+    /// El 403 de iTunes también (C8a): es como Apple avisa de que se ha pasado del límite de
+    /// peticiones (ver <see cref="LimitePara"/>), y se leía como «no está en el catálogo». En los
+    /// demás servidores un 403 es «sin permiso» (una clave mala): una respuesta, no un fallo.
+    /// </summary>
+    private static bool EsPasajero(string url, int codigo)
+    {
+        if (codigo is 408 or 429 || codigo >= 500) return true;
+        if (codigo != 403) return false;
+        var servidor = Servidor(url);
+        return servidor == "itunes.apple.com" || servidor.EndsWith(".itunes.apple.com", StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// Deezer responde «cuota agotada» (código 4) o «servicio ocupado» (700) con un HTTP 200 y un
@@ -461,6 +567,7 @@ public sealed class ApiClient : IDisposable
     private async Task<string?> PostAsync(string url, Func<HttpContent> contenido, IDictionary<string, string>? headers,
         int throttleMs, CancellationToken ct)
     {
+        if (EnPausa(url, "POST")) return null;
         await TurnoAsync(url, headers, throttleMs, ct).ConfigureAwait(false);
         try
         {
@@ -471,9 +578,12 @@ public sealed class ApiClient : IDisposable
             if (!resp.IsSuccessStatusCode)
             {
                 LastApiError = ($"HTTP {(int)resp.StatusCode} {tx}").Trim();
-                if (EsPasajero((int)resp.StatusCode)) AnotarFalloDeRed();
+                var pasajero = EsPasajero(url, (int)resp.StatusCode);
+                if (pasajero) AnotarFalloDeRed();
+                AnotarEnCortacircuitos(url, fallo: pasajero && NoContesta((int)resp.StatusCode));
                 return null;
             }
+            AnotarEnCortacircuitos(url, fallo: false);
             return tx;
         }
         // Solo es cancelar si lo pidió el usuario: un tiempo agotado es un fallo de red (ver GET).
@@ -483,6 +593,7 @@ public sealed class ApiClient : IDisposable
             LastApiError = ex is OperationCanceledException ? $"tiempo de espera agotado ({_http.Timeout.TotalSeconds:0} s)" : ex.Message;
             Log?.Detail($"    POST {Short(url)} · {LastApiError}");
             AnotarFalloDeRed();
+            AnotarEnCortacircuitos(url, fallo: true);
             return null;
         }
     }
@@ -495,15 +606,36 @@ public sealed class ApiClient : IDisposable
         return raw == null ? null : Parse(raw);
     }
 
-    /// <summary>Descarga cruda de bytes (para carátulas).</summary>
+    /// <summary>
+    /// Descarga cruda de bytes (para carátulas). Null si no hay; un 404 (la carátula ya no existe)
+    /// es una respuesta y NO cuenta como fallo de red, como documenta <see cref="FallosDeRed"/>.
+    /// Antes GetByteArrayAsync lanzaba con cualquier código de error y todo se contaba como fallo.
+    /// </summary>
     public async Task<byte[]?> GetBytesAsync(string url, CancellationToken ct = default)
     {
-        try { return await _http.GetByteArrayAsync(url, ct).ConfigureAwait(false); }
+        if (EnPausa(url, "GET")) return null;
+        try
+        {
+            using var resp = await _http.GetAsync(url, HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
+            var codigo = (int)resp.StatusCode;
+            if (!resp.IsSuccessStatusCode)
+            {
+                LastApiError = $"HTTP {codigo}";
+                var pasajero = EsPasajero(url, codigo);
+                if (pasajero) AnotarFalloDeRed();
+                AnotarEnCortacircuitos(url, fallo: pasajero && NoContesta(codigo));
+                return null;
+            }
+            var datos = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+            AnotarEnCortacircuitos(url, fallo: false);
+            return datos;
+        }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             LastApiError = ex is OperationCanceledException ? $"tiempo de espera agotado ({_http.Timeout.TotalSeconds:0} s)" : ex.Message;
             AnotarFalloDeRed();
+            AnotarEnCortacircuitos(url, fallo: true);
             return null;
         }
     }
@@ -535,11 +667,17 @@ public sealed class ApiClient : IDisposable
 /// <param name="Texto">El cuerpo de la respuesta, o null.</param>
 /// <param name="Codigo">Código HTTP (200 si vino de caché; 0 si ni siquiera hubo respuesta).</param>
 /// <param name="DeCache">Se sirvió de la caché en disco.</param>
-/// <param name="FalloDeRed">Sin conexión, tiempo agotado, 5xx, 429 o cuota: la ausencia de datos no significa nada.</param>
+/// <param name="FalloDeRed">
+/// Sin conexión, tiempo agotado, 5xx, 429, cuota de Deezer, 403 de iTunes, un 200 que no es JSON, o
+/// el servidor en pausa por el cortacircuitos: la ausencia de datos no significa nada.
+/// </param>
 public sealed record RespuestaApi(string? Texto, int Codigo, bool DeCache, bool FalloDeRed)
 {
+    /// <summary>El JSON ya interpretado por ApiClient, para no leerlo dos veces (null si no lo hizo).</summary>
+    internal JsonNode? Nodo { get; init; }
+
     /// <summary>El cuerpo interpretado como JSON (null si no hay cuerpo o no es JSON).</summary>
-    public JsonNode? Json() => ApiClient.ParseJson(Texto);
+    public JsonNode? Json() => Nodo ?? ApiClient.ParseJson(Texto);
 }
 
 /// <summary>
@@ -620,6 +758,9 @@ public sealed class LimitadorPeticiones
     public Task EsperarAsync(TimeSpan t, CancellationToken ct)
         => t > TimeSpan.Zero ? _esperar(t, ct) : Task.CompletedTask;
 
+    /// <summary>La hora del reloj de este limitador (monótono; simulado en las pruebas).</summary>
+    public TimeSpan Ahora => _ahora();
+
     /// <summary>
     /// Espera el turno para empezar una petición a <paramref name="servidor"/> y lo anota.
     /// Devuelve cuánto hubo que esperar (cero si no hizo falta).
@@ -651,5 +792,80 @@ public sealed class LimitadorPeticiones
             return esperado;
         }
         finally { s.Turno.Release(); }
+    }
+}
+
+/// <summary>
+/// Cortacircuitos por servidor: tras <see cref="FallosParaAbrir"/> peticiones SEGUIDAS sin
+/// respuesta a un mismo servidor, se deja de preguntarle durante una pausa (30 s la primera vez,
+/// que se dobla en cada recaída hasta 5 min). Cualquier respuesta, también un 404, lo cierra.
+///
+/// POR QUÉ. Desde C7 un tiempo agotado ya no aborta el análisis: cuenta como fallo y se sigue. Pero
+/// un servidor que acepta la conexión y no contesta cuesta entonces 30 s + 2 s + 30 s POR PETICIÓN,
+/// y un Discogs colgado convertía una tirada de 15.000 canciones en días, sin ningún aviso. Con la
+/// pausa, mientras no responde cada petición falla al instante (y cuenta como fallo de red: lo que
+/// se analice no se guarda como «no encontrada»), y pasada la pausa se vuelve a probar con una.
+/// </summary>
+public sealed class CortacircuitosRed
+{
+    /// <summary>Peticiones seguidas sin respuesta que abren el circuito.</summary>
+    public const int FallosParaAbrir = 3;
+
+    /// <summary>Primera pausa; se dobla en cada recaída.</summary>
+    public static readonly TimeSpan PausaInicial = TimeSpan.FromSeconds(30);
+
+    /// <summary>Pausa máxima: un servidor caído un buen rato se sigue probando cada 5 min.</summary>
+    public static readonly TimeSpan PausaMaxima = TimeSpan.FromMinutes(5);
+
+    private sealed class Estado
+    {
+        public int Seguidos;
+        public TimeSpan Pausa;
+        public TimeSpan AbiertoHasta;
+    }
+
+    private readonly ConcurrentDictionary<string, Estado> _estados = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Func<TimeSpan> _ahora;
+
+    /// <param name="ahora">Reloj monótono (el del limitador; simulado en las pruebas).</param>
+    public CortacircuitosRed(Func<TimeSpan> ahora) => _ahora = ahora;
+
+    /// <summary>¿Se puede preguntar ya a este servidor? Si no, cuánto falta.</summary>
+    public bool PuedePasar(string servidor, out TimeSpan falta)
+    {
+        falta = TimeSpan.Zero;
+        if (!_estados.TryGetValue(servidor ?? "", out var e)) return true;
+        lock (e)
+        {
+            var ahora = _ahora();
+            if (ahora >= e.AbiertoHasta) return true;
+            falta = e.AbiertoHasta - ahora;
+            return false;
+        }
+    }
+
+    /// <summary>El servidor respondió: se olvidan los fallos y la pausa.</summary>
+    public void Exito(string servidor)
+    {
+        if (!_estados.TryGetValue(servidor ?? "", out var e)) return;
+        lock (e) { e.Seguidos = 0; e.Pausa = TimeSpan.Zero; e.AbiertoHasta = TimeSpan.Zero; }
+    }
+
+    /// <summary>
+    /// Una petición más sin respuesta. Devuelve la pausa si con ella se abre el circuito (para
+    /// avisar una sola vez), o null.
+    /// </summary>
+    public TimeSpan? Fallo(string servidor)
+    {
+        var e = _estados.GetOrAdd(servidor ?? "", _ => new Estado());
+        lock (e)
+        {
+            e.Seguidos++;
+            if (e.Seguidos < FallosParaAbrir) return null;
+            e.Pausa = e.Pausa == TimeSpan.Zero ? PausaInicial
+                    : (e.Pausa + e.Pausa < PausaMaxima ? e.Pausa + e.Pausa : PausaMaxima);
+            e.AbiertoHasta = _ahora() + e.Pausa;
+            return e.Pausa;
+        }
     }
 }

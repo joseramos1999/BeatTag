@@ -33,9 +33,12 @@ public sealed class LinkResolver
         // el enlace más exacto que puede dar el usuario. Se sigue igual que en las listas.
         if (link == null && EnlaceCorto.Es(url))
         {
-            link = await EnlaceCorto.SeguirAsync(_http, url, TrackLinkParser.Parse, PatronCancion, ct).ConfigureAwait(false);
+            var seguido = await EnlaceCorto.AbrirAsync(_http, url, ct).ConfigureAwait(false);
+            if (!seguido.Respondio)
+                return new Result(null, $"No se pudo abrir el enlace corto ({seguido.Error}). Comprueba la conexión y vuelve a intentarlo.");
+            link = seguido.Reconocer(TrackLinkParser.Parse, PatronCancion);
             if (link == null)
-                return new Result(null, "Ese enlace corto no lleva a una canción de Deezer ni de Spotify. Si es de una lista, ábrelo en la pestaña Playlists.");
+                return new Result(null, MotivoSinCancion(seguido));
         }
 
         if (link == null)
@@ -58,6 +61,24 @@ public sealed class LinkResolver
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception e) { return new Result(null, "No se pudo leer el enlace: " + e.Message); }
+    }
+
+    /// <summary>Dónde buscar una lista o un álbum en la página de un enlace corto que redirige por script.</summary>
+    private const string PatronLista =
+        @"(?:deezer\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?(?:playlist|album)/\d+|open\.spotify\.com/(?:[a-z\-]+/)*?(?:playlist|album)/[A-Za-z0-9]{22})";
+
+    /// <summary>
+    /// Por qué un enlace corto que SÍ respondió no sirve. Si lleva a una lista o a un álbum se dice
+    /// así, con dónde se abre; si no, que no es de Deezer ni de Spotify. Antes el texto era el mismo
+    /// para todo, también sin conexión.
+    /// </summary>
+    internal static string MotivoSinCancion(EnlaceCorto.Seguido seguido)
+    {
+        if (seguido.Reconocer(PlaylistLinkParser.Parse, PatronLista) is { } lista)
+            return lista.EsAlbum
+                ? "Ese enlace es de un álbum, no de una canción. Para compararlo con la biblioteca, ábrelo en la pestaña Playlists."
+                : "Ese enlace es de una lista, no de una canción. Ábrelo en la pestaña Playlists.";
+        return "Ese enlace corto no lleva a una canción de Deezer ni de Spotify.";
     }
 
     private async Task<Result> DeezerAsync(string id, CancellationToken ct)

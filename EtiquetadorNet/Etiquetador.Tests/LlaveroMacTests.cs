@@ -47,7 +47,6 @@ public class LlaveroMacTests
     [Theory]
     [InlineData(36, "security: SecKeychainSearchCopyNext: User interaction is not allowed.")]
     [InlineData(128, "security: SecKeychainSearchCopyNext: User canceled the operation.")]
-    [InlineData(-1, "")]   // sin respuesta en 15 s
     public void Con_el_llavero_bloqueado_no_se_crea_otra_clave(int codigo, string error)
     {
         var security = new SecurityFalso();

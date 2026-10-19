@@ -41,7 +41,21 @@ public static class RekordboxRelocator
     /// toca) y una Location que hubiera llegado a apuntar a B vuelve a A. AppEngine.ReubicarFichas
     /// usa este mismo mapa y sigue devolviendo las fichas de B a A.
     /// </summary>
-    public static Dictionary<string, string> ReadRenames(string undoDir)
+    public static Dictionary<string, string> ReadRenames(string undoDir) => LeerRenombrados(undoDir, conDeshechos: true);
+
+    /// <summary>
+    /// Solo los renombrados que siguen VIGENTES: los A→B de ejecuciones que no se han deshecho,
+    /// encadenados igual que en <see cref="ReadRenames"/>. Es lo que hay que contar como
+    /// «renombrados anotados».
+    ///
+    /// Visto en una biblioteca real: ReadRenames incluye, para cada renombrado deshecho, su vuelta
+    /// B→A -necesaria para reparar una Location que llegó a apuntar a B-, así que el contador de
+    /// Ajustes contaba de más los 12 de run_20260920_230254.deshecho.jsonl, que ya estaban en su
+    /// nombre original.
+    /// </summary>
+    public static Dictionary<string, string> RenombradosVigentes(string undoDir) => LeerRenombrados(undoDir, conDeshechos: false);
+
+    private static Dictionary<string, string> LeerRenombrados(string undoDir, bool conDeshechos)
     {
         var mapa = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (!Directory.Exists(undoDir)) return mapa;
@@ -49,6 +63,7 @@ public static class RekordboxRelocator
         var pasos = new List<(DateTime Cuando, int Fase, string Manifiesto, int Orden, string De, string A)>();
         foreach (var mf in new DirectoryInfo(undoDir).EnumerateFiles("run_*.jsonl"))
         {
+            if (!conDeshechos && mf.Name.Contains(".deshecho", StringComparison.OrdinalIgnoreCase)) continue;
             var renombrados = new List<UndoRecord>();
             foreach (var linea in File.ReadLines(mf.FullName))
             {
