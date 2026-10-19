@@ -38,7 +38,7 @@
         <ScrollViewer Grid.Row="1" Grid.Column="2" Margin="8,0,6,0" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Spacing="6" IsEnabled="{Binding HaySeleccionada}" Margin="0,0,6,0">
                 <TextBlock Text="Nombre" />
-                <TextBox Text="{Binding Nombre}" />
+                <TextBox Text="{Binding Nombre}" LostFocus="Nombre_LostFocus" />
 
                 <TextBlock Text="Artista, título o archivo" Margin="0,6,0,0" />
                 <TextBox Text="{Binding Texto}" PlaceholderText="Palabras sueltas, en cualquier orden" />

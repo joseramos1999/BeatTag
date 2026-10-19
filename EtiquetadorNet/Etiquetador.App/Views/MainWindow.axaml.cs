@@ -170,6 +170,14 @@ public partial class MainWindow : Window
         var engine = AppEngine.Current;
         if (engine == null) return;
 
+        // Lo escrito en el panel de ficha (Ficha DJ, Bandeja) y no guardado, igual que al cambiar de fila.
+        try
+        {
+            _vm?.Fichas.GuardarAlCerrar();
+            _vm?.Bandeja.GuardarAlCerrar();
+        }
+        catch { /* no poder guardarlo no puede impedir cerrar la aplicación */ }
+
         try
         {
             var cfg = engine.Config;

@@ -116,20 +116,26 @@
             <TabItem Header="Proponer fichas">
                 <DockPanel DataContext="{Binding FichasIa}" x:DataType="vm:FichasIaViewModel" Margin="0,8,0,0">
                     <TextBlock DockPanel.Dock="Top" Classes="desc" Margin="0,0,0,6"
-                               Text="Propone el idioma y si lleva voz para las canciones que no los tienen en su ficha. Solo esos dos datos: medida con canciones conocidas, la IA acierta el idioma en unas 7 de cada 10 canciones (suele fallar cuando deduce por la nacionalidad del artista) y no sabe estimar la energía. Nunca cambia lo que ya hayas rellenado. Revisa y acepta." />
+                               Text="Propone el idioma y si lleva voz para las canciones que no los tienen en su ficha. Solo esos dos datos: medida con canciones conocidas, la IA acierta el idioma en unas 7 de cada 10 canciones (suele fallar cuando deduce por la nacionalidad del artista) y no sabe estimar la energía. Nunca cambia lo que ya hayas rellenado. Lo que propone la IA sale desmarcado: revisa, marca lo correcto y acepta. Cada aceptación se puede deshacer, y cada nueva búsqueda continúa con canciones que aún no se han revisado." />
                     <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                         <TextBlock Text="Canciones de" VerticalAlignment="Center" Margin="0,0,6,4" />
                         <ComboBox ItemsSource="{Binding Ambitos}" SelectedItem="{Binding Ambito}" MinWidth="200" Margin="0,0,12,4" />
                         <TextBlock Text="Como máximo" VerticalAlignment="Center" Margin="0,0,6,4" />
                         <ComboBox ItemsSource="{Binding Limites}" SelectedItem="{Binding Limite}" MinWidth="90" Margin="0,0,12,4" />
-                        <Button Content="Proponer" Command="{Binding ProponerCommand}" Margin="0,0,12,4"
+                        <Button Content="Proponer" Command="{Binding ProponerCommand}" Margin="0,0,6,4"
                                 IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
                                 Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+                        <Button Content="Empezar desde el principio" Command="{Binding EmpezarDeNuevoCommand}" Margin="0,0,12,4"
+                                IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                ToolTip.Tip="Cada búsqueda salta las canciones ya revisadas en esta sesión y no aceptadas. Esto las vuelve a incluir." />
                         <Button Content="Marcar todas" Command="{Binding MarcarTodasCommand}" Margin="0,0,6,4" />
                         <Button Content="Desmarcar todas" Command="{Binding MarcarNingunaCommand}" Margin="0,0,12,4" />
-                        <Button Content="Aceptar las marcadas" Command="{Binding AceptarCommand}" Margin="0,0,12,4"
+                        <Button Content="Aceptar las marcadas" Command="{Binding AceptarCommand}" Margin="0,0,6,4"
                                 IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
                                 Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
+                        <Button Content="Deshacer la última aceptación" Command="{Binding DeshacerAceptacionCommand}" Margin="0,0,12,4"
+                                IsEnabled="{Binding HayAceptacionQueDeshacer}"
+                                ToolTip.Tip="Devuelve el idioma y la voz que tenían las fichas antes de la última aceptación, y vuelve a poner esas propuestas en la lista." />
                         <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" />
                     </WrapPanel>
                     <DataGrid Name="TablaFichas" ItemsSource="{Binding Propuestas}" x:CompileBindings="False" AutoGenerateColumns="False"
@@ -185,9 +191,12 @@
                         <ComboBox ItemsSource="{Binding Ambitos}" SelectedItem="{Binding Ambito}" MinWidth="200" Margin="0,0,12,4" />
                         <TextBlock Text="Como máximo" VerticalAlignment="Center" Margin="0,0,6,4" />
                         <ComboBox ItemsSource="{Binding Limites}" SelectedItem="{Binding Limite}" MinWidth="90" Margin="0,0,12,4" />
-                        <Button Content="Proponer nombres" Command="{Binding ProponerCommand}" Margin="0,0,12,4"
+                        <Button Content="Proponer nombres" Command="{Binding ProponerCommand}" Margin="0,0,6,4"
                                 IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
                                 Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+                        <Button Content="Empezar desde el principio" Command="{Binding EmpezarDeNuevoCommand}" Margin="0,0,12,4"
+                                IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                ToolTip.Tip="Cada búsqueda salta los nombres ya revisados en esta sesión y no renombrados. Esto los vuelve a incluir." />
                         <CheckBox Content="Solo las que no tienen avisos" IsChecked="{Binding SoloSinAvisos}" Margin="0,0,12,4" />
                         <Button Content="Marcar las visibles" Command="{Binding MarcarTodasCommand}" Margin="0,0,6,4" />
                         <Button Content="Desmarcar todas" Command="{Binding MarcarNingunaCommand}" Margin="0,0,12,4" />

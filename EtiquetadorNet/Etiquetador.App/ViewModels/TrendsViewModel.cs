@@ -95,6 +95,7 @@ public partial class TrendsViewModel : ListaFrenteBibliotecaViewModel
         Rows.Clear();
         RowsView.Refresh();
         Resumen = "";
+        FechaLista = "";
         Status = "Cargando países…";
         _ = EnsureCountriesAsync();
     }
@@ -134,8 +135,21 @@ public partial class TrendsViewModel : ListaFrenteBibliotecaViewModel
         finally { IsBusy = false; LoadingCountries = false; }
     }
 
+    /// <summary>
+    /// De cuándo es la lista que se está viendo. Las listas se guardan unas horas
+    /// (<see cref="ChartsProvider.VigenciaLista"/>) y, sin conexión, se enseña la última guardada:
+    /// sin decirlo, el usuario podía estar mirando la de hace días creyendo que era la de hoy.
+    /// </summary>
+    [ObservableProperty] private string _fechaLista = "";
+
     [RelayCommand]
-    private async Task LoadAsync()
+    private Task LoadAsync() => CargarAsync(forzarRed: false);
+
+    /// <summary>Vuelve a pedir la lista a la red aunque la guardada sea reciente.</summary>
+    [RelayCommand]
+    private Task ActualizarAsync() => CargarAsync(forzarRed: true);
+
+    private async Task CargarAsync(bool forzarRed)
     {
         if (IsBusy) return;
         // Red de seguridad: si por lo que sea no se cargaron al abrir la pestaña, se cargan aquí.
@@ -143,18 +157,71 @@ public partial class TrendsViewModel : ListaFrenteBibliotecaViewModel
         if (SelectedCountry is not { } pais) { Status = "Selecciona antes un país."; return; }
         IsBusy = true;
         _cts = new CancellationTokenSource();
-        Status = $"Consultando el Top {ListSize} de {pais.Name}…";
-        _engine.Logger.Head($"Tendencias: Top {ListSize} de {pais.Name}");
+        var fuente = FuenteElegida;
+        Status = forzarRed ? $"Descargando de nuevo el Top {ListSize} de {pais.Name}…" : $"Consultando el Top {ListSize} de {pais.Name}…";
+        _engine.Logger.Head($"Tendencias: Top {ListSize} de {pais.Name}" + (forzarRed ? " (actualizar)" : ""));
         try
         {
             await AsegurarBibliotecaAsync();
-            var chart = await _engine.Charts.GetChartAsync(FuenteElegida, pais, ListSize, _cts.Token);
-            var tengo = Cruzar(chart);
-            Status = $"Top {Rows.Count} de {pais.Name}. {Resumen}. Faltan {Rows.Count - tengo}.";
+            // Para saber si «Actualizar» trajo de verdad una lista nueva: si la red falla, se enseña la
+            // guardada, y esa es de antes de este momento.
+            var pedidaEn = DateTime.Now;
+            var chart = await _engine.Charts.GetChartAsync(fuente, pais, ListSize, _cts.Token, forzarRed);
+            // Con la caché desactivada no hay archivo del que sacar la fecha: la lista acaba de llegar.
+            var descargada = _engine.Api.CacheOn ? _engine.Charts.FechaDeLaLista(fuente, pais, ListSize)
+                           : chart.Count > 0 ? DateTime.Now : (DateTime?)null;
+            // Sin filas no hay lista guardada que enseñar: no se dice que se enseña la de antes.
+            var sinActualizar = forzarRed && chart.Count > 0 && NoSeActualizo(descargada, pedidaEn);
+            if (sinActualizar) _engine.Logger.Detail($"Tendencias: no se pudo descargar de nuevo el Top de {pais.Name}; se enseña la lista guardada.");
+            var fecha = TextoFechaLista(descargada, DateTime.Now, ChartsProvider.VigenciaLista, sinActualizar);
+            var tengo = await CruzarAsync(chart, _cts.Token);
+            // La fecha se pone a la vez que la tabla. Antes se ponía antes del cruce, y si se cancelaba
+            // durante el cruce quedaba la fecha de la lista nueva junto a la tabla anterior.
+            FechaLista = fecha;
+            Status = (sinActualizar ? "No se ha podido descargar de nuevo: se enseña la lista guardada. " : "")
+                   + $"Top {Rows.Count} de {pais.Name}. {Resumen}. Faltan {Rows.Count - tengo}.";
             _engine.Logger.Sum($"Tendencias {pais.Name}: tienes {tengo} de {Rows.Count}");
         }
         catch (OperationCanceledException) { Status = "Consulta cancelada."; }
         catch (Exception e) { Status = "No se pudieron cargar las tendencias: " + e.Message; }
         finally { IsBusy = false; _cts?.Dispose(); _cts = null; }
     }
+
+    /// <summary>
+    /// «Lista descargada hoy a las 14:32.» y, si no está al día, por qué y cómo intentarlo otra vez:
+    /// porque se pidió «Actualizar» y la red no respondió (<paramref name="actualizacionFallida"/>), o
+    /// porque es más antigua que la vigencia. Vacío si no se sabe de cuándo es.
+    ///
+    /// Visto en la revisión: con «Actualizar» y sin red, si la guardada tenía menos de 6 horas se decía
+    /// «Lista descargada hoy a las 14:32.» sin más, como si la actualización pedida hubiera ido bien.
+    /// </summary>
+    internal static string TextoFechaLista(DateTime? descargada, DateTime ahora, TimeSpan vigencia,
+                                           bool actualizacionFallida = false)
+    {
+        if (descargada is not { } f) return "";
+        var hora = f.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        var cuando = f.Date == ahora.Date ? $"hoy a las {hora}"
+                   : f.Date == ahora.Date.AddDays(-1) ? $"ayer a las {hora}"
+                   : $"el {f.ToString("dd/MM/yyyy", System.Globalization.CultureInfo.InvariantCulture)} a las {hora}";
+        var texto = $"Lista descargada {cuando}.";
+        if (actualizacionFallida)
+            texto += " No se ha podido descargar de nuevo y se enseña la guardada: pulsa «Actualizar» para volver a intentarlo.";
+        else if (ahora - f > vigencia)
+            texto += " No se ha podido descargar una más reciente: pulsa «Actualizar» para volver a intentarlo.";
+        return texto;
+    }
+
+    /// <summary>
+    /// Margen para comparar la fecha del archivo guardado con la hora a la que se pidió la lista: los
+    /// dos salen del mismo reloj, pero con resoluciones distintas.
+    /// </summary>
+    private static readonly TimeSpan MargenReloj = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Se pidió la lista a la red en <paramref name="pedidaEn"/> y lo que hay guardado es de antes (o no
+    /// hay nada): la descarga falló y lo que se enseña es la copia anterior. Al descargar bien, la copia
+    /// guardada se reescribe y su fecha es posterior a la petición.
+    /// </summary>
+    internal static bool NoSeActualizo(DateTime? descargada, DateTime pedidaEn)
+        => descargada is not { } f || f < pedidaEn - MargenReloj;
 }

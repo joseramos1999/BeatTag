@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -12,6 +13,20 @@ public partial class ColeccionesView : UserControl
     {
         InitializeComponent();
         GridBehaviors.EnableWidthMemory(this, "Colecciones");
+    }
+
+    // La página solo recalcula a la vista: el shell cambia IsVisible al cambiar de página.
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if ((change.Property == IsVisibleProperty || change.Property == DataContextProperty) && DataContext is IPaginaVisible p)
+            p.Visible = IsVisible;
+    }
+
+    // Al dejar la casilla, el nombre no puede quedar vacío ni repetir el de otra colección.
+    private void Nombre_LostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ColeccionesViewModel vm) vm.ConfirmarNombre();
     }
 
     private void Grid_PointerPressed(object? sender, PointerPressedEventArgs e) => TeclaEnergia.SeleccionarConClicDerecho(sender, e);

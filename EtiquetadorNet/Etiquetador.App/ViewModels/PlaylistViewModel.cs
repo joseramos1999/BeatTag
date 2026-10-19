@@ -71,7 +71,7 @@ public partial class PlaylistViewModel : ListaFrenteBibliotecaViewModel
             _engine.Config.UltimaPlaylist = enlace;
             _engine.SaveConfig();
 
-            var tengo = Cruzar(lista.Pistas);
+            var tengo = await CruzarAsync(lista.Pistas, _cts.Token);
             Status = $"«{lista.Nombre}» ({lista.Plataforma}): {Rows.Count} canciones. {Resumen}. Faltan {Rows.Count - tengo}."
                    + (lista.Recortada ? " " + lista.Aviso : "");
             _engine.Logger.Sum($"Playlists «{lista.Nombre}» ({lista.Plataforma}): tienes {tengo} de {Rows.Count}"

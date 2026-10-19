@@ -113,6 +113,23 @@ public partial class FichaEditorViewModel : ViewModelBase
     [RelayCommand]
     private void Guardar() => GuardarPedido?.Invoke();
 
+    /// <summary>
+    /// Si hay algo escrito sin guardar, lo guarda (pidiéndoselo a la página, que sabe a qué canciones
+    /// corresponde). Devuelve true si guardó. Se llama ANTES de cargar otra selección o de rehacer la
+    /// tabla.
+    ///
+    /// Antes, escribir «boda, público mayor, cierre» en Etiquetas de 30 temas y hacer clic en otra fila
+    /// para comprobar algo lo borraba sin aviso ni forma de recuperarlo. Guardar sin preguntar es seguro:
+    /// solo se aplica lo que se ha tocado (<see cref="CambiosFicha"/>), y lo que no se quería se quita
+    /// igual que se puso.
+    /// </summary>
+    public bool GuardarSiHayCambios()
+    {
+        if (Cuantas == 0 || !HayCambios || !Cambios().HayAlguno) return false;
+        GuardarPedido?.Invoke();
+        return true;
+    }
+
     /// <summary>Vuelve a lo que había antes de tocar nada.</summary>
     [RelayCommand]
     private void Descartar() => Cargar(_cargadas);
@@ -212,4 +229,48 @@ public partial class FichaEditorViewModel : ViewModelBase
         if (_cargando || e.PropertyName == null || NoSonDeLaFicha.Contains(e.PropertyName)) return;
         HayCambios = Cuantas > 0 && Cambios().HayAlguno;
     }
+}
+
+/// <summary>
+/// Las filas seleccionadas de una tabla con panel de ficha (Ficha DJ y Bandeja), y el ORDEN en que se
+/// cambian: primero se guarda lo escrito en el panel, con la selección anterior todavía vigente, y
+/// solo después se pasa a la nueva y se carga su ficha.
+///
+/// Ese orden es lo que evita escribir en canciones equivocadas. La página guarda en «las
+/// seleccionadas» cuando el panel se lo pide; si la selección cambiase antes de guardar, lo escrito
+/// para 30 temas de boda acabaría en la fila en la que se acaba de hacer clic. Está aparte de las
+/// páginas para poder probarlo sin el motor de la aplicación.
+/// </summary>
+public sealed class SeleccionConFicha<T> where T : FichaRow
+{
+    private readonly FichaEditorViewModel _editor;
+
+    public SeleccionConFicha(FichaEditorViewModel editor) => _editor = editor;
+
+    /// <summary>Las filas seleccionadas ahora. Es a las que se aplica lo que se guarde.</summary>
+    public IReadOnlyList<T> Filas { get; private set; } = Array.Empty<T>();
+
+    /// <summary>
+    /// Guarda lo escrito en el panel para las filas seleccionadas ahora, si hay algo. Devuelve true si
+    /// guardó. Lo llaman las páginas antes de rehacer su tabla, al salir de ellas y al cerrar la
+    /// aplicación.
+    /// </summary>
+    public bool GuardarLoEscrito() => Filas.Count > 0 && _editor.GuardarSiHayCambios();
+
+    /// <summary>
+    /// Pasa a <paramref name="filas"/>. Lo escrito y no guardado se guarda antes en la selección
+    /// ANTERIOR. Devuelve true si guardó algo.
+    /// </summary>
+    public bool Cambiar(IEnumerable<T> filas)
+    {
+        // Se copian antes de guardar: guardar relee las fichas y puede tocar la colección de origen.
+        var nuevas = filas.ToList();
+        var guardada = GuardarLoEscrito();
+        Filas = nuevas;
+        Recargar();
+        return guardada;
+    }
+
+    /// <summary>Vuelve a enseñar en el panel la ficha de las seleccionadas (tras guardar o releer).</summary>
+    public void Recargar() => _editor.Cargar(Filas.Select(r => r.Ficha).ToList());
 }
