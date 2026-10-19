@@ -32,7 +32,8 @@ public partial class LoudnessView : UserControl
 
         var suben = objetivo.Count(r => r.Gain > 0);
         var bajan = objetivo.Count - suben;
-        var parciales = objetivo.Count(r => r.Satura);
+        // El mismo criterio que usa el ajuste: con el aumento redondeado hacia abajo por el pico.
+        var parciales = objetivo.Count(ViewModels.LoudnessViewModel.AumentoParcial);
 
         var ok = await ConfirmDialog.AskAsync(owner,
             $"Se va a ajustar el volumen de {objetivo.Count} grabaciones",

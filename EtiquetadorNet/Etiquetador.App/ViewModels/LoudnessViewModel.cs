@@ -258,26 +258,44 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     public const double UmbralAjuste = 2.0;
 
     /// <summary>Margen que se deja sin usar para no llegar justo al límite de distorsión.</summary>
-    private const double MargenSeguridad = 0.5;
+    internal const double MargenSeguridad = 0.5;
 
     /// <summary>Grabaciones que se corregirían con los criterios actuales.</summary>
     public List<LoudnessRow> ParaAjustar()
         => Rows.Where(r => r.Ajustable)   // un FLAC o un WAV se miden, pero no se tocan
                .Where(r => Math.Abs(r.Gain) > UmbralAjuste)
-               .Where(r => Mp3Gain.StepsFor(GananciaAplicable(r)) != 0)
+               .Where(r => PasosAplicables(r.Gain, r.PeakDb) != 0)
                .ToList();
 
     /// <summary>
-    /// Ganancia que de verdad se puede aplicar. Bajar siempre cabe; subir está limitado por el pico,
-    /// así que se aplica lo máximo que no llegue a distorsionar (mejor mejorar algo que no tocar).
+    /// Pasos de MP3Gain (1,5 dB cada uno) que de verdad se pueden aplicar. Bajar siempre cabe, y se
+    /// redondea al paso más cercano. Subir está limitado por el pico: se aplica lo máximo que no
+    /// llegue a distorsionar (mejor mejorar algo que no tocar), y ese tope se redondea HACIA ABAJO.
+    ///
+    /// Antes se redondeaba al más cercano también al subir, y el redondeo puede pasarse hasta
+    /// 0,75 dB, más que los 0,5 de margen. Ejemplo: canción a −16 LUFS con objetivo
+    /// −11 (+5 dB deseados) y pico de −2,8 dBFS. Caben 2,3 dB; redondeando salían 2 pasos (+3,0 dB)
+    /// y el pico acababa en +0,2 dBFS, recortado al decodificar. Ahora sale 1 paso (+1,5 dB) y el
+    /// pico queda en −1,3.
+    ///
+    /// El tope se aplica aunque la ganancia deseada quepa: con +2,3 deseados y un pico de −2,9 caben
+    /// 2,4 dB, pero el paso más cercano (+3,0) tampoco cabe.
     /// </summary>
-    private static double GananciaAplicable(LoudnessRow r)
+    internal static int PasosAplicables(double ganancia, double picoDb)
     {
-        var deseada = r.Gain;
-        if (deseada <= 0) return deseada;
-        var maxima = -MargenSeguridad - r.PeakDb;   // lo que cabe antes de tocar techo
-        return Math.Min(deseada, Math.Max(0, maxima));
+        var pasos = Mp3Gain.StepsFor(ganancia);
+        if (ganancia <= 0) return pasos;
+        var cabe = Math.Max(0, -MargenSeguridad - picoDb);   // lo que cabe antes de tocar techo
+        var tope = (int)Math.Floor(cabe / Mp3Gain.DbPerStep + 1e-9);
+        return Math.Min(pasos, tope);
     }
+
+    /// <summary>
+    /// El aumento se queda corto de lo deseado por falta de margen (más de medio paso por debajo).
+    /// Lo usan el aviso previo y el resumen final, para que digan lo mismo.
+    /// </summary>
+    public static bool AumentoParcial(LoudnessRow r)
+        => r.Gain > 0 && r.Gain - PasosAplicables(r.Gain, r.PeakDb) * Mp3Gain.DbPerStep > Mp3Gain.DbPerStep / 2;
 
     /// <summary>
     /// Ajusta el volumen de las grabaciones desviadas. Modifica los archivos, pero sin recodificar
@@ -319,8 +337,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 Progress = i * 100.0 / objetivo.Count;
                 Status = $"Ajustando {i} de {objetivo.Count}…  {fila.FileName}";
 
-                var aplicable = GananciaAplicable(fila);
-                var pasos = Mp3Gain.StepsFor(aplicable);
+                var pasos = PasosAplicables(fila.Gain, fila.PeakDb);
                 if (pasos == 0) continue;
 
                 var res = await Task.Run(() => Mp3Gain.Apply(fila.FilePath, pasos), ct);
@@ -332,7 +349,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 }
 
                 hechas++;
-                if (Math.Abs(aplicable - fila.Gain) > 0.75) parciales++;
+                if (AumentoParcial(fila)) parciales++;
 
                 // El ajuste se anuncia como reversible. Si el historial no se puede escribir, esa
                 // promesa deja de ser cierta a partir de aquí, así que se para: seguir tocando

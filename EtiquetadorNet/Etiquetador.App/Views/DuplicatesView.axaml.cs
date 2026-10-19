@@ -53,7 +53,7 @@ public partial class DuplicatesView : UserControl
         var ok = await ConfirmDialog.AskAsync(owner,
             $"Se van a enviar {objetivo.Count} archivos a la papelera",
             $"Afecta a {objetivo.Select(r => r.Group).Distinct().Count()} grupo(s) de duplicados." + aviso,
-            "Van a la Papelera de Windows, así que puedes recuperarlos desde ahí si te arrepientes.",
+            "Van a la papelera del sistema, así que puedes recuperarlos desde ahí. Si la papelera no admite alguno, no se toca y se indica el motivo.",
             "Enviar a la papelera");
 
         if (ok) vm.SendMarkedToRecycleBin();
