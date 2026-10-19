@@ -56,6 +56,45 @@ public class RekordboxImporterTests
         Assert.Equal((uint)94, RekordboxImporter.ParseBpm(list[0].Bpm));
     }
 
+    // En un Mac, rekordbox exporta rutas POSIX. Antes salían como «Users\dj\Music\…» -sin la barra
+    // inicial y con barras invertidas- y la importación de BPM y clave daba siempre 0 coincidencias.
+    private const string XmlMac = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <DJ_PLAYLISTS Version="1.0.0">
+      <COLLECTION Entries="1">
+        <TRACK TrackID="1" Name="Gasolina" Artist="Daddy Yankee" AverageBpm="96.00" Tonality="Fm"
+               Location="file://localhost/Users/dj/Music/Daddy%20Yankee%20-%20Gasolina.mp3"/>
+      </COLLECTION>
+    </DJ_PLAYLISTS>
+    """;
+
+    [Fact]
+    public void Parsea_las_rutas_de_un_mac()
+    {
+        var list = RekordboxImporter.ParseContent(XmlMac);
+        Assert.Equal("/Users/dj/Music/Daddy Yankee - Gasolina.mp3", Assert.Single(list).FilePath);
+    }
+
+    // Y con un archivo de verdad: la ruta leída casa con la de la biblioteca en el sistema donde se
+    // ejecute (en la CI de macOS, con una ruta /var/folders/…).
+    [Fact]
+    public void La_ruta_leida_casa_con_la_del_archivo()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var p = Path.Combine(dir, "Daddy Yankee - Gasolina.mp3");
+            Mp3Fixture.WriteMinMp3(p);
+            var xml = $"""<DJ_PLAYLISTS><COLLECTION><TRACK AverageBpm="96.00" Tonality="Fm" Location="{RekordboxRelocator.PathToLocation(p)}"/></COLLECTION></DJ_PLAYLISTS>""";
+
+            var leida = Assert.Single(RekordboxImporter.ParseContent(xml)).FilePath;
+
+            Assert.Equal(p, leida);
+            Assert.True(File.Exists(leida));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
     [Fact]
     public void Escribe_bpm_y_clave_en_el_archivo()
     {

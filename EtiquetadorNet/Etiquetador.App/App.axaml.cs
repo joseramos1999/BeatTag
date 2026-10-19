@@ -28,7 +28,9 @@ public partial class App : Application
             // la pantalla de carga ya sale con el aspecto elegido, sin pintarse en claro y
             // corregirse a oscuro a la vista del usuario.
             var paths = new AppPaths();
-            Services.Apariencia.Aplicar(AppConfig.Load(paths));
+            // Solo el aspecto: sin descifrar (en macOS iría al Llavero) ni apartar un archivo
+            // ilegible, que es cosa del motor y de su aviso.
+            Services.Apariencia.Aplicar(AppConfig.LeerAspecto(paths));
 
             // Mientras se monta el motor solo existe la pantalla de carga. Con OnMainWindowClose la
             // aplicación no se cierra por no tener todavía ventana principal.

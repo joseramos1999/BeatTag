@@ -27,6 +27,15 @@ public sealed class FieldChange
 
     public static FieldChange Num(uint oldVal, uint newVal)
         => new() { Kind = FieldKind.Num, OldNum = oldVal, NewNum = newVal };
+
+    /// <summary>
+    /// Sustitución de la carátula frontal (contrato «Cover», se anota con la clave
+    /// <see cref="UndoEngine.CoverField"/>): <paramref name="copiaAnterior"/> es la ruta absoluta de
+    /// la copia de la carátula anterior en <see cref="AppPaths.PortadasDir"/>, o "" si el archivo no
+    /// tenía. Deshacer la vuelve a poner como frontal, o quita la frontal si no había.
+    /// </summary>
+    public static FieldChange Portada(string? copiaAnterior)
+        => Str(copiaAnterior ?? "", UndoEngine.CoverSustituida);
 }
 
 /// <summary>Una línea del manifiesto reversible: rutas absolutas + cambios por campo.</summary>

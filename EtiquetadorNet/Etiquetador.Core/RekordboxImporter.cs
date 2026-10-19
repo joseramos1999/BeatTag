@@ -32,15 +32,40 @@ public static class RekordboxImporter
         return list;
     }
 
-    /// <summary>Convierte la Location de rekordbox ("file://localhost/D:/Música/x.mp3") en ruta local.</summary>
+    /// <summary>
+    /// Convierte la Location de rekordbox en ruta local:
+    ///   file://localhost/D:/Música/x.mp3        → D:\Música\x.mp3
+    ///   file://localhost/Users/dj/Music/x.mp3   → /Users/dj/Music/x.mp3   (macOS)
+    ///   file://servidor/musica/x.mp3            → \\servidor\musica\x.mp3 (red, en Windows)
+    ///
+    /// Se decide por la FORMA de la ruta y no solo por el sistema. Antes todo se trataba como de
+    /// Windows: en un Mac, «file://localhost/Users/dj/Music/x.mp3» salía como «Users\dj\Music\x.mp3»
+    /// -sin la barra inicial y con barras invertidas, que allí son parte del nombre-, nunca casaba
+    /// con la biblioteca, e Importar y Reparar rekordbox daban 0 coincidencias.
+    /// </summary>
     public static string LocationToPath(string location)
     {
-        var s = location;
-        if (s.StartsWith("file://localhost/", StringComparison.OrdinalIgnoreCase)) s = s["file://localhost/".Length..];
-        else if (s.StartsWith("file:///", StringComparison.OrdinalIgnoreCase)) s = s["file:///".Length..];
-        else if (s.StartsWith("file://", StringComparison.OrdinalIgnoreCase)) s = s["file://".Length..];
+        var s = location ?? "";
+        var servidor = false;
+        // Se conserva la barra que separa el host de la ruta: en macOS es la raíz «/».
+        if (s.StartsWith("file://localhost/", StringComparison.OrdinalIgnoreCase)) s = s["file://localhost".Length..];
+        else if (s.StartsWith("file:///", StringComparison.OrdinalIgnoreCase)) s = s["file://".Length..];
+        else if (s.StartsWith("file://", StringComparison.OrdinalIgnoreCase)) { s = s["file://".Length..]; servidor = true; }
         s = Uri.UnescapeDataString(s);
-        return s.Replace('/', '\\');
+
+        // Unidad de Windows: «/D:/Música/x.mp3» → «D:\Música\x.mp3».
+        if (s.Length >= 3 && s[0] == '/' && char.IsAsciiLetter(s[1]) && s[2] == ':')
+            return s[1..].Replace('/', '\\');
+
+        // Ruta de red (el host es el servidor): «\\servidor\recurso\x.mp3» en Windows.
+        if (servidor)
+            return OperatingSystem.IsWindows() ? @"\\" + s.Replace('/', '\\') : "//" + s;
+
+        // Ruta absoluta de macOS/Linux: tal cual, en cualquier sistema (es su forma).
+        if (s.StartsWith('/')) return s;
+
+        // Sin raíz reconocible (no debería darse): como antes, con el separador de Windows.
+        return OperatingSystem.IsWindows() ? s.Replace('/', '\\') : s;
     }
 
     /// <summary>BPM redondeado (de "128.00" a 128). 0 si no es válido.</summary>

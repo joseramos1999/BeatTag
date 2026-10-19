@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace Etiquetador.Core;
@@ -129,55 +130,245 @@ public sealed class AppConfig
     public bool WindowMaximized { get; set; }
 
     // --- Secretos serializados (cifrados). El getter cifra, el setter descifra. ---
-    [JsonPropertyName("DiscogsTokenEnc")] public string DiscogsTokenEnc { get => Secretos.Protect(DiscogsToken); set => DiscogsToken = Dec(value); }
-    [JsonPropertyName("SpotifySecretEnc")] public string SpotifySecretEnc { get => Secretos.Protect(SpotifySecret); set => SpotifySecret = Dec(value); }
-    [JsonPropertyName("AcoustIdKeyEnc")] public string AcoustIdKeyEnc { get => Secretos.Protect(AcoustIdKey); set => AcoustIdKey = Dec(value); }
-    [JsonPropertyName("AuddTokenEnc")] public string AuddTokenEnc { get => Secretos.Protect(AuddToken); set => AuddToken = Dec(value); }
+    [JsonPropertyName("DiscogsTokenEnc")] public string DiscogsTokenEnc { get => Enc(DiscogsToken, nameof(DiscogsTokenEnc)); set => DiscogsToken = Dec(value, nameof(DiscogsTokenEnc)); }
+    [JsonPropertyName("SpotifySecretEnc")] public string SpotifySecretEnc { get => Enc(SpotifySecret, nameof(SpotifySecretEnc)); set => SpotifySecret = Dec(value, nameof(SpotifySecretEnc)); }
+    [JsonPropertyName("AcoustIdKeyEnc")] public string AcoustIdKeyEnc { get => Enc(AcoustIdKey, nameof(AcoustIdKeyEnc)); set => AcoustIdKey = Dec(value, nameof(AcoustIdKeyEnc)); }
+    [JsonPropertyName("AuddTokenEnc")] public string AuddTokenEnc { get => Enc(AuddToken, nameof(AuddTokenEnc)); set => AuddToken = Dec(value, nameof(AuddTokenEnc)); }
 
-    /// <summary>true si al cargar hubo un ERROR criptográfico descifrando algún secreto (bloquea el guardado).</summary>
-    [JsonIgnore] public bool SecretsUnreadable { get; private set; }
+    // Texto cifrado TAL CUAL venía en el archivo, de los secretos que aquí no se pudieron descifrar
+    // (otro perfil de Windows, una configuración traída de un Mac, el Llavero bloqueado…).
+    private readonly Dictionary<string, string> _ilegibles = new();
 
-    private string Dec(string? enc)
+    /// <summary>
+    /// true si hay credenciales guardadas que no se pudieron descifrar en este equipo y que el
+    /// usuario no ha sustituido. Ya NO bloquea el guardado: al guardar se conserva su texto
+    /// cifrado original (ver <see cref="CredencialesIlegibles"/>).
+    /// </summary>
+    [JsonIgnore] public bool SecretsUnreadable => CredencialesIlegibles.Count > 0;
+
+    /// <summary>
+    /// Nombres de las credenciales que no se pudieron descifrar y se conservan cifradas tal cual
+    /// («SpotifySecretEnc»…). Para avisar en la interfaz.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> CredencialesIlegibles
+        => _ilegibles.Keys.Where(k => Claro(k).Length == 0).OrderBy(k => k, StringComparer.Ordinal).ToList();
+
+    /// <summary>
+    /// Descarta las credenciales ilegibles: el siguiente guardado ya no las conserva. Es la salida
+    /// explícita cuando son de otro equipo y no se van a poder leer nunca aquí.
+    /// </summary>
+    public void OlvidarCredencialesIlegibles() => _ilegibles.Clear();
+
+    /// <summary>
+    /// Cifra para guardar. Si el secreto no se pudo descifrar al cargar y el usuario no ha puesto
+    /// otro, se devuelve el cifrado ORIGINAL: re-cifrar el vacío perdería la credencial.
+    ///
+    /// Antes, con una sola credencial ilegible, Save se negaba a guardar NADA, y los guardados
+    /// automáticos (carpetas, ancho de columnas, ventana) fallaban en silencio: con una
+    /// configuración traída de otro equipo, el usuario añadía carpetas, cerraba y al reabrir habían
+    /// desaparecido.
+    /// </summary>
+    private string Enc(string claro, string campo)
+        => claro.Length == 0 && _ilegibles.TryGetValue(campo, out var original) ? original : Secretos.Protect(claro);
+
+    private string Dec(string? enc, string campo)
     {
         var (value, status) = Secretos.TryUnprotect(enc);
-        if (status == UnprotectStatus.CryptoError) SecretsUnreadable = true;
+        if (status == UnprotectStatus.CryptoError && !string.IsNullOrEmpty(enc)) _ilegibles[campo] = enc;
+        else _ilegibles.Remove(campo);
         return value;
     }
+
+    private string Claro(string campo) => campo switch
+    {
+        nameof(DiscogsTokenEnc) => DiscogsToken,
+        nameof(SpotifySecretEnc) => SpotifySecret,
+        nameof(AcoustIdKeyEnc) => AcoustIdKey,
+        nameof(AuddTokenEnc) => AuddToken,
+        _ => "",
+    };
+
+    /// <summary>Nombre de la credencial tal como se ve en Ajustes.</summary>
+    public static string NombreVisible(string campo) => campo switch
+    {
+        nameof(DiscogsTokenEnc) => "Discogs",
+        nameof(SpotifySecretEnc) => "Spotify",
+        nameof(AcoustIdKeyEnc) => "AcoustID",
+        nameof(AuddTokenEnc) => "AudD",
+        _ => campo,
+    };
+
+    /// <summary>
+    /// "" si la configuración se leyó con normalidad; si no, qué pasó con el archivo (se apartó por
+    /// ilegible, se descartaron ajustes que esta versión no entiende…). Para avisar en la interfaz.
+    /// </summary>
+    [JsonIgnore] public string AvisoCarga { get; private set; } = "";
+
+    /// <summary>
+    /// config.net.json existe pero no se pudo leer NI apartar. Mientras sea true, Save no escribe:
+    /// sustituiría por los valores de fábrica un archivo que quizá solo estaba bloqueado.
+    /// </summary>
+    [JsonIgnore] public bool GuardadoBloqueado { get; private set; }
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
     public static AppConfig Load(AppPaths paths) => Load(paths, out _);
 
+    /// <summary>
+    /// Lee la configuración. Si el archivo existe pero no se puede leer -un JSON editado a mano con
+    /// un error, o un ajuste que cambió de tipo al volver a una versión anterior- ya no se
+    /// devuelven los valores de fábrica sin más, que el siguiente guardado (al cerrar la ventana,
+    /// o el automático de las carpetas) escribía encima: se perdían las 43 carpetas, las prioridades
+    /// de Duplicados y las 4 credenciales cifradas. Ahora:
+    ///   1. se rescata todo lo que se entienda, ajuste a ajuste, y solo se descarta lo que no;
+    ///   2. el archivo original se aparta como «config.net.json.ilegible_fecha», intacto;
+    ///   3. el motivo queda en <paramref name="error"/> y en <see cref="AvisoCarga"/>.
+    /// Si no se puede ni leer ni apartar, <see cref="GuardadoBloqueado"/> impide escribir encima.
+    /// </summary>
     public static AppConfig Load(AppPaths paths, out string error)
     {
         error = "";
+        string json;
         try
         {
             if (!File.Exists(paths.ConfigPath)) return new AppConfig();
-            var json = File.ReadAllText(paths.ConfigPath, Encoding.UTF8);
-            return JsonSerializer.Deserialize<AppConfig>(json, JsonOpts) ?? new AppConfig();
+            json = File.ReadAllText(paths.ConfigPath, Encoding.UTF8);
         }
         catch (Exception e)
         {
-            error = "No se pudo leer la configuración: " + e.Message;
-            return new AppConfig();
+            // No se ha podido mirar dentro: no hay motivo para creerlo dañado, pero tampoco se puede
+            // guardar encima sin perderlo.
+            error = $"No se pudo leer la configuración ({e.Message}); no se guardará ningún cambio en esta sesión para no sustituirla.";
+            return new AppConfig { AvisoCarga = error, GuardadoBloqueado = true };
         }
+
+        string motivo;
+        try
+        {
+            var cfg = JsonSerializer.Deserialize<AppConfig>(json, JsonOpts);
+            if (cfg != null)
+            {
+                // Se puede seguir, pero hay que decirlo: antes solo bloqueaba el guardado en silencio.
+                if (cfg.SecretsUnreadable)
+                    error = cfg.AvisoCarga =
+                        $"Hay credenciales guardadas que no se pueden descifrar en este equipo ({string.Join(", ", cfg.CredencialesIlegibles.Select(NombreVisible))}); " +
+                        "se conservan cifradas tal cual. Si son de otro equipo, vuelve a introducirlas en Ajustes.";
+                return cfg;
+            }
+            motivo = "el archivo está vacío";
+        }
+        catch (Exception e)   // lo que sea del contenido: una configuración dañada no puede impedir arrancar
+        {
+            motivo = e.Message;
+        }
+
+        var descartados = new List<string>();
+        var rescatada = Rescatar(json, descartados);
+        var apartado = ArchivoDatos.Apartar(paths.ConfigPath);
+
+        var cfgFinal = rescatada ?? new AppConfig();
+        if (apartado.Length == 0)
+        {
+            cfgFinal.GuardadoBloqueado = true;
+            error = $"No se pudo leer la configuración ({motivo}) ni apartarla; no se guardará ningún cambio en esta sesión para no sustituirla.";
+        }
+        else if (rescatada != null)
+        {
+            error = $"La configuración tenía ajustes que esta versión no entiende ({string.Join(", ", descartados)}); " +
+                    $"se han dejado con su valor de fábrica y el resto se conserva. El archivo original se ha guardado como {Path.GetFileName(apartado)}.";
+        }
+        else
+        {
+            error = $"No se pudo leer la configuración ({motivo}); se empieza con los valores de fábrica. " +
+                    $"El archivo original se ha guardado como {Path.GetFileName(apartado)}.";
+        }
+        cfgFinal.AvisoCarga = error;
+        return cfgFinal;
+    }
+
+    /// <summary>
+    /// Lee el JSON quitando, uno a uno, los ajustes que no se dejan leer (el que señala la
+    /// excepción), hasta que el resto se lee. null si ni siquiera es un objeto JSON.
+    /// </summary>
+    private static AppConfig? Rescatar(string json, List<string> descartados)
+    {
+        JsonObject? obj;
+        try { obj = JsonNode.Parse(json) as JsonObject; }
+        catch { return null; }
+        if (obj == null) return null;
+
+        // Como mucho tantos intentos como ajustes: cada vuelta quita uno.
+        for (var intento = 0; intento <= obj.Count; intento++)
+        {
+            try { return obj.Deserialize<AppConfig>(JsonOpts); }
+            catch (JsonException e)
+            {
+                var ajuste = AjusteDe(e.Path);
+                if (ajuste == null || !obj.Remove(ajuste)) return null;
+                descartados.Add(ajuste);
+            }
+            catch { return null; }
+        }
+        return null;
+    }
+
+    /// <summary>Primer tramo de una ruta JSON: «$.Folders[3]» → «Folders», «$['Mi ajuste']» → «Mi ajuste».</summary>
+    private static string? AjusteDe(string? ruta)
+    {
+        if (string.IsNullOrEmpty(ruta) || !ruta.StartsWith('$')) return null;
+        var s = ruta[1..];
+        if (s.StartsWith("['", StringComparison.Ordinal))
+        {
+            var fin = s.IndexOf("']", StringComparison.Ordinal);
+            return fin > 2 ? s[2..fin] : null;
+        }
+        if (!s.StartsWith('.')) return null;
+        s = s[1..];
+        var corte = s.IndexOfAny(new[] { '.', '[' });
+        var nombre = corte < 0 ? s : s[..corte];
+        return nombre.Length > 0 ? nombre : null;
+    }
+
+    /// <summary>
+    /// Solo el aspecto (tema y filas compactas), para pintar la pantalla de carga con el tema
+    /// elegido. No descifra nada, no aparta nada y no avisa: eso lo hace <see cref="Load(AppPaths, out string)"/>
+    /// cuando arranca el motor.
+    ///
+    /// Antes se usaba Load entero, en el hilo de interfaz y antes de la pantalla de carga: en macOS
+    /// los setters de las credenciales llaman al Llavero, que puede quedarse esperando a que el
+    /// usuario lo desbloquee; y un archivo ilegible se apartaría aquí, con el aviso tirado, y el
+    /// motor ya no se enteraría.
+    /// </summary>
+    public static AppConfig LeerAspecto(AppPaths paths)
+    {
+        var cfg = new AppConfig();
+        try
+        {
+            if (!File.Exists(paths.ConfigPath)) return cfg;
+            using var doc = JsonDocument.Parse(File.ReadAllText(paths.ConfigPath, Encoding.UTF8));
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return cfg;
+            if (doc.RootElement.TryGetProperty(nameof(Theme), out var tema) && tema.ValueKind == JsonValueKind.String)
+                cfg.Theme = tema.GetString() ?? cfg.Theme;
+            if (doc.RootElement.TryGetProperty(nameof(CompactRows), out var compactas) && compactas.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                cfg.CompactRows = compactas.GetBoolean();
+        }
+        catch { /* el aspecto de fábrica; el motor dirá luego qué le pasa al archivo */ }
+        return cfg;
     }
 
     /// <summary>
     /// Guarda de forma segura: 1) cifra TODO en memoria (si falla, no toca el archivo anterior);
     /// 2) escribe a un temporal y lo intercambia de forma atómica. Devuelve false + error si falla.
+    /// Las credenciales que no se pudieron descifrar se guardan con su cifrado original.
     /// </summary>
     public bool Save(AppPaths paths, out string error)
     {
         error = "";
-        // Si las credenciales guardadas no se pudieron descifrar (otro perfil de usuario, o una
-        // configuración traída de otro sistema), NO guardamos: re-cifraríamos vacíos y perderíamos
-        // las originales del archivo.
-        if (SecretsUnreadable)
+        if (GuardadoBloqueado)
         {
-            error = "No se pueden descifrar las credenciales guardadas en este equipo; " +
-                    "no se guardará para no perderlas. (Si son de otro equipo o usuario, borra config.net.json y vuelve a introducirlas.)";
+            error = "config.net.json no se pudo leer al arrancar; no se guarda para no sustituirlo por los valores de fábrica. " +
+                    "Cierra la aplicación y revisa el archivo.";
             return false;
         }
         string json;

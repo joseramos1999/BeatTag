@@ -50,9 +50,13 @@ public class RekordboxRelocatorTests
         var destino = Path.Combine(dir, "reparada.xml");
         try
         {
-            var vieja = @"D:\Musica\pista01.mp3";
-            var nueva = @"D:\Musica\Bad Bunny - Titi Me Pregunto.mp3";
-            File.WriteAllText(origen, XmlCon(vieja, @"D:\Musica\otra.mp3"));
+            // Rutas de verdad, y el archivo NUEVO existe: la reparación ya no manda una pista a una
+            // ruta que no existe (con los renombrados deshechos eso era perderla, ver
+            // No_reescribe_hacia_un_archivo_que_no_existe). Antes la prueba usaba rutas inventadas.
+            var vieja = Path.Combine(dir, "pista01.mp3");
+            var nueva = Path.Combine(dir, "Bad Bunny - Titi Me Pregunto.mp3");
+            File.WriteAllText(nueva, "audio");
+            File.WriteAllText(origen, XmlCon(vieja, Path.Combine(dir, "otra.mp3")));
 
             var res = RekordboxRelocator.Repair(origen, destino,
                 new Dictionary<string, string> { [vieja] = nueva });
@@ -152,4 +156,237 @@ public class RekordboxRelocatorTests
     [Fact]
     public void Sin_carpeta_de_manifiestos_no_rompe()
         => Assert.Empty(RekordboxRelocator.ReadRenames(Path.Combine(Path.GetTempPath(), "no-existe-" + Guid.NewGuid())));
+
+    // ---- Renombrados que se deshicieron ----
+
+    // Visto en una biblioteca real: run_20260920_230254.deshecho.jsonl tiene 12 renombrados que se
+    // deshicieron esa misma noche (23:56). La reparación los seguía leyendo como vigentes y cambiaba
+    // la Location de esos temas -que estaban bien en su nombre original- por el nombre nuevo, que ya
+    // no existía: rekordbox los perdía con sus cue points.
+    [Fact]
+    public void Los_renombrados_deshechos_no_se_aplican()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "etq-mf-" + Guid.NewGuid().ToString("N"));
+        var undoDir = Path.Combine(dir, "deshacer");
+        Directory.CreateDirectory(undoDir);
+        try
+        {
+            var filas = Enumerable.Range(1, 12)
+                .Select(i => (Orig: Path.Combine(dir, $"pista{i:00}.mp3"), Final: Path.Combine(dir, $"Artista {i:00} - Tema {i:00}.mp3")))
+                .ToArray();
+            foreach (var f in filas) File.WriteAllText(f.Orig, "audio");   // de vuelta en su nombre original
+            var archivado = Manifiesto(undoDir, "run_20260920_230254.deshecho.jsonl", filas);
+            // Como los archivados antiguos: renombrar conservó la fecha de la ejecución.
+            File.SetLastWriteTime(archivado, new DateTime(2026, 9, 20, 23, 2, 54));
+
+            var mapa = RekordboxRelocator.ReadRenames(undoDir);
+
+            foreach (var f in filas)
+            {
+                Assert.False(mapa.ContainsKey(f.Orig));       // la ruta original NO se toca
+                Assert.Equal(f.Orig, mapa[f.Final]);          // y si rekordbox llegó a ver la nueva, vuelve a la original
+            }
+
+            // La colección exportada apunta a las originales: queda exactamente igual.
+            var origen = Path.Combine(dir, "collection.xml");
+            File.WriteAllText(origen, XmlCon(filas.Select(f => f.Orig).ToArray()));
+            var res = RekordboxRelocator.Repair(origen, Path.Combine(dir, "reparada.xml"), mapa);
+            Assert.True(res.Ok);
+            Assert.Equal(0, res.Reparadas);
+            Assert.Equal(12, res.SinCambio);
+            foreach (var f in filas)
+                Assert.Contains(RekordboxRelocator.PathToLocation(f.Orig), File.ReadAllText(Path.Combine(dir, "reparada.xml")));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Si rekordbox importó el archivo con el nombre nuevo antes del deshacer, esa Location apunta a
+    // un archivo que ya no existe: se devuelve al original.
+    [Fact]
+    public void Una_location_con_el_nombre_deshecho_vuelve_al_original()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "etq-mf-" + Guid.NewGuid().ToString("N"));
+        var undoDir = Path.Combine(dir, "deshacer");
+        Directory.CreateDirectory(undoDir);
+        try
+        {
+            var orig = Path.Combine(dir, "pista01.mp3");
+            var final = Path.Combine(dir, "Bad Bunny - Titi Me Pregunto.mp3");
+            File.WriteAllText(orig, "audio");
+            Manifiesto(undoDir, "run_20260920_230254.deshecho.jsonl", (orig, final));
+
+            var origen = Path.Combine(dir, "collection.xml");
+            var destino = Path.Combine(dir, "reparada.xml");
+            File.WriteAllText(origen, XmlCon(final));
+            var res = RekordboxRelocator.Repair(origen, destino, RekordboxRelocator.ReadRenames(undoDir));
+
+            Assert.Equal(1, res.Reparadas);
+            Assert.Contains(RekordboxRelocator.PathToLocation(orig), File.ReadAllText(destino));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // El orden del deshacer cuenta: A->B (10:00), B->C (11:00); se deshace la de las 11 a las 12:00
+    // y la de las 10 a las 12:05. El archivo acaba en A, y tanto B como C tienen que volver a A.
+    [Fact]
+    public void Las_vueltas_se_colocan_cuando_se_deshicieron()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "etq-mf-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string a = Path.Combine(dir, "A.mp3"), b = Path.Combine(dir, "B.mp3"), c = Path.Combine(dir, "C.mp3");
+            var primera = Manifiesto(dir, "run_20260101_100000.deshecho.jsonl", (a, b));
+            var segunda = Manifiesto(dir, "run_20260101_110000.deshecho.jsonl", (b, c));
+            File.SetLastWriteTime(segunda, new DateTime(2026, 1, 1, 12, 0, 0));
+            File.SetLastWriteTime(primera, new DateTime(2026, 1, 1, 12, 5, 0));
+
+            var mapa = RekordboxRelocator.ReadRenames(dir);
+
+            Assert.False(mapa.ContainsKey(a));
+            Assert.Equal(a, mapa[b]);
+            Assert.Equal(a, mapa[c]);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Deshacer a medias: lo que se pudo revertir va al archivado, lo pendiente sigue en el manifiesto.
+    // Lo pendiente sigue vigente; lo revertido, no.
+    [Fact]
+    public void Un_deshacer_a_medias_solo_anula_lo_revertido()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "etq-mf-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string a1 = Path.Combine(dir, "pista01.mp3"), b1 = Path.Combine(dir, "Tema 01.mp3");
+            string a2 = Path.Combine(dir, "pista02.mp3"), b2 = Path.Combine(dir, "Tema 02.mp3");
+            Manifiesto(dir, "run_20261009_210831.jsonl", (a2, b2));            // pendiente
+            Manifiesto(dir, "run_20261009_210831.deshecho.jsonl", (a1, b1));   // revertido
+
+            var mapa = RekordboxRelocator.ReadRenames(dir);
+
+            Assert.Equal(b2, mapa[a2]);
+            Assert.False(mapa.ContainsKey(a1));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Las fichas de DJ usan el mismo mapa: una ficha que se fue al nombre nuevo vuelve al original
+    // cuando el renombrado se deshace.
+    [Fact]
+    public void Las_fichas_siguen_volviendo_al_nombre_original()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "etq-mf-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var orig = Path.Combine(dir, "pista01.mp3");
+            var final = Path.Combine(dir, "Bad Bunny - Titi Me Pregunto.mp3");
+            File.WriteAllText(orig, "audio");
+            Manifiesto(dir, "run_20260920_230254.deshecho.jsonl", (orig, final));
+
+            var fichas = new Etiquetador.Core.Dj.AlmacenFichas(Path.Combine(dir, "fichas.json"));
+            fichas.Poner(final, new Etiquetador.Core.Dj.FichaDj { Energia = 8 });
+
+            var movidas = fichas.Reubicar(RekordboxRelocator.ReadRenames(dir), File.Exists);
+
+            Assert.Equal(1, movidas);
+            Assert.Equal(8, fichas.Obtener(orig)!.Energia);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Nunca se manda una pista a un archivo que no existe: sería perderla.
+    [Fact]
+    public void No_reescribe_hacia_un_archivo_que_no_existe()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "etq-rb-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var vieja = Path.Combine(dir, "pista01.mp3");
+            var nueva = Path.Combine(dir, "Bad Bunny - Titi Me Pregunto.mp3");   // tampoco existe
+            var origen = Path.Combine(dir, "collection.xml");
+            var destino = Path.Combine(dir, "reparada.xml");
+            File.WriteAllText(origen, XmlCon(vieja));
+
+            var res = RekordboxRelocator.Repair(origen, destino, new Dictionary<string, string> { [vieja] = nueva });
+
+            Assert.Equal(0, res.Reparadas);
+            Assert.Equal(1, res.NoEncontradas);
+            Assert.Contains(RekordboxRelocator.PathToLocation(vieja), File.ReadAllText(destino));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Y una pista cuyo archivo sigue en su sitio no se toca, aunque el mapa diga otra cosa.
+    [Fact]
+    public void No_toca_una_pista_que_sigue_en_su_sitio()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "etq-rb-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var vieja = Path.Combine(dir, "pista01.mp3");
+            var nueva = Path.Combine(dir, "Bad Bunny - Titi Me Pregunto.mp3");
+            File.WriteAllText(vieja, "audio");
+            File.WriteAllText(nueva, "otro audio");
+            var origen = Path.Combine(dir, "collection.xml");
+            var destino = Path.Combine(dir, "reparada.xml");
+            File.WriteAllText(origen, XmlCon(vieja));
+
+            var res = RekordboxRelocator.Repair(origen, destino, new Dictionary<string, string> { [vieja] = nueva });
+
+            Assert.Equal(0, res.Reparadas);
+            Assert.Equal(1, res.SinCambio);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // ---- macOS ----
+
+    // rekordbox en un Mac escribe «file://localhost/Users/…». Antes salía «file://localhost//Users/…»
+    // al escribir y «Users\jose\…» al leer: Importar daba 0 coincidencias y Reparar no encontraba nada.
+    [Theory]
+    [InlineData("/Users/jose/Music/x.mp3", "file://localhost/Users/jose/Music/x.mp3")]
+    [InlineData("/Users/x/Música/tema con espacios.mp3", "file://localhost/Users/x/M%C3%BAsica/tema%20con%20espacios.mp3")]
+    [InlineData("/Volumes/USB DJ/Bad Bunny - Titi Me Pregunto (Intro).mp3", "file://localhost/Volumes/USB%20DJ/Bad%20Bunny%20-%20Titi%20Me%20Pregunto%20%28Intro%29.mp3")]
+    public void Las_rutas_de_macOS_se_escriben_y_se_leen_bien(string ruta, string location)
+    {
+        Assert.Equal(location, RekordboxRelocator.PathToLocation(ruta));
+        Assert.Equal(ruta, RekordboxImporter.LocationToPath(location));
+    }
+
+    // Lo que exporta rekordbox en un Mac no siempre escapa igual que nosotros: se lee igual.
+    [Fact]
+    public void Lee_la_location_de_un_mac_tal_como_la_exporta_rekordbox()
+        => Assert.Equal("/Users/jose/Music/Daddy Yankee - Gasolina.mp3",
+                        RekordboxImporter.LocationToPath("file://localhost/Users/jose/Music/Daddy%20Yankee%20-%20Gasolina.mp3"));
+
+    // La sintaxis sin host («file:///») también existe.
+    [Fact]
+    public void Sin_host_tambien_se_entiende()
+        => Assert.Equal("/Users/jose/Music/x.mp3", RekordboxImporter.LocationToPath("file:///Users/jose/Music/x.mp3"));
+
+    // En macOS la barra invertida es un carácter más del nombre: no se puede convertir en carpeta.
+    [Fact]
+    public void En_macOS_la_barra_invertida_es_parte_del_nombre()
+    {
+        if (OperatingSystem.IsWindows()) return;   // en Windows sí es un separador
+        var ruta = "/Users/jose/Music/AC\\DC - Thunderstruck.mp3";
+        var loc = RekordboxRelocator.PathToLocation(ruta);
+        Assert.Contains("%5C", loc);
+        Assert.Equal(ruta, RekordboxImporter.LocationToPath(loc));
+    }
+
+    // Unidades de red de Windows: el servidor va como host.
+    [WindowsFact]
+    public void Las_rutas_de_red_sobreviven_a_la_ida_y_vuelta()
+    {
+        var ruta = @"\\NAS\Musica\Bad Bunny - Titi Me Pregunto.mp3";
+        var loc = RekordboxRelocator.PathToLocation(ruta);
+        Assert.Equal("file://NAS/Musica/Bad%20Bunny%20-%20Titi%20Me%20Pregunto.mp3", loc);
+        Assert.Equal(ruta, RekordboxImporter.LocationToPath(loc));
+    }
 }

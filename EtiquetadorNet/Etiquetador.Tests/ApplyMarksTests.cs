@@ -77,6 +77,28 @@ public class ApplyMarksTests
         finally { try { Directory.Delete(Path.GetDirectoryName(f)!, true); } catch { } }
     }
 
+    // Pero ya no se vacía en silencio: marcas-aplicar.json (84 KB en una biblioteca real) se aparta
+    // tal cual, con aviso, y el siguiente guardado no lo pisa.
+    [Fact]
+    public void Un_archivo_corrupto_se_aparta_con_aviso()
+    {
+        var f = TempFile();
+        try
+        {
+            File.WriteAllText(f, """{"E:\\Musica\\Tema 01.mp3":false,"E:\\Musica\\Te""");
+            var m = new ApplyMarks(f);
+            Assert.NotEqual("", m.AvisoCarga);
+
+            m.Set(@"E:\Musica\Tema 02.mp3", true);
+            Assert.Equal("", m.Save());
+
+            var apartado = Assert.Single(Directory.GetFiles(Path.GetDirectoryName(f)!, "marcas.json.ilegible_*"));
+            Assert.StartsWith("""{"E:\\Musica\\Tema 01.mp3":false""", File.ReadAllText(apartado));
+            Assert.True(new ApplyMarks(f).Get(@"E:\Musica\Tema 02.mp3"));
+        }
+        finally { try { Directory.Delete(Path.GetDirectoryName(f)!, true); } catch { } }
+    }
+
     // Guardar sin cambios no reescribe el archivo: no hay por que tocar el disco en cada arranque.
     [Fact]
     public void Guardar_sin_cambios_no_escribe()
