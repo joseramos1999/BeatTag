@@ -112,9 +112,10 @@ public class PulidoCatalogosTests
     [Fact]
     public void La_carpeta_dice_si_es_una_herramienta()
     {
-        Assert.True(FileProcessor.DescriptorDeHerramienta("Enur - Calabria 2007", @"E:\Musica\ACAPELLAS\Enur - Calabria 2007.mp3"));
-        Assert.True(FileProcessor.DescriptorDeHerramienta("Faith", @"E:\Musica\Instrumentales\Faith.mp3"));
-        Assert.False(FileProcessor.DescriptorDeHerramienta("Faith", @"E:\Musica\COMERCIAL\Faith.mp3"));
+        // Rutas con el separador del sistema: en macOS «\» no separa carpetas.
+        Assert.True(FileProcessor.DescriptorDeHerramienta("Enur - Calabria 2007", Path.Combine("Musica", "ACAPELLAS", "Enur - Calabria 2007.mp3")));
+        Assert.True(FileProcessor.DescriptorDeHerramienta("Faith", Path.Combine("Musica", "Instrumentales", "Faith.mp3")));
+        Assert.False(FileProcessor.DescriptorDeHerramienta("Faith", Path.Combine("Musica", "COMERCIAL", "Faith.mp3")));
     }
 
     // ------------------------------------------------------------------ C5 · wantRemix a iTunes

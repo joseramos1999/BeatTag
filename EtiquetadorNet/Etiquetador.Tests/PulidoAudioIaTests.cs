@@ -103,7 +103,7 @@ public class PulidoAudioIaTests
     [Fact]
     public void Completar_con_la_ia_quita_la_tonalidad_y_el_bpm_de_la_version()
         => Assert.Equal("Karol G - Provenza (Intro Clean)",
-                        NombreCortado.DesdeIa(@"E:\Musica\Karol G - Provenza (Intro Clea.mp3", "Karol G", "Provenza", "Intro Clean 6A 95"));
+                        NombreCortado.DesdeIa(Path.Combine("Musica", "Karol G - Provenza (Intro Clea.mp3"),"Karol G", "Provenza", "Intro Clean 6A 95"));
 
     // ------------------------------------------------------------------ I9 · qué cuenta para la pausa
 
