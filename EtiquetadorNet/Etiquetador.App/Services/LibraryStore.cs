@@ -1,12 +1,20 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Etiquetador.Core;
 
 namespace Etiquetador.App.Services;
+
+/// <summary>Una carpeta marcada que el último escaneo no pudo recorrer.</summary>
+/// <param name="Raiz">La carpeta, tal como está en la lista.</param>
+/// <param name="Motivo">Por qué («no existe o el disco no está conectado», el error del sistema…).</param>
+/// <param name="Conservadas">Canciones suyas que se mantienen de la vez anterior.</param>
+public sealed record CarpetaNoDisponible(string Raiz, string Motivo, int Conservadas);
 
 /// <summary>
 /// Biblioteca compartida por toda la app: una única lista de carpetas y un único conjunto de
@@ -17,6 +25,7 @@ public sealed class LibraryStore
     private readonly AppConfig _config;
     private readonly Action _saveConfig;
     private readonly ScanCache _cache;
+    private readonly Func<string, CarpetaRecorrida> _recorrer;
 
     /// <summary>Log opcional (se asigna desde AppEngine tras construirlo).</summary>
     public Logger? Log { get; set; }
@@ -24,20 +33,40 @@ public sealed class LibraryStore
     /// <summary>Carpetas elegidas (con estado marcado/desmarcado). Misma instancia para todas las pestañas.</summary>
     public ObservableCollection<FolderItem> Folders { get; } = new();
 
+    private readonly ListaPistas _tracks = new();
+
     /// <summary>Tracks escaneados (biblioteca en memoria).</summary>
-    public ObservableCollection<Track> Tracks { get; } = new();
+    public ObservableCollection<Track> Tracks => _tracks;
 
     public bool IsScanned { get; private set; }
     public bool IsScanning { get; private set; }
 
+    /// <summary>
+    /// Carpetas marcadas que el último escaneo no pudo recorrer (disco desconectado, unidad de red
+    /// caída…). Vacía si se pudieron leer todas.
+    /// </summary>
+    public IReadOnlyList<CarpetaNoDisponible> NoDisponibles { get; private set; } = Array.Empty<CarpetaNoDisponible>();
+
+    /// <summary>"" si la caché de escaneo se leyó con normalidad; si no, qué pasó con el archivo.</summary>
+    public string AvisoCache => _cache.AvisoCarga;
+
     /// <summary>Se dispara tras completar un escaneo (para que cada pestaña recalcule su vista).</summary>
     public event Action? Changed;
 
-    public LibraryStore(AppConfig config, Action saveConfig, ScanCache cache)
+    /// <summary>Empieza o termina un escaneo. Sirve para enseñarlo sin bloquear la aplicación.</summary>
+    public event Action? EscaneoCambiado;
+
+    /// <param name="recorrer">
+    /// Cómo se recorre una carpeta. Por defecto, <see cref="LibraryScanner.Recorrer"/>; las pruebas
+    /// ponen uno que se puede retener a mitad para reproducir lo que pasa si el usuario toca las
+    /// carpetas mientras se escanea.
+    /// </param>
+    public LibraryStore(AppConfig config, Action saveConfig, ScanCache cache, Func<string, CarpetaRecorrida>? recorrer = null)
     {
         _config = config;
         _saveConfig = saveConfig;
         _cache = cache;
+        _recorrer = recorrer ?? (r => LibraryScanner.Recorrer(r, recursive: true));
         var disabled = new HashSet<string>(config.DisabledFolders, StringComparer.OrdinalIgnoreCase);
         foreach (var f in config.Folders) Add(new FolderItem(f, !disabled.Contains(f)));
     }
@@ -186,6 +215,7 @@ public sealed class LibraryStore
 
         Tracks.Clear();
         IsScanned = false;
+        NoDisponibles = Array.Empty<CarpetaNoDisponible>();
         Log?.Detail("Biblioteca: quitadas todas las carpetas; la lista de canciones queda vacía.");
         Changed?.Invoke();
     }
@@ -204,6 +234,10 @@ public sealed class LibraryStore
     /// </summary>
     private void OlvidarTracksDe(string folder)
     {
+        // Una carpeta que ya no cuenta tampoco puede seguir avisando de que no está disponible.
+        if (NoDisponibles.Any(n => string.Equals(n.Raiz, folder, StringComparison.OrdinalIgnoreCase)))
+            NoDisponibles = NoDisponibles.Where(n => !string.Equals(n.Raiz, folder, StringComparison.OrdinalIgnoreCase)).ToList();
+
         // Sin carpetas no queda nada escaneado, aunque el borrado no llegue a quitar ninguna
         // canción (por ejemplo, si todavía no se había escaneado).
         if (Folders.Count == 0)
@@ -222,16 +256,13 @@ public sealed class LibraryStore
 
         // Cómo se quitan importa más de lo que parece. Esta lista está enlazada a varias tablas
         // AGRUPADAS, y cada baja suelta hace que la rejilla rehaga sus grupos: quitar una carpeta de
-        // miles de canciones así deja la ventana clavada. Vaciar y volver a poner cuesta un solo
-        // aviso más un alta por superviviente, que es lo que ya hace el escaneo.
+        // miles de canciones así deja la ventana clavada. Rehacer la lista de una vez cuesta un solo
+        // aviso a las tablas.
         //
         // Por eso se elige según el tamaño: para unas pocas bajas sale más barato quitarlas en su
         // sitio; para muchas, rehacer la lista entera.
         if (quitados > UmbralRehacerLista)
-        {
-            Tracks.Clear();
-            foreach (var t in sobreviven) Tracks.Add(t);
-        }
+            _tracks.Reemplazar(sobreviven);
         else
         {
             for (int i = Tracks.Count - 1; i >= 0; i--)
@@ -268,66 +299,375 @@ public sealed class LibraryStore
     /// <summary>Rutas de las carpetas MARCADAS (las que se analizan).</summary>
     public List<string> EnabledPaths() => Folders.Where(f => f.Enabled).Select(f => f.Path).ToList();
 
+    /// <summary>
+    /// Sube con cada cambio de la lista de carpetas o de sus casillas. Un escaneo apunta la que había
+    /// al empezar y, si al terminar es otra, lo leído ya no describe la biblioteca.
+    /// </summary>
+    private int _generacion;
+
     private void Persist()
     {
+        _generacion++;
         _config.Folders = Folders.Select(f => f.Path).ToList();
         _config.DisabledFolders = Folders.Where(f => !f.Enabled).Select(f => f.Path).ToList();
         _saveConfig();
     }
 
-    /// <summary>Escanea todas las carpetas hacia <see cref="Tracks"/> y notifica a las pestañas.</summary>
-    public async Task ScanAsync()
+    // --- Escanear ---
+
+    private Task? _escaneo;
+    private bool _otraVuelta;
+    private bool _publicando;
+    private bool _avisarSiempre;
+
+    /// <summary>
+    /// Escanea todas las carpetas hacia <see cref="Tracks"/> y notifica a las pestañas.
+    ///
+    /// Si ya hay un escaneo en marcha, NO vuelve al instante como si hubiera terminado: devuelve ese
+    /// mismo escaneo, que dará otra vuelta al acabar para recoger lo que haya cambiado desde que
+    /// empezó. Antes, soltar una carpeta a mitad del primer escaneo volvía enseguida, la pestaña
+    /// Biblioteca dejaba de estar ocupada y se desbloqueaba toda la aplicación con el escaneo aún en
+    /// marcha (un primer escaneo real tardó 340.680 ms, registro del 25-09).
+    /// </summary>
+    public Task ScanAsync()
     {
-        if (IsScanning) return;
+        if (_escaneo is { IsCompleted: false })
+        {
+            _avisarSiempre = true;
+            // Quien llega a mitad necesita un escaneo que empiece DESPUÉS de su llamada: puede que
+            // acabe de renombrar archivos que el escaneo en curso ya había pasado. Si llega mientras
+            // se publica (desde un aviso de Changed), lo que se publica ya es posterior a su llamada.
+            if (!_publicando) _otraVuelta = true;
+            return _escaneo;
+        }
+        _avisarSiempre = true;
+        _escaneo = EscanearAsync();
+        return _escaneo;
+    }
+
+    /// <summary>
+    /// Comprueba en segundo plano que la biblioteca publicada sigue al día y aplica SOLO las
+    /// diferencias. Avisa a las pestañas solo si algo ha cambiado, a diferencia de
+    /// <see cref="ScanAsync"/>, que avisa siempre porque hay quien espera ese aviso para refrescarse.
+    /// Pensado para el arranque, después de <see cref="CargarDesdeCache"/>.
+    /// </summary>
+    public Task VerificarAsync()
+    {
+        if (_escaneo is { IsCompleted: false }) return _escaneo;
+        _avisarSiempre = false;
+        _escaneo = EscanearAsync();
+        return _escaneo;
+    }
+
+    /// <summary>
+    /// Pone al día SOLO los archivos indicados, sin recorrer las carpetas (hallazgo M12). Es lo que
+    /// conviene tras un cambio puntual -renombrar unas canciones desde el Asistente, aplicar unas
+    /// pocas propuestas-, en lugar de <see cref="ScanAsync"/>, que vuelve a recorrer y a mirar la
+    /// fecha de las 13.500 canciones (MEDIDO en los registros: 1-8 s cada vez).
+    ///
+    /// En un renombrado hay que pasar la ruta de ANTES y la de DESPUÉS: la de antes ya no existe y
+    /// se quita; la de después se lee y entra. Igual que ScanAsync, avisa a las pestañas al
+    /// terminar. Si la biblioteca no está escaneada, o ya se está escaneando, hace (o se suma a) un
+    /// escaneo completo.
+    /// </summary>
+    public Task RefrescarAsync(IEnumerable<string> rutas)
+    {
+        var lista = rutas.Where(r => !string.IsNullOrWhiteSpace(r)).Distinct(StringComparer.Ordinal).ToList();   // «tema» y «Tema» se quedan las dos: ver Releer
+        if (!IsScanned || _escaneo is { IsCompleted: false }) return ScanAsync();
+        _avisarSiempre = true;
+        _escaneo = EscanearAsync(lista);
+        return _escaneo;
+    }
+
+    private async Task EscanearAsync(IReadOnlyCollection<string>? soloEstas = null)
+    {
         IsScanning = true;
+        EscaneoCambiado?.Invoke();
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            var roots = EnabledPaths();   // solo las carpetas marcadas
-            Log?.Head($"Escaneando {roots.Count} carpeta(s)…");
-            foreach (var r in roots) Log?.Detail($"    carpeta: {r}");
-            var skipped = Folders.Count - roots.Count;
-            if (skipped > 0) Log?.Detail($"    ({skipped} carpeta(s) desmarcada(s) que se omiten)");
-            var (list, repetidas) = await Task.Run(() =>
+            while (true)
             {
-                var acc = new List<Track>();
-                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var repes = 0;
+                _otraVuelta = false;
+                var generacion = _generacion;
+                var roots = EnabledPaths();   // solo las carpetas marcadas
+                Lectura leido;
+                if (soloEstas != null)
+                {
+                    // Solo la primera vuelta: si hay que dar otra, ya es un escaneo completo.
+                    var tocadas = soloEstas;
+                    soloEstas = null;
+                    var actuales = Tracks.ToList();
+                    Log?.Detail($"Biblioteca: se releen {tocadas.Count} archivo(s) tocados, sin recorrer las carpetas.");
+                    leido = await Task.Run(() => Releer(actuales, tocadas, roots));
+                }
+                else
+                {
+                    Log?.Head($"Escaneando {roots.Count} carpeta(s)…");
+                    foreach (var r in roots) Log?.Detail($"    carpeta: {r}");
+                    var skipped = Folders.Count - roots.Count;
+                    if (skipped > 0) Log?.Detail($"    ({skipped} carpeta(s) desmarcada(s) que se omiten)");
+                    leido = await Task.Run(() => Recorrer(roots));
+                }
 
-                // Las raíces de fuera, primero. Con una carpeta dentro de otra, la de fuera es la
-                // propietaria del archivo, y así quitar la de dentro no deja huérfana música que la
-                // de fuera sigue cubriendo. Ordenar por longitud basta: si A contiene a B, la ruta
-                // de A es siempre más corta que la de B.
-                foreach (var root in roots.OrderBy(r => r.Length))
-                    foreach (var path in LibraryScanner.EnumerateFiles(root, recursive: true))
-                    {
-                        // Cada archivo, una sola vez. Contarlo dos veces por estar bajo dos raíces
-                        // falseaba el recuento, inventaba duplicados y hacía que cada operación por
-                        // lote tocase el mismo archivo dos veces. AddFolder ya no deja configurar
-                        // carpetas solapadas; esto cubre lo que quedó guardado de antes.
-                        if (!seen.Add(path)) { repes++; continue; }
+                // Las carpetas cambiaron mientras se leía: quitar, desmarcar, vaciar o soltar una
+                // carpeta a mitad. Publicar esto devolvería a todas las pestañas las canciones de una
+                // carpeta excluida, o daría por escaneada una que ni se ha mirado. Se tira y se
+                // vuelve a leer; con la caché recién llenada, la segunda vuelta es rápida.
+                if (generacion != _generacion)
+                {
+                    Log?.Detail("Biblioteca: las carpetas cambiaron durante el escaneo; se descarta lo leído y se vuelve a escanear.");
+                    continue;
+                }
 
-                        var t = _cache.Read(path);   // caché por fecha+tamaño (rápido si no cambió)
-                        t.Folder = root;
-                        acc.Add(t);
-                    }
-                _cache.Prune(seen, roots);
-                _cache.Save();
-                return (acc, repes);
-            });
-            Tracks.Clear();
-            foreach (var t in list) Tracks.Add(t);
-
-            // Sin ninguna carpeta marcada no hay biblioteca que valga: darla por escaneada dejaba
-            // la aplicación entera abierta sobre una lista vacía en vez de pedir marcar una carpeta.
-            IsScanned = roots.Count > 0;
-
-            if (repetidas > 0)
-                Log?.Detail($"    ({repetidas} archivo(s) bajo dos carpetas configuradas; se cuentan una sola vez)");
-            Log?.Sum($"Escaneo terminado: {Tracks.Count} canciones en {sw.ElapsedMilliseconds} ms.");
-            Changed?.Invoke();
+                Publicar(roots, leido, sw.ElapsedMilliseconds);
+                if (!_otraVuelta) break;
+                Log?.Detail("Biblioteca: se pidió escanear mientras se escaneaba; otra vuelta para recoger los últimos cambios.");
+            }
         }
         catch (Exception e) { Log?.Error("Error al escanear la biblioteca", e); throw; }
-        finally { IsScanning = false; }
+        finally
+        {
+            IsScanning = false;
+            EscaneoCambiado?.Invoke();
+        }
+    }
+
+    /// <summary>Lo que dio recorrer las carpetas marcadas.</summary>
+    /// <param name="Parcial">Solo se releyeron unos archivos: lo demás, y las carpetas no disponibles, siguen como estaban.</param>
+    private sealed record Lectura(List<Track> Pistas, int Repetidas, List<(string Raiz, string Motivo)> NoDisponibles, HashSet<string> Vistas,
+                                  bool Parcial = false);
+
+    /// <summary>
+    /// La lista actual con unos archivos releídos: los que ya no existen salen, los que existen se
+    /// leen de nuevo (o de la caché, si no cambiaron) y entran con su carpeta raíz. Fuera del hilo de
+    /// la interfaz.
+    /// </summary>
+    private Lectura Releer(List<Track> actuales, IReadOnlyCollection<string> tocadas, IReadOnlyList<string> roots)
+    {
+        var quitar = new HashSet<string>(tocadas, StringComparer.OrdinalIgnoreCase);
+        var pistas = actuales.Where(t => !quitar.Contains(t.FilePath)).ToList();
+        var vistas = new HashSet<string>(pistas.Select(t => t.FilePath), StringComparer.OrdinalIgnoreCase);
+        var ordenadas = roots.OrderBy(r => r.Length).ToList();
+        // Del final al principio: en un renombrado llegan «antes, después», y si solo cambian las
+        // mayúsculas («tema.mp3» → «Tema.mp3») las dos rutas valen para el mismo archivo; tiene que
+        // entrar con la de después.
+        foreach (var ruta in tocadas.Reverse())
+        {
+            // Solo lo que cae dentro de una carpeta marcada: lo movido fuera deja de contar.
+            var raiz = ordenadas.FirstOrDefault(r => Rutas.EstaDentroDe(ruta, r));
+            if (raiz == null || !LibraryScanner.EsAudio(ruta) || !File.Exists(ruta) || !vistas.Add(ruta)) continue;
+            var t = _cache.Read(ruta);
+            t.Folder = raiz;
+            pistas.Add(t);
+        }
+        var error = _cache.Save();
+        if (error.Length > 0) Log?.Err("No se pudo guardar la caché de escaneo: " + error);
+        return new Lectura(pistas, 0, new List<(string, string)>(), vistas, Parcial: true);
+    }
+
+    /// <summary>Recorre las carpetas y lee cada archivo (o lo saca de la caché). Fuera del hilo de la interfaz.</summary>
+    private Lectura Recorrer(IReadOnlyList<string> roots)
+    {
+        var acc = new List<Track>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var noDisponibles = new List<(string, string)>();
+        var recorridas = new List<string>();
+        var repes = 0;
+
+        // Las raíces de fuera, primero. Con una carpeta dentro de otra, la de fuera es la
+        // propietaria del archivo, y así quitar la de dentro no deja huérfana música que la
+        // de fuera sigue cubriendo. Ordenar por longitud basta: si A contiene a B, la ruta
+        // de A es siempre más corta que la de B.
+        foreach (var root in roots.OrderBy(r => r.Length))
+        {
+            var recorrido = _recorrer(root);
+            if (!recorrido.Disponible)
+            {
+                // Un disco desconectado no ha borrado su música: ni se poda su caché ni se dan sus
+                // canciones por desaparecidas (hallazgo M7).
+                Log?.Err($"Carpeta no disponible: {root} ({recorrido.Motivo})");
+                noDisponibles.Add((root, recorrido.Motivo));
+                continue;
+            }
+            recorridas.Add(root);
+            foreach (var path in recorrido.Archivos)
+            {
+                // Cada archivo, una sola vez. Contarlo dos veces por estar bajo dos raíces
+                // falseaba el recuento, inventaba duplicados y hacía que cada operación por
+                // lote tocase el mismo archivo dos veces. AddFolder ya no deja configurar
+                // carpetas solapadas; esto cubre lo que quedó guardado de antes.
+                if (!seen.Add(path)) { repes++; continue; }
+
+                var t = _cache.Read(path);   // caché por fecha+tamaño (rápido si no cambió)
+                t.Folder = root;
+                acc.Add(t);
+            }
+        }
+
+        // Solo dentro de las carpetas recorridas de verdad: lo de una que no estaba se conserva.
+        _cache.Prune(seen, recorridas);
+        var error = _cache.Save();
+        if (error.Length > 0) Log?.Err("No se pudo guardar la caché de escaneo: " + error);
+        return new Lectura(acc, repes, noDisponibles, seen);
+    }
+
+    /// <summary>Deja en la lista lo leído y decide si la biblioteca queda lista. En el hilo de la interfaz.</summary>
+    private void Publicar(IReadOnlyList<string> roots, Lectura leido, long ms)
+    {
+        // Las canciones de una carpeta que no se pudo leer se quedan como estaban: si el disco se
+        // desconectó a media sesión, desaparecer de todas las pestañas sería tratarlas como
+        // borradas. Al volver a conectarlo, el siguiente escaneo las pone al día.
+        var caidas = new HashSet<string>(leido.NoDisponibles.Select(n => n.Raiz), StringComparer.OrdinalIgnoreCase);
+        var conservadas = caidas.Count == 0
+            ? new List<Track>()
+            : Tracks.Where(t => caidas.Contains(t.Folder) && !leido.Vistas.Contains(t.FilePath)).ToList();
+
+        var final = conservadas.Count == 0 ? leido.Pistas : leido.Pistas.Concat(conservadas).ToList();
+        var cambios = Sustituir(final);
+
+        var antes = (IsScanned, NoDisponibles.Count);
+        // Una relectura de unos pocos archivos no dice nada de las carpetas: lo que había, se queda.
+        if (!leido.Parcial)
+        {
+            NoDisponibles = leido.NoDisponibles
+                .Select(n => new CarpetaNoDisponible(n.Raiz, n.Motivo, conservadas.Count(t => string.Equals(t.Folder, n.Raiz, StringComparison.OrdinalIgnoreCase))))
+                .ToList();
+
+            // Sin ninguna carpeta marcada no hay biblioteca que valga: darla por escaneada dejaba la
+            // aplicación entera abierta sobre una lista vacía en vez de pedir marcar una carpeta. Y si
+            // no ha llegado nada porque las carpetas no están (el disco externo sin enchufar al abrir),
+            // tampoco: una biblioteca «escaneada» y vacía invitaba a analizar sobre nada.
+            IsScanned = roots.Count > 0 && !(final.Count == 0 && leido.NoDisponibles.Count > 0);
+        }
+
+        if (leido.Repetidas > 0)
+            Log?.Detail($"    ({leido.Repetidas} archivo(s) bajo dos carpetas configuradas; se cuentan una sola vez)");
+        if (conservadas.Count > 0)
+            Log?.Detail($"    ({conservadas.Count} canción(es) de carpetas no disponibles se conservan de la vez anterior)");
+        Log?.Sum($"{(leido.Parcial ? "Biblioteca puesta al día" : "Escaneo terminado")}: {Tracks.Count} canciones en {ms} ms"
+                 + (cambios > 0 ? $" ({cambios} cambio(s) en la lista)." : " (sin cambios)."));
+
+        var avisar = _avisarSiempre || cambios > 0 || antes != (IsScanned, NoDisponibles.Count);
+        if (!avisar) return;
+        _publicando = true;
+        try { Changed?.Invoke(); }
+        finally { _publicando = false; }
+    }
+
+    /// <summary>
+    /// Pone la lista nueva tocando solo lo que ha cambiado, y devuelve cuántas filas han cambiado.
+    ///
+    /// Antes se vaciaba y se volvían a añadir las 13.500 canciones una a una tras CADA escaneo,
+    /// también tras renombrar una sola desde el Asistente: cada alta llegaba a dos tablas agrupadas,
+    /// que rehacían sus grupos, todo en el hilo de la interfaz. Ahora, si no ha cambiado nada no se
+    /// toca la lista; si han cambiado unas pocas, solo esas; y si son muchas, se cambia la lista de
+    /// una vez con un único aviso. Las canciones que siguen igual conservan su objeto, y con él la
+    /// selección de las tablas.
+    /// </summary>
+    private int Sustituir(List<Track> nuevas)
+    {
+        var actuales = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < _tracks.Count; i++) actuales.TryAdd(_tracks[i].FilePath, i);
+
+        var altas = new List<Track>();
+        var cambiadas = new List<(int Indice, Track Nueva)>();
+        var siguen = new HashSet<int>();
+        var resultado = new List<Track>(nuevas.Count);
+        foreach (var n in nuevas)
+        {
+            if (actuales.TryGetValue(n.FilePath, out var i) && siguen.Add(i))
+            {
+                if (MismosDatos(_tracks[i], n)) resultado.Add(_tracks[i]);
+                else { cambiadas.Add((i, n)); resultado.Add(n); }
+            }
+            else { altas.Add(n); resultado.Add(n); }
+        }
+        var bajas = _tracks.Count - siguen.Count;
+        var total = altas.Count + cambiadas.Count + bajas;
+        if (total == 0) return 0;
+
+        if (total > UmbralRehacerLista)
+        {
+            _tracks.Reemplazar(resultado);
+            return total;
+        }
+
+        foreach (var (i, n) in cambiadas) _tracks[i] = n;
+        for (var i = _tracks.Count - 1; i >= 0; i--)
+            if (!siguen.Contains(i)) _tracks.RemoveAt(i);
+        foreach (var n in altas) _tracks.Add(n);
+        return total;
+    }
+
+    /// <summary>Lo que se enseña de una canción es igual. La ruta, distinguiendo mayúsculas: renombrar «tema» a «Tema» es un cambio.</summary>
+    internal static bool MismosDatos(Track a, Track b)
+        => string.Equals(a.FilePath, b.FilePath, StringComparison.Ordinal)
+        && string.Equals(a.Folder, b.Folder, StringComparison.Ordinal)
+        && a.Title == b.Title && a.Artist == b.Artist && a.Album == b.Album && a.Genre == b.Genre
+        && a.Year == b.Year && a.Bpm == b.Bpm && a.Key == b.Key && a.DurationSeconds == b.DurationSeconds
+        && a.Bitrate == b.Bitrate && a.SampleRate == b.SampleRate && a.Channels == b.Channels;
+
+    /// <summary>
+    /// Publica la biblioteca tal como quedó la última vez, sin leer el disco, para que la aplicación
+    /// se pueda usar desde el primer momento. Después hay que llamar a <see cref="VerificarAsync"/>,
+    /// que aplica en segundo plano lo que haya cambiado (hallazgo M12).
+    ///
+    /// Antes el arranque escaneaba con la aplicación bloqueada: MEDIDO en los registros, 7.774 ms
+    /// con el disco de giro en frío y 1.039-4.883 ms en caliente, con todas las pestañas en gris.
+    ///
+    /// No publica nada (devuelve false) si alguna carpeta marcada no tiene NADA en la caché: sería
+    /// abrir una biblioteca a la que le falta una carpeta entera, y en ese caso hay que escanear de
+    /// la forma de siempre.
+    /// </summary>
+    public bool CargarDesdeCache()
+    {
+        if (IsScanning || IsScanned || Tracks.Count > 0) return false;
+        var raices = EnabledPaths().OrderBy(r => r.Length).ToList();
+        if (raices.Count == 0) return false;
+
+        var guardadas = _cache.Guardadas(ruta => raices.FirstOrDefault(r => Rutas.EstaDentroDe(ruta, r)));
+        var conCanciones = new HashSet<string>(guardadas.Select(t => t.Folder), StringComparer.OrdinalIgnoreCase);
+        if (raices.Any(r => !conCanciones.Contains(r))) return false;
+
+        _tracks.Reemplazar(guardadas.OrderBy(t => raices.IndexOf(t.Folder)).ThenBy(t => t.FilePath, StringComparer.OrdinalIgnoreCase));
+        IsScanned = true;
+        Log?.Detail($"Biblioteca: {guardadas.Count} canciones publicadas desde la caché de escaneo; se comprueban los cambios en segundo plano.");
+        Changed?.Invoke();
+        return true;
+    }
+
+    /// <summary>
+    /// Qué decir de las carpetas que no se han podido leer, para el aviso de la ventana. "" si se
+    /// leyeron todas.
+    /// </summary>
+    public string AvisoNoDisponibles()
+    {
+        if (NoDisponibles.Count == 0) return "";
+        var n = NoDisponibles[0];
+        var nombre = Nombre(n.Raiz);
+        var otras = NoDisponibles.Count > 1 ? $" (y {NoDisponibles.Count - 1} carpeta(s) más)" : "";
+        var conservadas = NoDisponibles.Sum(x => x.Conservadas);
+        return $"No se ha podido leer la carpeta «{nombre}»{otras}: {n.Motivo}. "
+             + (conservadas > 0
+                ? $"Se mantienen sus {conservadas} canciones de la vez anterior; vuelve a escanear cuando esté disponible."
+                : "Sus canciones no aparecen hasta que esté disponible y vuelvas a escanear.");
+    }
+}
+
+/// <summary>
+/// La lista de canciones, con un cambio «en bloque»: sustituir el contenido entero con UN solo
+/// aviso a las tablas en lugar de uno por canción.
+/// </summary>
+internal sealed class ListaPistas : ObservableCollection<Track>
+{
+    public void Reemplazar(IEnumerable<Track> nuevas)
+    {
+        CheckReentrancy();
+        Items.Clear();
+        foreach (var t in nuevas) Items.Add(t);
+        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
     }
 }

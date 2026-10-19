@@ -517,4 +517,52 @@ public sealed class IdentificationScanner
         Interlocked.Exchange(ref _sucio, 0);
         try { if (File.Exists(_cacheFile)) File.Delete(_cacheFile); } catch { }
     }
+
+    // --- Seguir al archivo cuando lo cambia la propia aplicación (hallazgos X4 y A2) ---
+    //
+    // Cada respuesta se valida por ruta, fecha y tamaño. Unificar el género de 3.000 canciones en el
+    // Asistente, escribir la ficha en el comentario o aplicar en Enriquecer cambian la fecha y el
+    // tamaño sin tocar el audio, y renombrar cambia la ruta: la siguiente pasada de «Comprobar
+    // audio» volvía a preguntar por todas, y con AudD activado se pagaban otra vez. MEDIDO en
+    // identificacion.json (solo lectura): de 9.433 respuestas, 1.078 caducadas por fecha o tamaño.
+
+    /// <summary>
+    /// La respuesta acompaña al archivo que la aplicación acaba de renombrar o mover. Se llama
+    /// DESPUÉS de moverlo; el renombrado conserva fecha y tamaño, así que sigue valiendo igual que
+    /// antes. Devuelve si había algo que mover.
+    /// </summary>
+    public bool Mover(string origen, string destino)
+    {
+        if (string.IsNullOrWhiteSpace(origen) || string.IsNullOrWhiteSpace(destino)) return false;
+        if (string.Equals(origen, destino, StringComparison.Ordinal)) return false;
+        if (!_cache.TryRemove(origen, out var e)) return false;
+        _cache[destino] = e;
+        Interlocked.Exchange(ref _sucio, 1);
+        return true;
+    }
+
+    /// <summary>
+    /// La aplicación acaba de escribir en el archivo algo que no cambia QUÉ canción es: etiquetas, o
+    /// el volumen. Si la respuesta valía justo antes de escribir (fecha y tamaño
+    /// <paramref name="mAntes"/> y <paramref name="sAntes"/>), se pone al día con los de ahora; si
+    /// ya no valía, se deja: no se resucita la respuesta de un audio que cambió por otro lado.
+    /// Devuelve si la puso al día.
+    /// </summary>
+    public bool Retocar(string ruta, long mAntes, long sAntes)
+    {
+        if (string.IsNullOrWhiteSpace(ruta)) return false;
+        if (!_cache.TryGetValue(ruta, out var e) || e.M != mAntes || e.S != sAntes) return false;
+        try
+        {
+            var fi = new FileInfo(ruta);
+            if (!fi.Exists) return false;
+            if (fi.LastWriteTimeUtc.Ticks == e.M && fi.Length == e.S) return true;   // no se llegó a escribir: nada que guardar
+            // Se cambia en la misma entrada para no perder ningún campo de la respuesta.
+            e.M = fi.LastWriteTimeUtc.Ticks;
+            e.S = fi.Length;
+            Interlocked.Exchange(ref _sucio, 1);
+            return true;
+        }
+        catch { return false; }
+    }
 }

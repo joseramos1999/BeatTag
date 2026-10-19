@@ -130,7 +130,7 @@ public partial class IncompleteViewModel : ScanViewModelBase
             }
             var fields = _engine.BuildFields();
             var undo = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
-            var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog));
+            var res = await Task.Run(() => _engine.AplicarUnoAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog));
             await _engine.Library.ScanAsync();   // Recompute quitará la que ya esté completa
             Status = !res.TagOk ? $"⚠ {res.TagErr}"
                    : res.UndoErr.Length > 0 ? $"Actualizada: {row.FileName}  ⚠ el cambio NO quedó anotado, no se podrá deshacer ({res.UndoErr})"

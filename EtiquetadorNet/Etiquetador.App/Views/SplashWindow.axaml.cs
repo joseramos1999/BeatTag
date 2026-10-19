@@ -1,3 +1,4 @@
+using System;
 using Avalonia.Controls;
 using Etiquetador.Core;
 
@@ -22,5 +23,21 @@ public partial class SplashWindow : Window
     public void Paso(string texto)
     {
         if (texto.Length > 0) Estado.Text = texto;
+    }
+
+    /// <summary>
+    /// El arranque ha fallado: se dice por qué y se ofrece cerrar. Sin esto la pantalla se quedaba
+    /// girando para siempre, sin marco ni botón, y solo se podía cerrar desde el Administrador de
+    /// tareas (hallazgo M13). Se llama desde el hilo de interfaz.
+    /// </summary>
+    public void MostrarError(string texto, Action alCerrar)
+    {
+        Estado.Text = "No se ha podido abrir BeatTag.";
+        Barra.IsVisible = false;
+        Error.Text = texto;
+        Error.IsVisible = true;
+        Cerrar.IsVisible = true;
+        Cerrar.Click += (_, _) => alCerrar();
+        Cerrar.Focus();
     }
 }

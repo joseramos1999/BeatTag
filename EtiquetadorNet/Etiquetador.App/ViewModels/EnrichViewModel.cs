@@ -525,7 +525,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
                 try
                 {
                     row.SyncToResult();   // respeta lo editado en la tabla (nombre y tags)
-                    var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(row.Result, Overwrite, fields, CoverMode, png, undoFile, doneLog, ct), ct);
+                    var res = await Task.Run(() => _engine.AplicarUnoAsync(row.Result, Overwrite, fields, CoverMode, png, undoFile, doneLog, ct), ct);
                     row.RowStatus = res is { TagOk: true, RenOk: true }
                         ? (res.UndoErr.Length > 0 ? "✔ aplicado (sin marcha atrás)" : "✔ aplicado")
                         : $"⚠ {res.TagErr}{res.RenErr}";

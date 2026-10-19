@@ -426,6 +426,7 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
             foreach (var t in hechos)
             {
                 _engine.Fichas.Mover(t.Origen, t.Destino);
+                _engine.SeguirArchivo(t.Origen, t.Destino, default);   // huella, identificación y sonoridad, también
                 _engine.Bandeja.Olvidar(t.Origen);
                 _engine.Logger.Detail($"Bandeja → biblioteca: {Path.GetFileName(t.Origen)} → {t.Destino}");
             }

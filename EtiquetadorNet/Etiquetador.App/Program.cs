@@ -13,6 +13,17 @@ sealed class Program
     public static void Main(string[] args)
     {
         CrashLog.Install();   // registro de excepciones no controladas
+
+        // Una sola ventana a la vez: dos abiertas se pisan los archivos de datos al guardar. Si ya
+        // hay una, se le pide que se ponga delante y esta se cierra sin cargar nada.
+        using var instancia = InstanciaUnica.Adquirir();
+        if (!instancia.EsLaPrimera)
+        {
+            instancia.AvisarALaPrimera();
+            return;
+        }
+        InstanciaUnica.Actual = instancia;
+
         try { BuildAvaloniaApp().StartWithClassicDesktopLifetime(args); }
         catch (Exception ex) { CrashLog.Write("Fatal", ex); throw; }
     }

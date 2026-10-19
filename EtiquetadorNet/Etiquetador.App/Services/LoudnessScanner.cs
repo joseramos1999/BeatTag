@@ -178,4 +178,47 @@ public sealed class LoudnessScanner
         try { var fi = new FileInfo(path); if (!fi.Exists) return false; m = fi.LastWriteTimeUtc.Ticks; s = fi.Length; return true; }
         catch { return false; }
     }
+
+    // --- Seguir al archivo cuando lo cambia la propia aplicación (hallazgo A2) ---
+    //
+    // La medida se valida por ruta, fecha y tamaño. MEDIDO en sonoridad.json (solo lectura): de
+    // 17.313 medidas solo seguían valiendo 11.357. Renombrar o escribir etiquetas no cambia el audio
+    // y no debería obligar a decodificar la canción entera otra vez. El ajuste de volumen sí lo
+    // cambia: ahí no se usa esto, sino Update con la ganancia aplicada.
+
+    /// <summary>
+    /// La medida acompaña al archivo que la aplicación acaba de renombrar o mover (se llama DESPUÉS
+    /// de moverlo). Devuelve si había algo que mover.
+    /// </summary>
+    public bool Mover(string origen, string destino)
+    {
+        if (string.IsNullOrWhiteSpace(origen) || string.IsNullOrWhiteSpace(destino)) return false;
+        if (string.Equals(origen, destino, StringComparison.Ordinal)) return false;
+        lock (_lock)
+        {
+            if (!_map.Remove(origen, out var e)) return false;
+            _map[destino] = e;
+            _dirty = true;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// La aplicación acaba de escribir SOLO etiquetas en el archivo. Si la medida valía justo antes
+    /// (fecha y tamaño <paramref name="mAntes"/> y <paramref name="sAntes"/>), se pone al día con
+    /// los de ahora; si ya no valía, se deja. Devuelve si la puso al día.
+    /// </summary>
+    public bool Retocar(string ruta, long mAntes, long sAntes)
+    {
+        if (!Stat(ruta, out var m, out var s)) return false;
+        lock (_lock)
+        {
+            if (!_map.TryGetValue(ruta, out var e) || e.M != mAntes || e.S != sAntes) return false;
+            if (e.M == m && e.S == s) return true;   // no se llegó a escribir: nada que guardar
+            e.M = m;
+            e.S = s;
+            _dirty = true;
+            return true;
+        }
+    }
 }

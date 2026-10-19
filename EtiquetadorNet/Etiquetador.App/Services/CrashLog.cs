@@ -12,6 +12,9 @@ public static class CrashLog
     private static readonly string Dir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Etiquetador de Musica", "logs");
 
+    /// <summary>Dónde quedan los informes, para poder decírselo al usuario.</summary>
+    public static string Carpeta => Dir;
+
     /// <summary>Instala los manejadores globales de excepciones no controladas.</summary>
     public static void Install()
     {

@@ -5,6 +5,7 @@ using System.Linq;
 using Avalonia.Data.Converters;
 using System.ComponentModel;
 using System.Threading.Tasks;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Etiquetador.App.Services;
@@ -30,6 +31,12 @@ public sealed partial class PaginaNav : ObservableObject
 
     /// <summary>Su ViewModel, para poder leerle el estado que se muestra abajo.</summary>
     public ViewModelBase? Vm { get; init; }
+
+    /// <summary>
+    /// Cómo se para lo que esté haciendo, si se puede. Lo usa el cierre de la ventana: cancelar deja
+    /// que la página guarde lo que lleva hecho antes de que se cierre la aplicación.
+    /// </summary>
+    public Action? Cancelar { get; init; }
 
     [ObservableProperty] private bool _habilitada = true;
     [ObservableProperty] private bool _activa;
@@ -173,9 +180,12 @@ public partial class MainViewModel : ViewModelBase
                 Titulo = "ETIQUETAR",
                 Paginas = new PaginaNav[]
                 {
-                    new() { Indice = 1,  Icono = "✨", Nombre = "Enriquecer",      Vm = Enrich, Ocupada = () => Enrich.IsBusy },
-                    new() { Indice = 6,  Icono = "❓", Nombre = "No encontradas",  Vm = NotFound, Ocupada = () => NotFound.IsBusy },
-                    new() { Indice = 7,  Icono = "🎤", Nombre = "Comprobar audio", Vm = Identify, Ocupada = () => Identify.IsBusy },
+                    new() { Indice = 1,  Icono = "✨", Nombre = "Enriquecer",      Vm = Enrich, Ocupada = () => Enrich.IsBusy,
+                            Cancelar = () => Enrich.CancelCommand.Execute(null) },
+                    new() { Indice = 6,  Icono = "❓", Nombre = "No encontradas",  Vm = NotFound, Ocupada = () => NotFound.IsBusy,
+                            Cancelar = () => NotFound.CancelCommand.Execute(null) },
+                    new() { Indice = 7,  Icono = "🎤", Nombre = "Comprobar audio", Vm = Identify, Ocupada = () => Identify.IsBusy,
+                            Cancelar = () => Identify.CancelCommand.Execute(null) },
                     new() { Indice = 14, Icono = "🎚", Nombre = "Ficha DJ", Vm = Fichas, Ocupada = () => Fichas.IsBusy },
                 },
             },
@@ -184,10 +194,12 @@ public partial class MainViewModel : ViewModelBase
                 Titulo = "LIMPIAR",
                 Paginas = new PaginaNav[]
                 {
-                    new() { Indice = 3,  Icono = "👥", Nombre = "Duplicados",  Vm = Duplicates, Ocupada = () => Duplicates.IsBusy },
+                    new() { Indice = 3,  Icono = "👥", Nombre = "Duplicados",  Vm = Duplicates, Ocupada = () => Duplicates.IsBusy,
+                            Cancelar = () => Duplicates.CancelFingerprintsCommand.Execute(null) },
                     new() { Indice = 4,  Icono = "🎧", Nombre = "Calidad",     Vm = Quality, Ocupada = () => Quality.IsBusy },
                     new() { Indice = 5,  Icono = "⚠",  Nombre = "Incompletas", Vm = Incomplete, Ocupada = () => Incomplete.IsBusy },
-                    new() { Indice = 10, Icono = "🔊", Nombre = "Volumen",     Vm = Loudness, Ocupada = () => Loudness.IsBusy },
+                    new() { Indice = 10, Icono = "🔊", Nombre = "Volumen",     Vm = Loudness, Ocupada = () => Loudness.IsBusy,
+                            Cancelar = () => Loudness.CancelCommand.Execute(null) },
                 },
             },
             new()
@@ -199,8 +211,10 @@ public partial class MainViewModel : ViewModelBase
                     new() { Indice = 8,  Icono = "📊", Nombre = "Estadísticas", Vm = Stats, Ocupada = () => Stats.IsBusy },
                     // La carga de países no cuenta: es una precarga de fondo, no un proceso del usuario.
                     new() { Indice = 9,  Icono = "🌍", Nombre = "Tendencias", Vm = Trends,
-                            Ocupada = () => Trends.IsBusy && !Trends.LoadingCountries },
-                    new() { Indice = 17, Icono = "🎶", Nombre = "Playlists", Vm = Playlists, Ocupada = () => Playlists.IsBusy },
+                            Ocupada = () => Trends.IsBusy && !Trends.LoadingCountries,
+                            Cancelar = () => Trends.CancelCommand.Execute(null) },
+                    new() { Indice = 17, Icono = "🎶", Nombre = "Playlists", Vm = Playlists, Ocupada = () => Playlists.IsBusy,
+                            Cancelar = () => Playlists.CancelCommand.Execute(null) },
                 },
             },
             new()
@@ -209,7 +223,8 @@ public partial class MainViewModel : ViewModelBase
                 Titulo = "ASISTENTE",
                 Paginas = new PaginaNav[]
                 {
-                    new() { Indice = 16, Icono = "🤖", Nombre = "Asistente IA", Vm = Asistente, Ocupada = () => Asistente.IsBusy },
+                    new() { Indice = 16, Icono = "🤖", Nombre = "Asistente IA", Vm = Asistente, Ocupada = () => Asistente.IsBusy,
+                            Cancelar = () => Asistente.CancelarCommand.Execute(null) },
                 },
             },
             new()
@@ -267,17 +282,145 @@ public partial class MainViewModel : ViewModelBase
         NotFound.MostrarParaRevisar = Enrich.MostrarParaRevisar;
         Incomplete.MostrarParaRevisar = Enrich.MostrarParaRevisar;
 
+        // Avisos persistentes (archivos que no se pudieron leer, guardados que fallan, carpetas no
+        // disponibles). Pueden llegar desde cualquier hilo: se pasan al de la interfaz.
+        Engine.Avisos.Cambiado += () => Dispatcher.UIThread.Post(RefrescarAvisos);
+        RefrescarAvisos();
+
+        // Escanear sin bloquear se enseña igual: con una banda que dice que se está comprobando.
+        Engine.Library.EscaneoCambiado += () => OnPropertyChanged(nameof(ComprobandoBiblioteca));
+
         _ = InitAsync();
     }
 
+    /// <summary>
+    /// Lo que se hace nada más abrir. Si algo falla aquí, se registra y se dice en Biblioteca: antes
+    /// la excepción se quedaba en esta tarea, que nadie esperaba, y ni se cargaba lo analizado ni
+    /// quedaba rastro en el registro (hallazgo M13).
+    /// </summary>
     private async Task InitAsync()
     {
-        if (Engine.Library.Folders.Count > 0) await Library.ScanAsync();   // rápido gracias a la caché de escaneo
-        Enrich.LoadCached();      // rellena la previsualización con lo que ya haya analizado
-        NotFound.LoadFromCache(); // y las que no se identificaron, a su pestaña
+        try
+        {
+            // Primero, que la ventana se pinte: publicar la biblioteca hace recalcular todas las
+            // pestañas, y eso no debe retrasar que aparezca.
+            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+
+            if (Engine.Library.Folders.Count > 0)
+            {
+                // La biblioteca de la última vez se publica ya, desde la caché de escaneo, y se
+                // comprueba en segundo plano sin bloquear nada (hallazgo M12). MEDIDO en los
+                // registros: el escaneo de arranque dejaba todas las pestañas en gris 1-8 s (7.774 ms
+                // con el disco de giro en frío). Si la caché no la tiene entera, se escanea como
+                // siempre.
+                if (Engine.Library.CargarDesdeCache()) _ = ComprobarBibliotecaAsync();
+                else await Library.ScanAsync();
+            }
+            Enrich.LoadCached();      // rellena la previsualización con lo que ya haya analizado
+            NotFound.LoadFromCache(); // y las que no se identificaron, a su pestaña
+        }
+        catch (Exception e)
+        {
+            Engine.Logger.Error("Error al preparar la biblioteca al arrancar", e);
+            CrashLog.Write("Arranque (biblioteca)", e);
+            Library.Status = $"No se ha podido preparar la biblioteca al arrancar: {e.Message}. Pulsa «Escanear» para intentarlo de nuevo.";
+        }
         _ = Trends.EnsureCountriesAsync();   // la lista de paises, lista para cuando abras Tendencias
         _ = ArrancarIaLocalAsync();          // que Ollama este listo cuando haga falta
     }
+
+    /// <summary>
+    /// Comprueba en segundo plano que la biblioteca publicada desde la caché sigue al día. Si algo ha
+    /// cambiado en las carpetas desde la última vez, se aplica solo eso y se recargan las propuestas
+    /// guardadas, que se habían cargado sobre la lista anterior.
+    /// </summary>
+    private async Task ComprobarBibliotecaAsync()
+    {
+        var cambio = false;
+        void Marcar() => cambio = true;
+        Engine.Library.Changed += Marcar;
+        try { await Engine.Library.VerificarAsync(); }
+        catch (Exception e)
+        {
+            Engine.Logger.Error("Error al comprobar la biblioteca en segundo plano", e);
+            Library.Status = $"No se ha podido comprobar si hay cambios en las carpetas: {e.Message}. Pulsa «Escanear» para intentarlo de nuevo.";
+            return;
+        }
+        finally { Engine.Library.Changed -= Marcar; }
+
+        if (!cambio) return;
+        Enrich.LoadCached();
+        NotFound.LoadFromCache();
+    }
+
+    /// <summary>
+    /// Se está comprobando la biblioteca sin bloquear la aplicación: al arrancar, o cuando otra
+    /// pestaña pide reescanear. Si hay un proceso en curso ya lo dice su propio aviso.
+    /// </summary>
+    public bool ComprobandoBiblioteca => Engine.Library.IsScanning && !Busy;
+
+    // --- Avisos persistentes (hallazgos I6, T9, T10 y M7) ---
+
+    /// <summary>Los avisos pendientes, uno por línea.</summary>
+    [ObservableProperty] private string _avisos = "";
+
+    [ObservableProperty] private bool _hayAvisos;
+
+    private void RefrescarAvisos()
+    {
+        var textos = Engine.Avisos.Textos;
+        Avisos = string.Join("\n", textos);
+        HayAvisos = textos.Count > 0;
+    }
+
+    /// <summary>El usuario los ha leído. Si el problema sigue, el aviso vuelve cuando se repita.</summary>
+    [RelayCommand]
+    private void DescartarAvisos() => Engine.Avisos.QuitarTodos();
+
+    // --- Cerrar (hallazgos M9 y T3) ---
+
+    /// <summary>Se está cerrando y se espera a que el proceso en curso guarde lo que lleva hecho.</summary>
+    [ObservableProperty] private bool _cerrando;
+
+    /// <summary>Lo más que se espera a que un proceso cancelado termine de guardar antes de cerrar igualmente.</summary>
+    public static readonly TimeSpan EsperaAlCerrar = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// Cierre con un proceso en marcha, ya confirmado: lo cancela, espera a que termine (cada página
+    /// guarda lo suyo al cancelar) y después guarda todo lo demás. Si no termina a tiempo, se guarda
+    /// igualmente lo que se pueda.
+    /// </summary>
+    public async Task CancelarParaCerrarAsync()
+    {
+        Cerrando = true;
+        var pagina = Paginas.FirstOrDefault(p => p.Indice == BusyTabIndex);
+        Engine.Logger.Head($"Cerrando con un proceso en marcha en «{pagina?.Nombre ?? BusyWhat}»: se cancela y se guarda lo hecho.");
+        try { pagina?.Cancelar?.Invoke(); }
+        catch (Exception e) { Engine.Logger.Error("No se pudo cancelar el proceso al cerrar", e); }
+
+        if (!await EsperarAQueTermineAsync(() => Busy, EsperaAlCerrar, TimeSpan.FromMilliseconds(100)))
+            Engine.Logger.Err($"El proceso no terminó en {EsperaAlCerrar.TotalSeconds:0} s; se cierra guardando lo que haya.");
+        GuardarAlCerrar();
+    }
+
+    /// <summary>
+    /// Espera a que <paramref name="ocupado"/> deje de ser cierto, como mucho <paramref name="maximo"/>.
+    /// Devuelve si terminó a tiempo. Un proceso que no atiende la cancelación (escribir un archivo a
+    /// medias) no puede dejar la ventana sin cerrarse para siempre.
+    /// </summary>
+    internal static async Task<bool> EsperarAQueTermineAsync(Func<bool> ocupado, TimeSpan maximo, TimeSpan paso)
+    {
+        var reloj = System.Diagnostics.Stopwatch.StartNew();
+        while (ocupado())
+        {
+            if (reloj.Elapsed >= maximo) return false;
+            await Task.Delay(paso);
+        }
+        return true;
+    }
+
+    /// <summary>Guarda todo lo que vive en memoria. Lo llama la ventana al cerrarse.</summary>
+    public IReadOnlyList<string> GuardarAlCerrar() => Engine.GuardarTodo("al cerrar");
 
     /// <summary>
     /// Deja Ollama en marcha desde el principio si está instalado y la IA local está activada.
@@ -387,6 +530,7 @@ public partial class MainViewModel : ViewModelBase
     partial void OnBusyTabIndexChanged(int value)
     {
         OnPropertyChanged(nameof(Busy));
+        OnPropertyChanged(nameof(ComprobandoBiblioteca));
         RecomputeTabs();
     }
 
