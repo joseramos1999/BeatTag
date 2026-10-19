@@ -31,4 +31,17 @@ public sealed record ProviderResult
     /// Spotify o iTunes.
     /// </summary>
     public bool SoloArtista { get; init; }
+
+    /// <summary>
+    /// Código ISRC de la grabación («USUYG1017706»), ya comprobado, o "" si la fuente no lo da. Solo
+    /// Deezer, y sin peticiones nuevas: viene en las respuestas de /search y de track/{id} que ya se
+    /// piden (C14). Identifica una grabación concreta: la extended o la versión clean tienen el suyo.
+    /// </summary>
+    public string Isrc { get; init; } = "";
+
+    /// <summary>
+    /// Si la grabación del catálogo es explícita: <see cref="Analysis.Explicitness.Explicit"/>, la
+    /// versión editada (<see cref="Analysis.Explicitness.Clean"/>) o sin dato. Solo Deezer (C14).
+    /// </summary>
+    public Analysis.Explicitness Explicit { get; init; }
 }

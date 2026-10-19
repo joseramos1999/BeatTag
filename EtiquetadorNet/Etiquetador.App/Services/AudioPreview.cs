@@ -108,7 +108,8 @@ public sealed class AudioPreview : IDisposable
 
     private void PlayWindows(string path)
     {
-        _reader = new MediaFoundationReader(path);
+        // AIFF (M15): Media Foundation no lo abre en Windows; el lector de NAudio sí (ver AudioSamples.EsAiff).
+        _reader = AudioSamples.EsAiff(path) ? new AiffFileReader(path) : new MediaFoundationReader(path);
         try { _reader.CurrentTime = TimeSpan.FromSeconds(_reader.TotalTime.TotalSeconds * 0.25); } catch { }
         var player = new WaveOutEvent();
         _out = player;

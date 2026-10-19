@@ -92,6 +92,36 @@ public partial class BandejaView : UserControl
         if (ok) await vm.PasarABibliotecaAsync();
     }
 
+    // Descartar es masivo y toca archivos: se confirma diciendo cuántas, cuántas son de verdad
+    // duplicadas y si la papelera de esa unidad las va a admitir (X15).
+    private async void Descartar_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not BandejaViewModel vm || TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (vm.IsBusy) return;
+        var filas = vm.Seleccionadas;
+        if (filas.Count == 0) { vm.Status = "Selecciona antes las descargas que quieres descartar."; return; }
+
+        var ok = await ConfirmDialog.AskAsync(owner,
+            filas.Count == 1 ? $"Descartar «{filas[0].FileName}»" : $"Descartar {filas.Count} descargas",
+            Etiquetador.Core.Dj.RevisionBandeja.CuerpoDescartar(filas.Count, filas.Count(r => r.TieneAvisoDeDuplicado),
+                                                                filas.Count(r => r.PuedeSustituir)),
+            Services.Papelera.NotaConfirmacion(filas.Select(r => r.FilePath)),
+            "Enviar a la papelera");
+        if (ok) await vm.DescartarAsync(filas);
+    }
+
+    // Sustituir toca dos archivos y uno de ellos es de la biblioteca: se confirma con los dos y su
+    // calidad, y se avisa de lo que pasa con rekordbox (I14).
+    private async void Sustituir_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not BandejaViewModel vm || TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (vm.IsBusy || vm.FilaASustituir is not { Sustitucion: { } propuesta } fila) return;
+
+        var (cuerpo, nota) = Etiquetador.Core.Dj.SustitucionBandeja.TextosConfirmacion(fila.Track, propuesta.Vieja);
+        var ok = await ConfirmDialog.AskAsync(owner, "Sustituir la copia de la biblioteca", cuerpo, nota, "Sustituir");
+        if (ok) await vm.SustituirAsync(fila);
+    }
+
     private async void Volcar_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not BandejaViewModel vm || TopLevel.GetTopLevel(this) is not Window owner) return;

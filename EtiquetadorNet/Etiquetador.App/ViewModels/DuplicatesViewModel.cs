@@ -595,19 +595,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     /// lugar de «0 enviadas, 120 con problemas» y el primero de la lista.
     /// </summary>
     internal static string ResumenPapelera(int enviadas, IReadOnlyList<(string Archivo, string Motivo)> fallos)
-    {
-        if (fallos.Count == 0) return $"{enviadas} copia(s) enviadas a la papelera.";
-
-        var motivos = fallos.Select(f => f.Motivo).Distinct(StringComparer.Ordinal).ToList();
-        if (motivos.Count == 1)
-            return enviadas == 0
-                ? $"No se ha enviado ninguna copia a la papelera: {Motivo(motivos[0])}"
-                : $"{enviadas} copia(s) enviadas a la papelera · {fallos.Count} no se han enviado: {Motivo(motivos[0])}";
-
-        return $"{enviadas} enviadas, {fallos.Count} con problemas. La primera: {fallos[0].Archivo}: {Motivo(fallos[0].Motivo)}";
-
-        static string Motivo(string m) => string.IsNullOrWhiteSpace(m) ? "motivo desconocido." : m;
-    }
+        => EnvioPapelera.Resumen(enviadas, fallos, "copia");   // la misma regla que la Bandeja (X15)
 
     /// <summary>
     /// Descriptor de edición sacado del nombre del archivo ("Aca Out", "Melodic Intro"…). Vacío si
@@ -824,45 +812,86 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     /// <summary>Las copias marcadas, para que la vista pueda confirmar antes de borrar.</summary>
     public List<DupRow> ParaPapelera() => Rows.Where(r => r.Marcada).ToList();
 
+    // ---- Papelera, en segundo plano (resto del hallazgo T2) ----
+    //
+    // Antes el bucle iba en el hilo de la interfaz: cada envío consulta la unidad y llama al shell
+    // (en macOS, un osascript por archivo que puede esperar 20 s al aviso de permisos), y con 300
+    // copias la ventana se quedaba congelada sin decir por dónde iba. Ahora los archivos se envían
+    // fuera y aquí solo se pinta el avance y, al terminar, se quitan de la tabla las enviadas. Lo ya
+    // corregido se conserva: las marcas hechas a mano siguen, las enviadas desaparecen y el motivo de
+    // una negativa se lee en el estado.
+
+    /// <summary>Se está enviando a la papelera: los botones que cambian las marcas o envían, apagados.</summary>
+    [ObservableProperty] private bool _enviandoAPapelera;
+
+    /// <summary>Avance del envío a la papelera (0-100).</summary>
+    [ObservableProperty] private double _papeleraProgreso;
+
     /// <summary>
     /// Envía el archivo seleccionado a la papelera del sistema (recuperable), no lo borra del todo.
     /// Si la papelera se niega (por ejemplo, en una unidad que no tiene), se dice el motivo y la
     /// copia se queda en la tabla con su marca.
     /// </summary>
     [RelayCommand]
-    private void SendToRecycleBin()
+    private async Task SendToRecycleBinAsync()
     {
         var row = SelectedRow;
-        if (row == null || string.IsNullOrEmpty(row.FilePath)) return;
+        if (row == null || string.IsNullOrEmpty(row.FilePath) || EnviandoAPapelera) return;
         _preview.Stop();   // si suena, el archivo está abierto y no se puede mover a la papelera
-        var (ok, err) = Services.Papelera.Enviar(row.FilePath);
-        var desmarcadas = ok ? QuitarDeLaTabla(new[] { row.FilePath }) : 0;
+        var res = await EnviarAPapeleraAsync(new[] { row.FilePath });
+        if (res == null) return;
+        var ok = res.Enviadas.Count == 1;
+        var desmarcadas = ok ? QuitarDeLaTabla(res.Enviadas) : 0;
         // El estado va después: QuitarDeLaTabla repinta y pone el resumen de grupos.
+        var err = ok ? "" : res.Fallos[0].Motivo;
         Status = ok
             ? $"Enviado a la papelera: {row.FileName}." + NotaDesmarcadas(desmarcadas)
             : "No se pudo enviar a la papelera: " + (string.IsNullOrWhiteSpace(err) ? "motivo desconocido." : err);
     }
 
     /// <summary>Envía a la papelera TODAS las copias marcadas. La vista confirma antes de llamar.</summary>
-    public void SendMarkedToRecycleBin()
+    public async Task SendMarkedToRecycleBinAsync()
     {
+        if (EnviandoAPapelera) return;
         var objetivo = ParaPapelera();
         if (objetivo.Count == 0) { Status = "No hay ninguna copia marcada."; return; }
 
         _preview.Stop();
-        var borrados = new List<string>();
-        var fallos = new List<(string Archivo, string Motivo)>();
-        foreach (var r in objetivo)
-        {
-            var (ok, err) = Services.Papelera.Enviar(r.FilePath);
-            if (ok) borrados.Add(r.FilePath);
-            else fallos.Add((r.FileName, err));
-        }
+        var res = await EnviarAPapeleraAsync(objetivo.Select(r => r.FilePath).ToList());
+        if (res == null) return;
 
         // De una sola vez: quitarlos uno a uno recalcularía la biblioteca entera por cada archivo.
         // Las que no se han podido enviar siguen en la tabla y marcadas, para reintentarlo o decidir.
-        var desmarcadas = QuitarDeLaTabla(borrados);
+        // Las marcas que se cambiaran mientras tanto también se respetan: se leen ahora, al quitar.
+        var desmarcadas = QuitarDeLaTabla(res.Enviadas);
 
-        Status = ResumenPapelera(borrados.Count, fallos) + NotaDesmarcadas(desmarcadas);
+        Status = ResumenPapelera(res.Enviadas.Count, res.Fallos) + NotaDesmarcadas(desmarcadas);
+    }
+
+    /// <summary>
+    /// El envío en sí, fuera del hilo de la interfaz, con el avance en el estado y en la barra.
+    /// Devuelve null si ya había otro envío en marcha.
+    /// </summary>
+    private async Task<EnvioPapeleraResultado?> EnviarAPapeleraAsync(IReadOnlyList<string> rutas)
+    {
+        if (EnviandoAPapelera) return null;
+        EnviandoAPapelera = true;
+        PapeleraProgreso = 0;
+        Status = EnvioPapelera.TextoAvance(0, rutas.Count);
+        try
+        {
+            var avance = new Progress<(int Hechas, int Total)>(p =>
+            {
+                if (!EnviandoAPapelera) return;   // un aviso que llega tarde no pisa el resumen final
+                PapeleraProgreso = p.Total > 0 ? p.Hechas * 100.0 / p.Total : 0;
+                Status = EnvioPapelera.TextoAvance(p.Hechas, p.Total);
+            });
+            return await EnvioPapelera.EnviarAsync(rutas, progreso: avance);
+        }
+        finally
+        {
+            EnviandoAPapelera = false;
+            PapeleraProgreso = 0;
+        }
     }
 }

@@ -56,7 +56,22 @@ public static class ExplicitDetector
     /// </summary>
     private static readonly HashSet<string> Autoria = new(StringComparer.OrdinalIgnoreCase) { "by", "por", "de" };
 
-    public static Explicitness Detect(Track t)
+    /// <summary>
+    /// Lo que se sabe de la letra: lo que dice el nombre y, si no dice nada, lo que dice el catálogo
+    /// (ver <see cref="Combinar"/> y <see cref="PonerCatalogo"/>). Es lo que usan la columna
+    /// «Explícito», las estadísticas y la letra de la ficha cuando el DJ no la ha indicado.
+    /// </summary>
+    public static Explicitness Detect(Track t) => Combinar(DelNombre(t), DelCatalogo(t.FilePath));
+
+    /// <summary>Lo mismo con el dato del catálogo a mano (el de un análisis concreto).</summary>
+    public static Explicitness Detect(Track t, Explicitness catalogo) => Combinar(DelNombre(t), catalogo);
+
+    /// <summary>
+    /// Solo lo que dice el NOMBRE (y el título del tag). Es lo que hay que comparar entre dos archivos
+    /// para saber si son la misma versión, y lo que se le dice al catálogo para elegir entre la clean y
+    /// la explícita (C14): el dato del propio catálogo ahí no pinta nada.
+    /// </summary>
+    public static Explicitness DelNombre(Track t)
     {
         var limpia = false;
         foreach (var zona in Zonas(Path.GetFileNameWithoutExtension(t.FileName), esNombreDeArchivo: true)
@@ -139,4 +154,55 @@ public static class ExplicitDetector
     };
 
     public static string Label(Track t) => Label(Detect(t));
+
+    // ---- El dato del catálogo (C14) ----
+    //
+    // Hasta ahora solo se miraba el nombre, y la mayoría de canciones salían sin indicar: solo los
+    // pools ponen «Clean» o «Dirty». Deezer da la marca de cada pista en las mismas respuestas que ya
+    // se piden al analizar. MEDIDO en las respuestas de Deezer guardadas en la caché de una biblioteca
+    // real: de 78.975 pistas, 16.187 explícitas (20 %), 358 «editadas» (la versión clean de un tema
+    // explícito), 53.178 «no explícitas» y el resto sin dato.
+
+    /// <summary>
+    /// Junta lo que dice el nombre con lo que dice el catálogo.
+    ///
+    /// Manda el nombre: es la versión de ESTE archivo. «Tusa (Clean)» es limpia aunque el catálogo dé
+    /// el tema por explícito, porque es la edición de radio que publica el pool.
+    ///
+    /// Del catálogo solo se acepta «explícita». «No explícita» es la marca por defecto de muchas
+    /// distribuidoras, no una garantía, y su «editada» puede ser la versión clean de un tema del que
+    /// el archivo es la explícita: si el nombre no lo dice, el catálogo pudo elegir cualquiera de las
+    /// dos. Dar por limpia una canción que no lo es la metería en una colección «solo limpias» para
+    /// una boda, que es el fallo que más daño hace; equivocarse hacia «explícita» solo aparta una de más.
+    /// </summary>
+    public static Explicitness Combinar(Explicitness delNombre, Explicitness delCatalogo)
+    {
+        if (delNombre != Explicitness.Unknown) return delNombre;
+        return delCatalogo == Explicitness.Explicit ? Explicitness.Explicit : Explicitness.Unknown;
+    }
+
+    private static IReadOnlyDictionary<string, Explicitness>? _catalogo;
+
+    /// <summary>
+    /// Fija lo que dice el catálogo de cada archivo, por ruta (null lo quita). Lo pone quien tiene los
+    /// análisis: la caché de análisis guarda la marca de cada canción que identificó Deezer (ver
+    /// <c>AnalysisCache.LetraDelCatalogo</c>). Se copia y se sustituye de una vez, así que se puede
+    /// leer desde cualquier hilo mientras se pone al día; consultarlo es una búsqueda en un
+    /// diccionario, sin tocar el disco, porque la tabla de la biblioteca lo pide por cada fila visible.
+    /// </summary>
+    public static void PonerCatalogo(IEnumerable<KeyValuePair<string, Explicitness>>? porRuta)
+    {
+        if (porRuta == null) { Volatile.Write(ref _catalogo, null); return; }
+        var copia = new Dictionary<string, Explicitness>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (ruta, letra) in porRuta)
+            if (letra != Explicitness.Unknown && !string.IsNullOrEmpty(ruta)) copia[ruta] = letra;
+        Volatile.Write(ref _catalogo, copia);
+    }
+
+    /// <summary>Lo que dice el catálogo de ese archivo, o <see cref="Explicitness.Unknown"/>.</summary>
+    public static Explicitness DelCatalogo(string? ruta)
+    {
+        var mapa = Volatile.Read(ref _catalogo);
+        return mapa != null && !string.IsNullOrEmpty(ruta) && mapa.TryGetValue(ruta, out var e) ? e : Explicitness.Unknown;
+    }
 }

@@ -670,6 +670,9 @@ public sealed class UndoEngine
             case "Bpm":
                 if (tag.BeatsPerMinute == fc.NewNum) { tag.BeatsPerMinute = fc.OldNum; return (true, false); }
                 return (false, true);
+            case Tagging.IsrcField:   // ISRC del catálogo (C14), solo si el usuario lo activó en Ajustes
+                if ((tag.ISRC ?? "") == (fc.NewStr ?? "")) { tag.ISRC = Empty(fc.OldStr); return (true, false); }
+                return (false, true);
             default:
                 return (false, false);
         }

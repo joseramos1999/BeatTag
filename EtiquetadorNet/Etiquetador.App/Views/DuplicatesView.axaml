@@ -77,12 +77,12 @@
         </Border>
 
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
-            <Button Content="Marcar sobrantes" Command="{Binding MarkAllButBestCommand}"
+            <Button Content="Marcar sobrantes" Command="{Binding MarkAllButBestCommand}" IsEnabled="{Binding !EnviandoAPapelera}"
                     Background="#D97706" Foreground="White" FontWeight="SemiBold"
                     ToolTip.Tip="Marca todas las copias menos la mejor de cada grupo, de modo que siempre queda un ejemplar de cada canción." />
-            <Button Content="Quitar marcas" Command="{Binding ClearMarksCommand}"
+            <Button Content="Quitar marcas" Command="{Binding ClearMarksCommand}" IsEnabled="{Binding !EnviandoAPapelera}"
                     Background="#6B7280" Foreground="White" FontWeight="SemiBold" />
-            <Button Content="🗑 Enviar marcadas a la papelera" Click="TrashMarked_Click"
+            <Button Content="🗑 Enviar marcadas a la papelera" Click="TrashMarked_Click" IsEnabled="{Binding !EnviandoAPapelera}"
                     Background="#DC2626" Foreground="White" FontWeight="SemiBold"
                     ToolTip.Tip="Los archivos van a la papelera del sistema, así que se pueden recuperar desde ahí. Si la papelera no admite alguno, no se toca y se indica el motivo." />
             <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource TextoSecundario}"
@@ -100,6 +100,9 @@
         </Border>
 
         <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="4" Margin="0,0,0,6" />
+        <!-- Envío a la papelera en segundo plano: cuánto lleva (el detalle va en el estado). -->
+        <ProgressBar DockPanel.Dock="Top" Minimum="0" Maximum="100" Value="{Binding PapeleraProgreso}"
+                     IsVisible="{Binding EnviandoAPapelera}" Height="4" Margin="0,0,0,6" />
 
         <!-- IsReadOnly="False" solo para que la casilla se pueda pulsar; las columnas de datos van
              marcadas una a una como solo lectura. Es el mismo montaje que usa Enriquecer. -->

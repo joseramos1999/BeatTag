@@ -1,4 +1,5 @@
 using Etiquetador.Core.Analysis;
+using Etiquetador.Core.Pipeline;
 
 namespace Etiquetador.Core.Dj;
 
@@ -156,6 +157,48 @@ public static class RevisionBandeja
         _ => "Nombre ocupado",
     };
 
+    /// <summary>
+    /// ¿Dice este aviso que la canción ya la tienes? Solo la copia exacta de la biblioteca y la
+    /// repetida en la propia bandeja (X15). «Otra versión» no cuenta: una extended o un remix de algo
+    /// que ya tienes es justo lo que un DJ suele querer conservar, y descartarla por el filtro de
+    /// duplicados sería perder música.
+    /// </summary>
+    public static bool EsAvisoDeDuplicado(TipoAviso tipo) => tipo is TipoAviso.YaEnBiblioteca or TipoAviso.RepetidaEnBandeja;
+
+    /// <summary>¿Alguno de estos avisos dice que la canción ya la tienes? Ver <see cref="EsAvisoDeDuplicado"/>.</summary>
+    public static bool TieneAvisoDeDuplicado(IEnumerable<AvisoBandeja> avisos) => avisos.Any(a => EsAvisoDeDuplicado(a.Tipo));
+
+    /// <summary>
+    /// El cuerpo del diálogo antes de descartar descargas a la papelera (X15). Lo que conviene no
+    /// pasar por alto es que alguna seleccionada NO tenga aviso de duplicado: con la tabla filtrada y
+    /// Ctrl+A es fácil llevarse una canción que todavía no tienes. Y que alguna sea MEJOR que la copia
+    /// de la biblioteca (I14): esa conviene usarla para sustituir, no tirarla.
+    /// </summary>
+    public static string CuerpoDescartar(int total, int conAvisoDeDuplicado, int mejores = 0)
+    {
+        if (total <= 0) return "";
+        var sinAviso = total - conAvisoDeDuplicado;
+        string texto;
+        if (sinAviso <= 0)
+            texto = total == 1
+                ? "La descarga ya está en la biblioteca o repetida en la bandeja."
+                : $"Las {total} ya están en la biblioteca o repetidas en la bandeja.";
+        else if (conAvisoDeDuplicado <= 0)
+            texto = total == 1
+                ? "⚠ Esta descarga no tiene aviso de duplicado: no consta que ya la tengas."
+                : $"⚠ Ninguna de las {total} tiene aviso de duplicado: no consta que ya las tengas.";
+        else
+            texto = $"{conAvisoDeDuplicado} ya están en la biblioteca o repetidas en la bandeja. "
+                  + (sinAviso == 1
+                      ? "⚠ 1 no tiene aviso de duplicado: no consta que ya la tengas."
+                      : $"⚠ {sinAviso} no tienen aviso de duplicado: no consta que ya las tengas.");
+        if (mejores > 0)
+            texto += mejores == 1
+                ? " ⚠ 1 es de mejor calidad que su copia de la biblioteca: puedes sustituir esa copia por ella en lugar de descartarla."
+                : $" ⚠ {mejores} son de mejor calidad que su copia de la biblioteca: puedes sustituir esas copias por ellas en lugar de descartarlas.";
+        return texto;
+    }
+
     private static string Enumerar(IReadOnlyList<Track> canciones, bool conVersion = false)
     {
         string Uno(Track x) => conVersion
@@ -287,5 +330,282 @@ public static class TrasladoBandeja
             return new Traslado(archivo, destino, "");
         }
         catch (Exception e) { return new Traslado(archivo, destino, e.Message); }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sustituir la copia de la biblioteca por una descarga mejor (I14)
+// ---------------------------------------------------------------------------------------------
+
+/// <summary>La copia de la biblioteca que una descarga puede sustituir, y por qué es mejor («320 kbps frente a 128 kbps»).</summary>
+public sealed record PropuestaSustitucion(Track Vieja, string Motivo);
+
+/// <summary>Cómo fue sustituir una copia de la biblioteca.</summary>
+/// <param name="Destino">Dónde ha quedado la descarga (la carpeta y el nombre de la copia antigua).</param>
+/// <param name="Error">"" si fue bien; si no, qué pasó y en qué estado han quedado los dos archivos.</param>
+/// <param name="ViejaEnPapelera">La copia antigua ya está en la papelera (también cuando algo falló después).</param>
+public sealed record ResultadoSustitucion(string Destino, string Error, bool ViejaEnPapelera)
+{
+    public bool Ok => Error.Length == 0;
+}
+
+/// <summary>
+/// «Sustituir»: la descarga ocupa el lugar de la copia que ya estaba en la biblioteca.
+///
+/// POR QUÉ. Descargar en 320 kbps un tema que tienes a 128 era un camino de cinco pasos: la bandeja
+/// decía «Ya en la biblioteca» y nada más; había que ir a Duplicados, mandar la vieja a la papelera,
+/// volver, mover la nueva y renombrarla, y la ficha de DJ de la vieja se quedaba huérfana. Aquí se
+/// hace de una vez y con las mismas garantías que el resto: la copia antigua va a la papelera (y si
+/// su unidad no tiene, no se sustituye nada), la nueva toma el nombre y la carpeta de la antigua, la
+/// ficha la acompaña y el traslado queda anotado para deshacer.
+/// </summary>
+public static class SustitucionBandeja
+{
+    /// <summary>
+    /// Cuántos kbps más tiene que tener la descarga para contar como mejor. Es el salto más pequeño de
+    /// la escala de MP3 en la zona que importa (128→160, 192→224, 224→256). Con menos, dos
+    /// codificaciones de la misma calidad saldrían como «mejores» la una de la otra: un VBR V0 ronda
+    /// los 245 kbps de media según el tema, y un CBR 256 no es mejor que él.
+    /// </summary>
+    public const int MargenKbps = 32;
+
+    /// <summary>
+    /// Diferencia de duración, en segundos, por encima de la cual ya no se da por la misma grabación.
+    /// Es la misma tolerancia con la que Duplicados («Artista + título + duración») da dos copias por
+    /// iguales: el silencio inicial o final cambia de una tienda a otra, pero una intro de DJ o una
+    /// extended alargan el tema mucho más.
+    /// </summary>
+    public const int ToleranciaDuracionSeg = 5;
+
+    /// <summary>
+    /// La copia de la biblioteca que <paramref name="nueva"/> puede sustituir, o null. Hace falta todo:
+    ///   · una ÚNICA coincidencia exacta (artista y título) en la biblioteca; con dos o más no hay forma
+    ///     de saber cuál sustituir, y eso es trabajo para Duplicados;
+    ///   · la misma duración (± <see cref="ToleranciaDuracionSeg"/> s) y las dos conocidas: si no, puede
+    ///     ser otra edición con las mismas etiquetas;
+    ///   · la misma marca de letra en el nombre («Clean», «Dirty» o ninguna): los pools publican las
+    ///     dos versiones con el mismo artista y título, y no son intercambiables;
+    ///   · que la descarga sea de mejor calidad (ver <see cref="EsMejor"/>).
+    /// </summary>
+    public static PropuestaSustitucion? Proponer(Track nueva, IndiceCanciones biblioteca)
+    {
+        var exactas = biblioteca.MismaExacta(nueva);
+        if (exactas.Count != 1) return null;
+        var vieja = exactas[0];
+        if (nueva.DurationSeconds <= 0 || vieja.DurationSeconds <= 0) return null;
+        if (Math.Abs(nueva.DurationSeconds - vieja.DurationSeconds) > ToleranciaDuracionSeg) return null;
+        // Por el nombre: lo que diga el catálogo de la vieja no dice nada de qué versión es la descarga.
+        if (ExplicitDetector.DelNombre(nueva) != ExplicitDetector.DelNombre(vieja)) return null;
+        if (!EsMejor(nueva, vieja)) return null;
+        return new PropuestaSustitucion(vieja, $"{Calidad(nueva)} frente a {Calidad(vieja)}");
+    }
+
+    /// <summary>
+    /// ¿Es <paramref name="nueva"/> de mejor calidad que <paramref name="vieja"/>? Sin pérdida frente
+    /// a con pérdida, sí. Entre dos con pérdida, si tiene al menos <see cref="MargenKbps"/> kbps más.
+    /// Entre dos sin pérdida, no: un FLAC no suena mejor que un WAV del mismo máster. Si no se conoce
+    /// el bitrate de alguna de las dos con pérdida, no se puede afirmar.
+    /// </summary>
+    public static bool EsMejor(Track nueva, Track vieja)
+    {
+        var n = AudioQuality.Rate(nueva);
+        var v = AudioQuality.Rate(vieja);
+        if (n == QualityTier.Lossless) return v != QualityTier.Lossless;
+        if (v == QualityTier.Lossless) return false;
+        if (nueva.Bitrate <= 0 || vieja.Bitrate <= 0) return false;
+        return nueva.Bitrate >= vieja.Bitrate + MargenKbps;
+    }
+
+    /// <summary>La calidad en pocas palabras: «320 kbps», «sin pérdida (AIFF)».</summary>
+    public static string Calidad(Track t)
+    {
+        if (AudioQuality.Rate(t) == QualityTier.Lossless)
+            return $"sin pérdida ({Path.GetExtension(t.FilePath).TrimStart('.').ToUpperInvariant()})";
+        return t.Bitrate > 0 ? $"{t.Bitrate} kbps" : "calidad desconocida";
+    }
+
+    /// <summary>
+    /// Dónde queda la descarga: en la carpeta de la copia antigua, con su nombre y la extensión de la
+    /// descarga. Si las dos extensiones son la misma (salvo mayúsculas), se conserva la de la antigua y
+    /// la ruta no cambia: así rekordbox, que guarda los cue points por ruta, la sigue encontrando.
+    /// </summary>
+    public static string Destino(string vieja, string nueva)
+    {
+        var extNueva = Path.GetExtension(nueva);
+        var extVieja = Path.GetExtension(vieja);
+        var ext = string.Equals(extNueva, extVieja, StringComparison.OrdinalIgnoreCase) ? extVieja : extNueva;
+        return Path.Combine(Path.GetDirectoryName(vieja) ?? "", Path.GetFileNameWithoutExtension(vieja) + ext);
+    }
+
+    /// <summary>
+    /// Lo que conviene saber sobre rekordbox, que guarda los cue points y la cuadrícula ligados a la
+    /// ruta del archivo.
+    /// </summary>
+    public static string TextoRekordbox(string vieja, string destino)
+    {
+        if (string.Equals(vieja, destino, StringComparison.OrdinalIgnoreCase))
+            return "rekordbox guarda los cue points y la cuadrícula por ruta. La ruta no cambia, así que la pista los conserva, "
+                 + "pero el audio es otro archivo: conviene volver a analizarla en rekordbox y comprobar que los cue points caen donde deben.";
+        var de = Path.GetExtension(vieja).TrimStart('.').ToUpperInvariant();
+        var a = Path.GetExtension(destino).TrimStart('.').ToUpperInvariant();
+        return $"rekordbox guarda los cue points y la cuadrícula por ruta, y la extensión cambia ({de} → {a}): rekordbox dará la pista "
+             + "por perdida. Reubícala desde rekordbox apuntando al archivo nuevo, o vuelve a importarla.";
+    }
+
+    /// <summary>El cuerpo y la nota del diálogo de confirmación, con los dos archivos y su calidad.</summary>
+    public static (string Cuerpo, string Nota) TextosConfirmacion(Track nueva, Track vieja)
+    {
+        var destino = Destino(vieja.FilePath, nueva.FilePath);
+        var carpeta = Path.GetDirectoryName(vieja.FilePath) ?? "";
+        var cuerpo = $"La descarga «{nueva.FileName}» ({Calidad(nueva)}) sustituirá a «{vieja.FileName}» ({Calidad(vieja)}), "
+                   + $"en «{carpeta}». La copia de la biblioteca va a la papelera y la descarga ocupa su lugar como "
+                   + $"«{Path.GetFileName(destino)}». Su ficha de DJ pasa a la descarga.";
+        var nota = TextoRekordbox(vieja.FilePath, destino)
+                 + " La copia antigua se puede recuperar desde la papelera del sistema, y el traslado se puede deshacer desde Enriquecer.";
+        return (cuerpo, nota);
+    }
+
+    /// <summary>
+    /// La ficha que queda en la descarga: la de la copia antigua (lo que el DJ ha ido apuntando con el
+    /// tiempo) con lo que se haya rellenado ya en la bandeja por encima. Cada dato de la nueva manda si
+    /// lo tiene; los momentos, el ambiente y las etiquetas se suman; «arma secreta» se conserva si
+    /// cualquiera de las dos lo era.
+    ///
+    /// La letra «Limpia» de la copia antigua NO se hereda: es una decisión que se toma escuchando, y
+    /// los pools publican la versión clean y la explícita con el mismo artista, título y duración.
+    /// Heredarla podría meter una letra explícita en una colección «solo limpias» para una boda, que es
+    /// el fallo que más daño hace. «Explícita» sí se hereda: equivocarse en ese sentido solo aparta una
+    /// canción de más. Devuelve null si no queda nada que guardar.
+    /// </summary>
+    public static FichaDj? FusionarFichas(FichaDj? vieja, FichaDj? nueva)
+    {
+        if (vieja == null && nueva == null) return null;
+        var v = vieja ?? new FichaDj();
+        var n = nueva ?? new FichaDj();
+        var f = new FichaDj
+        {
+            Energia = n.Energia > 0 ? n.Energia : v.Energia,
+            Momentos = v.Momentos | n.Momentos,
+            Voz = n.Voz != TipoVoz.SinIndicar ? n.Voz : v.Voz,
+            Letra = n.Letra != TipoLetra.SinIndicar ? n.Letra
+                  : v.Letra == TipoLetra.Explicita ? TipoLetra.Explicita : TipoLetra.SinIndicar,
+            Idioma = n.Idioma.Trim().Length > 0 ? n.Idioma : v.Idioma,
+            Ambiente = Unir(v.Ambiente, n.Ambiente),
+            Etiquetas = Unir(v.Etiquetas, n.Etiquetas),
+            ArmaSecreta = v.ArmaSecreta || n.ArmaSecreta,
+        };
+        return f.EstaVacia ? null : f;
+    }
+
+    private static List<string> Unir(IEnumerable<string> a, IEnumerable<string> b)
+    {
+        var res = new List<string>();
+        var vistos = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var e in a.Concat(b))
+            if (Fichas.Clave(e).Length > 0 && vistos.Add(Fichas.Clave(e))) res.Add(e);
+        return res;
+    }
+
+    /// <summary>
+    /// Lleva a <paramref name="destino"/> la ficha fusionada de la copia antigua y de la descarga, y
+    /// quita las de las rutas que ya no existen. Se llama DESPUÉS de sustituir. No guarda en disco.
+    /// </summary>
+    public static void LlevarFicha(AlmacenFichas fichas, string vieja, string nueva, string destino)
+    {
+        var f = FusionarFichas(fichas.Obtener(vieja), fichas.Obtener(nueva));
+        fichas.Quitar(nueva);
+        if (!string.Equals(vieja, destino, StringComparison.OrdinalIgnoreCase)) fichas.Quitar(vieja);
+        if (f != null) fichas.Poner(destino, f);
+        else fichas.Quitar(destino);
+    }
+
+    /// <summary>
+    /// Sustituye en disco la copia <paramref name="vieja"/> de la biblioteca por la descarga
+    /// <paramref name="nueva"/>. Hay que llamarlo fuera del hilo de la interfaz, con el reproductor
+    /// parado y con el historial para deshacer YA abierto: si no se puede abrir, no se llama.
+    ///
+    /// El orden está pensado para que cualquier fallo antes de mandar la vieja a la papelera deje todo
+    /// como estaba:
+    ///   1. La descarga se mueve a un temporal en la carpeta de la vieja. Si la bandeja está en otro
+    ///      disco, aquí se copia el archivo entero, que es lo que puede fallar a medias (disco lleno).
+    ///   2. La vieja va a la papelera. Si se niega, la descarga vuelve a la bandeja.
+    ///   3. El temporal toma el nombre de la vieja: un renombrado en la misma carpeta.
+    ///   4. Se anota para deshacer (bandeja → destino). Se anota al final y no antes a propósito: con
+    ///      la misma extensión el destino ES la ruta de la vieja, y un registro escrito antes de que la
+    ///      vieja se fuera a la papelera, si la papelera se negaba, haría que deshacer moviera la copia
+    ///      de la biblioteca a la bandeja. Si anotar falla, la descarga vuelve a la bandeja y se dice
+    ///      que la vieja está en la papelera.
+    /// La vieja no se anota: no hay forma de devolverla desde el programa, se recupera desde la papelera.
+    /// </summary>
+    /// <param name="enviarPapelera">Envía a la papelera (Services.Papelera.Enviar, que se niega en las unidades sin papelera).</param>
+    /// <param name="anotar">Anota un registro en el historial para deshacer; devuelve "" o el motivo del fallo.</param>
+    public static ResultadoSustitucion Ejecutar(string nueva, string vieja, Func<string, (bool Ok, string Error)> enviarPapelera,
+                                                Func<UndoRecord, string> anotar)
+    {
+        var destino = Destino(vieja, nueva);
+        if (!File.Exists(nueva)) return Fallo("La descarga ya no está en la bandeja. No se ha cambiado nada.");
+        if (!File.Exists(vieja)) return Fallo($"La copia de la biblioteca ya no está en «{vieja}». No se ha cambiado nada.");
+        var mismaRuta = string.Equals(destino, vieja, StringComparison.OrdinalIgnoreCase);
+        if (!mismaRuta && (File.Exists(destino) || Directory.Exists(destino)))
+            return Fallo($"En la carpeta de la biblioteca ya hay un archivo llamado «{Path.GetFileName(destino)}»; no se sobrescribe. No se ha cambiado nada.");
+
+        // Extensión que el escáner no reconoce como audio: si se escanea mientras tanto, no entra.
+        var temporal = Path.Combine(Path.GetDirectoryName(vieja) ?? "", $".beattag-sustituir-{Guid.NewGuid():N}.tmp");
+
+        // 1. A la carpeta de la biblioteca, todavía con un nombre temporal.
+        try { File.Move(nueva, temporal); }
+        catch (Exception e)
+        {
+            // Una copia entre discos que falló a medias puede dejar el temporal: el original sigue en la bandeja.
+            if (File.Exists(nueva)) try { if (File.Exists(temporal)) File.Delete(temporal); } catch { }
+            return Fallo($"No se pudo llevar la descarga a la carpeta de la biblioteca ({e.Message}). No se ha cambiado nada.");
+        }
+
+        // 2. La copia antigua, a la papelera.
+        (bool Ok, string Error) papelera;
+        try { papelera = enviarPapelera(vieja); }
+        catch (Exception e) { papelera = (false, e.Message); }
+        if (!papelera.Ok)
+        {
+            var motivo = string.IsNullOrWhiteSpace(papelera.Error) ? "motivo desconocido." : papelera.Error.Trim();
+            return Fallo($"No se sustituye: la copia de la biblioteca no se pudo enviar a la papelera. {motivo} "
+                         + Devolver(temporal, nueva, "No se ha cambiado nada."));
+        }
+
+        // 3. Ocupa el lugar de la antigua.
+        try { File.Move(temporal, destino); }
+        catch (Exception e)
+        {
+            return Fallo($"La copia antigua está en la papelera, pero la descarga no pudo ocupar su lugar ({e.Message}). "
+                         + Devolver(temporal, nueva, "La descarga sigue en la bandeja.")
+                         + " Recupera la copia antigua desde la papelera si la necesitas.", viejaEnPapelera: true);
+        }
+
+        // 4. Queda anotado para deshacer.
+        string errAnotar;
+        try { errAnotar = anotar(new UndoRecord { OrigPath = nueva, FinalPath = destino, Renamed = true }) ?? ""; }
+        catch (Exception e) { errAnotar = e.Message; }
+        if (errAnotar.Length > 0)
+            return Fallo($"El cambio no se pudo anotar para deshacer ({errAnotar}). "
+                         + Devolver(destino, nueva, "La descarga vuelve a la bandeja.")
+                         + " La copia antigua está en la papelera, desde donde puedes recuperarla.", viejaEnPapelera: true);
+
+        return new ResultadoSustitucion(destino, "", true);
+
+        ResultadoSustitucion Fallo(string error, bool viejaEnPapelera = false) => new(destino, error, viejaEnPapelera);
+    }
+
+    /// <summary>Devuelve un archivo a la bandeja tras un fallo y dice cómo ha quedado.</summary>
+    private static string Devolver(string desde, string bandeja, string siSale)
+    {
+        try
+        {
+            File.Move(desde, bandeja);
+            return siSale;
+        }
+        catch (Exception e)
+        {
+            return $"Tampoco se pudo devolver la descarga a la bandeja ({e.Message}): está en «{desde}».";
+        }
     }
 }

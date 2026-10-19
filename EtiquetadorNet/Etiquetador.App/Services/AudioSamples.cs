@@ -24,8 +24,9 @@ namespace Etiquetador.App.Services;
 ///   Windows        AudioFileReader, el códec del sistema. IGUAL QUE SIEMPRE, no se toca.
 ///   macOS  .mp3    NLayer, en C# puro.
 ///   macOS  .wav    WaveFileReader de NAudio, que ya era código gestionado.
+///   macOS  .aif(f) AiffFileReader de NAudio, también gestionado (M15).
 ///   macOS  resto   no soportado, y se dice claramente.
-/// Para recortar (<see cref="AbrirComoWaveStream"/>), MP3 y WAV igual en los dos sistemas, y el
+/// Para recortar (<see cref="AbrirComoWaveStream"/>), MP3, WAV y AIFF igual en los dos sistemas, y el
 /// resto, en Windows, con Media Foundation.
 ///
 /// No se pierde nada respecto a antes: en macOS no funcionaba NADA, y en Windows sigue funcionando
@@ -86,10 +87,20 @@ public static class AudioSamples
 
         if (ext == ".wav") return new WaveFileReader(path);
 
+        // AIFF (M15, equipo catalogo_bandeja): el lector de NAudio es código gestionado y vale en los
+        // dos sistemas. Media Foundation NO lo abre en Windows. MEDIDO con un AIFF de 16 bits:
+        // 0xC00D36C4 («no se admite el tipo de secuencia de bytes»), y Comprobar audio lo daba por
+        // «dañado o falta el códec».
+        if (EsAiff(path)) return new AiffFileReader(path);
+
         if (OperatingSystem.IsWindows()) return AbrirConMediaFoundation(path, ext);
 
-        throw new NotSupportedException($"En este sistema solo se pueden leer archivos MP3 y WAV (este es {ext}).");
+        throw new NotSupportedException($"En este sistema solo se pueden leer archivos MP3, WAV y AIFF (este es {ext}).");
     }
+
+    /// <summary>¿Es un AIFF (.aif o .aiff)? Se abre con el lector de NAudio en los dos sistemas (M15).</summary>
+    internal static bool EsAiff(string path)
+        => Path.GetExtension(path).ToLowerInvariant() is ".aif" or ".aiff";
 
     /// <summary>
     /// El decodificador del sistema de Windows (Media Foundation), con un mensaje que se entienda

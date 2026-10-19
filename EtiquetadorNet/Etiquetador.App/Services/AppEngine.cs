@@ -921,6 +921,7 @@ public sealed class AppEngine
         Genre = Config.WriteGenre,
         Year = Config.WriteYear,
         Bpm = Config.WriteBpm,
+        Isrc = Config.WriteIsrc,   // C14 (equipo catalogo_bandeja): opción de Ajustes, desactivada por defecto
     };
 
     /// <summary>Guarda la config informando del resultado (para la pantalla de Ajustes).</summary>

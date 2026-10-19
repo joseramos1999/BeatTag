@@ -156,4 +156,17 @@ public sealed class AnalysisCache
         try { var fi = new FileInfo(path); if (!fi.Exists) return false; m = fi.LastWriteTimeUtc.Ticks; s = fi.Length; return true; }
         catch { return false; }
     }
+
+    // --- Letra según el catálogo (equipo catalogo_bandeja, C14) ---
+
+    /// <summary>
+    /// Lo que dijo el catálogo de la letra de cada canción analizada (solo las que tienen dato), para
+    /// <see cref="Analysis.ExplicitDetector.PonerCatalogo"/>. Sin mirar el disco ni la firma: es la
+    /// misma canción aunque se hayan cambiado sus etiquetas, y la columna «Explícito» lo consulta por
+    /// cada fila visible. Lo guardado por versiones anteriores no trae el dato y no aparece.
+    /// </summary>
+    public List<KeyValuePair<string, Analysis.Explicitness>> LetraDelCatalogo()
+        => _map.Where(kv => kv.Value.R.Explicit != Analysis.Explicitness.Unknown)
+               .Select(kv => new KeyValuePair<string, Analysis.Explicitness>(kv.Key, kv.Value.R.Explicit))
+               .ToList();
 }

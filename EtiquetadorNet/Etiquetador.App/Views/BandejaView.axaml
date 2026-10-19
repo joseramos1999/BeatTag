@@ -13,7 +13,7 @@
         <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Spacing="2" Margin="0,0,0,8">
             <TextBlock Classes="titulo" Text="Bandeja de entrada" />
             <TextBlock Classes="desc"
-                       Text="La música recién descargada se revisa aquí antes de entrar en la biblioteca: duplicados, otras versiones que ya tienes, calidad baja y etiquetas que faltan. Cuando una canción está lista, márcala como preparada y pásala a la biblioteca." />
+                       Text="La música recién descargada se revisa aquí antes de entrar en la biblioteca: duplicados, otras versiones que ya tienes, calidad baja y etiquetas que faltan. Cuando una canción está lista, márcala como preparada y pásala a la biblioteca. Las que ya tienes puedes descartarlas a la papelera o, si son de mejor calidad, sustituir con ellas la copia de la biblioteca." />
         </StackPanel>
 
         <!-- Carpetas -->
@@ -42,6 +42,8 @@
                     Background="#16A34A" Foreground="White" FontWeight="SemiBold" Margin="0,0,12,4"
                     ToolTip.Tip="Mueve las canciones preparadas a la carpeta de destino. Nunca sobrescribe un archivo existente y se puede deshacer." />
             <Button Content="Escribir ficha en el comentario" Click="Volcar_Click" IsEnabled="{Binding !IsBusy}" Margin="0,0,12,4" />
+            <Button Content="Descartar a la papelera" Click="Descartar_Click" IsEnabled="{Binding !IsBusy}" Margin="0,0,12,4"
+                    ToolTip.Tip="Envía a la papelera del sistema las descargas seleccionadas que no quieras conservar, por ejemplo las que ya tienes. Con el filtro «Con aviso de duplicado» y Ctrl+A se descartan de una vez." />
             <TextBox Text="{Binding Busqueda}" PlaceholderText="Buscar…" Width="160" Margin="0,0,6,4" />
             <ComboBox ItemsSource="{Binding Filtros}" SelectedItem="{Binding Filtro}" MinWidth="120" Margin="0,0,6,4" />
             <TextBlock Text="{Binding FiltroInfo}" VerticalAlignment="Center" Opacity="0.7" Margin="0,0,6,4" />
@@ -61,6 +63,9 @@
                         <MenuItem Header="Marcar como preparadas" Command="{Binding MarcarPreparadasCommand}" />
                         <Separator />
                         <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                        <Separator />
+                        <MenuItem Header="Sustituir la copia de la biblioteca…" Click="Sustituir_Click" IsVisible="{Binding PuedeSustituirSeleccion}" />
+                        <MenuItem Header="Descartar (a la papelera)…" Click="Descartar_Click" />
                     </ContextMenu>
                 </DataGrid.ContextMenu>
                 <DataGrid.Columns>
@@ -87,6 +92,9 @@
                 <StackPanel Spacing="4">
                     <TextBlock Text="Avisos" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding Detalle}" TextWrapping="Wrap" />
+                    <Button Content="Sustituir la copia de la biblioteca…" Click="Sustituir_Click" Margin="0,4,0,0"
+                            IsVisible="{Binding PuedeSustituirSeleccion}" IsEnabled="{Binding !IsBusy}"
+                            ToolTip.Tip="La copia de la biblioteca va a la papelera y esta descarga ocupa su lugar, con su nombre y su ficha de DJ. Se puede deshacer desde Enriquecer." />
                 </StackPanel>
             </Border>
             <views:FichaEditorView Grid.Row="1" DataContext="{Binding Editor}" />
