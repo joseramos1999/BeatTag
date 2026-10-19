@@ -231,6 +231,20 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
             return revisadas != null ? revisadas.Elegir(candidatas, limite) : (candidatas.Take(limite).ToList(), 0);
         }, ct);
     }
+
+    // --- Herramientas solo con reglas (equipo «asistente», tanda 3): P8 y P9 ---
+    //
+    // Cada una vive en su archivo (LimpiarPacksViewModel.cs, GeneroPorReglasViewModel.cs). Se crean la
+    // primera vez que la vista las pide, así que no hace falta tocar el constructor.
+
+    private LimpiarPacksViewModel? _packs;
+    private GeneroPorReglasViewModel? _generoReglas;
+
+    /// <summary>«Limpiar la publicidad de los packs» (P8).</summary>
+    public LimpiarPacksViewModel Packs => _packs ??= new LimpiarPacksViewModel(this);
+
+    /// <summary>«Género por carpeta y por artista» (P9).</summary>
+    public GeneroPorReglasViewModel GeneroReglas => _generoReglas ??= new GeneroPorReglasViewModel(this);
 }
 
 // =====================================================================================================

@@ -27,6 +27,15 @@ public partial class AsistenteView : UserControl
             tabla.AddHandler(PointerPressedEvent, (s, e) => TeclaEnergia.SeleccionarConClicDerecho(s, e),
                              Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
         }
+
+        // --- Equipo «asistente», tanda 3: el mismo menú en las tablas de «Limpiar publicidad de
+        // packs» y «Género por carpeta y artista». La de carpetas no lleva: sus filas no son archivos.
+        foreach (var tabla in new[] { TablaPacks, TablaGeneroReglas })
+        {
+            tabla.ContextMenu = CrearMenu(tabla);
+            tabla.AddHandler(PointerPressedEvent, (s, e) => TeclaEnergia.SeleccionarConClicDerecho(s, e),
+                             Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
+        }
     }
 
     private ContextMenu CrearMenu(DataGrid tabla)
@@ -262,4 +271,69 @@ public partial class AsistenteView : UserControl
 
     /// <summary>Las condiciones descartadas se ven apagadas: siguen ahí para saber qué se ignoró y por qué.</summary>
     public static readonly IValueConverter Atenuar = new FuncValueConverter<bool, double>(usable => usable ? 1.0 : 0.55);
+
+    // =================================================================================================
+    // Equipo «asistente», tanda 3: «Limpiar publicidad de packs» (P8) y «Género por carpeta y artista» (P9)
+    // =================================================================================================
+
+    private async void AplicarPacks_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not AsistenteViewModel vm || TopLevel.GetTopLevel(this) is not Window owner) return;
+        var marcadas = vm.Packs.Marcadas;
+        if (marcadas.Count == 0) { vm.Status = "No hay ninguna propuesta marcada."; return; }
+
+        var (cuerpo, nota) = LimpiarPacksViewModel.Confirmacion(marcadas, vm.Packs.AlComentario);
+        var ok = await ConfirmDialog.AskAsync(owner, "Limpiar la publicidad de los packs", cuerpo, nota, "Aplicar");
+        if (ok) await vm.Packs.AplicarAsync();
+    }
+
+    private async void AplicarGeneroReglas_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not AsistenteViewModel vm || TopLevel.GetTopLevel(this) is not Window owner) return;
+        var marcadas = vm.GeneroReglas.Marcadas;
+        if (marcadas.Count == 0) { vm.Status = "No hay ninguna propuesta marcada."; return; }
+
+        var (cuerpo, nota) = GeneroPorReglasViewModel.Confirmacion(marcadas);
+        var ok = await ConfirmDialog.AskAsync(owner, "Género por carpeta y por artista", cuerpo, nota, "Aplicar");
+        if (ok) await vm.GeneroReglas.AplicarAsync();
+    }
+
+    private IReadOnlyList<CarpetaGeneroFila> CarpetasSeleccionadas()
+        => TablaCarpetasGenero.SelectedItems.OfType<CarpetaGeneroFila>().ToList();
+
+    private void PonerReglaCarpeta_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not AsistenteViewModel vm) return;
+        // Lo que se ve escrito en el desplegable, aunque aún no haya pasado al modelo.
+        var genero = GeneroCarpeta.Text;
+        if (string.IsNullOrWhiteSpace(genero)) genero = GeneroCarpeta.SelectedItem as string ?? vm.GeneroReglas.GeneroElegido;
+        vm.GeneroReglas.PonerRegla(CarpetasSeleccionadas(), genero);
+    }
+
+    private void QuitarReglaCarpeta_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is AsistenteViewModel vm) vm.GeneroReglas.QuitarRegla(CarpetasSeleccionadas());
+    }
+
+    /// <summary>Al seleccionar una sola carpeta con regla, el desplegable enseña su género, listo para cambiarlo.</summary>
+    private void CarpetasGenero_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (DataContext is not AsistenteViewModel vm) return;
+        var sel = CarpetasSeleccionadas();
+        if (sel.Count == 1 && sel[0].Genero.Length > 0) vm.GeneroReglas.GeneroElegido = sel[0].Genero;
+    }
+
+    private async void AnadirCarpetaGenero_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not AsistenteViewModel vm) return;
+        var top = TopLevel.GetTopLevel(this);
+        if (top is null) return;
+        var carpetas = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Carpeta a la que dar un género (vale también para sus subcarpetas)",
+            AllowMultiple = false,
+        });
+        var ruta = carpetas.Count > 0 ? carpetas[0].TryGetLocalPath() : null;
+        if (!string.IsNullOrEmpty(ruta)) await vm.GeneroReglas.AnadirCarpetaAsync(ruta);
+    }
 }
