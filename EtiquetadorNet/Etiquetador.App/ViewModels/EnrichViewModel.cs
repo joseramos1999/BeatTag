@@ -97,6 +97,19 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     /// <summary>Visible solo cuando el modo de carátula es "png" (para el botón/ruta de imagen).</summary>
     public static readonly IValueConverter IsPngMode = new FuncValueConverter<string?, bool>(s => s == "png");
 
+    /// <summary>
+    /// Nombre de cada modo de carátula en el selector. El valor que se guarda en la configuración
+    /// sigue siendo keep/spotify/png; antes el selector enseñaba esos códigos tal cual, y «spotify»
+    /// ni siquiera es lo que hace: la carátula sale del catálogo que identificó la canción.
+    /// </summary>
+    public static readonly IValueConverter NombreModoCaratula = new FuncValueConverter<string?, string>(s => s switch
+    {
+        "keep" => "Conservar la actual",
+        "spotify" => "Del catálogo",
+        "png" => "Imagen propia",
+        _ => s ?? "",
+    });
+
     /// <summary>Texto del botón de pausa según el estado.</summary>
     public static readonly IValueConverter PauseLabel = new FuncValueConverter<bool, string>(p => p ? "▶ Reanudar" : "⏸ Pausar");
 
@@ -374,7 +387,13 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
 
         var row = new PreviewRow { Result = r, Old = r.Old, Folder = t.Folder, Duration = t.Duration, Quality = t.Quality, Cambio = indice, Why = r.Why };
         row.UpdateFrom(r);
-        if (double.TryParse(r.Score, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sc) && sc < LowConfidence)
+        if (r.Revisar.Length > 0)
+        {
+            // Fuente de rescate o nombre con huellas de una regla fallida (ProcessResult.Revisar).
+            row.Apply = false;
+            row.RowStatus = "⚠ revisar: " + r.Revisar;
+        }
+        else if (double.TryParse(r.Score, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sc) && sc < LowConfidence)
         {
             row.Apply = false;
             row.RowStatus = "⚠ baja confianza — revisar";
@@ -826,16 +845,22 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
 
             if (r.Found || r.CleanOnly)
             {
-                row.RowStatus = manual ? "✔ búsqueda manual" : "reanalizado";
+                // Igual que al cargar la fila (AddRow): lo que solo encontró una fuente de rescate o
+                // un nombre con huellas de una regla fallida no se queda marcado para aplicar. Antes
+                // aquí salía «reanalizado» y la casilla seguía como estuviera.
+                if (r.Revisar.Length > 0) DesmarcarParaRevisar(row, r.Revisar);
+                else row.RowStatus = manual ? "✔ búsqueda manual" : "reanalizado";
                 // La propuesta pasa a ser la buena de este archivo (misma firma que el análisis normal).
                 _engine.Analysis.Set(row.Result.FilePath, _engine.BuildOptions().Signature(), r);
                 _engine.Analysis.Save();
             }
             else row.RowStatus = r.Skip ? "saltado" : "sin resultado";
 
-            Status = r.Found || r.CleanOnly
-                ? "Reanalizado: " + row.Old
-                : $"Sin resultado para «{searchArtist} - {searchTitle}». Prueba otra grafía.";
+            Status = !(r.Found || r.CleanOnly)
+                ? $"Sin resultado para «{searchArtist} - {searchTitle}». Prueba otra grafía."
+                : r.Revisar.Length > 0
+                    ? $"Reanalizado: {row.Old}. Queda desmarcada, pendiente de revisión: {r.Revisar}."
+                    : "Reanalizado: " + row.Old;
         }
         catch (Exception e)
         {
@@ -844,6 +869,45 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             _engine.Logger.Error($"Error al reanalizar '{row.Old}'", e);
         }
         finally { IsBusy = false; }
+    }
+
+    /// <summary>
+    /// Desmarca la fila y enseña por qué hay que revisarla. La decisión que hubiera era sobre la
+    /// propuesta anterior, y desmarcar aquí no es una decisión del usuario: se olvida aquella y esto
+    /// no se anota como suya.
+    /// </summary>
+    private void DesmarcarParaRevisar(PreviewRow row, string motivo)
+    {
+        row.PropertyChanged -= RowApplyChanged;
+        row.Apply = false;
+        row.PropertyChanged += RowApplyChanged;
+        _engine.Marks.Forget(row.Result.FilePath);
+        row.RowStatus = "⚠ revisar: " + motivo;
+    }
+
+    /// <summary>
+    /// Pone en la lista, desmarcada y con su motivo, una propuesta que otra pestaña (No encontradas,
+    /// Incompletas) ha encontrado pero no debe aplicar por su cuenta (<see cref="ProcessResult.Revisar"/>):
+    /// se revisa aquí, con todas las demás. Devuelve false si no ha entrado en la lista (el archivo ya
+    /// no está en la biblioteca, o cambia menos de lo que pide el filtro de cambios).
+    /// </summary>
+    public bool MostrarParaRevisar(ProcessResult r)
+    {
+        if (IsBusy) return false;
+        var fila = Rows.FirstOrDefault(x => string.Equals(x.Result.FilePath, r.FilePath, StringComparison.OrdinalIgnoreCase));
+        if (fila != null)
+        {
+            fila.UpdateFrom(r);
+            if (r.Revisar.Length > 0) DesmarcarParaRevisar(fila, r.Revisar);
+            RowsView.Refresh();
+            return true;
+        }
+        var t = _engine.Library.Tracks.FirstOrDefault(x => string.Equals(x.FilePath, r.FilePath, StringComparison.OrdinalIgnoreCase));
+        if (t == null) return false;
+        _engine.Marks.Forget(r.FilePath);   // AddRow la deja desmarcada con el motivo
+        var dentro = AddRow(r, t);
+        RowsView.Refresh();
+        return dentro;
     }
 
     [RelayCommand]

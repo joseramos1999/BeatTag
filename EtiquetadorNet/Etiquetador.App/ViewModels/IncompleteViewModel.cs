@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Etiquetador.App.Services;
 using Etiquetador.Core;
+using Etiquetador.Core.Pipeline;
 
 namespace Etiquetador.App.ViewModels;
 
@@ -96,6 +97,12 @@ public partial class IncompleteViewModel : ScanViewModelBase
         catch (Exception e) { Status = "No se pudo reproducir: " + e.Message; }
     }
 
+    /// <summary>
+    /// Lleva a Enriquecer, para revisarla allí, una propuesta que no debe aplicarse sola. Devuelve si
+    /// ha entrado en la lista. Lo conecta MainViewModel; sin conectar, la propuesta queda en la caché.
+    /// </summary>
+    public Func<ProcessResult, bool>? MostrarParaRevisar { get; set; }
+
     /// <summary>Reanaliza y, si encuentra la canción, escribe los tags (undo disponible) y refresca.</summary>
     [RelayCommand]
     private async Task ReanalyzeThis()
@@ -109,6 +116,18 @@ public partial class IncompleteViewModel : ScanViewModelBase
             var opts = _engine.BuildOptions();
             var r = await Task.Run(() => _engine.Processor.ProcessAsync(row.FilePath, isAcapella: false, opts));
             if (r.Skip || !r.Found) { Status = "No se encontró nada nuevo para " + row.FileName; return; }
+            if (r.Revisar.Length > 0)
+            {
+                // Lo que solo identificó MusicBrainz o AcoustID, o un nombre con huellas de una regla
+                // fallida, no se escribe sin que lo veas: antes se aplicaba aquí directamente. Se
+                // guarda como propuesta y se revisa en Enriquecer, desmarcada y con el motivo.
+                _engine.Analysis.Set(row.FilePath, opts.Signature(), r);
+                _engine.Analysis.Save();
+                var enLista = MostrarParaRevisar?.Invoke(r) ?? false;
+                Status = $"Encontrada, pero no se aplica automáticamente: {r.Revisar}. Propuesta: «{r.New}»."
+                       + (enLista ? " Está en Enriquecer, desmarcada, pendiente de revisión." : "");
+                return;
+            }
             var fields = _engine.BuildFields();
             var undo = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
             var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog));

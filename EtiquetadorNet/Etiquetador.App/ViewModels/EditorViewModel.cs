@@ -238,7 +238,11 @@ public partial class EditorViewModel : ViewModelBase, IEstadoPagina
             if (r.Bpm.Length > 0) Bpm = r.Bpm;
             if (r.New.Length > 0) FileName = r.New;
 
-            Status = $"Propuesta de {r.Source} (confianza {r.Score}). Revisa y pulsa Guardar.";
+            // Aquí no se escribe nada hasta Guardar, pero el motivo para revisar (fuente de rescate,
+            // nombre con huellas de una regla fallida) tiene que verse antes de hacerlo.
+            Status = r.Revisar.Length > 0
+                ? $"Propuesta de {r.Source} (confianza {r.Score}), pendiente de revisión: {r.Revisar}. Revisa y pulsa Guardar."
+                : $"Propuesta de {r.Source} (confianza {r.Score}). Revisa y pulsa Guardar.";
         }
         catch (Exception e) { Status = "Error al reanalizar: " + e.Message; }
         finally { IsBusy = false; }

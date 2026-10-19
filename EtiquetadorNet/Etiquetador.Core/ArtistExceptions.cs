@@ -75,16 +75,20 @@ public sealed class ArtistExceptions
     /// Normaliza una lista de intérpretes separada por comas: grafía canónica si es excepción,
     /// si no UnScream por componente. Se aplica al tag y al nombre de archivo.
     /// </summary>
-    public string NormalizeArtists(string? s)
+    /// <param name="desgritar">
+    /// Si pasa a tipo título lo que va TODO EN MAYÚSCULAS. Para el nombre de archivo sí; para el tag
+    /// Artista no, porque ahí la grafía del catálogo suele ser la oficial («MC YOSHI», «SOLTO (FR)»).
+    /// </param>
+    public string NormalizeArtists(string? s, bool desgritar = true)
     {
         if (string.IsNullOrEmpty(s)) return s ?? "";
         var outList = new List<string>();
-        foreach (var part in Regex.Split(s, @",\s*"))
+        foreach (var part in TextUtils.Rx(@",\s*").Split(s))
         {
             var p = part.Trim();
             if (p.Length == 0) continue;
             var k = TextUtils.Nk(TextUtils.ToAscii(p));
-            outList.Add(k.Length > 0 && _map.TryGetValue(k, out var canon) ? canon : TextUtils.UnScream(p));
+            outList.Add(k.Length > 0 && _map.TryGetValue(k, out var canon) ? canon : desgritar ? TextUtils.UnScream(p) : p);
         }
         return string.Join(", ", outList);
     }

@@ -13,7 +13,7 @@ public static class Feat
     // $na = NK del artista completo; $artistNames = cada artista por separado.
     private static string FeatKeep(string namesStr, string na, IReadOnlyList<string> artistNames, string fmt)
     {
-        var names = Regex.Split(namesStr, SepRe);
+        var names = TextUtils.Rx(SepRe).Split(namesStr);
         var remain = new List<string>();
         foreach (var raw in names)
         {
@@ -33,7 +33,7 @@ public static class Feat
                 var pat = Regex.Escape(a).Replace("\\ ", @"\s+");
                 nm = Regex.Replace(nm, $@"\b{pat}\b", " ", IC);
             }
-            nm = Regex.Replace(nm, @"\s{2,}", " ").Trim().Trim(',', '&', '-').Trim();
+            nm = TextUtils.Rx(@"\s{2,}").Replace(nm, " ").Trim().Trim(',', '&', '-').Trim();
 
             if (nm.Length > 0 && TextUtils.Nk(nm).Length > 0) remain.Add(nm);
         }
@@ -46,19 +46,17 @@ public static class Feat
     {
         if (string.IsNullOrEmpty(title)) return title ?? "";
         var na = TextUtils.Nk(artists);
-        var artistNames = Regex.Split(artists ?? "", SepRe)
+        var artistNames = TextUtils.Rx(SepRe).Split(artists ?? "")
             .Select(x => x.Trim())
             .Where(x => x.Length > 0)
             .ToList();
 
         // feat entre paréntesis/corchetes: "(feat. X, Y)"
-        title = Regex.Replace(title,
-            @"(?i)\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring|with|con)\s+([^\)\]]+)[\)\]]",
-            m => FeatKeep(m.Groups[1].Value, na, artistNames, " (feat. {0})"), IC);
+        title = TextUtils.Rx(@"(?i)\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring|with|con)\s+([^\)\]]+)[\)\]]", IC)
+            .Replace(title, m => FeatKeep(m.Groups[1].Value, na, artistNames, " (feat. {0})"));
         // feat SUELTO (sin paréntesis): "... feat. X, Y" hasta un paréntesis/corchete o el final
-        title = Regex.Replace(title,
-            @"(?i)\s+(?:feat\.?|ft\.?|featuring)\s+([^\(\[]+?)(?=\s*[\(\[]|$)",
-            m => FeatKeep(m.Groups[1].Value, na, artistNames, " feat. {0}"), IC);
-        return Regex.Replace(title, @"\s{2,}", " ").Trim();
+        title = TextUtils.Rx(@"(?i)\s+(?:feat\.?|ft\.?|featuring)\s+([^\(\[]+?)(?=\s*[\(\[]|$)", IC)
+            .Replace(title, m => FeatKeep(m.Groups[1].Value, na, artistNames, " feat. {0}"));
+        return TextUtils.Rx(@"\s{2,}").Replace(title, " ").Trim();
     }
 }

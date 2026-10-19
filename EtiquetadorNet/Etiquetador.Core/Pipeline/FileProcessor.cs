@@ -150,7 +150,12 @@ public sealed class FileProcessor
         }
         catch { }
 
-        var isEdit = Regex.IsMatch(rawForOtros, Descriptors.DescRe, IC);
+        // Las palabras del nombre del artista no cuentan como descriptor: «Born Dirty», «James Hype» o
+        // «Clean Bandit» no hacen del archivo una edición, y con isEdit activo Deezer deja de castigar
+        // la diferencia de duración, así que entraban coincidencias de otra versión sin penalización.
+        // Solo las palabras que suelen ser parte de un nombre: en los nombres invertidos del pool esta
+        // mitad es el título, y su «Remix» sí cuenta.
+        var isEdit = TextUtils.Rx(Descriptors.DescRe, IC).IsMatch(Descriptors.SinArtistas(rawForOtros, new[] { fnArtist }, soloDebiles: true));
         var kwUsed = Descriptors.CleanKeywords($"{fnArtist} {qTitle}");
 
         // Traza por canción: es la que permite entender después POR QUÉ salió lo que salió.
@@ -213,15 +218,25 @@ public sealed class FileProcessor
         // a medias. Para un DJ, además, el remixer no puede perderse al limpiar el nombre.
         // Se mira el nombre ORIGINAL (FileNameParser ya le quita el editor), pero SIN el record pool:
         // "DJTOOLSVIP", "Latin Box"… distribuyen, no firman la versión.
-        var nameForRemix = Regex.Replace(Path.GetFileNameWithoutExtension(fileName), Descriptors.PoolRe, " ", IC);
+        var nameForRemix = TextUtils.Rx(Descriptors.PoolRe, IC).Replace(Path.GetFileNameWithoutExtension(fileName), " ");
         var remix = RemixParser.Parse(nameForRemix);
         if (!remix.HasRemixer) remix = RemixParser.Parse(rawForOtros);
+        // Para BUSCAR, en cambio, la primera firma del nombre: es la versión publicada, la que puede
+        // tener el catálogo; la última suele ser el editor del pool, que no la tiene. Con la última,
+        // Deezer dejaba de reconocer «Hello (Sidney Samson Remix) (Cesar Vilo Remix)» como la versión
+        // de Sidney Samson y la empataba con cualquier otro remix. Ver RemixParser.PrimeraFirma.
+        var remixBusqueda = RemixParser.PrimeraFirma(nameForRemix);
+        if (!remixBusqueda.HasRemixer) remixBusqueda = RemixParser.PrimeraFirma(rawForOtros);
         if (manual && o.SearchTitle.Length > 0)
         {
             var manualRemix = RemixParser.Parse(o.SearchTitle);
             if (manualRemix.HasRemixer) remix = manualRemix;
+            var manualBusqueda = RemixParser.PrimeraFirma(o.SearchTitle);
+            if (manualBusqueda.HasRemixer) remixBusqueda = manualBusqueda;
         }
-        if (remix.HasRemixer) _log?.Detail($"    remix  -> '{remix.Remixer}' ({remix.Kind})");
+        if (remix.HasRemixer) _log?.Detail($"    remix  -> '{remix.Remixer}' ({remix.Kind})"
+            + (remixBusqueda.HasRemixer && remixBusqueda.Remixer != remix.Remixer ? $" · se busca la versión de '{remixBusqueda.Remixer}'" : ""));
+        var remixerBusqueda = remixBusqueda.Remixer ?? "";
 
         const string splitArt = @"(?i)\s*(?:,| x | vs\.?| feat\.?| ft\.?)\s*";
         var firstArtist = fnArtist.Length > 0 ? Regex.Split(fnArtist, splitArt)[0].Trim() : "";
@@ -240,12 +255,12 @@ public sealed class FileProcessor
             if (o.Deezer && !onlyIt && !onlySp)
             {
                 Step("Deezer", 0.15);
-                dz = await _dz.SearchAsync(fnArtist, qTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "nombre";
-                if (dz == null && fnArtist.Length > 0) { dz = await _dz.SearchAsync(fnTitle, fnArtist, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "invertido"; }
-                if (dz == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(tagArtist, tagTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "tag"; }
-                if (dz == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(firstArtist, firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "principal"; }
-                if (dz == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { dz = await _dz.SearchAsync(firstTitleArtist, firstArtist, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "principal"; }
-                if (dz == null && firstTitle.Length > 0) { dz = await _dz.SearchAsync("", firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "titulo"; }
+                dz = await _dz.SearchAsync(fnArtist, qTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "nombre";
+                if (dz == null && fnArtist.Length > 0) { dz = await _dz.SearchAsync(fnTitle, fnArtist, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "invertido"; }
+                if (dz == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(tagArtist, tagTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "tag"; }
+                if (dz == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(firstArtist, firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "principal"; }
+                if (dz == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { dz = await _dz.SearchAsync(firstTitleArtist, firstArtist, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "principal"; }
+                if (dz == null && firstTitle.Length > 0) { dz = await _dz.SearchAsync("", firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "titulo"; }
             }
             if (o.Itunes && dz == null && !onlyDz && !onlySp)
             {
@@ -286,7 +301,8 @@ public sealed class FileProcessor
                     }
                 }
             }
-            else if (o.Discogs) dc = await _dc.SearchAsync(primary.Artist, primary.Title, AppInfo.UserAgent, o.DiscogsToken, ct).ConfigureAwait(false);
+            // Con coincidencia en el catálogo principal, Discogs ya no se consulta aquí: solo rellena
+            // los huecos que dejen las demás fuentes (ver más abajo, junto al género).
 
             // IA local de rescate: la propuesta se RE-VERIFICA contra Deezer/iTunes; nunca se escribe sin confirmar.
             if (primary == null && o.Ai && !forced)
@@ -296,11 +312,10 @@ public sealed class FileProcessor
                 if (ai != null && ai.Title.Length > 0 && ai.Confidence >= 0.5 && !ai.IsMashup)
                 {
                     var aiA = ai.Artist; var aiT = ai.Title;
-                    if (o.Deezer) { dz = await _dz.SearchAsync(aiA, aiT, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz == null && aiA.Length > 0) dz = await _dz.SearchAsync(aiT, aiA, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); }
+                    if (o.Deezer) { dz = await _dz.SearchAsync(aiA, aiT, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz == null && aiA.Length > 0) dz = await _dz.SearchAsync(aiT, aiA, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); }
                     if (dz == null && o.Itunes) { it = await _it.SearchAsync(aiA, aiT, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it == null && aiA.Length > 0) it = await _it.SearchAsync(aiT, aiA, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); }
                     primary = dz ?? it;
                     if (primary != null) variant = "ia";
-                    if (primary != null && o.Discogs && dc == null) dc = await _dc.SearchAsync(primary.Artist, primary.Title, AppInfo.UserAgent, o.DiscogsToken, ct).ConfigureAwait(false);
                     _log?.Log($"        · IA local propuso: {aiA} - {aiT} (conf {ai.Confidence}) -> {(primary != null ? "VERIFICADO en " + (dz != null ? "Deezer" : "iTunes") : "no verificado en catalogo")}", LogKind.Dim, true);
 
                     // Sin confirmar no se escribe nada, pero la propuesta tampoco se tira: si se
@@ -345,7 +360,6 @@ public sealed class FileProcessor
                         _log?.Detail($"      huella: AcoustID -> {ac.Artist} - {ac.Title}");
                         if (o.Deezer) dz = await _dz.SearchAsync(ac.Artist, ac.Title, false, false, localDur, isEdit, ct).ConfigureAwait(false);
                         if (dz == null && o.Itunes) it = await _it.SearchAsync(ac.Artist, ac.Title, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false);
-                        if (o.Discogs && dc == null) dc = await _dc.SearchAsync(ac.Artist, ac.Title, AppInfo.UserAgent, o.DiscogsToken, ct).ConfigureAwait(false);
                         primary = dz ?? it;
                         if (primary == null) acHit = ac;
                     }
@@ -354,6 +368,17 @@ public sealed class FileProcessor
         }
 
         if (variant.Length == 0) { if (mb != null) variant = "mb"; else if (dc != null) variant = "discogs"; }
+
+        // Lo que de verdad gana: el catálogo principal (Deezer, iTunes o Spotify, también cuando lo
+        // propuso la IA o la huella y ahí se verificó) y, si no hubo, una fuente de rescate. La
+        // confianza y el «por qué» se calculan sobre ESTE resultado. Antes solo se calculaban para el
+        // principal, y lo que sacaba MusicBrainz salía sin confianza, sin motivo y marcado para
+        // aplicar. Visto en una biblioteca real: «Gayle x Eric Prydz - abcdepjanoo (DJs from M» →
+        // «Eric Prydz - Eric Prydz», «Bellaqueo 4 Life - Ñengo Flow» → otra canción, «Kartashow -
+        // Золото (…)» → «KARTASHOW, - (…)». 46 líneas de los registros, todas con la confianza vacía.
+        var winner = primary ?? mb ?? acHit;
+        var esAcoustId = primary == null && mb == null && acHit != null;
+        var soloRescate = primary == null && winner != null;
 
         // Estrategia POR CAMPO: rellena huecos (album/año/carátula) con una fuente secundaria.
         if (primary != null && !cleanOnly && (primary.Album.Length == 0 || primary.Year.Length == 0 || primary.CoverUrl.Length == 0))
@@ -368,72 +393,107 @@ public sealed class FileProcessor
         var title = sp != null ? sp.Title : it != null ? it.Title : dz != null ? dz.Title : mb != null ? mb.Title : acHit != null ? acHit.Title : (qTitle.Length > 0 ? qTitle : fnTitle);
         var artist = sp != null ? sp.Artist : it != null ? it.Artist : dz != null ? dz.Artist : mb != null ? mb.Artist : acHit != null ? acHit.Artist : fnArtist;
 
-        string album = Pick(sp?.Album, it?.Album, dz?.Album, mb?.Album, sec?.Album, dc?.Album);
-        string year = Pick(sp?.Year, it?.Year, dz?.Year, mb?.Year, sec?.Year, dc?.Year);
+        string album = Pick(sp?.Album, it?.Album, dz?.Album, mb?.Album, sec?.Album);
+        string year = Pick(sp?.Year, it?.Year, dz?.Year, mb?.Year, sec?.Year);
 
+        // Género: mandan las fuentes que identificaron la canción (Spotify, Deezer, iTunes) y Discogs
+        // solo rellena si ninguna lo da. Antes Discogs iba el primero y mandaba sobre todas, aunque
+        // el disco que devolvía fuera de otro artista. Visto en una biblioteca real, con la canción
+        // bien identificada por Deezer (confianza 15-20): «Arcangel - Bali» → Gamelan, «Mad Mind -
+        // Bien Duro» → Medieval, «COQE, JC Reyes - Multiplicando $$$» → Educational.
         string genre = "";
-        if (dc != null && dc.Genre.Length > 0) genre = dc.Genre;
-        if (genre.Length == 0 && sp != null && sp.ArtistId.Length > 0) { var g = await _sp.ArtistGenreAsync(sp.ArtistId, o.SpotifyId, o.SpotifySecret, ct).ConfigureAwait(false); if (g.Length > 0) genre = g; }
+        if (sp != null && sp.ArtistId.Length > 0) { var g = await _sp.ArtistGenreAsync(sp.ArtistId, o.SpotifyId, o.SpotifySecret, ct).ConfigureAwait(false); if (g.Length > 0) genre = g; }
         if (genre.Length == 0 && dz != null && dz.AlbumId.Length > 0) { var g = await _dz.AlbumGenreAsync(dz.AlbumId, ct).ConfigureAwait(false); if (g.Length > 0) genre = g; }
         if (genre.Length == 0 && it != null && it.Genre.Length > 0) genre = it.Genre;
         if (genre.Length == 0 && sec != null && sec.Genre.Length > 0) genre = sec.Genre;
         if (genre.Length == 0 && sec != null && sec.AlbumId.Length > 0) { var g = await _dz.AlbumGenreAsync(sec.AlbumId, ct).ConfigureAwait(false); if (g.Length > 0) genre = g; }
+
+        // Discogs, por la misma razón, solo se consulta si queda algún hueco. MEDIDO en una tirada:
+        // 207 de las 578 peticiones fueron a Discogs, a unos 0,9 s cada una, solo para el género.
+        if (dc == null && o.Discogs && !cleanOnly && winner != null && (genre.Length == 0 || album.Length == 0 || year.Length == 0))
+        {
+            Step("Discogs", 0.9);
+            dc = await _dc.SearchAsync(winner.Artist, winner.Title, AppInfo.UserAgent, o.DiscogsToken, ct).ConfigureAwait(false);
+        }
+        if (genre.Length == 0 && dc != null && dc.Genre.Length > 0) genre = dc.Genre;
+        if (album.Length == 0 && dc != null) album = dc.Album;
+        if (year.Length == 0 && dc != null) year = dc.Year;
         genre = GenreNormalizer.Canonical(genre);   // unifica sinónimos/grafías y da formato
 
-        var bpm = dz is { Bpm: > 0 } ? dz.Bpm.ToString()
-                : (secSrc == "Deezer" && sec is { Bpm: > 0 }) ? sec!.Bpm.ToString() : "";
+        // El BPM del catálogo se decide más abajo, cuando ya se sabe qué versión es el archivo.
+        var bpmCatalogo = dz is { Bpm: > 0 } ? dz.Bpm
+                        : (secSrc == "Deezer" && sec is { Bpm: > 0 }) ? sec!.Bpm : 0;
+        // Título de la pista que da ese BPM: las versiones que ya nombra son las de esa pista.
+        var tituloDelBpm = dz is { Bpm: > 0 } ? dz.Title : bpmCatalogo > 0 ? sec!.Title : "";
         var cover = Pick(sp?.CoverUrl, it?.CoverUrl, dz?.CoverUrl, sec?.CoverUrl);
 
         title = Descriptors.CleanDbTitle(title, @base);
         title = TextUtils.UnScream(title);
 
         // feat/ft del nombre original (no descriptor DJ): se conserva en el título si no está ya
-        var featM = Regex.Match(@base, @"(?i)(?:feat\.?|ft\.?|featuring)\s+(.+?)(?=\s*[-(\[]|$)");
-        if (featM.Success)
-        {
-            var ft = featM.Groups[1].Value;
-            ft = Regex.Replace(ft, Descriptors.DescRe, " ", IC);
-            ft = Regex.Replace(ft, @"\b\d{1,3}\s*bpm\b", " ", IC);
-            ft = Regex.Replace(ft, @"\b\d{2,3}\b", " ");
-            ft = Regex.Replace(Regex.Replace(ft, @"[()\[\]]", " "), @"\s+", " ").Trim().Trim(',').Trim();
-            if (ft.Length > 0 && !Regex.IsMatch(title, @"(?i)\bfeat|\bft\b") && !TextUtils.Nk(title).Contains(TextUtils.Nk(ft)) && !TextUtils.Nk(artist).Contains(TextUtils.Nk(ft)))
-                title = $"{title} feat. {ft}";
-        }
+        var ft = FeatDelNombre(@base);
+        if (ft.Length > 0 && !TextUtils.Rx(@"(?i)\bfeat|\bft\b").IsMatch(title) && !TextUtils.Nk(title).Contains(TextUtils.Nk(ft)) && !TextUtils.Nk(artist).Contains(TextUtils.Nk(ft)))
+            title = $"{title} feat. {ft}";
 
         var titleTrail = new List<string>();
-        var mtr = Regex.Match(title, @"(?i)\s+(remix|extended(?:\s+mix)?|club\s+mix|radio\s+edit|version)\s*$");
-        if (mtr.Success) { titleTrail.Add(TextUtils.TitleCase(mtr.Groups[1].Value.Trim())); title = title.Substring(0, mtr.Index).Trim(); }
+        var mtr = TextUtils.Rx(@"(?i)\s+(remix|extended(?:\s+mix)?|club\s+mix|radio\s+edit|version)\s*$").Match(title);
+        // También el guion que quedara delante: «El Motorcito - Remix» no puede acabar en «El Motorcito -».
+        if (mtr.Success) { titleTrail.Add(TextUtils.TitleCase(mtr.Groups[1].Value.Trim())); title = title.Substring(0, mtr.Index).Trim().TrimEnd('-', '–', '—').Trim(); }
 
-        var otros = Descriptors.ExtractOtros(Descriptors.CompleteTruncated(rawForOtros), title).ToList();
+        // Las palabras del artista no son descriptores: las del catálogo se descartan enteras; las del
+        // nombre de archivo, solo las que suelen ser parte de un nombre, porque en los nombres
+        // invertidos del pool esa mitad es el título con su versión («Si Tu Te Vas Remix - Mora»).
+        var otros = Descriptors.ExtractOtros(Descriptors.CompleteTruncated(rawForOtros), title,
+            winner != null ? new[] { artist } : null, fnArtist).ToList();
         foreach (var tr in titleTrail)
             if (!otros.Any(x => TextUtils.Nk(x) == TextUtils.Nk(tr))) otros.Add(tr);
 
         // Si el nombre del archivo no daba autor, se intenta con el título del catálogo.
-        if (!remix.HasRemixer && primary != null)
+        if (!remix.HasRemixer && winner != null)
         {
-            var fromDb = RemixParser.Parse(primary.Title);
+            var fromDb = RemixParser.Parse(winner.Title);
             if (fromDb.HasRemixer) remix = fromDb;
+        }
+
+        // Si el autor elegido ya lo trae el catálogo en su título, el que firma ESTE archivo es otro:
+        // el siguiente del nombre. «RITMO (Bad Boys For Life) (Steve Aoki Remix) (Yaniss X Greg
+        // Lassierra Remix)» es la versión de Yaniss X Greg Lassierra sobre el remix de Steve Aoki.
+        var tituloCat = winner?.Title ?? "";
+        if (remix.HasRemixer && ContieneAlAutor(tituloCat, remix.Remixer))
+        {
+            var siguiente = RemixParser.Candidates(nameForRemix).Concat(RemixParser.Candidates(rawForOtros))
+                .FirstOrDefault(r => r.HasRemixer && !ContieneAlAutor(tituloCat, r.Remixer) && !EsElPropioTitulo(r.Remixer, title, qTitle));
+            if (siguiente.HasRemixer)
+            {
+                _log?.Detail($"    remix  -> '{remix.Remixer}' ya viene en el catálogo; firma el archivo '{siguiente.Remixer}'");
+                remix = siguiente;
+            }
         }
 
         // El "autor" no puede ser el propio título de la canción: en nombres como
         // "Stereo Love (Stereo Love Extended)" lo que precede al descriptor es el título repetido,
         // y colarlo daba cosas como "Stereo Love (Stereo Love Extended Extended)".
-        var nRx = TextUtils.Nk(remix.Remixer);
-        var nTi = TextUtils.Nk(title);
-        var nQt = TextUtils.Nk(qTitle);
-        var esElTitulo = nRx.Length > 0 && (
-               (nTi.Length > 3 && (nTi.Contains(nRx) || nRx.Contains(nTi)))
-            || (nQt.Length > 3 && (nQt.Contains(nRx) || nRx.Contains(nQt))));
+        var esElTitulo = remix.HasRemixer && EsElPropioTitulo(remix.Remixer, title, qTitle);
+        if (esElTitulo) _log?.Detail($"    remix  -> '{remix.Remixer}' descartado (es el propio título)");
 
-        if (remix.HasRemixer && !esElTitulo)
+        // Cada firma del nombre sustituye a su descriptor pelado («Remix» → «Tiesto Remix»), en el
+        // orden del nombre y sin perder ninguna: «CHEVERE (premium remix) (Davidmusic Slam Acapella)»
+        // lleva dos. Las que el catálogo ya nombra en su título («Get Ready For This (Rio & Le Jean
+        // '92 Remix)») no se repiten, y las que son el propio título se descartan.
+        var firmas = RemixParser.ConAutor(nameForRemix).ToList();
+        if (remix.HasRemixer && !firmas.Contains(remix)) firmas.Add(remix);
+        foreach (var f in firmas)
         {
-            // Sustituye el descriptor pelado ("Remix") por el completo ("Tiesto Remix").
-            var kindKey = TextUtils.Nk(remix.Kind);
+            if (EsElPropioTitulo(f.Remixer, title, qTitle) || ContieneAlAutor(title, f.Remixer)) continue;
+            var etiqueta = TextUtils.Nk(f.Label);
+            if (otros.Any(x => TextUtils.Nk(x) == etiqueta)) continue;
+            var kindKey = TextUtils.Nk(f.Kind);
             var idx = otros.FindIndex(x => TextUtils.Nk(x) == kindKey);
-            if (idx >= 0) otros[idx] = remix.Label;
-            else otros.Add(remix.Label);
+            if (idx >= 0) otros[idx] = f.Label;
+            else otros.Add(f.Label);
         }
-        else if (esElTitulo) _log?.Detail($"    remix  -> '{remix.Remixer}' descartado (es el propio título)");
+        // Para el tag y la columna Remixer, solo la persona: «Alex Torres», no «Alex Torres Intro».
+        var remixerFinal = remix.HasRemixer && !esElTitulo ? RemixParser.Autor(remix.Remixer) : "";
         if (isAcapella && !TextUtils.Nk(title).Contains("acapella") && !otros.Any(x => TextUtils.Nk(x).Contains("acapella")))
             otros.Add("Acapella");
 
@@ -454,21 +514,37 @@ public sealed class FileProcessor
             }
         }
 
+        // BPM: ya se sabe qué versiones lleva el archivo. Solo cuentan las que no nombra el título de
+        // la pista del catálogo: en otros también está lo que se le quitó a ese título («Macarena
+        // Bayside Boys Remix» → «(Remix)») y lo que el archivo repite («Scooteroni (RMX)» con el
+        // catálogo «Scooteroni (RMX)»), y eso es la misma versión, no otra a otro tempo.
+        var versionesNoDelCatalogo = otros.Where(v => !NombraLaVersion(tituloDelBpm, v)).ToList();
+        var bpm = ElegirBpm(fileName, versionesNoDelCatalogo, bpmCatalogo, out var porQueBpm);
+        if (porQueBpm.Length > 0) _log?.Detail($"    bpm    -> {porQueBpm}");
+        var bpmEsDelCatalogo = bpm.Length > 0 && BpmDelNombre(Path.GetFileNameWithoutExtension(fileName), out _) == 0;
+
         var mainArtist = artist.Trim(); if (mainArtist.Length == 0) mainArtist = fnArtist;
-        mainArtist = Regex.Replace(mainArtist, @"(?i)\s+ft\.?\s+", " feat. ");
-        mainArtist = Regex.Replace(mainArtist, @"(?i)\s+featuring\s+", " feat. ");
-        mainArtist = Regex.Replace(Regex.Replace(mainArtist, "_", " "), @"\s{2,}", " ").Trim();
+        // «ft» detrás de una coma empieza el nombre del siguiente intérprete, no es un invitado: Deezer
+        // da «Kid Yugi, Ill Santo, FT Kings» (FT Kings es un grupo) y salía «…, feat. Kings».
+        mainArtist = TextUtils.Rx(@"(?i)(?<![,\s])\s+ft\.?\s+").Replace(mainArtist, " feat. ");
+        mainArtist = TextUtils.Rx(@"(?i)\s+featuring\s+").Replace(mainArtist, " feat. ");
+        mainArtist = TextUtils.Rx(@"\s{2,}").Replace(mainArtist.Replace('_', ' '), " ").Trim();
+        // El tag lleva las grafías y los alias del nombre (Cruzzi → Cruz Cafuné), pero no el paso de
+        // MAYÚSCULAS a tipo título: en el catálogo suele ser la grafía oficial («MC YOSHI», «SOLTO
+        // (FR)»), y el tag Artista la conservaba antes de llevar la del nombre.
+        var artistaTag = _artistExc.NormalizeArtists(mainArtist, desgritar: false);
         mainArtist = _artistExc.NormalizeArtists(mainArtist);
         title = Feat.RemoveRedundantFeat(title, mainArtist).Trim();
 
-        var newBase = mainArtist.Length > 0 ? $"{mainArtist} - {title}" : title;
-        if (otros.Count > 0) newBase = $"{newBase} (" + string.Join(", ", otros) + ")";
-        newBase = TextUtils.Sanitize(TextUtils.ToAscii(newBase));
-        if (newBase.Length == 0) newBase = TextUtils.Sanitize(TextUtils.ToAscii(@base));
+        var newBase = ComponerNombre(mainArtist, title, otros);
+        if (newBase.Length == 0) newBase = TextUtils.Sanitize(TextUtils.AsciiSinPerderLetras(@base));
 
         // El título era «A x B» y el catálogo solo devuelve A: es un mashup que no se reconoció de
         // antemano, y renombrarlo lo haría pasar por el original. En búsqueda manual manda el usuario.
-        if (!manual && Matching.PierdeUnaCancion(fnTitle, newBase))
+        // Se mira la mitad del nombre que lleva el título, que en el formato invertido de los pools
+        // es la primera.
+        var mitadTitulo = Matching.MitadConElTitulo(fnArtist, fnTitle, winner?.Title ?? title);
+        if (!manual && Matching.PierdeUnaCancion(mitadTitulo, newBase))
         {
             _log?.Detail($"    -> SALTADA (parece un mashup: '{newBase}' pierde una de las canciones del nombre)");
             return new ProcessResult { FilePath = filePath, Old = fileName, New = fileName, Source = "Mezcla", Skip = true, Kw = kwUsed, DurLocal = localDur };
@@ -479,23 +555,28 @@ public sealed class FileProcessor
 
         Step("componiendo", 0.95);
 
-        // Confianza mostrada = puntuación del proveedor + coherencia con los tags ya embebidos.
+        // Confianza mostrada = puntuación de la fuente que gana + coherencia con los tags ya embebidos.
         var scoreStr = "";
         var why = "";
-        if (primary != null)
+        var revisar = new List<string>();
+        if (winner != null)
         {
-            var tagAdj = Matching.TagCoherence(tagArtist, tagTitle, primary.Artist, primary.Title);
-            var finalScore = Math.Round(primary.Score + tagAdj, 1);
+            // AcoustID no puntúa el título ni el artista, solo el parecido del audio: se le da un valor
+            // fijo, en la franja de las coincidencias aproximadas. MusicBrainz trae la suya.
+            var puntuacionFuente = esAcoustId ? PuntuacionAcoustId : winner.Score;
+            var tagAdj = Matching.TagCoherence(tagArtist, tagTitle, winner.Artist, winner.Title);
+            var finalScore = Math.Round(puntuacionFuente + tagAdj, 1);
 
             // Si la coincidencia la elegiste TÚ (de la lista, por enlace o por huella), no tiene
             // sentido marcarla como dudosa: la validaste viéndola. Antes salía con confianza 0 y
-            // se auto-desmarcaba, que es justo lo contrario de lo que quieres.
-            if (manual && o.SearchSource.Length > 0 && finalScore < 10)
+            // se auto-desmarcaba, que es justo lo contrario de lo que quieres. No aplica a lo que
+            // sale de una fuente de rescate: eso no es lo que eligió el usuario.
+            if (!soloRescate && manual && o.SearchSource.Length > 0 && finalScore < 10)
             {
                 _log?.Detail($"    confianza-> {finalScore} -> 10 (coincidencia elegida por el usuario en {o.SearchSource})");
                 finalScore = 10;
             }
-            else if (manual && finalScore < 4)
+            else if (!soloRescate && manual && finalScore < 4)
             {
                 // Términos dictados a mano: tampoco debería quedar por debajo del umbral de revisión.
                 _log?.Detail($"    confianza-> {finalScore} -> 4 (búsqueda dictada por el usuario)");
@@ -506,7 +587,7 @@ public sealed class FileProcessor
             // se lean mal los números.
             var inv = System.Globalization.CultureInfo.InvariantCulture;
             scoreStr = finalScore.ToString(inv);
-            _log?.Detail($"    confianza-> {primary.Score.ToString(inv)} (fuente) "
+            _log?.Detail($"    confianza-> {puntuacionFuente.ToString(inv)} (fuente) "
                        + $"{(tagAdj >= 0 ? "+" : "")}{tagAdj.ToString(inv)} (tags) = {scoreStr}"
                        + (finalScore < 2.0 ? "  [BAJA]" : ""));
 
@@ -514,33 +595,49 @@ public sealed class FileProcessor
             // ganó esta coincidencia y cómo la corrigen los tags que el archivo ya traía. Es lo que
             // convierte una propuesta dudosa en una decisión de un segundo.
             var partes = new List<string>();
-            if (primary.Why.Length > 0) partes.Add(primary.Why);
-            else if (primary.Dur > 0 && localDur > 0)
+            if (winner.Why.Length > 0) partes.Add(winner.Why);
+            else if (winner.Dur > 0 && localDur > 0)
             {
                 // Fuentes que no detallan su puntuación (iTunes, Spotify). Al menos se dice lo que
                 // sí se puede afirmar de este archivo: si la duración cuadra con la del catálogo,
                 // que es la comprobación que más veces cambia una decisión.
-                var dd = Math.Abs(primary.Dur - localDur);
+                var dd = Math.Abs(winner.Dur - localDur);
                 partes.Add(dd <= 2 ? $"la duración cuadra (Δ{dd}s)" : $"la duración difiere en {dd}s");
             }
+            else if (esAcoustId) partes.Add("la huella acústica coincide");
             if (tagAdj != 0)
                 partes.Add(tagAdj > 0
                     ? $"los tags del archivo concuerdan +{tagAdj.ToString(inv)}"
                     : $"los tags del archivo NO concuerdan {tagAdj.ToString(inv)}");
             if (manual) partes.Add(o.SearchSource.Length > 0 ? $"coincidencia elegida por ti en {o.SearchSource}" : "búsqueda dictada por ti");
             why = string.Join(" · ", partes);
+
+            // Lo que solo encontró una fuente de rescate no se aplica de oficio: MusicBrainz y AcoustID
+            // se consultan precisamente cuando los catálogos principales no dan con la canción.
+            if (soloRescate)
+                revisar.Add(MotivoSoloRescate(esAcoustId ? "AcoustID" : "MusicBrainz"));
         }
-        _log?.Detail($"    -> {(primary != null || acHit != null || genreOnly || cleanOnly ? "OK" : "SIN RESULTADO")} · fuente={srcLabel} · nuevo='{newBase + ext}'");
+
+        // Comprobación final del nombre propuesto: las huellas que deja una regla que ha fallado
+        // (guion colgando, título vacío, artista repetido…) se ven mirando solo el resultado.
+        revisar.AddRange(NombrePropuesto.Anomalias(newBase, mainArtist, title, fileName, bpm));
+        var motivoRevisar = string.Join(" · ", revisar);
+        if (motivoRevisar.Length > 0)
+        {
+            _log?.Detail($"    revisar-> {motivoRevisar}");
+            why = why.Length > 0 ? $"revisar: {motivoRevisar} · {why}" : $"revisar: {motivoRevisar}";
+        }
+        _log?.Detail($"    -> {(winner != null || genreOnly || cleanOnly ? "OK" : "SIN RESULTADO")} · fuente={srcLabel} · nuevo='{newBase + ext}'");
 
         // Línea estructurada (una por canción) pensada para analizar la tirada entera después:
         // se puede filtrar con  findstr DATA  y abrir como CSV con separador |.
-        var durMatch = primary?.Dur ?? 0;
+        var durMatch = winner?.Dur ?? 0;
         var durDelta = (localDur > 0 && durMatch > 0) ? Math.Abs(durMatch - localDur) : -1;
         _log?.Detail(string.Join("|", new[]
         {
             "DATA",
             Csv(fileName),
-            primary != null ? "OK" : (cleanOnly ? "LIMPIEZA" : genreOnly ? "SOLO-GENERO" : acHit != null ? "ACOUSTID" : "SIN-RESULTADO"),
+            primary != null ? "OK" : (cleanOnly ? "LIMPIEZA" : mb != null ? "OK-MB" : acHit != null ? "ACOUSTID" : genreOnly ? "SOLO-GENERO" : "SIN-RESULTADO"),
             Csv(srcLabel),
             Csv(variant),
             scoreStr,
@@ -560,12 +657,18 @@ public sealed class FileProcessor
             Old = fileName,
             New = newBase + ext,
             Title = titleTag,
-            Artist = artist,
+            // El tag lleva la misma grafía que el nombre de archivo (excepciones, alias, «feat.»),
+            // pero con sus acentos. Visto en una biblioteca real: 8 temas de Cruz Cafuné pasaban a
+            // llamarse «Cruz Cafune - …» y su tag Artista se quedaba en «Cruzzi», así que rekordbox,
+            // que ordena por el tag, partía al mismo artista en dos. Las mayúsculas del catálogo se
+            // respetan (ver artistaTag).
+            Artist = artistaTag,
             Album = album,
             Year = year,
             Genre = genre,
             CoverUrl = cover,
             Bpm = bpm,
+            BpmCatalogo = bpmEsDelCatalogo ? bpm : "",
             Found = sp != null || it != null || dz != null || mb != null || acHit != null,
             GenreOnly = genreOnly,
             Source = srcLabel,
@@ -575,15 +678,231 @@ public sealed class FileProcessor
             Skip = false,
             Variant = variant,
             Score = scoreStr,
-            Remixer = remix.Remixer,
+            Remixer = remixerFinal,
+            // El tag sale de su propio campo: el Remixer que guardó en la caché una versión anterior
+            // es texto en bruto y no debe escribirse (ver ProcessResult.RemixerTag).
+            RemixerTag = remixerFinal,
             RemixKind = remix.Kind,
             Why = why,
+            Revisar = motivoRevisar,
+            Reglas = ProcessResult.ReglasActuales,
             AiArtist = sugA,
             AiTitle = sugT,
             AiVersion = sugV,
             DurLocal = localDur,
-            DurMatch = primary != null ? primary.Dur.ToString() : "",
+            DurMatch = winner != null ? winner.Dur.ToString() : "",
         };
+    }
+
+    /// <summary>
+    /// Puntuación que se da a lo que solo identificó AcoustID. Su propia nota (0,5-1) mide el parecido
+    /// del audio, no si el título y el artista que devuelve son los buenos, así que no es comparable
+    /// con la de los catálogos. 5 es la franja de las coincidencias aproximadas de Deezer: por encima
+    /// del umbral de revisión solo con la huella, y que los tags la suban o la bajen.
+    /// </summary>
+    public const double PuntuacionAcoustId = 5.0;
+
+    /// <summary>Motivo para revisar lo que solo identificó una fuente de rescate («MusicBrainz», «AcoustID»).</summary>
+    public static string MotivoSoloRescate(string fuente) => $"identificada solo por {fuente}, una fuente de rescate";
+
+    /// <summary>
+    /// El invitado que el nombre de archivo declara con «feat.», «ft.» o «featuring», ya limpio, o ""
+    /// si no hay ninguno.
+    ///
+    /// Con límite de palabra: sin él, el «ft» final de Drift, Swift o Daft se tomaba por un invitado.
+    /// Visto en una biblioteca real: «Teriyaki Boyz - Tokyo Drift (Sam Collins Remix)» acababa en
+    /// «… feat. Sam Collins (Remix)» (invitado inventado y remixer perdido), «ZAYN, Taylor Swift - I
+    /// Dont Wanna Live Forever (Fifty Shades Darker)» en «… feat. I Dont Wanna Forever» y «DJ Allan x
+    /// Daft Punk - One More Time» en «… One More Time feat. Punk». Dentro de un paréntesis, tampoco
+    /// cuando lo que sigue nombra una versión («(ft. Sam Collins Remix)»): ahí lo que hay es quién la
+    /// firma, y eso lo resuelve RemixParser. Un invitado de verdad en el paréntesis sí vale («(Original
+    /// 2022 Remaster Ft. Daddy Yankee)»).
+    /// </summary>
+    public static string FeatDelNombre(string? nombre)
+    {
+        var s = nombre ?? "";
+        foreach (Match m in TextUtils.Rx(@"(?i)\b(?:feat\.?|ft\.?|featuring)\s+(.+?)(?=\s*[-(\[]|$)").Matches(s))
+        {
+            if (DentroDeParentesis(s, m.Index) && TextUtils.Rx(Descriptors.DescRe, IC).IsMatch(m.Groups[1].Value)) continue;
+            var ft = m.Groups[1].Value;
+            ft = TextUtils.Rx(Descriptors.DescRe, IC).Replace(ft, " ");
+            ft = TextUtils.Rx(@"\b\d{1,3}\s*bpm\b", IC).Replace(ft, " ");
+            ft = TextUtils.Rx(@"\b\d{2,3}\b").Replace(ft, " ");
+            ft = TextUtils.Rx(@"\s+").Replace(TextUtils.Rx(@"[()\[\]]").Replace(ft, " "), " ").Trim().Trim(',').Trim();
+            if (ft.Length > 0) return ft;
+        }
+        return "";
+    }
+
+    /// <summary>¿La posición cae dentro de un paréntesis o corchete abierto?</summary>
+    private static bool DentroDeParentesis(string s, int pos)
+    {
+        var nivel = 0;
+        for (int i = 0; i < pos && i < s.Length; i++)
+        {
+            if (s[i] is '(' or '[') nivel++;
+            else if (s[i] is ')' or ']' && nivel > 0) nivel--;
+        }
+        return nivel > 0;
+    }
+
+    /// <summary>
+    /// ¿El título contiene al autor como palabras enteras y seguidas? «Get Ready For This (Rio &amp; Le
+    /// Jean '92 Remix)» contiene a «Rio &amp; Le Jean»; «Animals» no contiene a «Ani».
+    /// </summary>
+    private static bool ContieneAlAutor(string? titulo, string? autor)
+    {
+        var t = PalabrasNk(titulo);
+        var a = PalabrasNk(autor);
+        if (a.Count == 0 || a.Count > t.Count) return false;
+        for (int i = 0; i + a.Count <= t.Count; i++)
+            if (t.Skip(i).Take(a.Count).SequenceEqual(a)) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// ¿El título del catálogo nombra ya esta versión? Por palabras enteras, y «RMX» cuenta como
+    /// «Remix»: «Scooteroni (RMX)» nombra la versión «Remix».
+    /// </summary>
+    private static bool NombraLaVersion(string? titulo, string? version)
+        => ContieneAlAutor(ComoRemix(titulo), ComoRemix(version));
+
+    private static string ComoRemix(string? s) => TextUtils.Rx(@"(?i)\brmx\b").Replace(s ?? "", "remix");
+
+    private static List<string> PalabrasNk(string? s)
+        => TextUtils.Rx(@"[^\p{L}\p{N}]+").Split(s ?? "").Select(TextUtils.Nk).Where(w => w.Length > 0).ToList();
+
+    /// <summary>
+    /// El «autor» que RemixParser ha sacado es en realidad el título de la canción: «Stereo Love
+    /// (Stereo Love Extended)», «Look At Me Now Remix».
+    ///
+    /// El título del catálogo se compara sin sus paréntesis ni su «feat.», que es donde puede ir
+    /// legítimamente el autor de la versión. El del nombre de archivo, solo por igualdad o por el
+    /// principio: el título repetido va delante y el editor del pool va detrás. Visto en una
+    /// biblioteca real con el formato de doble espacio: «Duki x Pickle - Givenchy  Alex Cortes Open
+    /// Show» se leía como título «Givenchy Alex Cortes», que CONTIENE al editor, y «Alex Cortes» se
+    /// descartaba por ser «el propio título» (igual con Alex Torres, Alberto Rodrigo, Nico Guerra…).
+    /// </summary>
+    public static bool EsElPropioTitulo(string? remixer, string? tituloCatalogo, string? tituloNombre)
+    {
+        var nRx = TextUtils.Nk(remixer);
+        if (nRx.Length == 0) return false;
+        var a = PalabrasNk(remixer);
+
+        // Por palabras enteras: «Animals» no contiene ni empieza por un remixer llamado «Ani».
+        var nucleo = TextUtils.Rx(@"\s*[\(\[][^\)\]]*[\)\]]").Replace(tituloCatalogo ?? "", " ");
+        nucleo = TextUtils.Rx(@"(?i)\s+(?:feat\.?|ft\.?|featuring)\s+.*$").Replace(nucleo, "");
+        var nTi = TextUtils.Nk(nucleo);
+        if (nTi.Length > 3 && nRx.Contains(nTi)) return true;
+        // Con títulos de tres letras o menos («AM», «47», «ALO») no vale buscar el texto dentro del
+        // autor, pero sí las palabras enteras: el autor es el título o empieza por él. Antes no se
+        // miraba nada, y «Nio Garcia - AM Remix» daba el remixer «Am», «Anuel AA - 47 Remix …» el
+        // «47» y «Katteyes … ALO  Open Show   Extended» el nombre «ALO (Alo Open Show Extended)».
+        if (ContieneAlAutor(nucleo, remixer) || EmpiezaPor(a, PalabrasNk(nucleo))) return true;
+
+        var nQt = TextUtils.Nk(tituloNombre);
+        if (nQt.Length > 3 && nRx.Contains(nQt)) return true;
+        var q = PalabrasNk(tituloNombre);
+        // El título del nombre empieza por el autor (el título repetido va delante y el editor del
+        // pool detrás), o el autor empieza por el título.
+        return EmpiezaPor(q, a) || EmpiezaPor(a, q);
+    }
+
+    /// <summary>¿La lista de palabras <paramref name="todo"/> empieza por <paramref name="principio"/> (no vacía)?</summary>
+    private static bool EmpiezaPor(IReadOnlyList<string> todo, IReadOnlyList<string> principio)
+        => principio.Count > 0 && principio.Count <= todo.Count && todo.Take(principio.Count).SequenceEqual(principio);
+
+    /// <summary>
+    /// Nombre de archivo (sin extensión) a partir de artista, título y versiones. Cada parte pasa a
+    /// ASCII por separado y se queda en Unicode si al pasarla perdería letras: ver
+    /// <see cref="TextUtils.AsciiSinPerderLetras"/>.
+    /// </summary>
+    public static string ComponerNombre(string? artista, string? titulo, IReadOnlyCollection<string>? versiones)
+    {
+        var a = TextUtils.AsciiSinPerderLetras(artista).Trim();
+        var t = TextUtils.AsciiSinPerderLetras(titulo).Trim();
+        var v = versiones is { Count: > 0 } ? TextUtils.AsciiSinPerderLetras(string.Join(", ", versiones)).Trim() : "";
+        var s = a.Length > 0 && t.Length > 0 ? $"{a} - {t}" : (t.Length > 0 ? t : a);
+        if (v.Length > 0) s = $"{s} ({v})";
+        return TextUtils.Sanitize(s);
+    }
+
+    /// <summary>
+    /// El BPM que declara el nombre de archivo («155bpm», «126 Bpm», «126.01bpm»). Devuelve 0 si no
+    /// declara ninguno, y marca <paramref name="cambiaDeTempo"/> si declara dos distintos o un rango
+    /// («118-128 Bpm», «100 150 BPM»): es una transición y no tiene un BPM único.
+    /// </summary>
+    public static int BpmDelNombre(string? nombre, out bool cambiaDeTempo)
+    {
+        cambiaDeTempo = false;
+        var s = nombre ?? "";
+        if (TextUtils.Rx(@"\b\d{2,3}\s*(?:-|–|/|\s|\ba\b|\bto\b)\s*\d{2,3}\s*bpm\b", IC).IsMatch(s))
+        {
+            cambiaDeTempo = true;
+            return 0;
+        }
+        var valores = TextUtils.Rx(@"(?<![\d.,])(\d{2,3})(?:[.,]\d{1,2})?\s*bpm\b", IC).Matches(s)
+            .Select(m => int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))
+            .Where(v => v is >= 50 and <= 220)
+            .Distinct()
+            .ToList();
+        if (valores.Count > 1) { cambiaDeTempo = true; return 0; }
+        return valores.Count == 1 ? valores[0] : 0;
+    }
+
+    /// <summary>
+    /// El BPM que se propone: el que declara el nombre manda; el del catálogo, solo si el archivo es
+    /// esa misma versión.
+    ///
+    /// Deezer da el BPM de la pista que encontró, que para un remix o una edición de DJ suele ser el
+    /// del tema original. MEDIDO en los registros: de 39 archivos que declaraban el BPM en el nombre y
+    /// recibían otro del catálogo, solo 13 coincidían, 9 eran el doble o la mitad y 17 iban a otro
+    /// tempo. «Ahora Me Llama (ADRUKID Remix) - … - 155bpm» recibía 135, «How Deep Is Your Love (VD
+    /// Soundsystem Remix 126Bpm)» 122 y «Rompe (Bayne Open Show 88bpm)» 176.
+    ///
+    /// <paramref name="versiones"/> son las versiones del archivo que el título del catálogo NO trae:
+    /// si alguna puede cambiar el tempo (remix, bootleg, open show, edit, transición…), el BPM del
+    /// catálogo no es el de este archivo. Las que lo conservan (extended, intro, acapella, clean…) no
+    /// lo impiden.
+    /// </summary>
+    public static string ElegirBpm(string? nombreArchivo, IEnumerable<string>? versiones, int bpmCatalogo, out string motivo)
+    {
+        motivo = "";
+        var delNombre = BpmDelNombre(Path.GetFileNameWithoutExtension(nombreArchivo ?? ""), out var cambiaDeTempo);
+        if (cambiaDeTempo)
+        {
+            motivo = "el nombre declara un cambio de tempo: no se propone BPM";
+            return "";
+        }
+        if (delNombre > 0)
+        {
+            if (bpmCatalogo > 0 && bpmCatalogo != delNombre)
+                motivo = $"manda el del nombre ({delNombre}); el catálogo daba {bpmCatalogo}";
+            return delNombre.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        if (bpmCatalogo <= 0) return "";
+
+        var otraVersion = (versiones ?? Enumerable.Empty<string>()).FirstOrDefault(PuedeCambiarElTempo);
+        if (otraVersion != null)
+        {
+            motivo = $"no se propone el del catálogo ({bpmCatalogo}): el archivo es una versión «{otraVersion}» que puede ir a otro tempo";
+            return "";
+        }
+        return bpmCatalogo.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Versiones que conservan el tempo del tema: alargarlo, añadirle una intro o quedarse con la voz
+    /// no lo cambia. Todo lo demás (remix, bootleg, open show, edit, transición, directo…) puede.
+    /// </summary>
+    private static bool PuedeCambiarElTempo(string version)
+    {
+        var k = TextUtils.Nk(version);
+        if (k.Length == 0) return false;
+        if (TextUtils.Rx(@"(intro|outro|acapella|aca(in|out)?$|acp$|acap$|instrumental|extended|starter)").IsMatch(k)) return false;
+        return k is not ("clean" or "dirty" or "radioedit" or "originalmix" or "originalversion"
+                         or "clubmix" or "quickhit" or "quickedit" or "shortedit" or "version"
+                         or "remaster" or "remastered" or "hype" or "loop" or "percapella");
     }
 
     private static string Nk2(string a, string b) => TextUtils.Nk(a + b);

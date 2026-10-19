@@ -28,6 +28,9 @@ public sealed class ApplyEngine
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
     private readonly CoverFetcher? _covers;
 
+    /// <summary>Subcarpeta del directorio de deshacer donde se guardan las carátulas sustituidas.</summary>
+    public const string CarpetaPortadas = "portadas";
+
     public ApplyEngine(CoverFetcher? covers = null) => _covers = covers;
 
     public async Task<ApplyOneResult> ApplyOneAsync(ProcessResult info, bool over, FieldFlags fields,
@@ -56,8 +59,13 @@ public sealed class ApplyEngine
         else if (coverMode == "spotify" && info.CoverUrl.Length > 0 && _covers != null)
             cov = await _covers.FetchAsync(info.CoverUrl, ct).ConfigureAwait(false);
 
-        // 3) Escribir tags
-        try { log = Tagging.ApplyTags(info, over, fields, cov); tagOk = true; }
+        // 3) Escribir tags. La carátula que se sustituya se guarda antes junto al manifiesto, en la
+        //    carpeta «portadas» del directorio de deshacer, para que deshacer pueda devolverla.
+        //    Sin manifiesto no hay dónde guardarla, y entonces Tagging no sustituye ninguna.
+        var portadas = undoFile != null
+            ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(undoFile)) ?? "", CarpetaPortadas)
+            : null;
+        try { log = Tagging.ApplyTags(info, over, fields, cov, portadas); tagOk = true; }
         catch (Exception e) { tagErr = e.Message; }
 
         // Si los tags no se pudieron escribir, NO se renombra. Antes se renombraba igualmente y el

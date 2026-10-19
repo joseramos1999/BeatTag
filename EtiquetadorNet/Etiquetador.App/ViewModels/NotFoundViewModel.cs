@@ -292,6 +292,12 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
         catch (Exception e) { Status = "No se pudo reproducir: " + e.Message; }
     }
 
+    /// <summary>
+    /// Lleva a Enriquecer, para revisarla allí, una propuesta que no debe aplicarse sola. Devuelve si
+    /// ha entrado en la lista. Lo conecta MainViewModel; sin conectar, la propuesta queda en la caché.
+    /// </summary>
+    public Func<ProcessResult, bool>? MostrarParaRevisar { get; set; }
+
     /// <summary>Servicios del diálogo "Reanalizar…" (los mismos que en Enriquecer).</summary>
     public SearchServices SearchServicesFor(string filePath)
         => new(_engine.FindCandidatesAsync, _engine.ResolveLinkAsync,
@@ -323,6 +329,20 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
             opts.SearchSource = searchSource;
             var r = await Task.Run(() => _engine.Processor.ProcessAsync(row.FilePath, isAcapella: false, opts));
             if (r.Skip || !r.Found) { row.RowStatus = "sigue sin encontrarse"; Status = "Sigue sin encontrarse."; return; }
+            if (r.Revisar.Length > 0)
+            {
+                // Lo que solo identificó MusicBrainz o AcoustID, o un nombre con huellas de una regla
+                // fallida, no se escribe sin que lo veas: antes se aplicaba aquí directamente. Se
+                // guarda como propuesta y se revisa en Enriquecer, desmarcada y con el motivo.
+                _engine.Analysis.Set(row.FilePath, opts.Signature(), r);
+                _engine.Analysis.Save();
+                var enLista = MostrarParaRevisar?.Invoke(r) ?? false;
+                row.RowStatus = "⚠ revisar: " + r.Revisar;
+                Status = $"Encontrada, pero no se aplica automáticamente: {r.Revisar}. Propuesta: «{r.New}»."
+                       + (enLista ? " Está en Enriquecer, desmarcada, pendiente de revisión." : "");
+                _engine.Logger.Detail($"    no se aplica sola ({r.Revisar}): '{row.FileName}' -> '{r.New}'");
+                return;
+            }
             var fields = _engine.BuildFields();
             var undo = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
             var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog));

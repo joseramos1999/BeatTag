@@ -27,6 +27,10 @@ public static class RenameSafety
         var origExt = Path.GetExtension(originalName);
         var baseName = TextUtils.Sanitize(Path.GetFileNameWithoutExtension(name));
         if (baseName.Length == 0) { error = "nombre vacío tras sanear"; return false; }
+        // Un nombre sin una sola letra ni cifra («-», «- (2)») no identifica nada. Visto en una
+        // biblioteca real: un tema entero en cirílico quedaba en «-» al pasarlo a ASCII y se renombraba
+        // igual, y los siguientes acababan en «- (2)», «- (3)»…
+        if (!Path.GetFileNameWithoutExtension(name).Any(char.IsLetterOrDigit)) { error = "el nombre no tiene letras ni números"; return false; }
 
         var candidate = baseName + origExt;
         int nn = 2;

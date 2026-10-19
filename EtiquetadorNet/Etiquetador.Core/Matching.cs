@@ -92,7 +92,7 @@ public static class Matching
     /// </summary>
     public static bool IsMashupFolder(string? folderPath)
         => !string.IsNullOrEmpty(folderPath)
-           && Regex.IsMatch(folderPath, @"\b(mashups?|mash\s*ups?|mash-ups?)\b", RegexOptions.IgnoreCase);
+           && TextUtils.Rx(@"\b(mashups?|mash\s*ups?|mash-ups?)\b", RegexOptions.IgnoreCase).IsMatch(folderPath);
 
     /// <summary>
     /// El nombre dice que esto combina VARIOS temas: mashup, transición o blend.
@@ -105,8 +105,15 @@ public static class Matching
     /// </summary>
     public static bool IsMezclaDeVariosTemas(string? baseName)
         => !string.IsNullOrEmpty(baseName)
-           && Regex.IsMatch(baseName, @"\b(mashups?|mash\s*ups?|mash-ups?|spice\s+mash|transitions?|segue|blend)\b",
-                            RegexOptions.IgnoreCase);
+           && TextUtils.Rx(@"\b(mashups?|mash\s*ups?|mash-ups?|" + Mashboot + @"|spice\s+mash|transitions?|segue|blend)\b",
+                           RegexOptions.IgnoreCase).IsMatch(baseName);
+
+    /// <summary>
+    /// «Mashboot» (mashup + bootleg), como lo firman varios editores de pool. Visto en una biblioteca
+    /// real: «FIEL (Ayuxx Mashboot)» se proponía como «Wisin Jhay Cortez - Fiel» y «Starships X
+    /// Kernkraft 400 (… MASHBOOT)» como «Nicki Minaj - Starships»: el mashup renombrado como el original.
+    /// </summary>
+    private const string Mashboot = @"mash\s*-?\s*boots?(?:legs?)?";
 
     /// <summary>
     /// El nombre PODRÍA ser una mezcla, pero no está claro. Sirve para decidir a quién preguntar:
@@ -123,20 +130,19 @@ public static class Matching
         if (s.Length == 0) return false;
 
         // Los que ya resuelve IsSkipMix no son ambiguos: esos se saltan sin preguntar a nadie.
-        if (Regex.IsMatch(s, @"\b(mashup|mash\s*up|mash-up|transition|segue|blend)\b", RegexOptions.IgnoreCase))
+        if (TextUtils.Rx(@"\b(mashup|mash\s*up|mash-up|" + Mashboot + @"|transition|segue|blend)\b", RegexOptions.IgnoreCase).IsMatch(s))
             return false;
 
         // Dos o más "x" sueltas entre palabras: puede ser lista de artistas o unión de temas.
         // A los lados tiene que haber letra o número: sin eso, el título "X (EQUIS)" de
         // "Nicky Jam x J. Balvin - X (EQUIS)" contaba como un separador más y lo marcaba.
-        var equis = Regex.Matches(s, @"(?<=[\p{L}\p{N}])\s+x\s+(?=[\p{L}\p{N}])", RegexOptions.IgnoreCase).Count;
+        var unaX = TextUtils.Rx(@"(?<=[\p{L}\p{N}])\s+x\s+(?=[\p{L}\p{N}])", RegexOptions.IgnoreCase);
+        var equis = unaX.Matches(s).Count;
         if (equis >= 2) return true;
 
         // Una "x" a cada lado del guion separador: sospechoso de unir dos canciones.
-        var partes = Regex.Split(s, @"\s+-\s+");
-        if (partes.Length >= 2
-            && Regex.IsMatch(partes[0], @"(?<=[\p{L}\p{N}])\s+x\s+(?=[\p{L}\p{N}])", RegexOptions.IgnoreCase)
-            && Regex.IsMatch(partes[^1], @"(?<=[\p{L}\p{N}])\s+x\s+(?=[\p{L}\p{N}])", RegexOptions.IgnoreCase))
+        var partes = TextUtils.Rx(@"\s+-\s+").Split(s);
+        if (partes.Length >= 2 && unaX.IsMatch(partes[0]) && unaX.IsMatch(partes[^1]))
             return true;
 
         return false;
@@ -157,14 +163,15 @@ public static class Matching
     /// </summary>
     public static bool PierdeUnaCancion(string? tituloArchivo, string? nombreNuevo)
     {
-        var t = Regex.Replace(tituloArchivo ?? "", @"\([^)]*\)?|\[[^\]]*\]?", " ");
-        var partes = Regex.Split(t, @"(?<=[\p{L}\p{N}])\s+x\s+(?=[\p{L}\p{N}])", RegexOptions.IgnoreCase);
+        var t = TextUtils.Rx(@"\([^)]*\)?|\[[^\]]*\]?").Replace(tituloArchivo ?? "", " ");
+        var partes = TextUtils.Rx(@"(?<=[\p{L}\p{N}])\s+x\s+(?=[\p{L}\p{N}])", RegexOptions.IgnoreCase).Split(t);
         if (partes.Length < 2) return false;
 
-        var nuevo = Regex.Split(nombreNuevo ?? "", @"[^\p{L}\p{N}]+").Select(TextUtils.Nk).ToHashSet(StringComparer.Ordinal);
+        var noLetras = TextUtils.Rx(@"[^\p{L}\p{N}]+");
+        var nuevo = noLetras.Split(nombreNuevo ?? "").Select(TextUtils.Nk).ToHashSet(StringComparer.Ordinal);
         foreach (var parte in partes)
         {
-            var palabras = Regex.Split(parte, @"[^\p{L}\p{N}]+")
+            var palabras = noLetras.Split(parte)
                                 .Select(TextUtils.Nk)
                                 .Where(w => w.Length >= 3 && !Relleno.Contains(w) && !w.All(char.IsDigit))
                                 .ToList();
@@ -172,6 +179,37 @@ public static class Matching
         }
         return false;
     }
+
+    /// <summary>
+    /// Cuál de las dos mitades del nombre de archivo lleva el título: la que más palabras comparte
+    /// con el título del catálogo. En empate, la segunda, que es el orden habitual «Artista - Título».
+    ///
+    /// Es la que hay que pasar a <see cref="PierdeUnaCancion"/>. En el formato invertido de los pools
+    /// («Título - Artista - bpm - pool») el título va DELANTE, y mirando solo la segunda mitad la red
+    /// de mashups no veía nada. Visto en una biblioteca real: «Cuando La Noche Arriba x Apex - Ana
+    /// Mena, Um» se proponía como «Ana Mena - Cuando la noche arriba», el mashup como si fuera el
+    /// original. No se miran las dos mitades a la vez: en la del artista la « x » une colaboradores, y
+    /// que el catálogo no recoja a uno no convierte el tema en un mashup.
+    /// </summary>
+    public static string MitadConElTitulo(string? fnArtist, string? fnTitle, string? tituloCatalogo)
+    {
+        var a = fnArtist ?? "";
+        var t = fnTitle ?? "";
+        if (a.Length == 0) return t;
+        if (t.Length == 0) return a;
+
+        var cat = PalabrasConContenido(tituloCatalogo);
+        if (cat.Count == 0) return t;
+        var enA = PalabrasConContenido(a).Count(cat.Contains);
+        var enT = PalabrasConContenido(t).Count(cat.Contains);
+        return enA > enT ? a : t;
+    }
+
+    private static HashSet<string> PalabrasConContenido(string? s)
+        => TextUtils.Rx(@"[^\p{L}\p{N}]+").Split(TextUtils.Rx(@"\([^)]*\)?|\[[^\]]*\]?").Replace(s ?? "", " "))
+                .Select(TextUtils.Nk)
+                .Where(w => w.Length >= 2 && !Relleno.Contains(w))
+                .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
     /// Palabras de relleno que no aportan identidad a una canción. Se ignoran al comprobar si la
@@ -211,8 +249,8 @@ public static class Matching
 
     /// <summary>Palabras con contenido de un nombre: normalizadas, sin relleno y sin extensión.</summary>
     private static List<string> Palabras(string? s)
-        => Regex.Split(Regex.Replace(s ?? "", @"\.(mp3|flac|wav|m4a|aiff?|ogg)$", "", RegexOptions.IgnoreCase),
-                       @"[^\p{L}\p{N}]+")
+        => TextUtils.Rx(@"[^\p{L}\p{N}]+").Split(
+               TextUtils.Rx(@"\.(mp3|flac|wav|m4a|aiff?|ogg)$", RegexOptions.IgnoreCase).Replace(s ?? "", ""))
                 .Select(TextUtils.Nk)
                 .Where(w => w.Length >= 2 && !Relleno.Contains(w))
                 .ToList();
@@ -220,13 +258,13 @@ public static class Matching
     public static bool IsSkipMix(string? baseName, string? fnTitle, string? fnArtist)
     {
         baseName ??= ""; fnTitle ??= ""; fnArtist ??= "";
-        if (Regex.IsMatch(baseName, @"\b(mashup|mash\s*up|mash-up|spice\s+mash|bootleg|transition|segue|blend)\b", RegexOptions.IgnoreCase)
-            || Regex.IsMatch(fnTitle, @"\svs\.?\s", RegexOptions.IgnoreCase)
-            || Regex.IsMatch(fnArtist, @"\svs\.?\s", RegexOptions.IgnoreCase))
+        if (TextUtils.Rx(@"\b(mashup|mash\s*up|mash-up|" + Mashboot + @"|spice\s+mash|bootleg|transition|segue|blend)\b", RegexOptions.IgnoreCase).IsMatch(baseName)
+            || TextUtils.Rx(@"\svs\.?\s", RegexOptions.IgnoreCase).IsMatch(fnTitle)
+            || TextUtils.Rx(@"\svs\.?\s", RegexOptions.IgnoreCase).IsMatch(fnArtist))
             return true;
 
         // "Edit" de DJ, salvo las ediciones de catálogo conocidas.
-        return Regex.IsMatch(baseName, @"\bedit\b", RegexOptions.IgnoreCase)
-            && !Regex.IsMatch(baseName, @"\b(radio|extended|short|quick|club|melodic|original|album|single)\s+edit\b", RegexOptions.IgnoreCase);
+        return TextUtils.Rx(@"\bedit\b", RegexOptions.IgnoreCase).IsMatch(baseName)
+            && !TextUtils.Rx(@"\b(radio|extended|short|quick|club|melodic|original|album|single)\s+edit\b", RegexOptions.IgnoreCase).IsMatch(baseName);
     }
 }

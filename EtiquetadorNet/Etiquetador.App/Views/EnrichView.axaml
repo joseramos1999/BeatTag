@@ -96,7 +96,14 @@
                     <CheckBox Content="Saltar las que ya están bien" IsChecked="{Binding SaltarYaCorrectas}" Margin="0,0,12,0"
                               ToolTip.Tip="No consulta las canciones cuyo nombre y tags ya dicen lo mismo y que ya tienen todo lo que se escribe (género, año…)." />
                     <TextBlock Text="Carátula:" VerticalAlignment="Center" Margin="8,0,4,0" />
-                    <ComboBox SelectedItem="{Binding CoverMode}" MinWidth="110">
+                    <!-- El valor guardado sigue siendo keep/spotify/png; lo que se lee es su nombre. -->
+                    <ComboBox SelectedItem="{Binding CoverMode}" MinWidth="110"
+                              ToolTip.Tip="La carátula del catálogo o una imagen propia solo sustituyen la frontal si «Sobrescribir tags existentes» está marcado o el archivo no tenía carátula. La anterior se guarda para poder deshacer el cambio.">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                                <TextBlock Text="{Binding Converter={x:Static vm:EnrichViewModel.NombreModoCaratula}}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
                         <sys:String>keep</sys:String>
                         <sys:String>spotify</sys:String>
                         <sys:String>png</sys:String>

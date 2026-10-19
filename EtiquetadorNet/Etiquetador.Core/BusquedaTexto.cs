@@ -42,6 +42,6 @@ public static class BusquedaTexto
     {
         if (string.IsNullOrEmpty(s)) return "";
         var d = TextUtils.RemoveDiacritics(s).ToLowerInvariant();
-        return Regex.Replace(Regex.Replace(d, @"[^\p{L}\p{N}]+", " "), @"\s{2,}", " ").Trim();
+        return TextUtils.Rx(@"\s{2,}").Replace(TextUtils.Rx(@"[^\p{L}\p{N}]+").Replace(d, " "), " ").Trim();
     }
 }

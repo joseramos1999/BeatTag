@@ -262,6 +262,11 @@ public partial class MainViewModel : ViewModelBase
         // Al terminar un análisis en Enriquecer, las no identificadas pasan a su pestaña.
         Enrich.AnalysisCompleted += () => NotFound.LoadFromCache();
 
+        // Lo que No encontradas o Incompletas encuentran pero no debe aplicarse solo se revisa en
+        // Enriquecer, con las demás propuestas.
+        NotFound.MostrarParaRevisar = Enrich.MostrarParaRevisar;
+        Incomplete.MostrarParaRevisar = Enrich.MostrarParaRevisar;
+
         _ = InitAsync();
     }
 
