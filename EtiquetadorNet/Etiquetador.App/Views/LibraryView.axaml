@@ -13,7 +13,7 @@
         <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,8">
             <TextBlock Classes="titulo" Text="Biblioteca" />
             <TextBlock Classes="desc"
-                       Text="Carpetas de música que analiza la aplicación. Puedes desmarcar las que quieras dejar fuera sin necesidad de quitarlas de la lista. Las columnas Clave y Camelot muestran la tonalidad leída de los tags: encajan para mezclar los temas del mismo número Camelot y los de un paso a cada lado." />
+                       Text="Carpetas de música que analiza la aplicación. Puedes desmarcar las que quieras dejar fuera sin necesidad de quitarlas de la lista. Las columnas Clave y Camelot muestran la tonalidad leída de los tags: encajan para mezclar los temas del mismo número Camelot y los de un paso a cada lado. Con clic derecho sobre una o varias canciones puedes escucharlas, buscar las compatibles, ver todas sus versiones u ordenarlas para mezclar." />
         </StackPanel>
 
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
@@ -35,13 +35,15 @@
 
         <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="4" Margin="0,0,0,6" />
 
-        <DataGrid ItemsSource="{Binding TracksView}"
+        <!-- El menú contextual se monta en el código: sus opciones dependen de cuántas filas hay seleccionadas. -->
+        <DataGrid Name="TablaBiblioteca" ItemsSource="{Binding TracksView}"
                   x:CompileBindings="False"
                   IsReadOnly="True"
                   AutoGenerateColumns="False"
                   CanUserSortColumns="True"
                   CanUserResizeColumns="True"
                   GridLinesVisibility="Horizontal"
+                  SelectionMode="Extended"
                   DoubleTapped="Grid_DoubleTapped">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="2*" MinWidth="120" />

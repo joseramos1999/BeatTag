@@ -1,0 +1,77 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Etiquetador.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="620"
+        x:Class="Etiquetador.App.Views.CompatiblesDialog"
+        x:DataType="vm:CompatiblesViewModel"
+        Title="Buscar compatibles"
+        Width="980" Height="640" MinWidth="640" MinHeight="420"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+
+    <DockPanel Margin="18" LastChildFill="True">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="6">
+            <TextBlock Text="{Binding Titulo}" FontSize="16" FontWeight="Bold" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding Detalle}" TextWrapping="Wrap" Foreground="{DynamicResource TextoSecundario}" FontSize="12" />
+            <Border IsVisible="{Binding Aviso, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                    Background="{DynamicResource AvisoFondo}" BorderBrush="{DynamicResource AvisoBorde}" BorderThickness="1"
+                    CornerRadius="4" Padding="8,6">
+                <TextBlock Text="{Binding Aviso}" TextWrapping="Wrap" Foreground="{DynamicResource AvisoTexto}" />
+            </Border>
+            <WrapPanel Margin="0,4,0,4">
+                <CheckBox Content="Incluir saltos de tono (dos pasos en la rueda)" IsChecked="{Binding IncluirSaltos}"
+                          IsEnabled="{Binding !Ocupado}" Margin="0,0,16,4"
+                          ToolTip.Tip="Por ejemplo, de 8A a 10A. No es mezcla armónica estricta, pero sube la energía y muchos DJs lo usan a propósito." />
+                <TextBlock Text="Mostrar" VerticalAlignment="Center" Margin="0,0,6,4" IsVisible="{Binding !EsAcapella}" />
+                <ComboBox ItemsSource="{Binding Filtros}" SelectedItem="{Binding Filtro}" MinWidth="150" Margin="0,0,16,4"
+                          IsVisible="{Binding !EsAcapella}" />
+                <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,0,4"
+                           Foreground="{DynamicResource TextoSecundario}" />
+            </WrapPanel>
+        </StackPanel>
+
+        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="0,12,0,0">
+            <TextBlock Grid.Column="0" Text="{Binding Status}" VerticalAlignment="Center" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextoSecundario}" Margin="0,0,12,0" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                <Button Content="Escuchar / Parar" Command="{Binding EscucharCommand}" />
+                <Button Content="Buscar compatibles con esta" Command="{Binding BuscarDesdeEstaCommand}" IsEnabled="{Binding !Ocupado}"
+                        ToolTip.Tip="Busca las que entran después de la seleccionada, para preparar un tramo de sesión canción a canción." />
+                <Button Content="Abrir carpeta" Command="{Binding AbrirCarpetaCommand}" />
+                <Button Content="Guardar como lista (M3U8)" Click="Exportar_Click" IsEnabled="{Binding HayFilas}"
+                        Background="#0D9488" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Guarda la canción consultada y las compatibles, en este orden, como lista M3U8. No copia ni mueve archivos." />
+                <Button Content="Cerrar" Click="Cerrar_Click" MinWidth="90" IsCancel="True" />
+            </StackPanel>
+        </Grid>
+
+        <Panel>
+            <DataGrid Name="Tabla" ItemsSource="{Binding Filas}" SelectedItem="{Binding Seleccionada}"
+                      x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
+                      CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                      DoubleTapped="Tabla_DoubleTapped">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Escuchar / Parar" Command="{Binding EscucharCommand}" />
+                        <MenuItem Header="Buscar compatibles con esta" Command="{Binding BuscarDesdeEstaCommand}" />
+                        <Separator />
+                        <MenuItem Header="Abrir carpeta contenedora" Command="{Binding AbrirCarpetaCommand}" />
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Título" Binding="{Binding Titulo}" Width="2*" MinWidth="120" />
+                    <DataGridTextColumn Header="Artista" Binding="{Binding Artista}" Width="1.5*" MinWidth="100" />
+                    <DataGridTextColumn Header="Tipo" Binding="{Binding Tipo}" Width="120" MinWidth="80" />
+                    <DataGridTextColumn Header="BPM" Binding="{Binding Bpm}" SortMemberPath="BpmValor" Width="62" MinWidth="54" />
+                    <DataGridTextColumn Header="Tono (etiquetas)" Binding="{Binding Tono}" Width="110" MinWidth="70" />
+                    <DataGridTextColumn Header="Encaje" Binding="{Binding Encaje}" SortMemberPath="Coste" Width="120" MinWidth="90" />
+                    <DataGridTextColumn Header="Diferencia" Binding="{Binding Diferencia}" SortMemberPath="Coste" Width="170" MinWidth="110" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <ProgressBar IsIndeterminate="True" IsVisible="{Binding Ocupado}" Height="4" VerticalAlignment="Top" />
+        </Panel>
+    </DockPanel>
+</Window>

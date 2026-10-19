@@ -1,0 +1,56 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Etiquetador.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="920" d:DesignHeight="560"
+        x:Class="Etiquetador.App.Views.VersionesDialog"
+        x:DataType="vm:VersionesViewModel"
+        Title="Versiones de una canción"
+        Width="920" Height="560" MinWidth="600" MinHeight="380"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+
+    <DockPanel Margin="18" LastChildFill="True">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,8">
+            <TextBlock Text="{Binding Titulo}" FontSize="16" FontWeight="Bold" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding Detalle}" TextWrapping="Wrap" Foreground="{DynamicResource TextoSecundario}" FontSize="12" />
+            <TextBlock Text="{Binding Resumen}" TextWrapping="Wrap" FontWeight="SemiBold" />
+        </StackPanel>
+
+        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="0,12,0,0">
+            <TextBlock Grid.Column="0" Text="{Binding Status}" VerticalAlignment="Center" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextoSecundario}" Margin="0,0,12,0" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                <Button Content="Escuchar / Parar" Command="{Binding EscucharCommand}" />
+                <Button Content="Abrir carpeta" Command="{Binding AbrirCarpetaCommand}" />
+                <Button Content="Cerrar" Click="Cerrar_Click" MinWidth="90" IsCancel="True" />
+            </StackPanel>
+        </Grid>
+
+        <Panel>
+            <DataGrid Name="Tabla" ItemsSource="{Binding Filas}" SelectedItem="{Binding Seleccionada}"
+                      x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
+                      CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                      DoubleTapped="Tabla_DoubleTapped">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Escuchar / Parar" Command="{Binding EscucharCommand}" />
+                        <MenuItem Header="Abrir carpeta contenedora" Command="{Binding AbrirCarpetaCommand}" />
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="" Binding="{Binding Esta}" Width="28" MinWidth="24" CanUserSort="False" />
+                    <DataGridTextColumn Header="Canción" Binding="{Binding Cancion}" Width="140" MinWidth="80" />
+                    <DataGridTextColumn Header="Tipo" Binding="{Binding Tipo}" Width="140" MinWidth="90" />
+                    <DataGridTextColumn Header="Título" Binding="{Binding Titulo}" Width="2*" MinWidth="120" />
+                    <DataGridTextColumn Header="Artista" Binding="{Binding Artista}" Width="1.5*" MinWidth="100" />
+                    <DataGridTextColumn Header="BPM" Binding="{Binding Bpm}" SortMemberPath="BpmValor" Width="62" MinWidth="54" />
+                    <DataGridTextColumn Header="Camelot" Binding="{Binding Tono}" Width="72" MinWidth="60" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <ProgressBar IsIndeterminate="True" IsVisible="{Binding Ocupado}" Height="4" VerticalAlignment="Top" />
+        </Panel>
+    </DockPanel>
+</Window>

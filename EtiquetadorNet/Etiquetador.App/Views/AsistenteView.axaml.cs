@@ -262,4 +262,43 @@ public partial class AsistenteView : UserControl
 
     /// <summary>Las condiciones descartadas se ven apagadas: siguen ahí para saber qué se ignoró y por qué.</summary>
     public static readonly IValueConverter Atenuar = new FuncValueConverter<bool, double>(usable => usable ? 1.0 : 0.55);
+
+    // =================================================================================================
+    // Ordenar para mezclar: opciones propias del menú de su tabla («Empezar por esta», «Buscar
+    // compatibles», «Ver sus versiones»). El menú común de las seis tablas lo monta CrearMenu en el
+    // constructor; aquí se le añaden estas la primera vez que se carga la tabla, sin tocar lo común.
+    // =================================================================================================
+
+    private bool _menuMezclaAmpliado;
+
+    private void TablaMezcla_Loaded(object? sender, RoutedEventArgs e)
+    {
+        if (_menuMezclaAmpliado || TablaMezcla.ContextMenu is not { } menu) return;
+        _menuMezclaAmpliado = true;
+
+        var empezar = Opcion("Empezar por esta", () =>
+        {
+            if (DataContext is AsistenteViewModel vm && TablaMezcla.SelectedItem is PasoFila fila && !vm.IsBusy)
+                _ = vm.Mezcla.EmpezarPorAsync(fila);
+        });
+        var compatibles = Opcion("Buscar compatibles…",
+            () => _ = Acciones.AccionesCancion.AbrirCompatiblesAsync(Acciones.AccionesCancion.RutaDe(TablaMezcla.SelectedItem)));
+        var versiones = Opcion("Ver sus versiones…",
+            () => _ = Acciones.AccionesCancion.AbrirVersionesAsync(Acciones.AccionesCancion.RutaDe(TablaMezcla.SelectedItem)));
+
+        // Detrás de «Editar»: son acciones sobre la canción, y van antes de las del archivo.
+        var donde = Math.Min(2, menu.Items.Count);
+        foreach (var c in new Control[] { new Separator(), empezar, compatibles, versiones })
+            menu.Items.Insert(donde++, c);
+
+        menu.Opening += (_, _) =>
+        {
+            var vm = DataContext as AsistenteViewModel;
+            var hay = TablaMezcla.SelectedItem is PasoFila;
+            empezar.IsEnabled = hay && vm?.IsBusy != true;
+            empezar.Header = "Empezar por esta" + (vm?.IsBusy == true ? " (espera a que termine el proceso)" : "");
+            // Los diálogos solo leen, pero desde ellos se escucha: no mientras una herramienta escribe archivos.
+            compatibles.IsEnabled = versiones.IsEnabled = hay && vm?.EscribiendoArchivos != true;
+        };
+    }
 }
