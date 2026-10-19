@@ -49,6 +49,19 @@ public sealed class ProcessResult
     /// <summary>Quién firma la versión ("Tiesto"), vacío si es el tema original o no se pudo saber.</summary>
     public string Remixer { get; set; } = "";
 
+    /// <summary>
+    /// Lo que se escribe en el tag Remixer (TPE4 en ID3, REMIXER en Vorbis y MP4): solo la persona
+    /// que firma la versión, ya comprobada. Vacío = no se toca ese tag.
+    ///
+    /// Va aparte de <see cref="Remixer"/> por la caché de análisis: las versiones anteriores guardaban
+    /// en Remixer el texto en bruto, sin pasar por RemixParser.Autor y también cuando se había
+    /// descartado por ser «el propio título» («Intro, Alex Torres Intro», «Look At Me Now», «Tik
+    /// Tok»…). La firma de la caché no cambia al actualizar, así que esas filas se reutilizan tal cual
+    /// y, si el tag saliera de Remixer, se escribirían en miles de archivos sin reanalizarlos. Lo que
+    /// guardó una versión anterior no trae este campo, se lee como "" y no escribe nada.
+    /// </summary>
+    public string RemixerTag { get; set; } = "";
+
     /// <summary>Tipo de versión detectada ("Remix", "Bootleg", "Edit"…). Vacío = original.</summary>
     public string RemixKind { get; set; } = "";
     /// <summary>
@@ -79,4 +92,17 @@ public sealed class ProcessResult
     public string Revisar { get; set; } = "";
 
     public string FieldSrc { get; set; } = "";
+
+    /// <summary>
+    /// Versión de las reglas con que se obtuvo este resultado: la pone FileProcessor. 0 = lo guardó
+    /// en la caché una versión anterior, sin las comprobaciones de ahora (motivo para revisar, BPM del
+    /// nombre). <see cref="ResultadoAnterior"/> lo pone al día al leerlo de la caché.
+    ///
+    /// No lleva valor inicial a propósito: al leer de la caché un resultado que no trae el campo, se
+    /// queda el valor por defecto, y eso es justo lo que lo distingue de uno nuevo.
+    /// </summary>
+    public int Reglas { get; set; }
+
+    /// <summary>Versión actual de las reglas de análisis (ver <see cref="Reglas"/>).</summary>
+    public const int ReglasActuales = 1;
 }

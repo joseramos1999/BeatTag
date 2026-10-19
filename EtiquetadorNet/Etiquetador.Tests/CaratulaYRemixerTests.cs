@@ -198,7 +198,7 @@ public class CaratulaYRemixerTests
         {
             var p = Path.Combine(dir, "a.mp3");
             Mp3Fixture.WriteMinMp3(p);
-            var info = new ProcessResult { FilePath = p, Title = "GIVENCHY (Alex Cortes Open Show)", Remixer = "Alex Cortes" };
+            var info = new ProcessResult { FilePath = p, Title = "GIVENCHY (Alex Cortes Open Show)", Remixer = "Alex Cortes", RemixerTag = "Alex Cortes" };
 
             var log = Tagging.ApplyTags(info, overwrite: false, SoloTitulo, null);
 
@@ -218,7 +218,7 @@ public class CaratulaYRemixerTests
         {
             var p = Path.Combine(dir, "a.mp3");
             Mp3Fixture.WriteMinMp3(p);
-            var info = new ProcessResult { FilePath = p, Title = "GIVENCHY (Alex Cortes Open Show)", Remixer = "Alex Cortes" };
+            var info = new ProcessResult { FilePath = p, Title = "GIVENCHY (Alex Cortes Open Show)", Remixer = "Alex Cortes", RemixerTag = "Alex Cortes" };
             var sinTitulo = new FieldFlags { Title = false, Artist = false, Album = false, Genre = false, Year = false, Bpm = false };
 
             var log = Tagging.ApplyTags(info, overwrite: true, sinTitulo, null);
@@ -237,7 +237,7 @@ public class CaratulaYRemixerTests
             var p = Path.Combine(dir, "a.mp3");
             Mp3Fixture.WriteMinMp3(p);
             using (var f = TagLib.File.Create(p)) { f.Tag.RemixedBy = "Puesto a mano"; f.Save(); }
-            var info = new ProcessResult { FilePath = p, Title = "Tema (Bayne Remix)", Remixer = "Bayne" };
+            var info = new ProcessResult { FilePath = p, Title = "Tema (Bayne Remix)", Remixer = "Bayne", RemixerTag = "Bayne" };
 
             var log = Tagging.ApplyTags(info, overwrite: false, SoloTitulo, null);
 
@@ -258,7 +258,7 @@ public class CaratulaYRemixerTests
             var p = Path.Combine(dir, "a.mp3");
             Mp3Fixture.WriteMinMp3(p);
             using (var f = TagLib.File.Create(p)) { f.Tag.Title = "Viejo"; f.Tag.RemixedBy = "Antes"; f.Save(); }
-            var info = new ProcessResult { FilePath = p, Old = "a.mp3", New = "a.mp3", Title = "Tema (Bayne Remix)", Remixer = "Bayne" };
+            var info = new ProcessResult { FilePath = p, Old = "a.mp3", New = "a.mp3", Title = "Tema (Bayne Remix)", Remixer = "Bayne", RemixerTag = "Bayne" };
             var man = Path.Combine(dir, "run_r.jsonl");
             await new ApplyEngine().ApplyOneAsync(info, true, SoloTitulo, "keep", null, man, Path.Combine(dir, "done.log"));
             using (var f = TagLib.File.Create(p)) Assert.Equal("Bayne", f.Tag.RemixedBy);

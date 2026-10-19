@@ -56,12 +56,15 @@ public static class Tagging
             // ahora solo acababa como texto dentro del título, y para reunir todas las ediciones de
             // «Miguel Roma» o «Alex Cortes» había que buscar dentro de los títulos. Va con el título
             // porque es la misma información: si el título no se escribe, esto tampoco.
-            if (info.Remixer.Length > 0 && (overwrite || string.IsNullOrEmpty(tag.RemixedBy)))
+            // Sale de RemixerTag y no de Remixer: lo que guardó en la caché una versión anterior no
+            // lo trae, y su Remixer en bruto no debe acabar en el tag (ver ProcessResult.RemixerTag).
+            var remixer = info.RemixerTag ?? "";
+            if (remixer.Length > 0 && (overwrite || string.IsNullOrEmpty(tag.RemixedBy)))
             {
                 var antes = tag.RemixedBy ?? "";
-                tag.RemixedBy = info.Remixer;
+                tag.RemixedBy = remixer;
                 // Hay formatos sin ese campo: solo se anota lo que de verdad ha quedado escrito.
-                if ((tag.RemixedBy ?? "") == info.Remixer) log["Remixer"] = FieldChange.Str(antes, info.Remixer);
+                if ((tag.RemixedBy ?? "") == remixer) log["Remixer"] = FieldChange.Str(antes, remixer);
             }
         }
         if (fields.Bpm && info.Bpm.Length > 0 && TextUtils.Rx(@"^\d+$").IsMatch(info.Bpm) && EscribeBpm(info, tag.BeatsPerMinute, overwrite))

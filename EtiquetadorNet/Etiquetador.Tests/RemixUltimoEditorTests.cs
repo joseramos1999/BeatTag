@@ -114,6 +114,7 @@ public class RemixUltimoEditorTests
             var r = await new CatalogoFalso().Procesador(dir).ProcessAsync(p, false, new Etiquetador.Core.Pipeline.ProcessOptions { CleanOnly = true });
             Assert.Equal(esperado, r.New);
             Assert.Equal(remixer, r.Remixer);
+            Assert.Equal(remixer, r.RemixerTag);   // lo que va al tag TPE4
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }

@@ -221,12 +221,22 @@ public sealed class FileProcessor
         var nameForRemix = TextUtils.Rx(Descriptors.PoolRe, IC).Replace(Path.GetFileNameWithoutExtension(fileName), " ");
         var remix = RemixParser.Parse(nameForRemix);
         if (!remix.HasRemixer) remix = RemixParser.Parse(rawForOtros);
+        // Para BUSCAR, en cambio, la primera firma del nombre: es la versión publicada, la que puede
+        // tener el catálogo; la última suele ser el editor del pool, que no la tiene. Con la última,
+        // Deezer dejaba de reconocer «Hello (Sidney Samson Remix) (Cesar Vilo Remix)» como la versión
+        // de Sidney Samson y la empataba con cualquier otro remix. Ver RemixParser.PrimeraFirma.
+        var remixBusqueda = RemixParser.PrimeraFirma(nameForRemix);
+        if (!remixBusqueda.HasRemixer) remixBusqueda = RemixParser.PrimeraFirma(rawForOtros);
         if (manual && o.SearchTitle.Length > 0)
         {
             var manualRemix = RemixParser.Parse(o.SearchTitle);
             if (manualRemix.HasRemixer) remix = manualRemix;
+            var manualBusqueda = RemixParser.PrimeraFirma(o.SearchTitle);
+            if (manualBusqueda.HasRemixer) remixBusqueda = manualBusqueda;
         }
-        if (remix.HasRemixer) _log?.Detail($"    remix  -> '{remix.Remixer}' ({remix.Kind})");
+        if (remix.HasRemixer) _log?.Detail($"    remix  -> '{remix.Remixer}' ({remix.Kind})"
+            + (remixBusqueda.HasRemixer && remixBusqueda.Remixer != remix.Remixer ? $" · se busca la versión de '{remixBusqueda.Remixer}'" : ""));
+        var remixerBusqueda = remixBusqueda.Remixer ?? "";
 
         const string splitArt = @"(?i)\s*(?:,| x | vs\.?| feat\.?| ft\.?)\s*";
         var firstArtist = fnArtist.Length > 0 ? Regex.Split(fnArtist, splitArt)[0].Trim() : "";
@@ -245,12 +255,12 @@ public sealed class FileProcessor
             if (o.Deezer && !onlyIt && !onlySp)
             {
                 Step("Deezer", 0.15);
-                dz = await _dz.SearchAsync(fnArtist, qTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "nombre";
-                if (dz == null && fnArtist.Length > 0) { dz = await _dz.SearchAsync(fnTitle, fnArtist, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "invertido"; }
-                if (dz == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(tagArtist, tagTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "tag"; }
-                if (dz == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(firstArtist, firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "principal"; }
-                if (dz == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { dz = await _dz.SearchAsync(firstTitleArtist, firstArtist, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "principal"; }
-                if (dz == null && firstTitle.Length > 0) { dz = await _dz.SearchAsync("", firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "titulo"; }
+                dz = await _dz.SearchAsync(fnArtist, qTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "nombre";
+                if (dz == null && fnArtist.Length > 0) { dz = await _dz.SearchAsync(fnTitle, fnArtist, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "invertido"; }
+                if (dz == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(tagArtist, tagTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "tag"; }
+                if (dz == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(firstArtist, firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "principal"; }
+                if (dz == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { dz = await _dz.SearchAsync(firstTitleArtist, firstArtist, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "principal"; }
+                if (dz == null && firstTitle.Length > 0) { dz = await _dz.SearchAsync("", firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "titulo"; }
             }
             if (o.Itunes && dz == null && !onlyDz && !onlySp)
             {
@@ -302,7 +312,7 @@ public sealed class FileProcessor
                 if (ai != null && ai.Title.Length > 0 && ai.Confidence >= 0.5 && !ai.IsMashup)
                 {
                     var aiA = ai.Artist; var aiT = ai.Title;
-                    if (o.Deezer) { dz = await _dz.SearchAsync(aiA, aiT, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); if (dz == null && aiA.Length > 0) dz = await _dz.SearchAsync(aiT, aiA, wantRemix, wantLive, localDur, isEdit, ct, remix.Remixer, verbatim: manual).ConfigureAwait(false); }
+                    if (o.Deezer) { dz = await _dz.SearchAsync(aiA, aiT, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz == null && aiA.Length > 0) dz = await _dz.SearchAsync(aiT, aiA, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); }
                     if (dz == null && o.Itunes) { it = await _it.SearchAsync(aiA, aiT, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it == null && aiA.Length > 0) it = await _it.SearchAsync(aiT, aiA, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); }
                     primary = dz ?? it;
                     if (primary != null) variant = "ia";
@@ -413,6 +423,8 @@ public sealed class FileProcessor
         // El BPM del catálogo se decide más abajo, cuando ya se sabe qué versión es el archivo.
         var bpmCatalogo = dz is { Bpm: > 0 } ? dz.Bpm
                         : (secSrc == "Deezer" && sec is { Bpm: > 0 }) ? sec!.Bpm : 0;
+        // Título de la pista que da ese BPM: las versiones que ya nombra son las de esa pista.
+        var tituloDelBpm = dz is { Bpm: > 0 } ? dz.Title : bpmCatalogo > 0 ? sec!.Title : "";
         var cover = Pick(sp?.CoverUrl, it?.CoverUrl, dz?.CoverUrl, sec?.CoverUrl);
 
         title = Descriptors.CleanDbTitle(title, @base);
@@ -502,15 +514,25 @@ public sealed class FileProcessor
             }
         }
 
-        // BPM: ya se sabe qué versiones lleva el archivo que no trae el catálogo (otros).
-        var bpm = ElegirBpm(fileName, otros, bpmCatalogo, out var porQueBpm);
+        // BPM: ya se sabe qué versiones lleva el archivo. Solo cuentan las que no nombra el título de
+        // la pista del catálogo: en otros también está lo que se le quitó a ese título («Macarena
+        // Bayside Boys Remix» → «(Remix)») y lo que el archivo repite («Scooteroni (RMX)» con el
+        // catálogo «Scooteroni (RMX)»), y eso es la misma versión, no otra a otro tempo.
+        var versionesNoDelCatalogo = otros.Where(v => !NombraLaVersion(tituloDelBpm, v)).ToList();
+        var bpm = ElegirBpm(fileName, versionesNoDelCatalogo, bpmCatalogo, out var porQueBpm);
         if (porQueBpm.Length > 0) _log?.Detail($"    bpm    -> {porQueBpm}");
         var bpmEsDelCatalogo = bpm.Length > 0 && BpmDelNombre(Path.GetFileNameWithoutExtension(fileName), out _) == 0;
 
         var mainArtist = artist.Trim(); if (mainArtist.Length == 0) mainArtist = fnArtist;
-        mainArtist = TextUtils.Rx(@"(?i)\s+ft\.?\s+").Replace(mainArtist, " feat. ");
+        // «ft» detrás de una coma empieza el nombre del siguiente intérprete, no es un invitado: Deezer
+        // da «Kid Yugi, Ill Santo, FT Kings» (FT Kings es un grupo) y salía «…, feat. Kings».
+        mainArtist = TextUtils.Rx(@"(?i)(?<![,\s])\s+ft\.?\s+").Replace(mainArtist, " feat. ");
         mainArtist = TextUtils.Rx(@"(?i)\s+featuring\s+").Replace(mainArtist, " feat. ");
         mainArtist = TextUtils.Rx(@"\s{2,}").Replace(mainArtist.Replace('_', ' '), " ").Trim();
+        // El tag lleva las grafías y los alias del nombre (Cruzzi → Cruz Cafuné), pero no el paso de
+        // MAYÚSCULAS a tipo título: en el catálogo suele ser la grafía oficial («MC YOSHI», «SOLTO
+        // (FR)»), y el tag Artista la conservaba antes de llevar la del nombre.
+        var artistaTag = _artistExc.NormalizeArtists(mainArtist, desgritar: false);
         mainArtist = _artistExc.NormalizeArtists(mainArtist);
         title = Feat.RemoveRedundantFeat(title, mainArtist).Trim();
 
@@ -593,7 +615,7 @@ public sealed class FileProcessor
             // Lo que solo encontró una fuente de rescate no se aplica de oficio: MusicBrainz y AcoustID
             // se consultan precisamente cuando los catálogos principales no dan con la canción.
             if (soloRescate)
-                revisar.Add($"identificada solo por {(esAcoustId ? "AcoustID" : "MusicBrainz")}, una fuente de rescate");
+                revisar.Add(MotivoSoloRescate(esAcoustId ? "AcoustID" : "MusicBrainz"));
         }
 
         // Comprobación final del nombre propuesto: las huellas que deja una regla que ha fallado
@@ -638,8 +660,9 @@ public sealed class FileProcessor
             // El tag lleva la misma grafía que el nombre de archivo (excepciones, alias, «feat.»),
             // pero con sus acentos. Visto en una biblioteca real: 8 temas de Cruz Cafuné pasaban a
             // llamarse «Cruz Cafune - …» y su tag Artista se quedaba en «Cruzzi», así que rekordbox,
-            // que ordena por el tag, partía al mismo artista en dos.
-            Artist = mainArtist,
+            // que ordena por el tag, partía al mismo artista en dos. Las mayúsculas del catálogo se
+            // respetan (ver artistaTag).
+            Artist = artistaTag,
             Album = album,
             Year = year,
             Genre = genre,
@@ -656,9 +679,13 @@ public sealed class FileProcessor
             Variant = variant,
             Score = scoreStr,
             Remixer = remixerFinal,
+            // El tag sale de su propio campo: el Remixer que guardó en la caché una versión anterior
+            // es texto en bruto y no debe escribirse (ver ProcessResult.RemixerTag).
+            RemixerTag = remixerFinal,
             RemixKind = remix.Kind,
             Why = why,
             Revisar = motivoRevisar,
+            Reglas = ProcessResult.ReglasActuales,
             AiArtist = sugA,
             AiTitle = sugT,
             AiVersion = sugV,
@@ -674,6 +701,9 @@ public sealed class FileProcessor
     /// del umbral de revisión solo con la huella, y que los tags la suban o la bajen.
     /// </summary>
     public const double PuntuacionAcoustId = 5.0;
+
+    /// <summary>Motivo para revisar lo que solo identificó una fuente de rescate («MusicBrainz», «AcoustID»).</summary>
+    public static string MotivoSoloRescate(string fuente) => $"identificada solo por {fuente}, una fuente de rescate";
 
     /// <summary>
     /// El invitado que el nombre de archivo declara con «feat.», «ft.» o «featuring», ya limpio, o ""
@@ -730,6 +760,15 @@ public sealed class FileProcessor
         return false;
     }
 
+    /// <summary>
+    /// ¿El título del catálogo nombra ya esta versión? Por palabras enteras, y «RMX» cuenta como
+    /// «Remix»: «Scooteroni (RMX)» nombra la versión «Remix».
+    /// </summary>
+    private static bool NombraLaVersion(string? titulo, string? version)
+        => ContieneAlAutor(ComoRemix(titulo), ComoRemix(version));
+
+    private static string ComoRemix(string? s) => TextUtils.Rx(@"(?i)\brmx\b").Replace(s ?? "", "remix");
+
     private static List<string> PalabrasNk(string? s)
         => TextUtils.Rx(@"[^\p{L}\p{N}]+").Split(s ?? "").Select(TextUtils.Nk).Where(w => w.Length > 0).ToList();
 
@@ -748,20 +787,30 @@ public sealed class FileProcessor
     {
         var nRx = TextUtils.Nk(remixer);
         if (nRx.Length == 0) return false;
+        var a = PalabrasNk(remixer);
 
         // Por palabras enteras: «Animals» no contiene ni empieza por un remixer llamado «Ani».
         var nucleo = TextUtils.Rx(@"\s*[\(\[][^\)\]]*[\)\]]").Replace(tituloCatalogo ?? "", " ");
         nucleo = TextUtils.Rx(@"(?i)\s+(?:feat\.?|ft\.?|featuring)\s+.*$").Replace(nucleo, "");
         var nTi = TextUtils.Nk(nucleo);
-        if (nTi.Length > 3 && (nRx.Contains(nTi) || ContieneAlAutor(nucleo, remixer))) return true;
+        if (nTi.Length > 3 && nRx.Contains(nTi)) return true;
+        // Con títulos de tres letras o menos («AM», «47», «ALO») no vale buscar el texto dentro del
+        // autor, pero sí las palabras enteras: el autor es el título o empieza por él. Antes no se
+        // miraba nada, y «Nio Garcia - AM Remix» daba el remixer «Am», «Anuel AA - 47 Remix …» el
+        // «47» y «Katteyes … ALO  Open Show   Extended» el nombre «ALO (Alo Open Show Extended)».
+        if (ContieneAlAutor(nucleo, remixer) || EmpiezaPor(a, PalabrasNk(nucleo))) return true;
 
         var nQt = TextUtils.Nk(tituloNombre);
-        if (nQt.Length <= 3) return false;
-        if (nRx.Contains(nQt)) return true;
+        if (nQt.Length > 3 && nRx.Contains(nQt)) return true;
         var q = PalabrasNk(tituloNombre);
-        var a = PalabrasNk(remixer);
-        return a.Count > 0 && a.Count <= q.Count && q.Take(a.Count).SequenceEqual(a);
+        // El título del nombre empieza por el autor (el título repetido va delante y el editor del
+        // pool detrás), o el autor empieza por el título.
+        return EmpiezaPor(q, a) || EmpiezaPor(a, q);
     }
+
+    /// <summary>¿La lista de palabras <paramref name="todo"/> empieza por <paramref name="principio"/> (no vacía)?</summary>
+    private static bool EmpiezaPor(IReadOnlyList<string> todo, IReadOnlyList<string> principio)
+        => principio.Count > 0 && principio.Count <= todo.Count && todo.Take(principio.Count).SequenceEqual(principio);
 
     /// <summary>
     /// Nombre de archivo (sin extensión) a partir de artista, título y versiones. Cada parte pasa a

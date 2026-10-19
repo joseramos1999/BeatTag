@@ -73,12 +73,16 @@ public static class TextUtils
     /// ¿Pasar este texto a ASCII le borra letras? Las latinas con acento no cuentan (se quedan sin
     /// el acento, pero se quedan); sí cuentan las de escrituras sin equivalente: cirílico, griego,
     /// hebreo, árabe, CJK…
+    ///
+    /// Los ordinales «ª» y «º» tampoco cuentan: Unicode los tiene por letras, pero son abreviaturas
+    /// («5ª», «30ºC») y sin ellos el campo se entiende igual. Contándolos, «La 5ª Estación» se quedaba
+    /// entera en Unicode, acentos incluidos, cuando siempre se había propuesto «La 5 Estacion».
     /// </summary>
     public static bool PierdeLetrasEnAscii(string? s)
     {
         if (string.IsNullOrEmpty(s)) return false;
         foreach (var c in SinMarcas(s))
-            if (c > '\x7E' && char.IsLetter(c)) return true;
+            if (c > '\x7E' && char.IsLetter(c) && c is not ('ª' or 'º')) return true;
         return false;
     }
 

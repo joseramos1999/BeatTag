@@ -79,6 +79,10 @@ public static class RemixParser
     private const string TipoCompuestoAlFinal =
         @"\s+(?:(?:hype|melodic|break|drop|short|long)\s*intro|aca(?:pella)?\s*(?:intro|outro|in|out|starter|break|vocals|studio)|intro\s*outro)$";
 
+    // Una minúscula seguida de una mayúscula. Va con IgnoreCase desactivado: el resto del patrón lo
+    // lleva activado, y con él «a» y «E» valdrían igual.
+    private const string CambioDeCaja = @"(?-i:(?<=\p{Ll})(?=\p{Lu}))";
+
     // Fin del nombre sin paréntesis: de más fiable a menos. Doble espacio (lo típico del pool:
     // "Titulo  Editor Mashup"), luego guion, luego a pelo.
     private static readonly string[] Colas =
@@ -125,12 +129,8 @@ public static class RemixParser
         if (s.Length == 0) yield break;
 
         // 1) "Remix by X" / "Remixed by X" (explícito, el más fiable).
-        var m = TextUtils.Rx(@"\b(?<kind>remix|rework|edit|bootleg|flip)(?:ed)?\s+by\s+(?<who>[^)\]\-–—]{2,60})", IC).Match(s);
-        if (m.Success)
-        {
-            var who = Clean(m.Groups["who"].Value);
-            if (who.Length > 0) yield return new RemixInfo(who, Norm(m.Groups["kind"].Value));
-        }
+        var explicita = PorEscrito(s);
+        if (explicita.HasRemixer) yield return explicita;
 
         // 2) Entre paréntesis o corchetes: "(Tiesto Remix)", "[Pedro Cabrera Bootleg]". Primero los
         //    que tienen autor, del último al primero; si ninguno lo tiene, el primero que sea versión.
@@ -157,6 +157,36 @@ public static class RemixParser
         }
     }
 
+    /// <summary>
+    /// La firma que con más probabilidad trae el CATÁLOGO: la primera del nombre, en su orden. Es la
+    /// que sirve para BUSCAR, mientras que <see cref="Parse"/> (la última) es la del archivo y va al
+    /// nombre y al tag.
+    ///
+    /// Los pools añaden su edición detrás de la versión publicada: en «Hello (Sidney Samson Remix)
+    /// (Cesar Vilo Remix)» el catálogo tiene la de Sidney Samson y no la de Cesar Vilo. Buscando con
+    /// el último, Deezer dejaba de reconocer la versión publicada («versión de X», +9) y la puntuaba
+    /// como cualquier otro remix (+6): sin el original entre los resultados, ganaba el primero que
+    /// saliera, «Hello (Bob Sinclar Remix)».
+    /// </summary>
+    public static RemixInfo PrimeraFirma(string? text)
+    {
+        var s = (text ?? "").Trim();
+        if (s.Length == 0) return RemixInfo.None;
+        var explicita = PorEscrito(s);
+        if (explicita.HasRemixer) return explicita;
+        foreach (var r in ConAutor(s)) return r;
+        return Parse(s);
+    }
+
+    /// <summary>«Remix by X», «Remixed by X», «Edit by X»…; None si el texto no lo dice así.</summary>
+    private static RemixInfo PorEscrito(string s)
+    {
+        var m = TextUtils.Rx(@"\b(?<kind>remix|rework|edit|bootleg|flip)(?:ed)?\s+by\s+(?<who>[^)\]\-–—]{2,60})", IC).Match(s);
+        if (!m.Success) return RemixInfo.None;
+        var who = Clean(m.Groups["who"].Value);
+        return who.Length > 0 ? new RemixInfo(who, Norm(m.Groups["kind"].Value)) : RemixInfo.None;
+    }
+
     /// <summary>Analiza el contenido de un paréntesis: "Tiesto Remix" -> (Tiesto, Remix).</summary>
     private static RemixInfo FromFragment(string fragment)
     {
@@ -166,7 +196,11 @@ public static class RemixParser
         f = TextUtils.Rx(@"\b\d{1,2}[AB]\b").Replace(f, " ");            // clave Camelot
         f = TextUtils.Rx(@"\b(clean|dirty|explicit)\b", IC).Replace(f, " ");
         f = TextUtils.Rx(@"\s{2,}").Replace(f, " ").Trim();
-        var m = TextUtils.Rx($@"^(?<who>.*?)\s*\b{KindRe}\s*$", IC).Match(f);
+        // El tipo empieza una palabra, o va pegado detrás de una minúscula con su mayúscula
+        // («B00STaVIPaEdit»): sin esto último, «(Smurfy x B00STaVIPaEdit)» se quedaba sin versión y
+        // el archivo se proponía con el nombre del tema original. Pegado sin ese cambio de caja
+        // («Firestarter», «@SAMUVIP») sigue sin contar.
+        var m = TextUtils.Rx($@"^(?<who>.*?)\s*(?:\b|{CambioDeCaja}){KindRe}\s*$", IC).Match(f);
         if (!m.Success) return RemixInfo.None;
         return new RemixInfo(Clean(m.Groups["who"].Value), Norm(m.Groups["kind"].Value));
     }

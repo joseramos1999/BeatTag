@@ -31,7 +31,13 @@ public sealed class AnalysisCache
     public ProcessResult? Get(string path, string sig)
     {
         if (!Stat(path, out var m, out var s)) return null;
-        if (_map.TryGetValue(path, out var e) && e.M == m && e.S == s && e.Sig == sig) return e.R;
+        if (_map.TryGetValue(path, out var e) && e.M == m && e.S == s && e.Sig == sig)
+        {
+            // Lo que guardó una versión anterior de las reglas sale ya puesto al día (sin red): sin
+            // esto se aplicaría tal cual, sin las comprobaciones de ahora. Ver ResultadoAnterior.
+            if (ResultadoAnterior.Actualizar(e.R)) _dirty = true;
+            return e.R;
+        }
         return null;
     }
 
