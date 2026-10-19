@@ -250,4 +250,41 @@ public class ListaFrenteBibliotecaTests
     [Fact]
     public void Sin_fecha_no_se_dice_nada()
         => Assert.Equal("", TrendsViewModel.TextoFechaLista(null, Ahora, ChartsProvider.VigenciaLista));
+
+    // El caso de la revisión: se pulsa «Actualizar» a las 18:00 sin red y la guardada es de las 14:32,
+    // dentro de las 6 horas de vigencia. Antes solo decía «Lista descargada hoy a las 14:32.», como si
+    // la actualización pedida hubiera ido bien.
+    [Fact]
+    public void Si_actualizar_falla_se_dice_aunque_la_guardada_sea_reciente()
+    {
+        var guardada = new DateTime(2026, 10, 19, 14, 32, 0);
+        Assert.True(TrendsViewModel.NoSeActualizo(guardada, pedidaEn: Ahora));
+
+        var texto = TrendsViewModel.TextoFechaLista(guardada, Ahora, ChartsProvider.VigenciaLista, actualizacionFallida: true);
+        Assert.StartsWith("Lista descargada hoy a las 14:32.", texto);
+        Assert.Contains("No se ha podido descargar de nuevo", texto);
+        Assert.Contains("Actualizar", texto);
+    }
+
+    // Al descargar bien, la copia guardada se reescribe después de pedirla: su fecha es posterior. Se
+    // deja un margen por la resolución distinta del reloj y de la fecha del archivo.
+    [Theory]
+    [InlineData(3, false)]      // escrita 3 s después de pedirla
+    [InlineData(0, false)]
+    [InlineData(-1, false)]     // dentro del margen
+    [InlineData(-60, true)]     // de hace un minuto: no es la que se acaba de pedir
+    public void Se_sabe_si_la_lista_es_la_que_se_acaba_de_pedir(int segundos, bool noSeActualizo)
+        => Assert.Equal(noSeActualizo, TrendsViewModel.NoSeActualizo(Ahora.AddSeconds(segundos), pedidaEn: Ahora));
+
+    [Fact]
+    public void Sin_nada_guardado_tras_pedirla_es_que_no_llego()
+        => Assert.True(TrendsViewModel.NoSeActualizo(null, pedidaEn: Ahora));
+
+    // Una actualización fallida con una lista además vieja da un solo aviso, no dos.
+    [Fact]
+    public void Un_solo_aviso_aunque_la_lista_ademas_sea_vieja()
+    {
+        var texto = TrendsViewModel.TextoFechaLista(new DateTime(2026, 9, 11, 10, 0, 0), Ahora, ChartsProvider.VigenciaLista, actualizacionFallida: true);
+        Assert.Equal(1, texto.Split("Actualizar").Length - 1);
+    }
 }

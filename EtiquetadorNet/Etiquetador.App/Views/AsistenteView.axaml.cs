@@ -31,12 +31,15 @@ public partial class AsistenteView : UserControl
 
     private ContextMenu CrearMenu(DataGrid tabla)
     {
-        // Escuchar y editar no se permiten mientras una herramienta escribe archivos: ver CalcularMenu.
-        var escuchar = Opcion("Escuchar / Parar", () => ConArchivo(tabla, (vm, ruta) => vm.Engine.Preview.Toggle(ruta), siOcupado: false));
-        var editar = Opcion("Editar etiquetas de esta canción", () => ConArchivo(tabla, (vm, ruta) => vm.Engine.RequestEdit(ruta), siOcupado: false));
+        // Cuándo se permite cada opción mientras una herramienta trabaja: ver CalcularMenu.
+        var escuchar = Opcion("Escuchar / Parar", () => ConArchivo(tabla, (vm, ruta) => vm.Engine.Preview.Toggle(ruta),
+                                                                   bloqueada: vm => vm.EscribiendoArchivos));
+        var editar = Opcion("Editar etiquetas de esta canción", () => ConArchivo(tabla, (vm, ruta) => vm.Engine.RequestEdit(ruta),
+                                                                               bloqueada: vm => vm.IsBusy));
         var marcar = Opcion("Marcar las seleccionadas", () => Marcar(tabla, true));
         var desmarcar = Opcion("Desmarcar las seleccionadas", () => Marcar(tabla, false));
-        var carpeta = Opcion("Abrir carpeta contenedora", () => ConArchivo(tabla, (vm, ruta) => { _ = Services.Shell.OpenContainingFolderAsync(ruta); }, siOcupado: true));
+        var carpeta = Opcion("Abrir carpeta contenedora", () => ConArchivo(tabla, (vm, ruta) => { _ = Services.Shell.OpenContainingFolderAsync(ruta); },
+                                                                         bloqueada: _ => false));
         var papelera = Opcion("Enviar a la papelera", () => _ = EnviarAPapeleraAsync(tabla));
         var separaMarcas = new Separator();
         var separaCarpeta = new Separator();
@@ -56,7 +59,8 @@ public partial class AsistenteView : UserControl
             marcar.IsVisible = desmarcar.IsVisible = marcable;
             separaMarcas.IsVisible = conArchivo && marcable;
 
-            var estado = CalcularMenu(tabla.SelectedItem != null, DataContext is AsistenteViewModel { IsBusy: true },
+            var vm = DataContext as AsistenteViewModel;
+            var estado = CalcularMenu(tabla.SelectedItem != null, vm?.IsBusy == true, vm?.EscribiendoArchivos == true,
                                       tabla.SelectedItems.OfType<IFilaConArchivo>().Count());
             escuchar.IsEnabled = estado.Escuchar;
             editar.IsEnabled = estado.Editar;
@@ -75,25 +79,33 @@ public partial class AsistenteView : UserControl
                                                string TextoEscuchar, string TextoEditar, string TextoPapelera);
 
     /// <summary>
-    /// Mientras una herramienta escribe archivos (aplicar géneros, renombrar, completar), no se deja
-    /// escuchar, editar ni mandar a la papelera: el reproductor mantiene el archivo abierto y la
-    /// herramienta solo libera el audio una vez, al empezar. Visto en el código: escuchar desde «Buscar
-    /// con una frase» una canción que «Aplicar las marcadas» estaba reetiquetando la dejaba en «no se
-    /// pudo escribir»; mandarla a la papelera a mitad de «Renombrar» rompía su renombrado. Las demás
-    /// pestañas ya lo impedían; aquí el menú solo miraba la selección. Abrir la carpeta y marcar o
-    /// desmarcar no tocan el archivo y siguen disponibles.
+    /// Qué se deja hacer mientras una herramienta trabaja.
+    ///
+    /// Escuchar: no mientras una herramienta ESCRIBE archivos (aplicar géneros, renombrar, completar).
+    /// El reproductor mantiene el archivo abierto y la herramienta solo libera el audio una vez, al
+    /// empezar: escuchar desde «Buscar con una frase» una canción que «Aplicar las marcadas» estaba
+    /// reetiquetando la dejaba en «no se pudo escribir». Mientras solo se lee (Proponer fichas, la fase
+    /// de propuesta de Renombrar, Analizar géneros, que con límite 5000 duran minutos) sí se puede:
+    /// visto en la revisión, bloquearlo con cualquier proceso impedía escuchar las propuestas que ya
+    /// estaban en la tabla.
+    ///
+    /// Editar y mandar a la papelera: no con ningún proceso en marcha. Editar salta a otra página, y el
+    /// bloqueo global no deja salir de esta mientras trabaja; mover un archivo a mitad de una pasada
+    /// rompería lo que la herramienta tenga apuntado de él. Abrir la carpeta y marcar o desmarcar no
+    /// tocan el archivo y siguen disponibles.
     /// </summary>
-    internal static EstadoMenu CalcularMenu(bool haySeleccion, bool ocupado, int cuantas)
+    internal static EstadoMenu CalcularMenu(bool haySeleccion, bool ocupado, bool escribiendo, int cuantas)
     {
         var espera = ocupado ? " (espera a que termine el proceso)" : "";
+        var esperaEscritura = escribiendo ? " (espera a que se terminen de escribir los archivos)" : "";
         var conArchivo = haySeleccion && !ocupado;
         return new EstadoMenu(
-            Escuchar: conArchivo,
+            Escuchar: haySeleccion && !escribiendo,
             Editar: conArchivo,
             Carpeta: haySeleccion,
             Marcar: haySeleccion,
             Papelera: conArchivo,
-            TextoEscuchar: "Escuchar / Parar" + espera,
+            TextoEscuchar: "Escuchar / Parar" + esperaEscritura,
             TextoEditar: "Editar etiquetas de esta canción" + espera,
             TextoPapelera: (cuantas > 1 ? $"Enviar a la papelera ({cuantas})" : "Enviar a la papelera") + espera);
     }
@@ -157,12 +169,13 @@ public partial class AsistenteView : UserControl
 
     /// <summary>
     /// Ejecuta la acción sobre el archivo de la fila seleccionada; si falla, lo dice en la barra de
-    /// estado. Con <paramref name="siOcupado"/> en false no hace nada mientras una herramienta trabaja.
+    /// estado. No hace nada mientras <paramref name="bloqueada"/> diga que no se puede (se vuelve a
+    /// mirar al pulsar: el menú pudo abrirse antes de que la herramienta empezara a escribir).
     /// </summary>
-    private void ConArchivo(DataGrid tabla, Action<AsistenteViewModel, string> accion, bool siOcupado)
+    private void ConArchivo(DataGrid tabla, Action<AsistenteViewModel, string> accion, Func<AsistenteViewModel, bool> bloqueada)
     {
         if (DataContext is not AsistenteViewModel vm || tabla.SelectedItem is not IFilaConArchivo fila) return;
-        if (!siOcupado && vm.IsBusy) { vm.Status = "Espera a que termine el proceso en curso."; return; }
+        if (bloqueada(vm)) { vm.Status = "Espera a que termine el proceso en curso."; return; }
         try { accion(vm, fila.RutaArchivo); }
         catch (Exception e) { vm.Status = "No se pudo: " + e.Message; }
     }

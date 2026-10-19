@@ -58,16 +58,86 @@ public class PaginasDiferidasTests
         Assert.Equal(1, veces);
     }
 
-    // Marcar deja el recálculo para cuando se vuelva a mostrar, sin hacerlo ahora.
+    // El caso de la revisión: con Ficha DJ oculta se aceptan fichas en el Asistente. Al volver no se
+    // rehace la tabla entera (15.000 filas, vista nueva, selección perdida): solo se releen las fichas.
     [Fact]
-    public void Marcar_deja_el_recalculo_para_la_proxima_vez()
+    public void Un_cambio_de_fichas_oculta_solo_relee_al_volver()
+    {
+        var recalculos = 0;
+        var refrescos = 0;
+        var r = new RecalculoDiferido(() => recalculos++, () => refrescos++);
+        r.CambiarVisible(true);
+        r.CambiarVisible(false);
+
+        r.PedirRefresco();
+        r.PedirRefresco();   // dos aceptaciones seguidas en el Asistente
+        Assert.True(r.RefrescoPendiente);
+        Assert.False(r.Pendiente);
+
+        r.CambiarVisible(true);
+        Assert.Equal(1, recalculos);   // solo el de la primera vez
+        Assert.Equal(1, refrescos);
+        Assert.False(r.RefrescoPendiente);
+
+        r.CambiarVisible(false);
+        r.CambiarVisible(true);
+        Assert.Equal(1, refrescos);    // nada pendiente: nada que hacer
+    }
+
+    [Fact]
+    public void A_la_vista_un_cambio_de_fichas_relee_al_momento()
+    {
+        var recalculos = 0;
+        var refrescos = 0;
+        var r = new RecalculoDiferido(() => recalculos++, () => refrescos++);
+        r.CambiarVisible(true);
+        r.PedirRefresco();
+        Assert.Equal(1, recalculos);
+        Assert.Equal(1, refrescos);
+    }
+
+    // Si además cambió la biblioteca, el recálculo entero ya relee las fichas: el retoque sobra.
+    [Fact]
+    public void Si_tambien_cambio_la_biblioteca_basta_con_el_recalculo()
+    {
+        var recalculos = 0;
+        var refrescos = 0;
+        var r = new RecalculoDiferido(() => recalculos++, () => refrescos++);
+        r.CambiarVisible(true);
+        r.CambiarVisible(false);
+
+        r.PedirRefresco();
+        r.Pedir();
+        r.PedirRefresco();
+        r.CambiarVisible(true);
+
+        Assert.Equal(2, recalculos);
+        Assert.Equal(0, refrescos);
+        Assert.False(r.RefrescoPendiente);
+    }
+
+    // Antes de mostrarse la primera vez no hay filas que releer: lo hará el primer recálculo.
+    [Fact]
+    public void Antes_de_mostrarse_la_primera_vez_el_refresco_no_se_apunta()
+    {
+        var refrescos = 0;
+        var r = new RecalculoDiferido(() => { }, () => refrescos++);
+        r.PedirRefresco();
+        Assert.False(r.RefrescoPendiente);
+        r.CambiarVisible(true);
+        Assert.Equal(0, refrescos);
+    }
+
+    // Sin retoque ligero (Colecciones, Estadísticas), pedirlo rehace la página como siempre.
+    [Fact]
+    public void Sin_retoque_ligero_el_refresco_es_un_recalculo()
     {
         var veces = 0;
         var r = new RecalculoDiferido(() => veces++);
         r.CambiarVisible(true);
-        r.Marcar();
-        Assert.Equal(1, veces);
         r.CambiarVisible(false);
+        r.PedirRefresco();
+        Assert.True(r.Pendiente);
         r.CambiarVisible(true);
         Assert.Equal(2, veces);
     }
@@ -104,15 +174,58 @@ public class PaginasDiferidasTests
         Assert.Equal(2, indice.Construcciones);
     }
 
+    // Lo que importa es que pedir el índice no bloquee a quien lo pide (el hilo de la interfaz):
+    // ObtenerAsync tiene que volver ANTES de construir. Antes se comparaba el id del hilo que pide con
+    // el del que construye, y fallaba de vez en cuando (5 de 6 ejecuciones en la revisión): xUnit
+    // corre las pruebas en hilos del grupo, y al hacer el await ese mismo hilo podía recoger el Task.Run.
     [Fact]
-    public async Task El_indice_se_construye_fuera_del_hilo_que_lo_pide()
+    public async Task Pedir_el_indice_no_espera_a_que_se_construya()
     {
-        var hiloQuePide = Environment.CurrentManagedThreadId;
-        var hiloQueConstruye = -1;
+        using var puerta = new ManualResetEventSlim();
         var indice = new IndiceReutilizable<object>();
-        await indice.ObtenerAsync(() => { hiloQueConstruye = Environment.CurrentManagedThreadId; return new object(); });
-        Assert.NotEqual(hiloQuePide, hiloQueConstruye);
+        Assert.False(indice.Listo);
+
+        // Si se construyera en el hilo que lo pide, ObtenerAsync se quedaría aquí hasta que la espera
+        // caducase, y la tarea volvería ya terminada.
+        var tarea = indice.ObtenerAsync(() => { puerta.Wait(TimeSpan.FromSeconds(10)); return new object(); });
+        Assert.False(tarea.IsCompleted);
+        Assert.False(indice.Listo);   // la Bandeja dice «Revisando…» mientras tanto
+
+        puerta.Set();
+        Assert.NotNull(await tarea);
+        Assert.True(indice.Listo);
+
+        indice.Invalidar();
+        Assert.False(indice.Listo);
     }
+
+    // --- I10 (revisión): una revisión que nadie espera no falla en silencio ---
+
+    [Fact]
+    public async Task Un_fallo_en_un_trabajo_sin_esperar_llega_a_quien_lo_cuenta()
+    {
+        Exception? contada = null;
+        await SinEsperar.Lanzar(() => Task.FromException(new InvalidOperationException("índice roto")), e => contada = e);
+        Assert.IsType<InvalidOperationException>(contada);
+        Assert.Equal("índice roto", contada!.Message);
+    }
+
+    [Fact]
+    public async Task Cancelar_un_trabajo_sin_esperar_no_cuenta_como_fallo()
+    {
+        Exception? contada = null;
+        await SinEsperar.Lanzar(() => Task.FromCanceled(new CancellationToken(true)), e => contada = e);
+        await SinEsperar.Lanzar(() => Task.CompletedTask, e => contada = e);
+        Assert.Null(contada);
+    }
+
+    [Theory]
+    [InlineData(1, 0, "Bandeja revisada contra la biblioteca: la canción no tiene avisos.")]
+    [InlineData(1, 1, "Bandeja revisada contra la biblioteca: la canción tiene avisos.")]
+    [InlineData(12, 0, "Bandeja revisada contra la biblioteca: ninguna de las 12 canciones tiene avisos.")]
+    [InlineData(12, 3, "Bandeja revisada contra la biblioteca: 3 de 12 canciones con avisos.")]
+    public void Tras_revisar_se_dice_como_ha_quedado(int canciones, int conAvisos, string esperado)
+        => Assert.Equal(esperado, BandejaViewModel.TextoRevisada(canciones, conAvisos));
 
     // Dos revisiones seguidas mientras se construye esperan a la misma construcción.
     [Fact]
@@ -173,6 +286,82 @@ public class PaginasDiferidasTests
         Assert.False(editor.GuardarSiHayCambios());
         Assert.Equal(0, guardados);
     }
+
+    // --- X12 (revisión): lo escrito se guarda en la selección ANTERIOR, no en la nueva ---
+
+    private static FichaRow Fila(string nombre, FichaDj? ficha = null)
+        => new(new Etiquetador.Core.Track { FilePath = Rutas.Archivo(nombre), Folder = Rutas.Carpeta }, ficha);
+
+    // El caso real: «boda, público mayor, cierre» en Etiquetas de 30 temas y clic en otra fila. La
+    // página guarda en «las seleccionadas» cuando el panel se lo pide; si la selección cambiase antes
+    // de guardar, las etiquetas de boda acabarían en la fila del clic.
+    [Fact]
+    public void Al_cambiar_de_seleccion_lo_escrito_va_a_las_filas_de_antes()
+    {
+        var editor = new FichaEditorViewModel();
+        var sel = new SeleccionConFicha<FichaRow>(editor);
+        var boda = Enumerable.Range(1, 30).Select(i => Fila($"Boda {i:00}.mp3", new FichaDj { Energia = 6 })).ToList();
+        var otra = Fila("Bad Bunny - Tití Me Preguntó.mp3", new FichaDj { Energia = 9 });
+
+        IReadOnlyList<FichaRow>? guardadoEn = null;
+        List<string>? etiquetasGuardadas = null;
+        editor.GuardarPedido += () => { guardadoEn = sel.Filas.ToList(); etiquetasGuardadas = editor.Cambios().EtiquetasAnadir?.ToList(); };
+
+        sel.Cambiar(boda);
+        editor.Etiquetas = "boda, público mayor, cierre";
+        var guardada = sel.Cambiar(new[] { otra });
+
+        Assert.True(guardada);
+        Assert.Equal(boda, guardadoEn);
+        Assert.Equal(new[] { "boda", "público mayor", "cierre" }, etiquetasGuardadas);
+        // Y el panel ya enseña la ficha de la fila nueva, sin nada pendiente.
+        Assert.Same(otra, Assert.Single(sel.Filas));
+        Assert.Equal(1, editor.Cuantas);
+        Assert.False(editor.HayCambios);
+        Assert.Equal("", editor.Etiquetas);
+    }
+
+    [Fact]
+    public void Sin_nada_escrito_cambiar_de_seleccion_no_guarda()
+    {
+        var editor = new FichaEditorViewModel();
+        var sel = new SeleccionConFicha<FichaRow>(editor);
+        var guardados = 0;
+        editor.GuardarPedido += () => guardados++;
+
+        Assert.False(sel.Cambiar(new[] { Fila("Uno.mp3") }));
+        Assert.False(sel.Cambiar(new[] { Fila("Dos.mp3"), Fila("Tres.mp3") }));
+        Assert.False(sel.Cambiar(Array.Empty<FichaRow>()));
+        Assert.Equal(0, guardados);
+        Assert.Equal(0, editor.Cuantas);
+    }
+
+    // Al cerrar la aplicación (o salir de la página, o rehacer la tabla) se guarda lo pendiente sin
+    // cambiar la selección.
+    [Fact]
+    public void Guardar_lo_escrito_sin_cambiar_de_seleccion()
+    {
+        var editor = new FichaEditorViewModel();
+        var sel = new SeleccionConFicha<FichaRow>(editor);
+        var filas = new[] { Fila("Uno.mp3"), Fila("Dos.mp3") };
+        IReadOnlyList<FichaRow>? guardadoEn = null;
+        editor.GuardarPedido += () => guardadoEn = sel.Filas;
+
+        Assert.False(sel.GuardarLoEscrito());   // sin selección
+        sel.Cambiar(filas);
+        Assert.False(sel.GuardarLoEscrito());   // nada escrito
+        editor.Etiquetas = "cierre";
+        Assert.True(sel.GuardarLoEscrito());
+        Assert.Equal(filas, guardadoEn);
+        Assert.Equal(filas, sel.Filas);
+    }
+
+    [Theory]
+    [InlineData(1, "Ficha guardada al cerrar la aplicación, para no perder lo escrito.")]
+    [InlineData(30, "Ficha guardada en 30 canciones al cambiar de selección, para no perder lo escrito.")]
+    public void El_estado_dice_donde_se_guardo(int cuantas, string esperado)
+        => Assert.Equal(esperado, FichasViewModel.TextoGuardadoParaNoPerder(
+            cuantas, cuantas == 1 ? "al cerrar la aplicación" : "al cambiar de selección"));
 
     // --- X5: nombre de colección ni vacío ni repetido ---
 

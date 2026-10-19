@@ -64,8 +64,14 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
 {
     private readonly AppEngine _engine;
     private readonly LibraryStore _store;
-    private List<BandejaRow> _seleccion = new();
+
+    /// <summary>Las seleccionadas, y el orden en que se guarda lo escrito al cambiar de selección.</summary>
+    private readonly SeleccionConFicha<BandejaRow> _sel;
+    private IReadOnlyList<BandejaRow> Seleccion => _sel.Filas;
     private bool _guardando;
+
+    /// <summary>El error del último guardado, para que el aviso «guardada para no perderla» no lo tape.</summary>
+    private string _errorAlGuardar = "";
 
     /// <summary>
     /// Revisar la bandeja contra la biblioteca: solo con la página a la vista, y si no, al volver.
@@ -108,11 +114,13 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         _engine = engine;
         _store = engine.Library;
         RowsView = new DataGridCollectionView(Rows);
+        _sel = new SeleccionConFicha<BandejaRow>(Editor);
         Editor.GuardarPedido += GuardarFicha;
 
         _carpeta = engine.Config.BandejaCarpeta;
         _destino = engine.Config.BandejaDestino;
-        _revision = new RecalculoDiferido(() => _ = RevisarAsync());
+        // Nadie espera a esta revisión: si falla, se dice en el estado y en el registro.
+        _revision = new RecalculoDiferido(() => _ = SinEsperar.Lanzar(RevisarAsync, ErrorAlRevisar));
         RellenarDestinos();
 
         // La biblioteca cambia (se escanea, se añaden carpetas): hay que volver a buscar duplicados
@@ -155,13 +163,24 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         }
     }
 
-    /// <summary>Guarda lo escrito en el panel de ficha para la selección ACTUAL, si hay algo.</summary>
+    /// <summary>
+    /// Guarda lo escrito en el panel de ficha para la selección ACTUAL, si hay algo. Si no se pudo
+    /// escribir en disco, se queda a la vista ese aviso.
+    /// </summary>
     private bool GuardarLoEscrito(string cuando)
     {
-        if (_seleccion.Count == 0 || !Editor.GuardarSiHayCambios()) return false;
-        Status = $"Ficha guardada {cuando}, para no perder lo escrito.";
+        var cuantas = Seleccion.Count;
+        _errorAlGuardar = "";
+        if (!_sel.GuardarLoEscrito()) return false;
+        if (_errorAlGuardar.Length == 0) Status = FichasViewModel.TextoGuardadoParaNoPerder(cuantas, cuando);
         return true;
     }
+
+    /// <summary>
+    /// Se cierra la aplicación: lo escrito en el panel y no guardado se guarda, igual que al cambiar de
+    /// fila o de página.
+    /// </summary>
+    public void GuardarAlCerrar() => GuardarLoEscrito("al cerrar la aplicación");
 
     partial void OnBusquedaChanged(string value) => AplicarFiltro();
     partial void OnFiltroChanged(string value) => AplicarFiltro();
@@ -294,6 +313,9 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         if (Rows.Count == 0) { ActualizarRecuento(); return; }
 
         var canciones = _store.IsScanned ? _store.Tracks.ToList() : null;   // instantánea en el hilo de la interfaz
+        // Construir el índice de la biblioteca lleva 1-2 s con 15.000 canciones, y mientras tanto la
+        // tabla sigue enseñando los avisos de antes. Visto en la revisión: no se decía nada. Ahora sí.
+        if (canciones != null && !_indiceBiblioteca.Listo) Status = TextoRevisando;
         var biblioteca = canciones == null
             ? IndiceCanciones.Vacio
             : await _indiceBiblioteca.ObtenerAsync(() => new IndiceCanciones(canciones));
@@ -307,6 +329,26 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         AplicarFiltro();
         ActualizarRecuento();
         MostrarDetalle();
+        // Solo si nadie ha escrito otra cosa en el estado mientras tanto.
+        if (Status == TextoRevisando) Status = TextoRevisada(Rows.Count, Rows.Count(r => r.HayAvisos));
+    }
+
+    internal const string TextoRevisando = "Revisando la bandeja contra la biblioteca…";
+
+    internal static string TextoRevisada(int canciones, int conAvisos)
+        => canciones == 1
+            ? (conAvisos == 0 ? "Bandeja revisada contra la biblioteca: la canción no tiene avisos."
+                              : "Bandeja revisada contra la biblioteca: la canción tiene avisos.")
+            : conAvisos == 0
+                ? $"Bandeja revisada contra la biblioteca: ninguna de las {canciones} canciones tiene avisos."
+                : $"Bandeja revisada contra la biblioteca: {conAvisos} de {canciones} canciones con avisos.";
+
+    /// <summary>Una revisión que nadie esperaba ha fallado: se dice, en vez de dejar los avisos como estaban.</summary>
+    private void ErrorAlRevisar(Exception e)
+    {
+        _engine.Logger.Error("Bandeja: error al revisar contra la biblioteca", e);
+        Status = $"No se pudo revisar la bandeja contra la biblioteca ({e.Message}). "
+               + "Los avisos de la tabla pueden no estar al día: pulsa «Analizar» para volver a intentarlo.";
     }
 
     private void AplicarFiltro()
@@ -347,22 +389,22 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
     /// </summary>
     public void Seleccionar(IEnumerable<BandejaRow> filas)
     {
-        var nuevas = filas.ToList();
-        GuardarLoEscrito("al cambiar de selección");
-        _seleccion = nuevas;
-        Editor.Cargar(_seleccion.Select(r => r.Ficha).ToList());
+        var anteriores = Seleccion.Count;
+        _errorAlGuardar = "";
+        if (_sel.Cambiar(filas) && _errorAlGuardar.Length == 0)
+            Status = FichasViewModel.TextoGuardadoParaNoPerder(anteriores, "al cambiar de selección");
         MostrarDetalle();
     }
 
-    public int CuantasSeleccionadas => _seleccion.Count;
+    public int CuantasSeleccionadas => Seleccion.Count;
 
     private void MostrarDetalle()
     {
-        Detalle = _seleccion.Count switch
+        Detalle = Seleccion.Count switch
         {
             0 => "",
-            1 => _seleccion[0].HayAvisos ? _seleccion[0].AvisosDetalle : "Sin avisos.",
-            _ => $"{_seleccion.Count} seleccionadas · {_seleccion.Count(r => r.HayAvisos)} con avisos.",
+            1 => Seleccion[0].HayAvisos ? Seleccion[0].AvisosDetalle : "Sin avisos.",
+            _ => $"{Seleccion.Count} seleccionadas · {Seleccion.Count(r => r.HayAvisos)} con avisos.",
         };
     }
 
@@ -378,8 +420,8 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
 
     private void Marcar(EstadoBandeja estado)
     {
-        if (_seleccion.Count == 0) { Status = "Selecciona antes las canciones."; return; }
-        foreach (var r in _seleccion)
+        if (Seleccion.Count == 0) { Status = "Selecciona antes las canciones."; return; }
+        foreach (var r in Seleccion)
         {
             _engine.Bandeja.Marcar(r.FilePath, estado);
             r.EstadoCambiado();
@@ -387,24 +429,25 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         GuardarBandeja();
         ActualizarRecuento();
         if (Filtro != "Todas") AplicarFiltro();
-        Status = $"{_seleccion.Count} canción(es) marcadas como {AlmacenBandeja.Nombre(estado).ToLowerInvariant()}s.";
+        Status = $"{Seleccion.Count} canción(es) marcadas como {AlmacenBandeja.Nombre(estado).ToLowerInvariant()}s.";
     }
 
     private void GuardarFicha() => AplicarFicha(Editor.Cambios());
 
     public void PonerEnergiaRapida(int energia)
     {
-        if (_seleccion.Count == 0) return;
+        if (Seleccion.Count == 0) return;
         AplicarFicha(new CambiosFicha { Energia = Math.Clamp(energia, 0, Fichas.EnergiaMaxima) });
     }
 
     private void AplicarFicha(CambiosFicha cambios)
     {
-        if (_seleccion.Count == 0) return;
+        if (Seleccion.Count == 0) return;
         if (!cambios.HayAlguno) { Status = "No hay cambios que guardar."; return; }
-        var err = _engine.GuardarFichas(_seleccion.Select(r => r.FilePath).ToList(), cambios);
-        foreach (var r in _seleccion) r.Actualizar(_engine.Fichas.Obtener(r.FilePath));
-        Editor.Cargar(_seleccion.Select(r => r.Ficha).ToList());
+        var err = _engine.GuardarFichas(Seleccion.Select(r => r.FilePath).ToList(), cambios);
+        _errorAlGuardar = err;
+        foreach (var r in Seleccion) r.Actualizar(_engine.Fichas.Obtener(r.FilePath));
+        _sel.Recargar();
         _guardando = true;
         try { _engine.AvisarFichasCambiadas(); }
         finally { _guardando = false; }
@@ -414,13 +457,13 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
     private void RefrescarFichas()
     {
         foreach (var r in Rows) r.Actualizar(_engine.Fichas.Obtener(r.FilePath));
-        Editor.Cargar(_seleccion.Select(r => r.Ficha).ToList());
+        _sel.Recargar();
     }
 
     public async Task VolcarAlComentarioAsync()
     {
-        if (IsBusy || _seleccion.Count == 0) return;
-        var rutas = _seleccion.Select(r => r.FilePath).ToList();
+        if (IsBusy || Seleccion.Count == 0) return;
+        var rutas = Seleccion.Select(r => r.FilePath).ToList();
         IsBusy = true;
         Status = $"Escribiendo la ficha en el comentario de {rutas.Count} canción(es)…";
         try

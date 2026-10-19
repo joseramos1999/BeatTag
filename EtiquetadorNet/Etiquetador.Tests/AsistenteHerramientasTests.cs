@@ -274,24 +274,157 @@ public class AsistenteHerramientasTests : IDisposable
     [Fact]
     public void Mientras_se_escriben_archivos_no_se_puede_escuchar_editar_ni_mandar_a_la_papelera()
     {
-        var m = AsistenteView.CalcularMenu(haySeleccion: true, ocupado: true, cuantas: 3);
+        var m = AsistenteView.CalcularMenu(haySeleccion: true, ocupado: true, escribiendo: true, cuantas: 3);
         Assert.False(m.Escuchar);
         Assert.False(m.Editar);
         Assert.False(m.Papelera);
         Assert.True(m.Carpeta);   // abrir la carpeta no toca el archivo
         Assert.True(m.Marcar);
         Assert.Contains("espera a que termine", m.TextoPapelera);
+        Assert.Contains("escribir los archivos", m.TextoEscuchar);
+    }
+
+    // Visto en la revisión: «Proponer fichas» con límite 5000 tarda minutos y solo lee. Mientras tanto
+    // se tienen que poder escuchar las propuestas que ya están en la tabla. Editar (salta a otra página,
+    // y el bloqueo global no deja) y la papelera siguen esperando.
+    [Fact]
+    public void Mientras_solo_se_lee_se_puede_escuchar_pero_no_editar_ni_mandar_a_la_papelera()
+    {
+        var m = AsistenteView.CalcularMenu(haySeleccion: true, ocupado: true, escribiendo: false, cuantas: 1);
+        Assert.True(m.Escuchar);
+        Assert.Equal("Escuchar / Parar", m.TextoEscuchar);
+        Assert.False(m.Editar);
+        Assert.False(m.Papelera);
+        Assert.True(m.Carpeta && m.Marcar);
     }
 
     [Fact]
     public void Sin_proceso_en_curso_el_menu_es_el_de_siempre()
     {
-        var m = AsistenteView.CalcularMenu(haySeleccion: true, ocupado: false, cuantas: 3);
+        var m = AsistenteView.CalcularMenu(haySeleccion: true, ocupado: false, escribiendo: false, cuantas: 3);
         Assert.True(m.Escuchar && m.Editar && m.Papelera && m.Carpeta && m.Marcar);
         Assert.Equal("Enviar a la papelera (3)", m.TextoPapelera);
         Assert.Equal("Escuchar / Parar", m.TextoEscuchar);
 
-        var sinSeleccion = AsistenteView.CalcularMenu(haySeleccion: false, ocupado: false, cuantas: 0);
+        var sinSeleccion = AsistenteView.CalcularMenu(haySeleccion: false, ocupado: false, escribiendo: false, cuantas: 0);
         Assert.False(sinSeleccion.Escuchar || sinSeleccion.Papelera || sinSeleccion.Marcar);
+    }
+
+    // --- X5 (revisión): una colección borrada no cambia el ámbito en silencio ---
+
+    // El caso de la revisión: «Bachata para cerrar» se borra en Colecciones y, al volver al Asistente,
+    // los desplegables se rellenan. Antes pasaban a «Toda la biblioteca» sin decir nada.
+    [Fact]
+    public void Al_rellenar_se_sabe_que_la_coleccion_elegida_ya_no_existe()
+    {
+        var bachata = Coleccion("Bachata para cerrar");
+        var pico = Coleccion("Pico");
+        var elegida = SelectorAmbito.Opciones(new[] { pico, bachata }, conTodaLaBiblioteca: true)[2];
+
+        var ahora = SelectorAmbito.Elegir(SelectorAmbito.Opciones(new[] { pico }, conTodaLaBiblioteca: true), elegida, out var perdida);
+
+        Assert.Equal("Bachata para cerrar", perdida);
+        Assert.True(ahora!.EsTodaLaBiblioteca);
+    }
+
+    [Fact]
+    public void Si_la_coleccion_sigue_o_no_habia_ninguna_no_se_avisa()
+    {
+        var pico = Coleccion("Pico");
+        var opciones = SelectorAmbito.Opciones(new[] { pico }, conTodaLaBiblioteca: true);
+
+        SelectorAmbito.Elegir(opciones, opciones[1], out var sigue);
+        SelectorAmbito.Elegir(opciones, AmbitoOpcion.TodaLaBiblioteca, out var biblioteca);
+        SelectorAmbito.Elegir(opciones, null, out var nada);
+
+        Assert.Equal("", sigue);
+        Assert.Equal("", biblioteca);
+        Assert.Equal("", nada);
+    }
+
+    [Fact]
+    public void El_aviso_dice_que_coleccion_falta_y_a_que_pasa_cada_herramienta()
+    {
+        var aviso = SelectorAmbito.AvisoAmbitosPerdidos(new[]
+        {
+            new SelectorAmbito.AmbitoPerdido("Ordenar para mezclar", "Bachata para cerrar", "Pico"),
+            new SelectorAmbito.AmbitoPerdido("Proponer fichas", "Bachata para cerrar", AmbitoOpcion.TextoTodaLaBiblioteca),
+            new SelectorAmbito.AmbitoPerdido("Renombrar con IA", "Bachata para cerrar", AmbitoOpcion.TextoTodaLaBiblioteca),
+        });
+
+        Assert.Equal("La colección «Bachata para cerrar» ya no existe en Colecciones: «Ordenar para mezclar» pasa a «Pico»; "
+                     + "«Proponer fichas» y «Renombrar con IA» pasan a «Toda la biblioteca».", aviso);
+    }
+
+    [Fact]
+    public void Sin_colecciones_que_elegir_mezclar_se_queda_sin_ninguna()
+    {
+        var aviso = SelectorAmbito.AvisoAmbitosPerdidos(new[] { new SelectorAmbito.AmbitoPerdido("Ordenar para mezclar", "Pico", null) });
+        Assert.Equal("La colección «Pico» ya no existe en Colecciones: «Ordenar para mezclar» se queda sin colección.", aviso);
+        Assert.Equal("", SelectorAmbito.AvisoAmbitosPerdidos(Array.Empty<SelectorAmbito.AmbitoPerdido>()));
+    }
+
+    // --- X13 (revisión): «Comprobar» quita la pausa por fallos ---
+
+    /// <summary>Un Ollama de mentira que se cae y vuelve: lista un modelo y responde (o no) a /api/generate.</summary>
+    private sealed class OllamaQueVuelve : HttpMessageHandler
+    {
+        public bool Caido { get; set; }
+        public int Generaciones;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct)
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/tags")
+                return Task.FromResult(Json("""{"models":[{"name":"llama3.2:latest"}]}"""));
+            Interlocked.Increment(ref Generaciones);
+            if (Caido) throw new HttpRequestException("Conexión rechazada.");
+            return Task.FromResult(Json("""{"response":"{\"idioma\":\"ES\"}","done":true}"""));
+        }
+
+        private static HttpResponseMessage Json(string cuerpo)
+            => new(System.Net.HttpStatusCode.OK) { Content = new StringContent(cuerpo, System.Text.Encoding.UTF8, "application/json") };
+    }
+
+    // El caso de la revisión: Ollama se cae a mitad de «Proponer fichas», la herramienta corta a los 3
+    // fallos y la cabecera pide «Pulsa «Comprobar» cuando esté resuelto». Se arranca Ollama, se pulsa
+    // «Comprobar» y enseguida «Proponer»: sin reiniciar, la pausa de 30 s seguía y la IA devolvía el
+    // error sin llegar a preguntar.
+    [Fact]
+    public async Task Comprobar_con_la_IA_de_vuelta_quita_la_pausa_por_fallos()
+    {
+        var ollama = new OllamaQueVuelve { Caido = true };
+        var ia = new OllamaClient(new ApiClient(new AppPaths(_dir)), http: new HttpClient(ollama));
+        for (var i = 0; i < OllamaClient.FallosSeguidosParaPausar; i++)
+            await ia.PedirJsonAsync("sistema", $"peticion {i}", "llama3.2");
+        var (_, enPausa) = await ia.PedirJsonAsync("sistema", "otra", "llama3.2");
+        Assert.Contains("No se pudo contactar", enPausa);
+        Assert.Equal(OllamaClient.FallosSeguidosParaPausar, ollama.Generaciones);   // ya no pregunta
+
+        ollama.Caido = false;   // Ollama vuelve
+        var estado = await ia.ComprobarModeloAsync("llama3.2");
+        var (disponible, _, _) = AsistenteViewModel.TrasComprobarIa(ia, estado, "llama3.2");
+
+        Assert.True(disponible);
+        var (json, error) = await ia.PedirJsonAsync("sistema", "despues de comprobar", "llama3.2");
+        Assert.Equal("", error);
+        Assert.NotNull(json);
+        Assert.Equal(OllamaClient.FallosSeguidosParaPausar + 1, ollama.Generaciones);
+    }
+
+    // Si la comprobación dice que la IA sigue sin estar, no se toca nada.
+    [Fact]
+    public async Task Comprobar_sin_IA_no_quita_la_pausa()
+    {
+        var ollama = new OllamaQueVuelve { Caido = true };
+        var ia = new OllamaClient(new ApiClient(new AppPaths(_dir)), http: new HttpClient(ollama));
+        for (var i = 0; i < OllamaClient.FallosSeguidosParaPausar; i++)
+            await ia.PedirJsonAsync("sistema", $"peticion {i}", "llama3.2");
+
+        var (disponible, _, _) = AsistenteViewModel.TrasComprobarIa(
+            ia, new EstadoModelo("", false, "Ollama no responde.", Array.Empty<string>()), "llama3.2");
+
+        Assert.False(disponible);
+        await ia.PedirJsonAsync("sistema", "otra", "llama3.2");
+        Assert.Equal(OllamaClient.FallosSeguidosParaPausar, ollama.Generaciones);
     }
 }

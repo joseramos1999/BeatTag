@@ -30,6 +30,13 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private double _progress;
 
+    /// <summary>
+    /// Una herramienta está escribiendo archivos (géneros en las etiquetas, nombres nuevos). Es más
+    /// estricto que <see cref="IsBusy"/>: proponer fichas o nombres solo lee, y mientras tanto se
+    /// pueden escuchar las propuestas que ya están en la tabla.
+    /// </summary>
+    [ObservableProperty] private bool _escribiendoArchivos;
+
     /// <summary>Qué IA hay: modelo en uso, o por qué no hay.</summary>
     [ObservableProperty] private string _estadoIa = "Comprobando la IA local…";
     [ObservableProperty] private bool _iaDisponible;
@@ -78,7 +85,23 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
         }
         EstadoIa = "Comprobando la IA local…";
         var estado = await Engine.Ai.ComprobarModeloAsync(Engine.Config.AiModel);
-        (IaDisponible, Modelo, EstadoIa) = DescribirIa(estado, Engine.Config.AiModel);
+        (IaDisponible, Modelo, EstadoIa) = TrasComprobarIa(Engine.Ai, estado, Engine.Config.AiModel);
+    }
+
+    /// <summary>
+    /// Si la IA responde con el modelo elegido, se le quita la pausa por fallos que pudiera arrastrar, y
+    /// se describe el estado para la cabecera.
+    ///
+    /// Visto en la revisión: tras un corte, la cabecera pide «Pulsa «Comprobar» cuando esté resuelto»,
+    /// pero comprobar no reiniciaba el cliente. Renombrar y Completar sí lo hacen al empezar; Proponer
+    /// fichas y Unificar géneros no, así que si se pulsaba «Proponer» en los 30 s de pausa la IA
+    /// devolvía el error al momento y la herramienta volvía a cortar a los 3 fallos. Reiniciar aquí es
+    /// seguro: mientras otra página trabaja no se puede entrar en esta ni pulsar «Comprobar».
+    /// </summary>
+    internal static (bool Disponible, string Modelo, string Texto) TrasComprobarIa(OllamaClient ai, EstadoModelo estado, string elegido)
+    {
+        if (estado.Disponible) ai.Reset();
+        return DescribirIa(estado, elegido);
     }
 
     /// <summary>
@@ -105,13 +128,30 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
         EstadoIa = $"{motivo} Pulsa «Comprobar» cuando esté resuelto.";
     }
 
-    /// <summary>Las listas de colecciones de todas las herramientas, como están ahora en Colecciones.</summary>
+    /// <summary>
+    /// Las listas de colecciones de todas las herramientas, como están ahora en Colecciones. Si la
+    /// colección que tenía elegida alguna ya no existe, se dice en el estado a qué ha pasado.
+    ///
+    /// Visto en la revisión: al entrar en la página se rellenan los desplegables, y una colección
+    /// borrada en Colecciones pasaba sin aviso a «Toda la biblioteca» (o, en «Ordenar para mezclar», a
+    /// otra colección). El aviso de «ya no existe» al pulsar casi nunca llegaba a verse.
+    /// </summary>
     internal void RellenarAmbitos()
     {
-        Mezcla.RellenarColecciones();
-        FichasIa.RellenarAmbitos();
-        Renombrar.RellenarAmbitos();
-        Completar.RellenarAmbitos();
+        var perdidos = new List<SelectorAmbito.AmbitoPerdido>();
+        void Mirar(string herramienta, string perdida, AmbitoOpcion? ahora)
+        {
+            if (perdida.Length > 0) perdidos.Add(new SelectorAmbito.AmbitoPerdido(herramienta, perdida, ahora?.Nombre));
+        }
+        Mirar("Ordenar para mezclar", Mezcla.RellenarColecciones(), Mezcla.Coleccion);
+        Mirar("Proponer fichas", FichasIa.RellenarAmbitos(), FichasIa.Ambito);
+        Mirar("Renombrar con IA", Renombrar.RellenarAmbitos(), Renombrar.Ambito);
+        Mirar("Completar nombres cortados", Completar.RellenarAmbitos(), Completar.Ambito);
+
+        // Con una herramienta en marcha el estado es suyo (y, si se rellenó porque la colección ya no
+        // estaba, ya dice el motivo).
+        var aviso = SelectorAmbito.AvisoAmbitosPerdidos(perdidos);
+        if (aviso.Length > 0 && !IsBusy) Status = aviso;
     }
 
     [RelayCommand]
@@ -122,11 +162,12 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
     /// avance. Todas las herramientas pasan por aquí para que el bloqueo del resto de la aplicación
     /// y el botón Cancelar funcionen igual en todas.
     /// </summary>
-    internal async Task TrabajarAsync(string que, Func<CancellationToken, Task> trabajo)
+    internal async Task TrabajarAsync(string que, Func<CancellationToken, Task> trabajo, bool escribeArchivos = false)
     {
         if (IsBusy) return;
         _cts = new CancellationTokenSource();
         IsBusy = true;
+        EscribiendoArchivos = escribeArchivos;
         Progress = 0;
         Status = que;
         try { await trabajo(_cts.Token); }
@@ -139,11 +180,19 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
         finally
         {
             IsBusy = false;
+            EscribiendoArchivos = false;
             Progress = 0;
             _cts.Dispose();
             _cts = null;
         }
     }
+
+    /// <summary>
+    /// Como <see cref="TrabajarAsync"/>, para las herramientas que escriben archivos: mientras dura, el
+    /// menú contextual no deja escuchar (el reproductor tendría el archivo abierto).
+    /// </summary>
+    internal Task EscribirArchivosAsync(string que, Func<CancellationToken, Task> trabajo)
+        => TrabajarAsync(que, trabajo, escribeArchivos: true);
 
     /// <summary>Las fichas de toda la biblioteca de una vez, para no leerlas canción a canción.</summary>
     internal Dictionary<string, FichaDj> FichasActuales()
@@ -236,15 +285,55 @@ public static class SelectorAmbito
     /// nombre), o la primera si ya no está.
     /// </summary>
     public static AmbitoOpcion? Elegir(IReadOnlyList<AmbitoOpcion> opciones, AmbitoOpcion? anterior)
+        => Elegir(opciones, anterior, out _);
+
+    /// <summary>
+    /// Como <see cref="Elegir(IReadOnlyList{AmbitoOpcion}, AmbitoOpcion?)"/>, y en
+    /// <paramref name="perdida"/> el nombre de la colección elegida antes si ya no existe ("" si sigue,
+    /// o si no había ninguna elegida): quien rellena el desplegable tiene que decir que ha cambiado.
+    /// </summary>
+    public static AmbitoOpcion? Elegir(IReadOnlyList<AmbitoOpcion> opciones, AmbitoOpcion? anterior, out string perdida)
     {
+        perdida = "";
         if (anterior != null)
         {
             var misma = opciones.FirstOrDefault(o => ReferenceEquals(o.Coleccion, anterior.Coleccion))
                         ?? (anterior.Id.Length > 0 ? opciones.FirstOrDefault(o => o.Id == anterior.Id) : null);
             if (misma != null) return misma;
+            if (!anterior.EsTodaLaBiblioteca) perdida = anterior.Nombre;
         }
         return opciones.FirstOrDefault();
     }
+
+    /// <summary>Una herramienta cuya colección elegida ya no existe, y a qué ha pasado (null = a ninguna).</summary>
+    public sealed record AmbitoPerdido(string Herramienta, string Coleccion, string? Ahora);
+
+    /// <summary>
+    /// El aviso para el estado cuando una o varias herramientas han perdido su colección, agrupado por
+    /// colección: «La colección «Bachata para cerrar» ya no existe en Colecciones: «Proponer fichas» y
+    /// «Renombrar con IA» pasan a «Toda la biblioteca».». Vacío si no se ha perdido ninguna.
+    /// </summary>
+    public static string AvisoAmbitosPerdidos(IReadOnlyList<AmbitoPerdido> perdidos)
+    {
+        var frases = new List<string>();
+        foreach (var porColeccion in perdidos.GroupBy(p => p.Coleccion, StringComparer.Ordinal))
+        {
+            var destinos = porColeccion.GroupBy(p => p.Ahora, StringComparer.Ordinal).Select(g =>
+            {
+                var herramientas = Unir(g.Select(p => $"«{p.Herramienta}»").ToList());
+                var varias = g.Count() > 1;
+                return g.Key == null
+                    ? $"{herramientas} {(varias ? "se quedan" : "se queda")} sin colección"
+                    : $"{herramientas} {(varias ? "pasan" : "pasa")} a «{g.Key}»";
+            });
+            frases.Add($"La colección «{porColeccion.Key}» ya no existe en Colecciones: {string.Join("; ", destinos)}.");
+        }
+        return string.Join(" ", frases);
+    }
+
+    /// <summary>«A», «A y B», «A, B y C».</summary>
+    private static string Unir(IReadOnlyList<string> partes)
+        => partes.Count <= 1 ? string.Join("", partes) : string.Join(", ", partes.Take(partes.Count - 1)) + " y " + partes[^1];
 
     /// <summary>
     /// La colección del ámbito (null = toda la biblioteca). Si la colección elegida ya no existe, NO se
@@ -263,14 +352,17 @@ public static class SelectorAmbito
         return false;
     }
 
-    /// <summary>Rehace un desplegable conservando la elección por colección, no por nombre.</summary>
+    /// <summary>
+    /// Rehace un desplegable conservando la elección por colección, no por nombre. En
+    /// <paramref name="perdida"/>, la colección elegida antes si ya no existe.
+    /// </summary>
     internal static AmbitoOpcion? Rellenar(ObservableCollection<AmbitoOpcion> destino, IEnumerable<ColeccionInteligente> colecciones,
-                                           bool conTodaLaBiblioteca, AmbitoOpcion? anterior)
+                                           bool conTodaLaBiblioteca, AmbitoOpcion? anterior, out string perdida)
     {
         var opciones = Opciones(colecciones, conTodaLaBiblioteca);
         destino.Clear();
         foreach (var o in opciones) destino.Add(o);
-        return Elegir(opciones, anterior);
+        return Elegir(opciones, anterior, out perdida);
     }
 }
 
@@ -577,8 +669,12 @@ public sealed partial class FichasIaViewModel : ObservableObject
     [ObservableProperty] private string _resumen = "";
     [ObservableProperty] private bool _hayAceptacionQueDeshacer;
 
-    public void RellenarAmbitos()
-        => Ambito = SelectorAmbito.Rellenar(Ambitos, _p.Engine.Colecciones.Todas, conTodaLaBiblioteca: true, Ambito);
+    /// <summary>Rehace el desplegable. Devuelve la colección elegida si ya no existe ("" si sigue).</summary>
+    public string RellenarAmbitos()
+    {
+        Ambito = SelectorAmbito.Rellenar(Ambitos, _p.Engine.Colecciones.Todas, conTodaLaBiblioteca: true, Ambito, out var perdida);
+        return perdida;
+    }
 
     [RelayCommand]
     private Task ProponerAsync() => _p.TrabajarAsync("Buscando canciones sin idioma o sin voz…", async ct =>
@@ -911,7 +1007,7 @@ public sealed partial class GenerosIaViewModel : ObservableObject
     public IReadOnlyList<GeneroFila> Marcadas => Filas.Where(f => f.Aplicar && f.Cambia).ToList();
 
     /// <summary>Escribe los géneros marcados. La confirmación la pide la vista.</summary>
-    public Task AplicarAsync() => _p.TrabajarAsync("Escribiendo géneros…", async ct =>
+    public Task AplicarAsync() => _p.EscribirArchivosAsync("Escribiendo géneros…", async ct =>
     {
         var marcadas = Marcadas.ToDictionary(f => f.Original, f => f.Propuesto.Trim(), StringComparer.Ordinal);
         if (marcadas.Count == 0) { _p.Status = "No hay ningún género marcado."; return; }
@@ -1002,8 +1098,12 @@ public sealed partial class RenombrarIaViewModel : ObservableObject
         FilasView.Refresh();
     }
 
-    public void RellenarAmbitos()
-        => Ambito = SelectorAmbito.Rellenar(Ambitos, _p.Engine.Colecciones.Todas, conTodaLaBiblioteca: true, Ambito);
+    /// <summary>Rehace el desplegable. Devuelve la colección elegida si ya no existe ("" si sigue).</summary>
+    public string RellenarAmbitos()
+    {
+        Ambito = SelectorAmbito.Rellenar(Ambitos, _p.Engine.Colecciones.Todas, conTodaLaBiblioteca: true, Ambito, out var perdida);
+        return perdida;
+    }
 
     [RelayCommand]
     private Task ProponerAsync() => _p.TrabajarAsync("Buscando nombres sucios…", async ct =>
@@ -1091,7 +1191,7 @@ public sealed partial class RenombrarIaViewModel : ObservableObject
     public IReadOnlyList<NombreFila> Marcadas => Filas.Where(f => f.Aceptar && f.Propuesto.Trim().Length > 0).ToList();
 
     /// <summary>Renombra las marcadas. La confirmación la pide la vista.</summary>
-    public Task RenombrarAsync() => _p.TrabajarAsync("Renombrando…", async ct =>
+    public Task RenombrarAsync() => _p.EscribirArchivosAsync("Renombrando…", async ct =>
     {
         var marcadas = Marcadas;
         if (marcadas.Count == 0) { _p.Status = "No hay ninguna propuesta marcada."; return; }
@@ -1195,8 +1295,12 @@ public sealed partial class CompletarNombresViewModel : ObservableObject
     public ObservableCollection<CortadoFila> Filas { get; } = new();
     [ObservableProperty] private string _resumen = "";
 
-    public void RellenarAmbitos()
-        => Ambito = SelectorAmbito.Rellenar(Ambitos, _p.Engine.Colecciones.Todas, conTodaLaBiblioteca: true, Ambito);
+    /// <summary>Rehace el desplegable. Devuelve la colección elegida si ya no existe ("" si sigue).</summary>
+    public string RellenarAmbitos()
+    {
+        Ambito = SelectorAmbito.Rellenar(Ambitos, _p.Engine.Colecciones.Todas, conTodaLaBiblioteca: true, Ambito, out var perdida);
+        return perdida;
+    }
 
     [RelayCommand]
     private Task BuscarAsync() => _p.TrabajarAsync("Buscando nombres cortados…", async ct =>
@@ -1321,7 +1425,7 @@ public sealed partial class CompletarNombresViewModel : ObservableObject
                                                                    && !string.Equals(f.Propuesto.Trim(), f.Actual, StringComparison.Ordinal)).ToList();
 
     /// <summary>Renombra las marcadas. La confirmación la pide la vista.</summary>
-    public Task RenombrarAsync() => _p.TrabajarAsync("Completando nombres…", async ct =>
+    public Task RenombrarAsync() => _p.EscribirArchivosAsync("Completando nombres…", async ct =>
     {
         var marcadas = Marcadas;
         if (marcadas.Count == 0) { _p.Status = "No hay ninguna propuesta marcada."; return; }
@@ -1386,8 +1490,12 @@ public sealed partial class MezclaViewModel : ObservableObject
     public ObservableCollection<PasoFila> Pasos { get; } = new();
     [ObservableProperty] private string _resumen = "";
 
-    public void RellenarColecciones()
-        => Coleccion = SelectorAmbito.Rellenar(Colecciones, _p.Engine.Colecciones.Todas, conTodaLaBiblioteca: false, Coleccion);
+    /// <summary>Rehace el desplegable. Devuelve la colección elegida si ya no existe ("" si sigue).</summary>
+    public string RellenarColecciones()
+    {
+        Coleccion = SelectorAmbito.Rellenar(Colecciones, _p.Engine.Colecciones.Todas, conTodaLaBiblioteca: false, Coleccion, out var perdida);
+        return perdida;
+    }
 
     [RelayCommand]
     private Task OrdenarAsync() => _p.TrabajarAsync("Ordenando…", async ct =>
