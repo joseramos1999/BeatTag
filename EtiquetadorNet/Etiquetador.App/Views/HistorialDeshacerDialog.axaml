@@ -1,0 +1,88 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="960" d:DesignHeight="640"
+        x:Class="Etiquetador.App.Views.HistorialDeshacerDialog"
+        x:CompileBindings="False"
+        Title="Historial de cambios"
+        Width="960" Height="640" MinWidth="640" MinHeight="420"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+
+    <!-- Sin x:DataType (bindings por reflexión), como el resto de diálogos: el DataContext es HistorialDeshacerViewModel. -->
+    <DockPanel Margin="16">
+        <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,10">
+            <TextBlock Text="Historial de cambios" FontSize="16" FontWeight="Bold" />
+            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextoSecundario}"
+                       Text="Cada vez que la aplicación escribe en tus archivos (aplicar propuestas, Editor, Volumen, géneros, renombrados…) anota cómo estaban. Elige una ejecución para ver sus archivos: puedes deshacerla entera o solo las canciones que marques, aunque después haya otras." />
+        </StackPanel>
+
+        <!-- Abajo: estado y botones -->
+        <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,10,0,0">
+            <TextBlock Text="{Binding Estado}" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button Content="Dar por perdidos…" Click="DarPorPerdidos_Click" MinWidth="140" IsEnabled="{Binding PuedeDarPorPerdidos}"
+                        ToolTip.Tip="Saca de la cola los cambios pendientes de esta ejecución sin tocar ningún archivo. Para los archivos que ya no van a volver (borrados o enviados a la papelera)." />
+                <Button Content="Cerrar" Click="Cerrar_Click" MinWidth="100" IsCancel="True" />
+                <Button Click="DeshacerMarcadas_Click" MinWidth="160" IsEnabled="{Binding PuedeDeshacerMarcadas}"
+                        Background="#D97706" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Deshace solo las canciones marcadas de la ejecución elegida. Las demás siguen pendientes.">
+                    <TextBlock Text="{Binding Marcadas, StringFormat='Deshacer las marcadas ({0})'}" />
+                </Button>
+                <Button Content="Deshacer esta ejecución" Click="DeshacerEjecucion_Click" MinWidth="170"
+                        IsEnabled="{Binding PuedeDeshacerEjecucion}"
+                        Background="#B45309" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Deshace todo lo que sigue pendiente de la ejecución elegida. Antes comprueba si alguna ejecución posterior tocó los mismos archivos y te lo dice." />
+            </StackPanel>
+        </StackPanel>
+
+        <Grid RowDefinitions="Auto,2*,Auto,3*">
+            <DockPanel Grid.Row="0" Margin="0,0,0,4">
+                <CheckBox DockPanel.Dock="Right" Content="Mostrar también las ya deshechas" IsChecked="{Binding MostrarDeshechas}" />
+                <TextBlock Text="Ejecuciones" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </DockPanel>
+
+            <DataGrid Grid.Row="1" ItemsSource="{Binding Ejecuciones}" SelectedItem="{Binding Seleccionada}"
+                      AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                      CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Fecha" Binding="{Binding Fecha}" Width="140" />
+                    <DataGridTextColumn Header="Tipo" Binding="{Binding Tipo}" Width="200" />
+                    <DataGridTextColumn Header="Archivos" Binding="{Binding Cambios}" Width="90" />
+                    <DataGridTextColumn Header="Renombrados" Binding="{Binding Renombrados}" Width="110" />
+                    <DataGridTextColumn Header="Estado" Binding="{Binding Estado}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <DockPanel Grid.Row="2" Margin="0,10,0,4">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6">
+                    <Button Content="Marcar todas" Command="{Binding MarcarTodasCommand}" />
+                    <Button Content="Desmarcar todas" Command="{Binding DesmarcarTodasCommand}" />
+                </StackPanel>
+                <TextBlock Text="Archivos de la ejecución elegida" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </DockPanel>
+
+            <DataGrid Grid.Row="3" ItemsSource="{Binding Cambios}"
+                      AutoGenerateColumns="False" SelectionMode="Extended"
+                      CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
+                <DataGrid.Columns>
+                    <!-- Solo lo pendiente se puede marcar: lo deshecho o perdido ya no está por deshacer. -->
+                    <DataGridTemplateColumn Header="" Width="40">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <CheckBox IsChecked="{Binding Marcada}" IsEnabled="{Binding Seleccionable}"
+                                          HorizontalAlignment="Center" />
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Header="Archivo" Binding="{Binding Archivo}" Width="260" IsReadOnly="True" />
+                    <DataGridTextColumn Header="Nombre anterior" Binding="{Binding NombreAnterior}" Width="200" IsReadOnly="True" />
+                    <DataGridTextColumn Header="Qué cambió" Binding="{Binding Cambios}" Width="170" IsReadOnly="True" />
+                    <DataGridTextColumn Header="Estado" Binding="{Binding Estado}" Width="110" IsReadOnly="True" />
+                    <DataGridTextColumn Header="Carpeta" Binding="{Binding Carpeta}" Width="*" IsReadOnly="True" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Grid>
+    </DockPanel>
+</Window>

@@ -66,4 +66,23 @@ public sealed class UndoRecord
     /// el manifiesto serializando un UndoRecord con las opciones por defecto la lleva sin hacer nada.
     /// </summary>
     public bool Aplicada { get; set; }
+
+    // --- Historial de deshacer (E14/M14) ---
+
+    /// <summary>
+    /// Qué operación escribió este registro, con el nombre de un <see cref="TipoEjecucion"/>
+    /// («Volumen», «Generos»…). Es OPCIONAL: los manifiestos anteriores no lo llevan, y el historial
+    /// deduce el tipo de lo que guarda cada registro (<see cref="HistorialDeshacer.DeducirTipo"/>).
+    /// Solo hace falta donde esa deducción no distingue dos operaciones con los mismos campos (el
+    /// Editor y Unificar géneros escriben los dos solo «Genre»).
+    ///
+    /// Sin valor no se escribe, así que los manifiestos de quien no lo pone quedan exactamente como
+    /// antes.
+    ///
+    /// PENDIENTE: en la tanda 3 ningún escritor lo pone todavía (el Editor y Unificar géneros son de
+    /// otros equipos), así que una edición del Editor que solo cambia el género sigue saliendo como
+    /// «Géneros». Basta con que cada escritor ponga aquí su <see cref="TipoEjecucion"/>.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Origen { get; set; }
 }

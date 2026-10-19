@@ -163,6 +163,9 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 try { r = await Task.Run(() => _engine.AnalyzeCachedAsync(t.FilePath, opts, sig, force, ct), ct); }
                 catch (OperationCanceledException) { throw; }
                 catch { continue; }
+                // Restos de la tanda 2: como en Enriquecer, lo analizado se guarda cada ~200
+                // canciones o 5 minutos; un cierre a la fuerza ya no tira la pasada entera.
+                await _engine.PuntoDeControlAsync();
                 if (r.Skip) continue;
                 if (!r.Found && !r.CleanOnly)
                     Rows.Add(MakeRow(r, t));
@@ -223,11 +226,13 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
         var campos = new FieldFlags { Title = true, Artist = true, Album = false, Genre = false, Year = false, Bpm = false };
         int hechas = 0, sinRenombrar = 0, fallidas = 0, sinHistorial = 0;
         ApplyOneResult? ultimo = null;
+        var tocadas = new List<string>();   // origen y destino de cada una: lo que se relee en la biblioteca
 
         try
         {
             foreach (var row in filas)
             {
+                tocadas.Add(row.FilePath);
                 var titulo = row.AiVersion.Trim().Length > 0 ? $"{row.AiTitle} ({row.AiVersion.Trim()})" : row.AiTitle;
                 var info = new ProcessResult
                 {
@@ -244,6 +249,7 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 // sobrescribir a ciegas se pisa: el usuario ha aceptado un NOMBRE, no una ficha entera.
                 var res = await Task.Run(() => _engine.AplicarUnoAsync(info, over: true, campos, "keep", null, undo, _engine.Paths.DoneLog, aplicada: true));
                 ultimo = res;
+                tocadas.Add(res.FinalPath);
                 if (res.UndoErr.Length > 0) sinHistorial++;
 
                 // Aceptar la sugerencia es sobre todo RENOMBRAR: si el renombrado falla (el Explorador,
@@ -269,12 +275,14 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
                         _engine.Logger.Err($"No se pudo aplicar la sugerencia en '{row.FileName}': {res.TagErr}{res.RenErr}");
                         break;
                 }
+                await _engine.PuntoDeControlAsync();   // lo dado por aplicado se guarda también a mitad de un lote largo
             }
 
             _engine.Applied.Save();
             RowsView.Refresh();
             SetSelection(Array.Empty<NotFoundRow>());
-            await _engine.Library.ScanAsync();
+            // M12: se releen solo los archivos tocados (nombre de antes y de después), no todas las carpetas.
+            await _engine.Library.RefrescarAsync(tocadas);
 
             Status = ResumenSugerencias(filas.Count, hechas, sinRenombrar, fallidas, filas[0], ultimo)
                    + (sinHistorial > 0 ? $"  ⚠ {sinHistorial} no quedaron anotadas: esos cambios no se pueden deshacer." : "");
@@ -394,7 +402,7 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
             var fields = _engine.BuildFields();
             var undo = _engine.Paths.NuevoManifiesto();
             var res = await Task.Run(() => _engine.AplicarUnoAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog, aplicada: true));
-            await _engine.Library.ScanAsync();
+            await _engine.Library.RefrescarAsync(new[] { row.FilePath, res.FinalPath });   // M12: solo este archivo
             var sinAnotar = res.UndoErr.Length > 0
                 ? $"  ⚠ el cambio NO quedó anotado, no se podrá deshacer ({res.UndoErr})"
                 : "";

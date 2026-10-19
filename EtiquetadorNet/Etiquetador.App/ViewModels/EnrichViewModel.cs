@@ -357,10 +357,19 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     }
 
     [RelayCommand]
-    private void RemoveFolderPath(string? folder) { if (folder != null) _engine.Library.RemoveFolder(folder); }
+    private void RemoveFolderPath(string? folder)
+    {
+        if (folder == null) return;
+        _engine.Library.RemoveFolder(folder);
+        OlvidarAmbitoSiCaduco();
+    }
 
     [RelayCommand]
-    private void ClearFolders() => _engine.Library.ClearFolders();
+    private void ClearFolders()
+    {
+        _engine.Library.ClearFolders();
+        OlvidarAmbitoSiCaduco();
+    }
 
     /// <summary>
     /// ¿Se salta sin consultar? Depende solo de su casilla, también con «Sobrescribir tags
@@ -391,12 +400,27 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     [RelayCommand]
     private Task ReanalyzeAllAsync() => RunAnalyzeAsync(force: true);
 
-    private async Task RunAnalyzeAsync(bool force)
+    /// <param name="marcar">
+    /// F1: carpeta desmarcada que el usuario ha aceptado marcar para analizarla. Se marca con la
+    /// pestaña ya ocupada: marcarla antes deja la biblioteca «sin escanear», y eso bloquea un momento
+    /// el resto de pestañas y lleva a Biblioteca.
+    /// </param>
+    private async Task RunAnalyzeAsync(bool force, FolderItem? marcar = null)
     {
         if (_engine.Library.Folders.Count == 0) { Status = "Añade al menos una carpeta."; return; }
         if (IsBusy) return;
+        // F1: si la carpeta del ámbito se ha quitado o desmarcado, no se analiza «todo» por sorpresa
+        // (una pasada completa puede durar horas): se vuelve a la vista de todas y se dice.
+        if (marcar == null && Ambito is { } caducado && !AmbitoVigente(Folders, caducado))
+        {
+            Ambito = null;
+            LoadCached();
+            Status = $"«{NombreAmbito(caducado)}» ya no está entre las carpetas marcadas: se muestran de nuevo todas. Pulsa «Analizar» para analizarlas.";
+            return;
+        }
         PushToConfig();
         IsBusy = true;
+        if (marcar != null) marcar.Enabled = true;   // la biblioteca pide escanear; se escanea justo debajo
         IsPaused = false;
         Progress = 0; TimeInfo = "";
         StepProgress = 0; StepInfo = "";
@@ -425,8 +449,12 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             Rows.Clear();
             var opts = _engine.BuildOptions();
             var sig = opts.Signature();
-            var tracks = _engine.Library.Tracks.ToList();   // biblioteca compartida (sin re-escanear)
-            _engine.Logger.Head($"{(force ? "REANÁLISIS COMPLETO" : "Análisis")} de {tracks.Count} canciones"
+            // Biblioteca compartida (sin re-escanear), o solo la carpeta elegida (F1).
+            var ambito = Ambito;
+            var tracks = PistasDelAmbito(_engine.Library.Tracks, ambito);
+            var donde = ambito == null ? "" : $" de «{NombreAmbito(ambito)}»";
+            if (ambito != null) AmbitoTexto = TextoAmbito(ambito, tracks.Count);
+            _engine.Logger.Head($"{(force ? "REANÁLISIS COMPLETO" : "Análisis")} de {tracks.Count} canciones{(ambito == null ? "" : $" de {ambito.Carpeta} (solo esa carpeta)")}"
                               + (_engine.Ignored.Count > 0 ? $" ({_engine.Ignored.Count} descartadas se omiten)" : ""));
             _engine.Logger.Detail($"Firma de opciones: {sig}");
             var seen = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
@@ -463,6 +491,11 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
                     try { r = await Task.Run(() => _engine.AnalyzeCachedAsync(t.FilePath, opts, sig, force, ct), ct); }
                     catch (OperationCanceledException) { throw; }
                     catch { continue; }
+                    // Restos de la tanda 2: una pasada completa puede durar horas; cada ~200
+                    // canciones consultadas o 5 minutos se guarda lo hecho, y un cierre a la fuerza
+                    // ya no tira la tirada entera. Las que salen de la caché no cuentan: no hay nada
+                    // nuevo que guardar.
+                    await _engine.PuntoDeControlAsync();
                 }
                 seenResults.Add(r);
                 VigilarIa();
@@ -472,16 +505,16 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             // Solo se poda dentro de las carpetas que esta pasada ha recorrido de verdad, las que han
             // aportado canciones. Visto en una biblioteca real: con 42 de 43 carpetas desmarcadas,
             // analizar 59 canciones dejó analysis-cache.json en 57.730 bytes (antes, ~6 MB). Una
-            // carpeta sin canciones -un disco desconectado- tampoco se poda.
-            var raices = tracks.Select(t => t.Folder).Where(f => !string.IsNullOrEmpty(f))
-                               .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            // carpeta sin canciones -un disco desconectado- tampoco se poda. Con una subcarpeta (F1)
+            // la raíz es la subcarpeta, no la carpeta de la lista: si no, se borraría el resto.
+            var raices = RaicesAPodar(tracks, ambito);
             _engine.Analysis.Prune(seen, raices);
             _engine.Analysis.Save();
             PodarMarcas(_engine.Marks, HuellasVigentes(seenResults));
             _engine.Marks.Save();
             RowsView.Refresh();
             Progress = 100;
-            Status = $"Analizadas {tracks.Count} · propuestas {Rows.Count} · {fromCache} de caché"
+            Status = $"Analizadas {tracks.Count}{donde} · propuestas {Rows.Count} · {fromCache} de caché"
                    + (alreadyApplied > 0 ? $" · {alreadyApplied} ya aplicadas (omitidas)" : "")
                    + (yaCorrectas > 0 ? $" · {yaCorrectas} saltadas (nombre y tags ya coinciden)" : "")
                    + (sinCambio > 0 ? $" · {sinCambio} ya estaban bien" : "")
@@ -669,8 +702,11 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     public void LoadCached()
     {
         if (IsBusy) return;
-        var tracks = _engine.Library.Tracks.ToList();
-        if (tracks.Count == 0) return;
+        if (_engine.Library.Tracks.Count == 0) return;
+        // Con un ámbito (F1), solo lo de esa carpeta; si la carpeta ya no cuenta, otra vez todas.
+        if (Ambito != null && !AmbitoVigente(Folders, Ambito)) Ambito = null;
+        var tracks = PistasDelAmbito(_engine.Library.Tracks, Ambito);
+        if (Ambito != null) AmbitoTexto = TextoAmbito(Ambito, tracks.Count);
         var sig = _engine.BuildOptions().Signature();
         Rows.Clear();
         int loaded = 0;
@@ -797,7 +833,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
              + (renombran > 0 ? $" y se renombrarán {Archivos(renombran)}." : "; ningún archivo cambia de nombre.");
         static string Frase(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
-        var nota = "Se puede deshacer con «Deshacer última»."
+        var nota = "Se puede deshacer con «Deshacer última» o, más adelante, desde «Historial de cambios»."
                  + (p.Renombran > 0
                      ? " Si usas rekordbox, los archivos renombrados pierden allí sus cue points y su beatgrid hasta que repares la colección (Ajustes → Reparar colección de rekordbox)."
                      : "");
@@ -874,16 +910,20 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             var sw = Stopwatch.StartNew();
             var cancelled = false;
             var appliedRows = new List<PreviewRow>();   // filas aplicadas con éxito: se quitan de la lista al terminar
+            var tocadas = new List<string>();           // origen y destino de cada una: lo que se relee en la biblioteca
             foreach (var row in toApply)
             {
                 if (ct.IsCancellationRequested) { cancelled = true; break; }
                 done++;
                 Progress = marked == 0 ? 0 : (double)done / marked * 100;
                 Status = $"Aplicando {done}/{marked}…  {row.Old}";
+                var origen = row.Result.FilePath;
+                tocadas.Add(origen);
                 try
                 {
                     row.SyncToResult();   // respeta lo editado en la tabla (nombre y tags)
                     var res = await Task.Run(() => _engine.AplicarUnoAsync(row.Result, Overwrite, fields, CoverMode, png, undoFile, doneLog, ct, aplicada: true), ct);
+                    tocadas.Add(res.FinalPath);
                     row.RowStatus = res is { TagOk: true, RenOk: true }
                         ? (res.UndoErr.Length > 0 ? "✔ aplicado (sin marcha atrás)" : "✔ aplicado")
                         : $"⚠ {res.TagErr}{res.RenErr}";
@@ -911,6 +951,9 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
                     row.RowStatus = "⚠ " + e.Message;
                     _engine.Logger.Error($"Error al aplicar '{row.Old}'", e);
                 }
+                // Restos de la tanda 2: aplicar cientos de canciones lleva su rato; lo dado por
+                // aplicado se guarda cada ~200 canciones o 5 minutos, no solo al terminar.
+                await _engine.PuntoDeControlAsync();
             }
             // Las canciones ya aplicadas salen de la lista de Enriquecer (las que fallaron se quedan con su aviso).
             if (appliedRows.Count > 0)
@@ -923,7 +966,9 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             _engine.Logger.Sum($"Aplicación terminada: {applied} de {marked} correctas"
                              + (applied < marked ? $" · {marked - applied} con problemas" : "")
                              + (cancelled ? " (cancelada)" : ""));
-            await _engine.Library.ScanAsync();   // refleja renombrados/tags en la biblioteca compartida
+            // M12: se releen solo los archivos tocados (de cada renombrado, el nombre de antes y el de
+            // después) en lugar de recorrer las 15-20k canciones de todas las carpetas.
+            if (tocadas.Count > 0) await _engine.Library.RefrescarAsync(tocadas);
             Status = cancelled
                 ? $"Cancelado: {applied} aplicados antes de parar. Manifiesto: {Path.GetFileName(undoFile)}"
                 : marked == 1
@@ -950,46 +995,70 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         try
         {
             res = await Task.Run(() => _engine.Undo.UndoLastRun());
-            _engine.Logger.Sum($"Deshacer: {res.Reverted} revertidos · {res.Manual} conservados · {res.Missing} ausentes · {res.Errors} errores.");
-            // Solo lo que se había dado por aplicado: deshacer un ajuste de volumen, Unificar géneros
-            // o la importación de rekordbox no devuelve a pendientes nada de Enriquecer.
-            vuelven = OlvidarRevertidas(_engine.Applied, _engine.Marks, res.AplicadasRevertidas);
-            if (vuelven > 0)
-            {
-                _engine.Applied.Save();
-                _engine.Marks.Save();
-                _engine.Logger.Detail($"    {vuelven} canciones revertidas dejan de contar como aplicadas.");
-            }
-            if (!res.None) await _engine.Library.ScanAsync();   // refleja el estado revertido
+            vuelven = await AsentarDeshacerAsync(res);
         }
         finally { IsBusy = false; }
 
-        // Salen de la lista SOLO las propuestas de los archivos cuyo nombre o etiquetas acaba de
-        // devolver el deshacer (no las de un deshacer de volumen): se calcularon sobre etiquetas o
-        // nombres que ya no son los que hay. Antes se rehacía la lista
-        // entera desde la caché, que da lo mismo para esas (deshacer cambia la fecha del archivo y su
-        // caché deja de valer) pero tiraba lo editado en las celdas y los avisos «⚠» de todas las
-        // demás, y miraba en disco las 15-20k pistas desde el hilo de la interfaz.
-        var retiradas = 0;
-        if (!res.None)
+        Status = ResumenDeshacer(res, vuelven, RetirarRevertidas(res),
+                                 nada: "No hay ninguna ejecución que deshacer.",
+                                 reintento: "«Deshacer última» reintentará solo esos.");
+    }
+
+    /// <summary>
+    /// Lo que se hace tras deshacer, venga de «Deshacer última» o del historial (E14): olvidar como
+    /// aplicado lo revertido y releer en la biblioteca lo tocado. Devuelve cuántas canciones vuelven
+    /// a estar pendientes.
+    /// </summary>
+    private async Task<int> AsentarDeshacerAsync(UndoResult res)
+    {
+        if (res.None) return 0;
+        _engine.Logger.Sum($"Deshacer: {res.Reverted} revertidos · {res.Manual} conservados · {res.Missing} ausentes · {res.Errors} errores.");
+        // Solo lo que se había dado por aplicado: deshacer un ajuste de volumen, Unificar géneros
+        // o la importación de rekordbox no devuelve a pendientes nada de Enriquecer.
+        var vuelven = OlvidarRevertidas(_engine.Applied, _engine.Marks, res.AplicadasRevertidas);
+        if (vuelven > 0)
         {
-            var quitar = FilasRevertidas(Rows, res.Revertidas);
-            if (quitar.Count > 0)
-            {
-                using (Recuento.EnLote())
-                    foreach (var f in quitar) Rows.Remove(f);
-                RowsView.Refresh();
-                retiradas = quitar.Count;
-            }
+            _engine.Applied.Save();
+            _engine.Marks.Save();
+            _engine.Logger.Detail($"    {vuelven} canciones revertidas dejan de contar como aplicadas.");
         }
-        Status = res.None
-            ? "No hay ninguna ejecución que deshacer."
+        // M12: refleja el estado revertido releyendo solo esos archivos (las dos rutas de cada
+        // registro), no las 15-20k canciones de todas las carpetas.
+        if (res.Tocadas.Count > 0) await _engine.Library.RefrescarAsync(res.Tocadas);
+        return vuelven;
+    }
+
+    /// <summary>
+    /// Quita de la lista las propuestas de los archivos revertidos y devuelve cuántas.
+    ///
+    /// Salen SOLO las de los archivos cuyo nombre o etiquetas acaba de devolver el deshacer (no las
+    /// de un deshacer de volumen): se calcularon sobre etiquetas o nombres que ya no son los que hay.
+    /// Antes se rehacía la lista entera desde la caché, que da lo mismo para esas (deshacer cambia la
+    /// fecha del archivo y su caché deja de valer) pero tiraba lo editado en las celdas y los avisos
+    /// «⚠» de todas las demás, y miraba en disco las 15-20k pistas desde el hilo de la interfaz.
+    /// </summary>
+    private int RetirarRevertidas(UndoResult res)
+    {
+        if (res.None) return 0;
+        var quitar = FilasRevertidas(Rows, res.Revertidas);
+        if (quitar.Count == 0) return 0;
+        using (Recuento.EnLote())
+            foreach (var f in quitar) Rows.Remove(f);
+        RowsView.Refresh();
+        return quitar.Count;
+    }
+
+    /// <summary>Lo que se dice tras deshacer.</summary>
+    /// <param name="nada">Qué decir si no había nada que deshacer.</param>
+    /// <param name="reintento">Cómo se reintenta lo que ha quedado pendiente.</param>
+    public static string ResumenDeshacer(UndoResult res, int vuelven, int retiradas, string nada, string reintento)
+        => res.None
+            ? nada
             : $"Deshecho: {res.Reverted} revertidos · {res.Manual} conservados · {res.Missing} ausentes · {res.Errors} errores."
-              + (res.Pendientes > 0 ? $" Quedan {res.Pendientes} pendientes: «Deshacer última» reintentará solo esos." : "")
+              + (res.Pendientes > 0 ? $" Quedan {res.Pendientes} pendientes: {reintento}" : "")
               + (vuelven > 0 ? $" {(vuelven == 1 ? "1 canción vuelve" : $"{vuelven} canciones vuelven")} a estar pendiente{(vuelven == 1 ? "" : "s")}: pulsa «Analizar» para ver de nuevo sus propuestas." : "")
               + (retiradas > 0 ? $" {(retiradas == 1 ? "Se retira 1 propuesta" : $"Se retiran {retiradas} propuestas")} de la lista porque su archivo ha cambiado: «Analizar» la{(retiradas == 1 ? "" : "s")} vuelve a calcular." : "")
               + (res.Aviso.Length > 0 ? " ⚠ " + res.Aviso : "");
-    }
 
     /// <summary>
     /// Filas cuyo archivo acaba de revertirse (por su ruta antes o después del cambio deshecho).
@@ -1364,4 +1433,194 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         try { _engine.Preview.Toggle(path); }
         catch (Exception e) { Status = "No se pudo reproducir: " + e.Message; }
     }
+
+    // --- F1: analizar una carpeta sin desmarcar las demás ---
+    //
+    // Visto en los registros de un usuario real: en cada sesión desmarcaba 42 de sus 43 carpetas para
+    // trabajar solo «Descargas» (análisis de 33, 59, 98 y 114 canciones) y después las volvía a marcar
+    // una a una. Desmarcar saca las canciones de TODAS las pestañas; para acotar un análisis basta con
+    // decir qué carpeta. El ámbito vive solo en esta pestaña y no cambia ninguna casilla.
+
+    /// <summary>
+    /// Carpeta a la que se limita Enriquecer (análisis, tabla y aplicar), o null para todas las
+    /// marcadas. No se guarda: al abrir la aplicación se vuelve a ver todo.
+    /// </summary>
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(HayAmbito))] private AmbitoAnalisis? _ambito;
+
+    public bool HayAmbito => Ambito != null;
+
+    /// <summary>«Mostrando solo «Descargas» · 98 canciones», para la banda encima de la tabla.</summary>
+    [ObservableProperty] private string _ambitoTexto = "";
+
+    partial void OnAmbitoChanged(AmbitoAnalisis? value)
+    {
+        if (value == null) AmbitoTexto = "";
+    }
+
+    /// <summary>Comprueba la carpeta elegida contra la lista de carpetas (ver <see cref="PrepararAmbito(IEnumerable{FolderItem}, string)"/>).</summary>
+    public PreparacionAmbito PrepararAmbito(string carpeta) => PrepararAmbito(Folders, carpeta);
+
+    /// <summary>
+    /// Analiza solo <paramref name="ambito"/>. Con <paramref name="marcarRaiz"/> (ya confirmado por
+    /// el usuario) marca antes su carpeta de la lista, que estaba desmarcada: el análisis la escanea.
+    /// </summary>
+    public async Task AnalizarAmbitoAsync(AmbitoAnalisis ambito, bool marcarRaiz)
+    {
+        if (IsBusy) return;
+        var raiz = marcarRaiz ? Folders.FirstOrDefault(f => !f.Enabled && Rutas.MismaCarpeta(f.Path, ambito.Raiz)) : null;
+        Ambito = ambito;
+        await RunAnalyzeAsync(force: false, marcar: raiz);
+    }
+
+    /// <summary>Vuelve a la vista de todas las carpetas marcadas, con lo que ya haya analizado.</summary>
+    [RelayCommand]
+    private void VerTodas()
+    {
+        if (IsBusy || Ambito == null) return;
+        Ambito = null;
+        LoadCached();
+        Status = Rows.Count > 0
+            ? $"Se muestran de nuevo las propuestas de todas las carpetas marcadas ({Rows.Count}). Pulsa «Analizar» para completar el resto."
+            : "Se muestran de nuevo todas las carpetas marcadas. Pulsa «Analizar» para analizarlas.";
+    }
+
+    /// <summary>Si la carpeta del ámbito se ha quitado de la lista, se vuelve a ver todo.</summary>
+    private void OlvidarAmbitoSiCaduco()
+    {
+        if (Ambito == null || AmbitoVigente(Folders, Ambito)) return;
+        Ambito = null;
+        LoadCached();
+    }
+
+    /// <summary>
+    /// Qué carpeta de la lista contiene la elegida y si está marcada. Solo se aceptan carpetas que ya
+    /// estén en la lista o dentro de alguna: analizar es trabajar sobre la biblioteca, y lo de fuera
+    /// no aparece en ninguna otra pestaña.
+    ///
+    /// Si su carpeta está DESMARCADA no se analiza «por libre»: se pide marcarla. Analizarla sin
+    /// escanearla dejaría en Enriquecer propuestas de archivos que ninguna otra pestaña conoce
+    /// (Biblioteca, Editor, No encontradas), y tras aplicar no habría dónde revisarlos. Marcarla es
+    /// visible, se explica antes y se puede deshacer quitando la marca; lo analizado se conserva.
+    /// </summary>
+    public static PreparacionAmbito PrepararAmbito(IEnumerable<FolderItem> carpetas, string elegida)
+    {
+        if (string.IsNullOrWhiteSpace(elegida)) return new PreparacionAmbito(null, false, "Elige una carpeta.");
+        var candidatas = carpetas.Where(f => Rutas.MismaCarpeta(f.Path, elegida) || Rutas.EstaDentroDe(elegida, f.Path)).ToList();
+        if (candidatas.Count == 0)
+            return new PreparacionAmbito(null, false,
+                $"«{NombreCarpeta(elegida)}» no está dentro de ninguna carpeta de la lista. Para analizarla, añádela antes con «Añadir carpeta…».");
+
+        // Con carpetas solapadas (configuraciones de versiones anteriores), una marcada antes que una
+        // desmarcada y la de fuera antes que la de dentro, que es la que el escaneo asigna.
+        var raiz = candidatas.OrderByDescending(f => f.Enabled).ThenBy(f => f.Path.Length).First();
+        var carpeta = Rutas.MismaCarpeta(raiz.Path, elegida)
+            ? raiz.Path
+            : elegida.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return new PreparacionAmbito(new AmbitoAnalisis(carpeta, raiz.Path), !raiz.Enabled, "");
+    }
+
+    /// <summary>La carpeta del ámbito sigue en la lista y marcada.</summary>
+    public static bool AmbitoVigente(IEnumerable<FolderItem> carpetas, AmbitoAnalisis ambito)
+        => carpetas.Any(f => f.Enabled && Rutas.MismaCarpeta(f.Path, ambito.Raiz));
+
+    /// <summary>Las canciones del ámbito (todas si no hay). Se mira la ruta, así vale también para una subcarpeta.</summary>
+    public static List<Track> PistasDelAmbito(IEnumerable<Track> pistas, AmbitoAnalisis? ambito)
+        => ambito == null ? pistas.ToList() : pistas.Where(t => Rutas.EstaDentroDe(t.FilePath, ambito.Carpeta)).ToList();
+
+    /// <summary>
+    /// Dentro de qué carpetas se puede podar la caché de análisis tras una pasada (E1): las que la
+    /// pasada ha recorrido de verdad. Con un ámbito, SOLO esa carpeta: con una subcarpeta, la raíz de
+    /// la lista borraría lo analizado del resto de la raíz. Sin canciones (un disco desconectado),
+    /// ninguna.
+    /// </summary>
+    public static List<string> RaicesAPodar(IReadOnlyCollection<Track> pistas, AmbitoAnalisis? ambito)
+    {
+        if (pistas.Count == 0) return new List<string>();
+        if (ambito != null) return new List<string> { ambito.Carpeta };
+        return pistas.Select(t => t.Folder).Where(f => !string.IsNullOrEmpty(f))
+                     .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>Nombre corto del ámbito: «Descargas», o «Descargas\House» para una subcarpeta.</summary>
+    public static string NombreAmbito(AmbitoAnalisis a)
+    {
+        var raiz = NombreCarpeta(a.Raiz);
+        if (a.EsRaiz) return raiz;
+        var relativa = Path.GetRelativePath(a.Raiz, a.Carpeta);
+        return relativa.StartsWith("..", StringComparison.Ordinal) ? NombreCarpeta(a.Carpeta) : Path.Combine(raiz, relativa);
+    }
+
+    /// <summary>Texto de la banda del ámbito.</summary>
+    public static string TextoAmbito(AmbitoAnalisis a, int canciones)
+        => $"Mostrando solo «{NombreAmbito(a)}» · {(canciones == 1 ? "1 canción" : $"{canciones} canciones")}";
+
+    /// <summary>Confirmación para marcar una carpeta desmarcada antes de analizarla.</summary>
+    public static (string Titulo, string Cuerpo, string Nota, string Aceptar) ConfirmacionCarpetaDesmarcada(AmbitoAnalisis a)
+    {
+        var raiz = NombreCarpeta(a.Raiz);
+        return ($"«{raiz}» está desmarcada",
+                "Las carpetas desmarcadas no forman parte de la biblioteca: sus canciones no se escanean ni aparecen en ninguna pestaña. "
+                + $"Para analizar «{NombreAmbito(a)}» hay que marcar «{raiz}». Se escaneará y el análisis se limitará a esa carpeta.",
+                "Las demás carpetas se quedan como están. Puedes volver a desmarcarla cuando termines: lo analizado se conserva.",
+                "Marcar y analizar");
+    }
+
+    /// <summary>Solo el nombre de una carpeta, sin la ruta entera.</summary>
+    private static string NombreCarpeta(string ruta)
+    {
+        var limpia = ruta.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var nombre = Path.GetFileName(limpia);
+        return nombre.Length > 0 ? nombre : limpia;
+    }
+
+    // --- E14/M14: historial de deshacer ---
+
+    /// <summary>El modelo del diálogo «Historial de cambios», conectado a esta pestaña.</summary>
+    public HistorialDeshacerViewModel CrearHistorial()
+        => new(new HistorialDeshacer(_engine.Paths.UndoDir), DeshacerDelHistorialAsync, _engine.Undo.DarPorPerdidos);
+
+    /// <summary>
+    /// Deshace, desde el historial, los cambios elegidos de una ejecución (null: todos los
+    /// pendientes), con el mismo tratamiento que «Deshacer última»: lo revertido deja de contar como
+    /// aplicado, se relee en la biblioteca y sus propuestas salen de la lista. Fuera del hilo de la
+    /// interfaz. Devuelve lo que se dice al terminar, o null si había otro proceso en curso.
+    /// </summary>
+    public async Task<string?> DeshacerDelHistorialAsync(EjecucionDeshacer ejecucion, IReadOnlyCollection<string>? huellas)
+    {
+        if (IsBusy || ejecucion.Manifiesto is not { } manifiesto) return null;
+        _engine.ReleaseAudio();   // deshacer también renombra: el archivo no puede estar sonando
+        IsBusy = true;
+        var cuantos = huellas?.Count ?? ejecucion.Pendientes;
+        Status = $"Deshaciendo {(cuantos == 1 ? "1 cambio" : $"{cuantos} cambios")} de «{ejecucion.TipoTexto}»…";
+        _engine.Logger.Head($"Deshaciendo desde el historial: {Path.GetFileName(manifiesto)} ({ejecucion.TipoTexto}), "
+                          + (huellas == null ? "todo lo pendiente" : $"{huellas.Count} cambio(s) elegidos") + "…");
+        UndoResult res;
+        var vuelven = 0;
+        try
+        {
+            res = await Task.Run(() => _engine.Undo.DeshacerCambios(manifiesto, huellas));
+            vuelven = await AsentarDeshacerAsync(res);
+        }
+        finally { IsBusy = false; }
+
+        Status = ResumenDeshacer(res, vuelven, RetirarRevertidas(res),
+                                 nada: "No quedaba nada pendiente en esa ejecución.",
+                                 reintento: "siguen en el historial para reintentarlo.");
+        return Status;
+    }
 }
+
+/// <summary>Carpeta a la que se limita Enriquecer (F1).</summary>
+/// <param name="Carpeta">La carpeta elegida: una de la lista o una subcarpeta suya.</param>
+/// <param name="Raiz">La carpeta de la lista que la contiene (o ella misma).</param>
+public sealed record AmbitoAnalisis(string Carpeta, string Raiz)
+{
+    /// <summary>Es una carpeta de la lista, no una subcarpeta.</summary>
+    public bool EsRaiz => Rutas.MismaCarpeta(Carpeta, Raiz);
+}
+
+/// <summary>Resultado de comprobar la carpeta elegida para analizar (F1).</summary>
+/// <param name="Ambito">El ámbito, o null si no se puede (ver <paramref name="Motivo"/>).</param>
+/// <param name="RaizDesmarcada">Su carpeta de la lista está desmarcada: hay que confirmar que se marca.</param>
+/// <param name="Motivo">Por qué no se puede, o "".</param>
+public sealed record PreparacionAmbito(AmbitoAnalisis? Ambito, bool RaizDesmarcada, string Motivo);

@@ -180,6 +180,14 @@ public partial class EnrichView : UserControl
         await vm.AplicarMarcadasAsync(soloVisibles: eleccion == ConfirmDialog.Eleccion.Aceptar && c.AceptarSoloVisibles);
     }
 
+    // E14: «Historial de cambios», con la lista de ejecuciones y deshacer una concreta o parte de ella.
+    private async void Historial_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not EnrichViewModel vm || vm.IsBusy) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        await HistorialDeshacerDialog.MostrarAsync(owner, vm.CrearHistorial());
+    }
+
     private void ExpandAll_Click(object? sender, RoutedEventArgs e) => GridBehaviors.SetAllGroups(this.FindDescendantOfType<DataGrid>(), true);
     private void CollapseAll_Click(object? sender, RoutedEventArgs e) => GridBehaviors.SetAllGroups(this.FindDescendantOfType<DataGrid>(), false);
 
