@@ -144,7 +144,9 @@ public partial class IncompleteViewModel : ScanViewModelBase
             var fields = _engine.BuildFields();
             var undo = _engine.Paths.NuevoManifiesto();
             var res = await Task.Run(() => _engine.AplicarUnoAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog));
-            await _engine.Library.ScanAsync();   // Recompute quitará la que ya esté completa
+            // M12: se relee solo este archivo (con su nombre de antes y el de después), no todas las
+            // carpetas. Al terminar, la biblioteca avisa y Recompute quita la fila si ya está completa.
+            await _engine.Library.RefrescarAsync(new[] { row.FilePath, res.FinalPath });
             Status = EstadoTrasReanalizar(row.FileName, res);
         }
         catch (Exception e) { Status = "Error al reanalizar: " + e.Message; }

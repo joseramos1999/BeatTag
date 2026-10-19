@@ -42,7 +42,10 @@
                     ToolTip.Tip="Escribe los cambios de todas las canciones con la casilla «Aplicar» marcada, también las que oculte la búsqueda. Antes de empezar pide confirmación y, si hay una búsqueda activa, ofrece aplicar solo las que se ven.">
                 <TextBlock Text="{Binding Marcadas, StringFormat='Aplicar marcadas ({0})'}" />
             </Button>
-            <Button Content="Deshacer última" Command="{Binding UndoCommand}" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#D97706" Margin="0,0,12,4" />
+            <Button Content="Deshacer última" Command="{Binding UndoCommand}" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#D97706" />
+            <!-- E14: elegir qué ejecución, o qué canciones de ella, deshacer. -->
+            <Button Content="Historial de cambios…" Click="Historial_Click" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#B45309" Margin="0,0,12,4"
+                    ToolTip.Tip="Lista todo lo que la aplicación ha escrito en tus archivos (Enriquecer, Editor, Volumen, géneros…) y permite deshacer una ejecución concreta o solo algunas de sus canciones, aunque haya otras posteriores." />
             <Button Content="Marcar todo" Command="{Binding MarkAllCommand}" Classes="act" Background="#475569"
                     ToolTip.Tip="Marca todas las filas para aplicar." />
             <Button Content="Desmarcar todo" Command="{Binding MarkNoneCommand}" Classes="act" Background="#475569" Margin="0,0,12,4"
@@ -63,7 +66,8 @@
             </Border>
         </WrapPanel>
 
-        <views:FolderListView DockPanel.Dock="Top" Margin="0,0,0,6" />
+        <!-- F1: en Enriquecer cada carpeta ofrece analizarla sola, sin tocar las casillas. -->
+        <views:FolderListView DockPanel.Dock="Top" Margin="0,0,0,6" PermiteAnalizar="True" />
 
         <Expander DockPanel.Dock="Top" Header="Opciones" Margin="0,0,0,6">
             <StackPanel Spacing="6" Margin="4">
@@ -134,6 +138,21 @@
         <Border DockPanel.Dock="Top" IsVisible="{Binding AvisoIa, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" Margin="0,0,0,6" Padding="8,6"
                 Background="{DynamicResource AvisoFondo}" BorderBrush="{DynamicResource AvisoBorde}" BorderThickness="1" CornerRadius="4">
             <TextBlock Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap" FontSize="12" Text="{Binding AvisoIa}" />
+        </Border>
+
+        <!-- F1: la tabla está limitada a una carpeta. Se dice siempre, con la forma de volver a todas. -->
+        <Border DockPanel.Dock="Top" IsVisible="{Binding HayAmbito}" Margin="0,0,0,6" Padding="8,6"
+                Background="{DynamicResource InfoFondo}" BorderBrush="{DynamicResource InfoBorde}" BorderThickness="1" CornerRadius="4">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Ver todas las carpetas" Command="{Binding VerTodasCommand}"
+                        IsEnabled="{Binding !IsBusy}" VerticalAlignment="Center" Margin="8,0,0,0"
+                        ToolTip.Tip="Vuelve a mostrar las propuestas de todas las carpetas marcadas. Lo analizado en esta carpeta se conserva." />
+                <StackPanel VerticalAlignment="Center" Spacing="1">
+                    <TextBlock Text="{Binding AmbitoTexto}" FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{DynamicResource InfoTexto}" />
+                    <TextBlock Text="Analizar, aplicar y marcar actúan solo sobre esta carpeta. Las demás siguen marcadas y sus propuestas se conservan."
+                               FontSize="12" Foreground="{DynamicResource InfoTexto}" TextWrapping="Wrap" />
+                </StackPanel>
+            </DockPanel>
         </Border>
 
         <StackPanel DockPanel.Dock="Top" Margin="0,0,0,6" Spacing="3" IsVisible="{Binding IsBusy}">

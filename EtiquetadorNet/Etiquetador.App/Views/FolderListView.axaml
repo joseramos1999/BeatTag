@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:views="using:Etiquetador.App.Views"
              mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="120"
              x:CompileBindings="False"
              x:Class="Etiquetador.App.Views.FolderListView">
@@ -20,6 +21,20 @@
                                     ToolTip.Tip="Quitar esta carpeta"
                                     Command="{Binding DataContext.RemoveFolderPathCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                     CommandParameter="{Binding Path}" />
+                            <!--
+                              F1: solo en Enriquecer (PermiteAnalizar). Analiza esta carpeta, o una
+                              subcarpeta suya, sin cambiar ninguna casilla.
+                            -->
+                            <Button DockPanel.Dock="Right" Content="Subcarpeta…" Padding="8,0" Margin="6,0,0,0"
+                                    Click="AnalizarSubcarpeta_Click"
+                                    IsVisible="{Binding PermiteAnalizar, RelativeSource={RelativeSource AncestorType=views:FolderListView}}"
+                                    IsEnabled="{Binding !DataContext.IsBusy, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                    ToolTip.Tip="Elige una carpeta dentro de esta y analiza solo esa. Las casillas de las carpetas no cambian." />
+                            <Button DockPanel.Dock="Right" Content="Analizar solo esta" Padding="8,0" Margin="6,0,0,0"
+                                    Click="AnalizarCarpeta_Click"
+                                    IsVisible="{Binding PermiteAnalizar, RelativeSource={RelativeSource AncestorType=views:FolderListView}}"
+                                    IsEnabled="{Binding !DataContext.IsBusy, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                    ToolTip.Tip="Analiza solo esta carpeta y muestra solo sus propuestas, sin desmarcar las demás. Las propuestas del resto se conservan." />
                             <CheckBox IsChecked="{Binding Enabled}" VerticalAlignment="Center" Margin="0,0,6,0"
                                       ToolTip.Tip="Marcar/desmarcar: solo se analizan las carpetas marcadas." />
                             <TextBlock Text="{Binding Path}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />

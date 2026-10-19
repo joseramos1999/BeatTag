@@ -42,6 +42,15 @@ public sealed record UndoResult(string File, int Reverted, int Errors, int Missi
     /// Enriquecer (ver <see cref="UndoEngine.DioPorAplicada"/>).
     /// </summary>
     public IReadOnlyList<string> AplicadasRevertidas { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Las dos rutas de CADA registro que se ha intentado deshacer, haya ido como haya ido: es lo que
+    /// hay que releer en la biblioteca (<c>LibraryStore.RefrescarAsync</c>) en lugar de recorrer
+    /// todas las carpetas. <see cref="Revertidas"/> no basta: un registro que vuelve al nombre
+    /// original y después falla al escribir las etiquetas cuenta como error, pero el archivo ya ha
+    /// cambiado de nombre.
+    /// </summary>
+    public IReadOnlyList<string> Tocadas { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>Resultado de <see cref="UndoEngine.DarPorPerdidos"/>.</summary>
@@ -109,7 +118,41 @@ public sealed class UndoEngine
         if (!string.IsNullOrEmpty(manifest)) mf = File.Exists(manifest) ? manifest : null;
         else mf = PrimeroConRegistros();
         if (mf == null) return new UndoResult("", 0, 0, 0, 0, false, true);
+        return Deshacer(mf, null);
+    }
 
+    /// <summary>
+    /// Deshace SOLO los registros elegidos de una ejecución pendiente (E14), identificados por la
+    /// huella de su línea (<see cref="HuellaLinea"/>); con <paramref name="huellas"/> null, todos,
+    /// igual que <see cref="UndoLastRun"/> con ese manifiesto. Lo que no se elige sigue pendiente en
+    /// el manifiesto, que se reescribe de forma atómica; lo revertido se archiva como en un deshacer
+    /// normal («.deshecho»), así que RekordboxRelocator y «Deshacer última» lo ven igual.
+    ///
+    /// Se identifica por la huella y no por el número de línea a propósito: entre que el historial
+    /// lee el manifiesto y el usuario confirma, una pasada anterior puede haberlo reescrito (las
+    /// líneas pendientes se conservan tal cual, pero cambian de posición).
+    ///
+    /// Solo acepta manifiestos pendientes: un archivado ya está deshecho, y volver a procesarlo es
+    /// justo el fallo T1 (el volumen se aplicaba otra vez).
+    /// </summary>
+    public UndoResult DeshacerCambios(string manifiesto, IReadOnlyCollection<string>? huellas)
+    {
+        if (string.IsNullOrEmpty(manifiesto) || !EsManifiestoPendiente(manifiesto) || !File.Exists(manifiesto)
+            || huellas is { Count: 0 })
+            return new UndoResult("", 0, 0, 0, 0, false, true);
+        return Deshacer(manifiesto, huellas == null ? null : new HashSet<string>(huellas, StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// Identifica una línea de manifiesto: los 16 primeros caracteres hexadecimales del SHA-1 de su
+    /// texto. Archivar copia las líneas tal cual, así que la huella no cambia mientras siga pendiente.
+    /// Dos líneas idénticas tienen la misma, y se deshacen juntas: describen el mismo cambio.
+    /// </summary>
+    public static string HuellaLinea(string linea)
+        => Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(Encoding.UTF8.GetBytes(linea)), 0, 8).ToLowerInvariant();
+
+    private UndoResult Deshacer(string mf, IReadOnlySet<string>? seleccion)
+    {
         // Cada línea con su texto original: lo que no se pueda revertir vuelve al manifiesto tal cual.
         var lineas = new List<(string Texto, JsonNode? Nodo)>();
         foreach (var ln in File.ReadAllLines(mf, Encoding.UTF8))
@@ -125,12 +168,19 @@ public sealed class UndoEngine
         var pendiente = new bool[lineas.Count];
         var revertidas = new List<string>();
         var aplicadasRevertidas = new List<string>();
+        var tocadas = new List<string>();
         var legadoDeAplicar = ManifiestoAntiguoDeAplicar(lineas.Select(l => l.Nodo));
         int rev = 0, err = 0, missing = 0, manual = 0;
         for (var i = lineas.Count - 1; i >= 0; i--)
         {
+            // Lo que no se ha elegido (E14) se queda pendiente tal cual, sin mirar el archivo.
+            if (seleccion != null && !seleccion.Contains(HuellaLinea(lineas[i].Texto))) { pendiente[i] = true; continue; }
             var node = lineas[i].Nodo;
             if (node == null) continue;
+            // Primero la de después y luego la de antes: al deshacer, el archivo acaba en la de antes,
+            // y la biblioteca relee la lista del final al principio. Con un cambio solo de mayúsculas
+            // («tema» → «Tema»), las dos rutas valen para el mismo archivo y debe entrar con «tema».
+            tocadas.AddRange(RutasDe(node).Reverse());
             Outcome outcome;
             try
             {
@@ -162,6 +212,7 @@ public sealed class UndoEngine
         {
             Revertidas = revertidas,
             AplicadasRevertidas = aplicadasRevertidas,
+            Tocadas = tocadas,
         };
 
         // E2: un registro ausente para siempre (archivo enviado a la papelera) o con un error que no
@@ -179,7 +230,7 @@ public sealed class UndoEngine
             {
                 Aviso = $"No se ha podido deshacer {cuales} ({motivo}). " +
                         "Mientras quede pendiente, «Deshacer última» volverá a esta ejecución antes que a las anteriores. " +
-                        "Si esos archivos no van a volver, se pueden dar por perdidos.",
+                        "Si esos archivos no van a volver, se pueden dar por perdidos en «Historial de cambios» (Enriquecer).",
             };
         }
 
@@ -400,7 +451,7 @@ public sealed class UndoEngine
                 try { File.Delete(mf); } catch { }
                 return "";
             }
-            _log?.Log($"  deshacer: quedan {quedan.Count} registro(s) en {Path.GetFileName(mf)}; «Deshacer última» reintentará solo esos.", LogKind.No);
+            _log?.Log($"  deshacer: quedan {quedan.Count} registro(s) pendientes en {Path.GetFileName(mf)}; lo revertido se archiva aparte.", LogKind.No);
             return "";
         }
         catch (Exception e)
