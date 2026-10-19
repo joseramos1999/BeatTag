@@ -113,6 +113,23 @@ public partial class FichaEditorViewModel : ViewModelBase
     [RelayCommand]
     private void Guardar() => GuardarPedido?.Invoke();
 
+    /// <summary>
+    /// Si hay algo escrito sin guardar, lo guarda (pidiéndoselo a la página, que sabe a qué canciones
+    /// corresponde). Devuelve true si guardó. Se llama ANTES de cargar otra selección o de rehacer la
+    /// tabla.
+    ///
+    /// Antes, escribir «boda, público mayor, cierre» en Etiquetas de 30 temas y hacer clic en otra fila
+    /// para comprobar algo lo borraba sin aviso ni forma de recuperarlo. Guardar sin preguntar es seguro:
+    /// solo se aplica lo que se ha tocado (<see cref="CambiosFicha"/>), y lo que no se quería se quita
+    /// igual que se puso.
+    /// </summary>
+    public bool GuardarSiHayCambios()
+    {
+        if (Cuantas == 0 || !HayCambios || !Cambios().HayAlguno) return false;
+        GuardarPedido?.Invoke();
+        return true;
+    }
+
     /// <summary>Vuelve a lo que había antes de tocar nada.</summary>
     [RelayCommand]
     private void Descartar() => Cargar(_cargadas);

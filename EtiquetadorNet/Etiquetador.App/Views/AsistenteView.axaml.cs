@@ -31,11 +31,12 @@ public partial class AsistenteView : UserControl
 
     private ContextMenu CrearMenu(DataGrid tabla)
     {
-        var escuchar = Opcion("Escuchar / Parar", () => ConArchivo(tabla, (vm, ruta) => vm.Engine.Preview.Toggle(ruta)));
-        var editar = Opcion("Editar etiquetas de esta canción", () => ConArchivo(tabla, (vm, ruta) => vm.Engine.RequestEdit(ruta)));
+        // Escuchar y editar no se permiten mientras una herramienta escribe archivos: ver CalcularMenu.
+        var escuchar = Opcion("Escuchar / Parar", () => ConArchivo(tabla, (vm, ruta) => vm.Engine.Preview.Toggle(ruta), siOcupado: false));
+        var editar = Opcion("Editar etiquetas de esta canción", () => ConArchivo(tabla, (vm, ruta) => vm.Engine.RequestEdit(ruta), siOcupado: false));
         var marcar = Opcion("Marcar las seleccionadas", () => Marcar(tabla, true));
         var desmarcar = Opcion("Desmarcar las seleccionadas", () => Marcar(tabla, false));
-        var carpeta = Opcion("Abrir carpeta contenedora", () => ConArchivo(tabla, (vm, ruta) => { _ = Services.Shell.OpenContainingFolderAsync(ruta); }));
+        var carpeta = Opcion("Abrir carpeta contenedora", () => ConArchivo(tabla, (vm, ruta) => { _ = Services.Shell.OpenContainingFolderAsync(ruta); }, siOcupado: true));
         var papelera = Opcion("Enviar a la papelera", () => _ = EnviarAPapeleraAsync(tabla));
         var separaMarcas = new Separator();
         var separaCarpeta = new Separator();
@@ -55,13 +56,46 @@ public partial class AsistenteView : UserControl
             marcar.IsVisible = desmarcar.IsVisible = marcable;
             separaMarcas.IsVisible = conArchivo && marcable;
 
-            var haySeleccion = tabla.SelectedItem != null;
-            escuchar.IsEnabled = editar.IsEnabled = carpeta.IsEnabled = marcar.IsEnabled = desmarcar.IsEnabled = haySeleccion;
-            papelera.IsEnabled = haySeleccion;
-            var cuantas = tabla.SelectedItems.OfType<IFilaConArchivo>().Count();
-            papelera.Header = cuantas > 1 ? $"Enviar a la papelera ({cuantas})" : "Enviar a la papelera";
+            var estado = CalcularMenu(tabla.SelectedItem != null, DataContext is AsistenteViewModel { IsBusy: true },
+                                      tabla.SelectedItems.OfType<IFilaConArchivo>().Count());
+            escuchar.IsEnabled = estado.Escuchar;
+            editar.IsEnabled = estado.Editar;
+            carpeta.IsEnabled = estado.Carpeta;
+            marcar.IsEnabled = desmarcar.IsEnabled = estado.Marcar;
+            papelera.IsEnabled = estado.Papelera;
+            escuchar.Header = estado.TextoEscuchar;
+            editar.Header = estado.TextoEditar;
+            papelera.Header = estado.TextoPapelera;
         };
         return menu;
+    }
+
+    /// <summary>Qué opciones del menú contextual se pueden usar y cómo se rotulan.</summary>
+    internal readonly record struct EstadoMenu(bool Escuchar, bool Editar, bool Carpeta, bool Marcar, bool Papelera,
+                                               string TextoEscuchar, string TextoEditar, string TextoPapelera);
+
+    /// <summary>
+    /// Mientras una herramienta escribe archivos (aplicar géneros, renombrar, completar), no se deja
+    /// escuchar, editar ni mandar a la papelera: el reproductor mantiene el archivo abierto y la
+    /// herramienta solo libera el audio una vez, al empezar. Visto en el código: escuchar desde «Buscar
+    /// con una frase» una canción que «Aplicar las marcadas» estaba reetiquetando la dejaba en «no se
+    /// pudo escribir»; mandarla a la papelera a mitad de «Renombrar» rompía su renombrado. Las demás
+    /// pestañas ya lo impedían; aquí el menú solo miraba la selección. Abrir la carpeta y marcar o
+    /// desmarcar no tocan el archivo y siguen disponibles.
+    /// </summary>
+    internal static EstadoMenu CalcularMenu(bool haySeleccion, bool ocupado, int cuantas)
+    {
+        var espera = ocupado ? " (espera a que termine el proceso)" : "";
+        var conArchivo = haySeleccion && !ocupado;
+        return new EstadoMenu(
+            Escuchar: conArchivo,
+            Editar: conArchivo,
+            Carpeta: haySeleccion,
+            Marcar: haySeleccion,
+            Papelera: conArchivo,
+            TextoEscuchar: "Escuchar / Parar" + espera,
+            TextoEditar: "Editar etiquetas de esta canción" + espera,
+            TextoPapelera: (cuantas > 1 ? $"Enviar a la papelera ({cuantas})" : "Enviar a la papelera") + espera);
     }
 
     /// <summary>
@@ -71,6 +105,7 @@ public partial class AsistenteView : UserControl
     private async Task EnviarAPapeleraAsync(DataGrid tabla)
     {
         if (DataContext is not AsistenteViewModel vm || TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (vm.IsBusy) { vm.Status = "Espera a que termine el proceso en curso."; return; }
         var filas = tabla.SelectedItems.OfType<IFilaConArchivo>().ToList();
         if (filas.Count == 0) return;
 
@@ -85,6 +120,8 @@ public partial class AsistenteView : UserControl
             "Van a la papelera del sistema, así que puedes recuperarlos desde ahí si te arrepientes.",
             "Enviar a la papelera");
         if (!ok) return;
+        // Por si una herramienta empezó mientras se confirmaba.
+        if (vm.IsBusy) { vm.Status = "Espera a que termine el proceso en curso."; return; }
 
         vm.Engine.Preview.Stop();   // si suena, el archivo está abierto y no se puede mover
         var enviadas = new List<IFilaConArchivo>();
@@ -118,10 +155,14 @@ public partial class AsistenteView : UserControl
         return item;
     }
 
-    /// <summary>Ejecuta la acción sobre el archivo de la fila seleccionada; si falla, lo dice en la barra de estado.</summary>
-    private void ConArchivo(DataGrid tabla, Action<AsistenteViewModel, string> accion)
+    /// <summary>
+    /// Ejecuta la acción sobre el archivo de la fila seleccionada; si falla, lo dice en la barra de
+    /// estado. Con <paramref name="siOcupado"/> en false no hace nada mientras una herramienta trabaja.
+    /// </summary>
+    private void ConArchivo(DataGrid tabla, Action<AsistenteViewModel, string> accion, bool siOcupado)
     {
         if (DataContext is not AsistenteViewModel vm || tabla.SelectedItem is not IFilaConArchivo fila) return;
+        if (!siOcupado && vm.IsBusy) { vm.Status = "Espera a que termine el proceso en curso."; return; }
         try { accion(vm, fila.RutaArchivo); }
         catch (Exception e) { vm.Status = "No se pudo: " + e.Message; }
     }
@@ -198,7 +239,7 @@ public partial class AsistenteView : UserControl
         var archivo = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Guardar lista ordenada",
-            SuggestedFileName = Etiquetador.Core.TextUtils.Sanitize((vm.Mezcla.Coleccion ?? "Sesion") + " (ordenada)"),
+            SuggestedFileName = Etiquetador.Core.TextUtils.Sanitize((vm.Mezcla.Coleccion?.Nombre ?? "Sesion") + " (ordenada)"),
             DefaultExtension = "m3u8",
             FileTypeChoices = new[] { new FilePickerFileType("Lista de reproducción") { Patterns = new[] { "*.m3u8" } } },
         });

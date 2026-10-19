@@ -16,7 +16,7 @@ namespace Etiquetador.App.ViewModels;
 /// Página Ficha DJ: rellenar, canción a canción o por lotes, lo que un DJ sabe de su música y no
 /// cabe en las etiquetas de siempre.
 /// </summary>
-public partial class FichasViewModel : ScanViewModelBase
+public partial class FichasViewModel : ScanViewModelBase, IPaginaVisible
 {
     private readonly AppEngine _engine;
     private List<FichaRow> _seleccion = new();
@@ -24,8 +24,14 @@ public partial class FichasViewModel : ScanViewModelBase
     /// <summary>Mientras esta página guarda, no tiene que atender su propio aviso de fichas cambiadas.</summary>
     private bool _guardando;
 
-    public ObservableCollection<FichaRow> Rows { get; } = new();
-    public DataGridCollectionView RowsView { get; }
+    /// <summary>La tabla solo se rehace si la página está a la vista; si no, al volver a ella.</summary>
+    private readonly RecalculoDiferido _recalculo;
+
+    private List<FichaRow> _filas = new();
+    public IReadOnlyList<FichaRow> Rows => _filas;
+
+    /// <summary>Se sustituye entera al recalcular: un aviso a la tabla en vez de uno por canción.</summary>
+    [ObservableProperty] private DataGridCollectionView _rowsView;
     public FichaEditorViewModel Editor { get; } = new();
 
     [ObservableProperty] private FichaRow? _selectedRow;
@@ -38,12 +44,35 @@ public partial class FichasViewModel : ScanViewModelBase
     public FichasViewModel(AppEngine engine) : base(engine.Library)
     {
         _engine = engine;
-        RowsView = new DataGridCollectionView(Rows);
+        _rowsView = new DataGridCollectionView(_filas);
+        _recalculo = new RecalculoDiferido(Recompute);
         Editor.GuardarPedido += GuardarSeleccion;
-        _engine.FichasCambiadas += () => { if (!_guardando) RefrescarFichas(); };
+        _engine.FichasCambiadas += () =>
+        {
+            if (_guardando) return;
+            // A la vista, basta con releer las fichas de las filas; oculta, se rehace al volver.
+            if (_recalculo.Visible) RefrescarFichas();
+            else _recalculo.Marcar();
+        };
         Status = "Selecciona canciones y rellena su ficha a la derecha.";
-        if (Store.IsScanned) Recompute();
+        // Sin recálculo aquí: se hace la primera vez que la página se muestra.
     }
+
+    /// <summary>
+    /// Lo avisa la vista. Al salir de la página se guarda lo escrito en el panel: al volver, la tabla
+    /// puede rehacerse (si la biblioteca cambió mientras tanto) y lo escrito se perdería.
+    /// </summary>
+    public bool Visible
+    {
+        get => _recalculo.Visible;
+        set
+        {
+            if (!value && _recalculo.Visible) GuardarLoEscrito("al salir de la página");
+            _recalculo.CambiarVisible(value);
+        }
+    }
+
+    protected override void RecomputeReactive() => _recalculo.Pedir();
 
     partial void OnBusquedaChanged(string value) => AplicarFiltro();
     partial void OnFiltroChanged(string value) => AplicarFiltro();
@@ -68,14 +97,30 @@ public partial class FichasViewModel : ScanViewModelBase
 
     protected override void Recompute()
     {
-        var filas = Store.Tracks.Select(t => new FichaRow(t, _engine.Fichas.Obtener(t.FilePath))).ToList();
+        // Lo escrito en el panel se guarda antes de rehacer la tabla, que deja la selección vacía.
+        var guardada = GuardarLoEscrito("antes de actualizar la tabla");
 
-        // Reponer de una vez: cada alta suelta avisaría a la tabla por separado.
-        Rows.Clear();
-        foreach (var f in filas) Rows.Add(f);
+        // Reponer de una vez: cada alta suelta avisaría a la tabla por separado. El comentario ya lo
+        // decía, pero el código hacía Clear y un Add por canción.
+        _filas = Store.Tracks.Select(t => new FichaRow(t, _engine.Fichas.Obtener(t.FilePath))).ToList();
+        RowsView = VistaTabla.Nueva(_filas, RowsView);
         AplicarFiltro();
         Seleccionar(Array.Empty<FichaRow>());
         ActualizarEstado();
+        if (guardada) Status = "Lo escrito en la ficha se guardó antes de actualizar la tabla. " + Status;
+    }
+
+    /// <summary>
+    /// Guarda lo escrito en el panel de ficha para la selección ACTUAL, si hay algo. Devuelve true si
+    /// guardó, y lo dice en el estado.
+    /// </summary>
+    private bool GuardarLoEscrito(string cuando)
+    {
+        if (_seleccion.Count == 0 || !Editor.GuardarSiHayCambios()) return false;
+        Status = _seleccion.Count == 1
+            ? $"Ficha guardada {cuando}, para no perder lo escrito."
+            : $"Ficha guardada en {_seleccion.Count} canciones {cuando}, para no perder lo escrito.";
+        return true;
     }
 
     private void ActualizarEstado()
@@ -84,10 +129,15 @@ public partial class FichasViewModel : ScanViewModelBase
         Status = $"{con} de {Rows.Count} canciones con ficha.";
     }
 
-    /// <summary>La selección de la tabla ha cambiado. Se llama desde la vista.</summary>
+    /// <summary>
+    /// La selección de la tabla ha cambiado. Se llama desde la vista. Lo escrito y no guardado se
+    /// guarda en la selección ANTERIOR antes de cargar la nueva.
+    /// </summary>
     public void Seleccionar(IEnumerable<FichaRow> filas)
     {
-        _seleccion = filas.ToList();
+        var nuevas = filas.ToList();
+        GuardarLoEscrito("al cambiar de selección");
+        _seleccion = nuevas;
         Editor.Cargar(_seleccion.Select(r => r.Ficha).ToList());
     }
 

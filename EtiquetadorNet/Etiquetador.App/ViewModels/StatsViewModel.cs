@@ -17,9 +17,15 @@ public sealed class StatBarItem
 }
 
 /// <summary>Pestaña Estadísticas: reparto de la biblioteca por BPM, género, calidad, década y explícito.</summary>
-public partial class StatsViewModel : ScanViewModelBase
+public partial class StatsViewModel : ScanViewModelBase, IPaginaVisible
 {
     private const double MaxBar = 240;
+
+    /// <summary>
+    /// Las estadísticas recorren la biblioteca entera (incluida la detección de letra explícita, que lee
+    /// cada nombre): solo se rehacen con la página a la vista, y si no, al volver a ella.
+    /// </summary>
+    private readonly RecalculoDiferido _recalculo;
 
     public ObservableCollection<StatBarItem> ByBpm { get; } = new();
     public ObservableCollection<StatBarItem> ByGenre { get; } = new();
@@ -31,8 +37,18 @@ public partial class StatsViewModel : ScanViewModelBase
 
     public StatsViewModel(AppEngine engine) : base(engine.Library)
     {
-        if (Store.IsScanned) Recompute();
+        // Sin recálculo aquí: se hace la primera vez que la página se muestra.
+        _recalculo = new RecalculoDiferido(Recompute);
     }
+
+    /// <summary>Lo avisa la vista.</summary>
+    public bool Visible
+    {
+        get => _recalculo.Visible;
+        set => _recalculo.CambiarVisible(value);
+    }
+
+    protected override void RecomputeReactive() => _recalculo.Pedir();
 
     protected override void Recompute()
     {

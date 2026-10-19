@@ -27,6 +27,8 @@
                           MinWidth="80" IsEnabled="{Binding !IsBusy}" />
                 <Button Content="Ver tendencias" Command="{Binding LoadCommand}" IsEnabled="{Binding !IsBusy}"
                         Background="#7C3AED" Foreground="White" FontWeight="SemiBold" />
+                <Button Content="Actualizar" Command="{Binding ActualizarCommand}" IsEnabled="{Binding !IsBusy}"
+                        ToolTip.Tip="Vuelve a descargar la lista aunque la guardada sea reciente. Las listas se guardan unas horas para no pedirlas en cada consulta." />
                 <Button Content="Cancelar" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
                 <CheckBox Content="Mostrar solo las disponibles" IsChecked="{Binding SoloLasQueTengo}" VerticalAlignment="Center" />
                 <Button Content="Guardar como lista (M3U8)" Click="ExportM3u_Click"
@@ -37,6 +39,9 @@
                         Background="#16A34A" Foreground="White" FontWeight="SemiBold"
                         ToolTip.Tip="Copia (no mueve) a una carpeta nueva las grabaciones de la lista que ya están en la biblioteca, numeradas por su posición." />
             </StackPanel>
+
+            <!-- De cuándo es la lista: sin conexión se enseña la última guardada, y hay que saberlo. -->
+            <TextBlock Classes="desc" Text="{Binding FechaLista}" />
 
         </StackPanel>
 

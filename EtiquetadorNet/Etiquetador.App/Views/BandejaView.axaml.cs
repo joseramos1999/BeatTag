@@ -1,4 +1,5 @@
 using System.Linq;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -13,6 +14,15 @@ public partial class BandejaView : UserControl
     {
         InitializeComponent();
         GridBehaviors.EnableWidthMemory(this, "Bandeja");
+    }
+
+    // La bandeja solo se revisa contra la biblioteca a la vista, y al dejarla guarda lo escrito en el
+    // panel de ficha. El shell cambia IsVisible al cambiar de página.
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if ((change.Property == IsVisibleProperty || change.Property == DataContextProperty) && DataContext is IPaginaVisible p)
+            p.Visible = IsVisible;
     }
 
     private void Grid_SelectionChanged(object? sender, SelectionChangedEventArgs e)

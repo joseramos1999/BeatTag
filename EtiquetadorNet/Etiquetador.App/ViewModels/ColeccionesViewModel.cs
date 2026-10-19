@@ -31,15 +31,26 @@ public sealed partial class ColeccionItem : ObservableObject
 /// Página Colecciones: listas que se rellenan solas a partir de unas condiciones, y que se pueden
 /// llevar a cualquier programa de DJ como M3U8.
 /// </summary>
-public partial class ColeccionesViewModel : ScanViewModelBase
+public partial class ColeccionesViewModel : ScanViewModelBase, IPaginaVisible
 {
     private readonly AppEngine _engine;
     private readonly DispatcherTimer _espera;
     private bool _cargando;
 
+    /// <summary>
+    /// Los resultados solo se recalculan con la página a la vista; si no, al volver a ella. Cada tecla de
+    /// energía pulsada en Ficha DJ avisa de que las fichas han cambiado, y antes eso recalculaba aquí la
+    /// colección abierta, sobre toda la biblioteca, aunque nadie la estuviera mirando.
+    /// </summary>
+    private readonly RecalculoDiferido _recalculo;
+
     public ObservableCollection<ColeccionItem> Colecciones { get; } = new();
-    public ObservableCollection<FichaRow> Resultados { get; } = new();
-    public DataGridCollectionView ResultadosView { get; }
+
+    private List<FichaRow> _resultados = new();
+    public IReadOnlyList<FichaRow> Resultados => _resultados;
+
+    /// <summary>Se sustituye entera al recalcular: un aviso a la tabla en vez de uno por canción.</summary>
+    [ObservableProperty] private DataGridCollectionView _resultadosView;
 
     [ObservableProperty] private ColeccionItem? _seleccionada;
     [ObservableProperty] private FichaRow? _selectedRow;
@@ -91,7 +102,8 @@ public partial class ColeccionesViewModel : ScanViewModelBase
     public ColeccionesViewModel(AppEngine engine) : base(engine.Library)
     {
         _engine = engine;
-        ResultadosView = new DataGridCollectionView(Resultados);
+        _resultadosView = new DataGridCollectionView(_resultados);
+        _recalculo = new RecalculoDiferido(Recompute);
 
         // Escribir en una casilla no puede recalcular la biblioteca entera y guardar en disco a cada
         // tecla. Se espera a que el usuario pare un momento.
@@ -99,19 +111,55 @@ public partial class ColeccionesViewModel : ScanViewModelBase
         _espera.Tick += (_, _) => { _espera.Stop(); GuardarYRecalcular(); };
 
         foreach (var c in _engine.Colecciones.Todas) Colecciones.Add(new ColeccionItem(c));
-        _engine.FichasCambiadas += Recompute;
+        _engine.FichasCambiadas += _recalculo.Pedir;
 
         Seleccionada = Colecciones.FirstOrDefault();
         if (Seleccionada == null) CargarCondiciones(null);
         Status = Colecciones.Count == 0 ? "Crea una colección y define sus condiciones." : "";
-        if (Store.IsScanned) Recompute();
+        // Sin recálculo aquí: se hace la primera vez que la página se muestra.
     }
+
+    /// <summary>Lo avisa la vista.</summary>
+    public bool Visible
+    {
+        get => _recalculo.Visible;
+        set => _recalculo.CambiarVisible(value);
+    }
+
+    protected override void RecomputeReactive() => _recalculo.Pedir();
 
     partial void OnSeleccionadaChanged(ColeccionItem? value)
     {
         OnPropertyChanged(nameof(HaySeleccionada));
         CargarCondiciones(value?.Modelo);
-        Recompute();
+        _recalculo.Pedir();
+    }
+
+    /// <summary>
+    /// Al dejar la casilla del nombre: ni vacío ni repetido. Renombrar no pasaba por ninguna
+    /// comprobación (solo crear o duplicar), y una colección sin nombre o con el de otra no se podía
+    /// distinguir en los desplegables del Asistente.
+    /// </summary>
+    public void ConfirmarNombre()
+    {
+        if (Seleccionada == null) return;
+        var limpio = NombreUnico(Nombre, Colecciones.Where(c => c != Seleccionada).Select(c => c.Nombre));
+        if (limpio != Nombre) Nombre = limpio;   // se guarda como cualquier otro cambio de condición
+    }
+
+    /// <summary>
+    /// El nombre sin espacios sobrantes, «Nueva colección» si queda vacío, y con un número detrás si ya
+    /// lo usa otra colección (sin distinguir mayúsculas).
+    /// </summary>
+    internal static string NombreUnico(string propuesto, IEnumerable<string> otros)
+    {
+        var base_ = (propuesto ?? "").Trim();
+        if (base_.Length == 0) base_ = "Nueva colección";
+        var usados = otros.ToList();
+        var nombre = base_;
+        for (var n = 2; usados.Any(o => string.Equals(o, nombre, StringComparison.CurrentCultureIgnoreCase)); n++)
+            nombre = $"{base_} {n}";
+        return nombre;
     }
 
     private void CargarCondiciones(ColeccionInteligente? c)
@@ -191,7 +239,7 @@ public partial class ColeccionesViewModel : ScanViewModelBase
     private void GuardarYRecalcular()
     {
         Guardar();
-        Recompute();
+        _recalculo.Pedir();
     }
 
     private void Guardar()
@@ -206,7 +254,6 @@ public partial class ColeccionesViewModel : ScanViewModelBase
 
     protected override void Recompute()
     {
-        Resultados.Clear();
         var c = Seleccionada?.Modelo;
 
         // Las fichas se leen una vez por recálculo y no una vez por canción.
@@ -215,9 +262,10 @@ public partial class ColeccionesViewModel : ScanViewModelBase
             if (_engine.Fichas.Obtener(ruta) is { } f) fichas[ruta] = f;
         EtiquetasEnUso = DescribirEnUso(fichas.Values);
 
-        if (c == null) { Resumen = ""; return; }
+        if (c == null) { PonerResultados(new List<FichaRow>()); Resumen = ""; return; }
         if (!FiltroColeccion.TieneCriterios(c))
         {
+            PonerResultados(new List<FichaRow>());
             Resumen = "";
             Status = "Define al menos una condición: sin ninguna, la colección sería la biblioteca entera.";
             return;
@@ -231,14 +279,21 @@ public partial class ColeccionesViewModel : ScanViewModelBase
             .ThenBy(x => x.t.Artist, StringComparer.CurrentCultureIgnoreCase)
             .Select(x => new FichaRow(x.t, x.f))
             .ToList();
-        foreach (var r in filas) Resultados.Add(r);
-        ResultadosView.Refresh();
+        PonerResultados(filas);
 
         var segundos = filas.Sum(r => (long)r.Track.DurationSeconds);
         Resumen = $"{filas.Count} canciones · {DuracionTexto(segundos)}";
         Status = filas.Count == 0
             ? "Ninguna canción cumple todas las condiciones. Las que piden energía, momento o etiquetas solo encuentran canciones con ficha."
             : $"«{c.Nombre}»: {Resumen}.";
+    }
+
+    /// <summary>Sustituye los resultados de una vez, conservando el orden por columna que hubiera elegido el usuario.</summary>
+    private void PonerResultados(List<FichaRow> filas)
+    {
+        if (filas.Count == 0 && _resultados.Count == 0) return;
+        _resultados = filas;
+        ResultadosView = VistaTabla.Nueva(_resultados, ResultadosView);
     }
 
     private static string DuracionTexto(long segundos)
@@ -307,16 +362,10 @@ public partial class ColeccionesViewModel : ScanViewModelBase
         Colecciones.Remove(Seleccionada);
         Guardar();
         Seleccionada = Colecciones.Count == 0 ? null : Colecciones[Math.Clamp(i, 0, Colecciones.Count - 1)];
-        if (Seleccionada == null) { Resultados.Clear(); Resumen = ""; Status = "Crea una colección y define sus condiciones."; }
+        if (Seleccionada == null) { PonerResultados(new List<FichaRow>()); Resumen = ""; Status = "Crea una colección y define sus condiciones."; }
     }
 
-    private string NombreLibre(string base_)
-    {
-        var nombre = base_;
-        for (var n = 2; Colecciones.Any(c => string.Equals(c.Nombre, nombre, StringComparison.CurrentCultureIgnoreCase)); n++)
-            nombre = $"{base_} {n}";
-        return nombre;
-    }
+    private string NombreLibre(string base_) => NombreUnico(base_, Colecciones.Select(c => c.Nombre));
 
     /// <summary>Guarda los resultados como lista M3U8, en el orden en que se ven en la tabla.</summary>
     public void ExportarM3u(string destino)
