@@ -5,6 +5,7 @@ using System.Linq;
 
 using Avalonia.Media;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -50,7 +51,25 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
     [ObservableProperty] private string _aiModel = "";
     [ObservableProperty] private string _aiStatus = "";
     [ObservableProperty] private string _aiHost = "";
-    [ObservableProperty] private bool _aiBusy;
+
+    /// <summary>
+    /// «Detectar» en curso: es breve (como mucho, lo que tarda Ollama en arrancar) y mientras tanto
+    /// la aplicación se bloquea como con cualquier proceso.
+    /// </summary>
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(IaOcupada))] private bool _aiBusy;
+
+    /// <summary>
+    /// Instalando Ollama o descargando un modelo. NO bloquea la aplicación: no toca ningún archivo
+    /// del usuario, y «llama3.1:8b» son unos 4,7 GB (unos 20 minutos a 30 Mbit/s) en los que antes
+    /// BeatTag quedaba inutilizable y sin forma de cancelar.
+    /// </summary>
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(IaOcupada))] private bool _iaEnSegundoPlano;
+
+    /// <summary>Hay algo de la IA en marcha: los botones de la sección se desactivan.</summary>
+    public bool IaOcupada => AiBusy || IaEnSegundoPlano;
+
+    private CancellationTokenSource? _ctsIa;
+
     [ObservableProperty] private double _aiProgress;
     [ObservableProperty] private bool _aiShowProgress;
     [ObservableProperty] private bool _cache = true;
@@ -77,13 +96,9 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
 
     // Ollama devuelve los modelos con etiqueta ("llama3.2:latest") mientras que los sugeridos se
     // escriben sin ella ("llama3.2"). Son el mismo modelo: sin esto aparecerían por duplicado en el
-    // desplegable y uno ya descargado se anunciaría como no instalado.
-    private static string SinEtiquetaLatest(string m)
-        => m.EndsWith(":latest", StringComparison.OrdinalIgnoreCase) ? m[..^":latest".Length] : m;
-
-    private bool EstaInstalado(string modelo)
-        => _instalados.Any(x => string.Equals(SinEtiquetaLatest(x), SinEtiquetaLatest(modelo),
-                                              StringComparison.OrdinalIgnoreCase));
+    // desplegable y uno ya descargado se anunciaría como no instalado. La regla es la de OllamaClient,
+    // la misma con la que el análisis decide si el modelo elegido está descargado.
+    private bool EstaInstalado(string modelo) => Core.Ai.OllamaClient.EstaInstalado(modelo, _instalados);
 
     /// <summary>Rehace la lista del desplegable conservando la elección actual si sigue siendo válida.</summary>
     private void RefrescarOpciones()
@@ -203,9 +218,12 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
         _tema = TemaMostrado(c.Theme);
         _tablasCompactas = c.CompactRows;
         RefrescarOpciones();
+        ActualizarAvisosConfiguracion();
 
         // El Logger puede emitir desde hilos de fondo -> marshalizar a la UI.
         _engine.Logger.OnLog += entry => Dispatcher.UIThread.Post(() => Anotar(entry));
+
+        _ = ActualizarRenombradosAsync();
     }
 
     private void PushToConfig()
@@ -221,6 +239,9 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
         c.Cache = Cache;
         // La dirección se aplica en caliente: así "Detectar" y "Descargar" usan lo que hay en pantalla.
         _engine.Ai.Host = c.AiHost.Length > 0 ? c.AiHost : Core.Ai.OllamaClient.DefaultHost;
+        // Una credencial ilegible que se acaba de volver a escribir ya no lo es: sin esto, el aviso
+        // amarillo seguía hasta reiniciar aunque la clave de Spotify o Discogs ya fuese la nueva.
+        ActualizarAvisosConfiguracion();
     }
 
     /// <summary>
@@ -246,6 +267,7 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
     [RelayCommand]
     private async Task DetectAiAsync()
     {
+        if (IaOcupada) return;
         PushToConfig();
         AiBusy = true;
         try { await DetectarAsync(); }
@@ -284,10 +306,14 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
         AiStatus = $"Preparada. {modelos.Count} modelo(s) instalado(s).";
     }
 
-    /// <summary>Instala Ollama con el gestor de paquetes del sistema (winget o Homebrew).</summary>
+    /// <summary>
+    /// Instala Ollama con el gestor de paquetes del sistema (winget o Homebrew). En segundo plano y
+    /// cancelable: el resto de la aplicación sigue disponible mientras tanto.
+    /// </summary>
     [RelayCommand]
     private async Task InstallAiAsync()
     {
+        if (IaOcupada) return;
         if (!OllamaInstaller.HayGestorDePaquetes())
         {
             AiStatus = $"Este equipo no tiene {OllamaInstaller.GestorDePaquetes}. Se abrirá la página oficial de descarga.";
@@ -295,14 +321,17 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
             return;
         }
 
-        AiBusy = true;
+        IaEnSegundoPlano = true;
         AiShowProgress = false;
+        _ctsIa = new CancellationTokenSource();
+        var ct = _ctsIa.Token;
         AiStatus = OperatingSystem.IsWindows()
-            ? "Instalando Ollama… Windows pedirá confirmación de administrador."
-            : "Instalando Ollama con Homebrew…";
+            ? "Instalando Ollama… Windows pedirá confirmación de administrador. Puedes seguir usando la aplicación."
+            : "Instalando Ollama con Homebrew… Puedes seguir usando la aplicación.";
         try
         {
-            var err = await OllamaInstaller.InstalarAsync(l => _engine.Logger.Detail($"  {OllamaInstaller.GestorDePaquetes}: {l}"));
+            var err = await OllamaInstaller.InstalarAsync(l => _engine.Logger.Detail($"  {OllamaInstaller.GestorDePaquetes}: {l}"), ct);
+            ct.ThrowIfCancellationRequested();
             if (err.Length > 0)
             {
                 AiStatus = "No se pudo instalar: " + err;
@@ -310,19 +339,44 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
             }
             // Tras instalar, el servicio tarda un poco en levantar; se comprueba en vez de darlo por hecho.
             AiStatus = "Instalado. Comprobando que el servicio responde…";
-            for (int i = 0; i < 10 && !await _engine.Ai.IsRunningAsync(); i++)
-                await Task.Delay(1500);
+            for (int i = 0; i < 10 && !await _engine.Ai.IsRunningAsync(ct); i++)
+                await Task.Delay(1500, ct);
 
-            if (await _engine.Ai.IsRunningAsync()) await DetectarAsync();
+            if (await _engine.Ai.IsRunningAsync(ct)) await DetectarAsync();
             else AiStatus = "Ollama se instaló, pero el servicio aún no responde. Ábrelo una vez y pulsa «Detectar».";
         }
-        finally { AiBusy = false; }
+        catch (OperationCanceledException)
+        {
+            // La confirmación de administrador abre el instalador como otro proceso con permisos
+            // elevados, que esta aplicación no puede detener: hay que decirlo.
+            AiStatus = "Instalación cancelada. Si el instalador ya había empezado, puede terminar por su cuenta: pulsa «Detectar» para comprobarlo.";
+        }
+        finally
+        {
+            IaEnSegundoPlano = false;
+            _ctsIa.Dispose(); _ctsIa = null;
+        }
     }
 
-    /// <summary>Descarga el modelo seleccionado (son varios GB, con aviso de avance).</summary>
+    /// <summary>
+    /// Sin ninguna línea de avance durante este tiempo, la descarga se da por colgada. Ollama envía
+    /// avance varias veces por segundo mientras descarga; el tramo mudo más largo es la comprobación
+    /// final del archivo. Antes, una conexión colgada sin cerrar el socket dejaba la lectura
+    /// esperando para siempre, y la única salida era cerrar la aplicación.
+    /// </summary>
+    public static readonly TimeSpan DescargaSinAvance = TimeSpan.FromMinutes(5);
+
+    /// <summary>¿Lleva la descarga demasiado tiempo sin avanzar?</summary>
+    public static bool DescargaParada(DateTime ultimoAvance, DateTime ahora) => ahora - ultimoAvance >= DescargaSinAvance;
+
+    /// <summary>
+    /// Descarga el modelo seleccionado (son varios GB, con aviso de avance). En segundo plano y
+    /// cancelable, y se detiene sola si deja de avanzar.
+    /// </summary>
     [RelayCommand]
     private async Task PullModelAsync()
     {
+        if (IaOcupada) return;
         PushToConfig();
         var modelo = (AiModel ?? "").Trim();
         if (modelo.Length == 0) modelo = Core.Ai.OllamaClient.DefaultModel;
@@ -333,27 +387,65 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
             return;
         }
 
-        AiBusy = true;
+        IaEnSegundoPlano = true;
         AiShowProgress = true;
         AiProgress = 0;
-        AiStatus = $"Descargando «{modelo}»… Puede tardar: son varios GB.";
+        AiStatus = $"Descargando «{modelo}»… Puede tardar: son varios GB. Puedes seguir usando la aplicación.";
+        var cts = _ctsIa = new CancellationTokenSource();
+        var ultimoAvance = DateTime.UtcNow;
+        var parada = false;
+        var terminada = false;   // un avance que llegue tarde no puede pisar el mensaje final
+        // El avance llega por el hilo de la interfaz (Progress<T>), igual que el reloj que lo vigila.
+        var vigilante = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+        vigilante.Tick += (_, _) =>
+        {
+            if (!DescargaParada(ultimoAvance, DateTime.UtcNow)) return;
+            parada = true;
+            cts.Cancel();
+        };
         try
         {
             var avance = new Progress<(string Estado, double Fraccion)>(p =>
             {
+                ultimoAvance = DateTime.UtcNow;
+                if (terminada) return;
                 AiProgress = p.Fraccion * 100;
                 AiStatus = p.Fraccion > 0
                     ? $"Descargando «{modelo}»: {p.Estado} ({p.Fraccion:P0})"
                     : $"«{modelo}»: {p.Estado}";
             });
-            var err = await _engine.Ai.PullModelAsync(modelo, avance);
+            vigilante.Start();
+            var err = await _engine.Ai.PullModelAsync(modelo, avance, cts.Token);
+            terminada = true;
+            vigilante.Stop();
+            if (cts.IsCancellationRequested)
+            {
+                AiStatus = parada
+                    ? $"La descarga de «{modelo}» lleva {DescargaSinAvance.TotalMinutes:0} minutos sin avanzar y se ha detenido. Comprueba la conexión y vuelve a pulsar «Descargar modelo»."
+                    : $"Descarga de «{modelo}» cancelada.";
+                return;
+            }
             if (err.Length > 0) { AiStatus = "No se pudo descargar: " + err; return; }
 
             AiStatus = $"Modelo «{modelo}» listo.";
             await DetectarAsync();
             AiModel = modelo;
         }
-        finally { AiBusy = false; AiShowProgress = false; }
+        finally
+        {
+            vigilante.Stop();
+            IaEnSegundoPlano = false; AiShowProgress = false;
+            cts.Dispose(); _ctsIa = null;
+        }
+    }
+
+    /// <summary>Cancela la instalación de Ollama o la descarga del modelo en curso.</summary>
+    [RelayCommand]
+    private void CancelarIa()
+    {
+        if (_ctsIa == null) return;
+        AiStatus = "Cancelando…";
+        _ctsIa.Cancel();
     }
 
     /// <summary>Abre el archivo de alias de artista (nombres distintos del mismo artista).</summary>
@@ -399,26 +491,107 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
     [RelayCommand]
     private void ClearLog() => Log.Clear();
 
-    /// <summary>Vacía la caché de respuestas de API y la caché de escaneo (se regeneran al usar la app).</summary>
-    [RelayCommand]
-    private void ClearCache()
+    // --- Vaciar caché (E11) ---
+    //
+    // Antes borraba sin preguntar, y en el hilo de la interfaz: con la carpeta cache de una
+    // biblioteca real (256 subcarpetas de ~260-280 archivos, unos 69.000) la ventana se quedaba
+    // congelada, y después el siguiente escaneo releía las etiquetas de toda la biblioteca (el primer
+    // escaneo medido tardó 340 s) y el siguiente análisis volvía a consultarlo todo en red e IA.
+    // Estaba al lado de «Recuperar descartadas», así que bastaba un clic equivocado.
+
+    /// <summary>Qué se llevaría «Vaciar caché», con cifras, para decirlo antes de borrar.</summary>
+    public sealed record ContenidoCache(int Respuestas, long Bytes, int Analisis, bool HayEscaneo)
     {
-        int n = 0;
+        public bool Vacia => Respuestas == 0 && Analisis == 0 && !HayEscaneo;
+    }
+
+    /// <summary>Mira la caché en segundo plano: contar decenas de miles de archivos lleva un rato.</summary>
+    public async Task<ContenidoCache> InspeccionarCacheAsync()
+    {
+        var dir = _engine.Paths.CacheDir;
+        var (n, bytes) = await Task.Run(() => ContarArchivos(dir));
+        var escaneo = File.Exists(_engine.Paths.ScanCachePath);
+        return new ContenidoCache(n, bytes, _engine.Analysis.Count, escaneo);
+    }
+
+    /// <summary>Archivos y bytes que hay dentro de una carpeta (0 si no existe).</summary>
+    public static (int Archivos, long Bytes) ContarArchivos(string dir)
+    {
+        if (!Directory.Exists(dir)) return (0, 0);
+        int n = 0; long bytes = 0;
+        foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+        {
+            n++;
+            try { bytes += new FileInfo(f).Length; } catch { }
+        }
+        return (n, bytes);
+    }
+
+    /// <summary>Texto de la confirmación de «Vaciar caché»: qué se borra y qué cuesta después.</summary>
+    public static (string Cuerpo, string Nota) TextosVaciarCache(ContenidoCache c)
+    {
+        var partes = new List<string>();
+        if (c.Respuestas > 0) partes.Add($"• Respuestas guardadas de los catálogos: {c.Respuestas:N0} archivos ({Tam(c.Bytes)}).");
+        if (c.HayEscaneo) partes.Add("• Caché de escaneo: lo leído de las etiquetas de toda la biblioteca.");
+        if (c.Analisis > 0) partes.Add($"• Resultados de análisis guardados: {c.Analisis:N0} canciones, con las propuestas pendientes de Enriquecer y No encontradas.");
+        return ("Se va a borrar:\n" + string.Join("\n", partes),
+                "No se tocan tus archivos de música, ni los ajustes, ni el historial para deshacer. Pero el próximo "
+              + "escaneo volverá a leer las etiquetas de toda la biblioteca y el próximo análisis volverá a consultar "
+              + "cada canción en los catálogos y en la IA local: en una biblioteca grande, eso lleva bastante tiempo.");
+    }
+
+    /// <summary>
+    /// «Vaciar caché» entero: mira qué hay, pregunta con <paramref name="confirmar"/> y vacía. La
+    /// página queda ocupada desde el clic, también durante el recuento (unos segundos con ~69.000
+    /// archivos) y la confirmación: ocupada, ninguna otra pestaña puede estar analizando y leyendo o
+    /// escribiendo estas mismas cachés, y un doble clic no abre dos confirmaciones
+    /// (ver <see cref="TareaExclusiva"/>).
+    /// </summary>
+    public Task VaciarCacheAsync(Func<ContenidoCache, Task<bool>> confirmar)
+        => TareaExclusiva.EjecutarAsync(() => IsBusy, ocupada => IsBusy = ocupada, async () =>
+        {
+            Status = "Mirando qué hay en la caché…";
+            var contenido = await InspeccionarCacheAsync();
+            if (contenido.Vacia) { Status = "La caché ya está vacía."; return; }
+            Status = "";
+            if (!await confirmar(contenido)) return;
+            await VaciarAsync();
+        });
+
+    /// <summary>Vacía las cachés ya confirmado, sin congelar la ventana y diciendo por dónde va.</summary>
+    private async Task VaciarAsync()
+    {
+        Status = "Vaciando la caché…";
         try
         {
-            var cacheDir = _engine.Paths.CacheDir;
-            if (Directory.Exists(cacheDir))
-            {
-                foreach (var f in Directory.EnumerateFiles(cacheDir, "*", SearchOption.AllDirectories))
-                    try { File.Delete(f); n++; } catch { }
-                foreach (var d in Directory.EnumerateDirectories(cacheDir))
-                    try { Directory.Delete(d, true); } catch { }
-            }
+            var dir = _engine.Paths.CacheDir;
+            var avance = new Progress<int>(n => Status = $"Vaciando la caché… {n:N0} archivos borrados.");
+            var (borrados, fallidos) = await Task.Run(() => BorrarContenido(dir, avance));
             _engine.Library.ClearScanCache();   // memoria + archivo (no basta con borrar el .json)
             _engine.ClearAnalysisCache();       // resultados de análisis guardados
-            Status = $"Caché vaciada ({n} respuestas + escaneo + análisis). Se regenerará al usar la app.";
+            Status = $"Caché vaciada ({borrados:N0} respuestas, escaneo y análisis). Se regenerará al usar la aplicación."
+                   + (fallidos > 0 ? $" {fallidos:N0} archivos no se pudieron borrar (estaban en uso)." : "");
+            _engine.Logger.Log($"Caché vaciada: {borrados} respuestas borradas, {fallidos} sin poder borrar.");
         }
         catch (Exception e) { Status = "No se pudo vaciar del todo la caché: " + e.Message; }
+    }
+
+    /// <summary>
+    /// Borra todo lo que hay DENTRO de una carpeta (la carpeta se queda). Cuenta lo borrado y lo que
+    /// no se pudo borrar, e informa del avance cada 500 archivos.
+    /// </summary>
+    public static (int Borrados, int Fallidos) BorrarContenido(string dir, IProgress<int>? avance = null)
+    {
+        if (!Directory.Exists(dir)) return (0, 0);
+        int borrados = 0, fallidos = 0;
+        foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).ToList())
+        {
+            try { File.Delete(f); borrados++; } catch { fallidos++; }
+            if (borrados > 0 && borrados % 500 == 0) avance?.Report(borrados);
+        }
+        foreach (var d in Directory.EnumerateDirectories(dir).ToList())
+            try { Directory.Delete(d, true); } catch { }
+        return (borrados, fallidos);
     }
 
     /// <summary>
@@ -505,8 +678,66 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
         Status = $"Carpeta de datos limpiada: {borrados} archivo(s). Se conservan ajustes, listas de artista y el historial de deshacer.";
     }
 
-    /// <summary>Cuántos renombrados hay anotados y podrían repararse en rekordbox.</summary>
-    public int RenombradosAnotados => RekordboxRelocator.RenombradosVigentes(_engine.Paths.UndoDir).Count;
+    /// <summary>
+    /// Cuántos renombrados anotados se pueden reparar en rekordbox: los que siguen vigentes. Se
+    /// calcula en segundo plano (lee todos los manifiestos y mira los archivos) al abrir Ajustes.
+    /// </summary>
+    [ObservableProperty] private int _renombradosAnotados;
+
+    public async Task ActualizarRenombradosAsync()
+    {
+        var dir = _engine.Paths.UndoDir;
+        try { RenombradosAnotados = await Task.Run(() => RenombradosReparables(dir)); }
+        catch (Exception e) { _engine.Logger.Error("No se pudieron contar los renombrados anotados", e); }
+    }
+
+    /// <summary>
+    /// Renombrados que hoy tiene sentido reparar: el archivo está en la ruta nueva y ya no en la vieja,
+    /// y la ruta vieja no es un nombre que solo existió hasta que se deshizo.
+    ///
+    /// Visto en una biblioteca real: run_20260920_230254.deshecho.jsonl tiene 12 renombrados que se
+    /// deshicieron esa misma noche, y el contador los sumaba. El mapa de RekordboxRelocator los
+    /// incluye a propósito como vueltas B→A (las fichas y una Location que llegara a apuntar a B las
+    /// necesitan), y en esas vueltas A existe y B no, así que mirar solo si existen los archivos los
+    /// seguía contando: hay que saber además que B fue un nombre deshecho.
+    /// </summary>
+    public static int RenombradosReparables(string undoDir)
+    {
+        var mapa = RekordboxRelocator.ReadRenames(undoDir);
+        if (mapa.Count == 0) return 0;
+        var deshechos = NombresDeshechos(undoDir);
+        return mapa.Count(kv => !deshechos.Contains(kv.Key) && File.Exists(kv.Value) && !File.Exists(kv.Key));
+    }
+
+    /// <summary>
+    /// Rutas que BeatTag llegó a dar a un archivo y que se deshicieron (el destino de cada renombrado
+    /// de los manifiestos archivados «.deshecho»).
+    /// </summary>
+    public static HashSet<string> NombresDeshechos(string undoDir)
+    {
+        var res = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!Directory.Exists(undoDir)) return res;
+        foreach (var mf in Directory.EnumerateFiles(undoDir, "run_*.jsonl"))
+        {
+            if (!Path.GetFileName(mf).Contains(".deshecho", StringComparison.OrdinalIgnoreCase)) continue;
+            IEnumerable<string> lineas;
+            try { lineas = File.ReadAllLines(mf); } catch { continue; }
+            foreach (var linea in lineas)
+            {
+                try
+                {
+                    if (System.Text.Json.Nodes.JsonNode.Parse(linea) is not System.Text.Json.Nodes.JsonObject o) continue;
+                    // Formato actual (OrigPath/FinalPath/Renamed) y el antiguo (new/orig/renamed).
+                    var destino = (string?)(o["FinalPath"] ?? o["new"]) ?? "";
+                    var renombrado = (o["Renamed"] ?? o["renamed"]) is System.Text.Json.Nodes.JsonValue v
+                                     && v.TryGetValue<bool>(out var b) && b;
+                    if (renombrado && destino.Length > 0) res.Add(destino);
+                }
+                catch { /* línea ilegible: no cuenta */ }
+            }
+        }
+        return res;
+    }
 
     /// <summary>
     /// Reescribe las rutas de una colección de rekordbox exportada, para que vuelva a encontrar los
@@ -524,6 +755,57 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
             ? $"{r.Reparadas} rutas reparadas. Importa el archivo generado en rekordbox para recuperar los cue points."
             : "No había ninguna ruta que reparar en esa colección.";
         _engine.Logger.Sum($"rekordbox: {r.Reparadas} reparadas · {r.SinCambio} sin cambio · {r.NoEncontradas} no encontradas.");
+    }
+
+    // --- Avisos de la configuración (T9) ---
+    //
+    // Si config.net.json no se pudo leer, o trae credenciales cifradas en otro equipo, el motor lo
+    // sabe desde el arranque (AppConfig.AvisoCarga), pero hasta ahora solo iba al registro: se
+    // perdían ajustes o no se guardaba nada, y en pantalla nadie lo decía.
+
+    /// <summary>Lo que pasó al leer config.net.json, o "" si se leyó con normalidad.</summary>
+    [ObservableProperty] private string _avisoConfiguracion = "";
+
+    /// <summary>Qué credenciales no se pueden descifrar aquí, o "" si ninguna.</summary>
+    [ObservableProperty] private string _avisoCredenciales = "";
+
+    /// <summary>
+    /// Los dos avisos, por separado: el del archivo se queda toda la sesión; el de las credenciales
+    /// desaparece en cuanto se sustituyen (al guardar o probar las claves: lo recalcula PushToConfig)
+    /// o se olvidan. Cuando el único problema al cargar fueron las credenciales
+    /// (<see cref="AppConfig.AvisoCargaSoloCredenciales"/>), el aviso de carga es ese mismo y no se repite.
+    /// </summary>
+    public static (string Archivo, string Credenciales) AvisosConfiguracion(AppConfig cfg)
+    {
+        var ilegibles = cfg.CredencialesIlegibles;
+        var credenciales = ilegibles.Count == 0 ? ""
+            : $"No se pueden descifrar en este equipo las credenciales de {NombresCredenciales(ilegibles)}: "
+            + "probablemente se guardaron en otro equipo o con otro usuario. Se conservan cifradas tal cual; "
+            + "vuelve a introducirlas en «Claves de API» o pulsa «Olvidar credenciales ilegibles».";
+        return (cfg.AvisoCargaSoloCredenciales ? "" : cfg.AvisoCarga, credenciales);
+    }
+
+    private static string NombresCredenciales(IEnumerable<string> campos)
+        => string.Join(", ", campos.Select(AppConfig.NombreVisible));
+
+    private void ActualizarAvisosConfiguracion()
+        => (AvisoConfiguracion, AvisoCredenciales) = AvisosConfiguracion(_engine.Config);
+
+    /// <summary>Nombres de las credenciales ilegibles, para la confirmación.</summary>
+    public string CredencialesIlegibles => NombresCredenciales(_engine.Config.CredencialesIlegibles);
+
+    /// <summary>Descarta las credenciales que no se pueden descifrar aquí (ya confirmado en la vista).</summary>
+    public void OlvidarCredencialesIlegibles()
+    {
+        var nombres = CredencialesIlegibles;
+        if (nombres.Length == 0) { ActualizarAvisosConfiguracion(); return; }
+        _engine.Config.OlvidarCredencialesIlegibles();
+        var ok = _engine.SaveConfig(out var error);
+        ActualizarAvisosConfiguracion();
+        Status = ok
+            ? $"Olvidadas las credenciales ilegibles ({nombres}). Si las necesitas, vuelve a introducirlas en «Claves de API»."
+            : $"Se olvidaron las credenciales ilegibles ({nombres}), pero la configuración no se pudo guardar: {error}";
+        _engine.Logger.Log($"Credenciales ilegibles olvidadas: {nombres}");
     }
 
     /// <summary>Abre la carpeta de datos, para poder mirarla a mano.</summary>
@@ -566,13 +848,19 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
         _engine.Logger.Log($"Recuperadas {elegidas.Count} canciones descartadas (quedan {_engine.Ignored.Count})");
     }
 
-    /// <summary>Olvida qué canciones se aplicaron ya, para que vuelvan a proponerse al analizar.</summary>
-    [RelayCommand]
-    private void ForgetApplied()
+    /// <summary>Cuántas canciones constan como ya aplicadas (para la confirmación de «Olvidar aplicadas»).</summary>
+    public int AplicadasCount => _engine.Applied.Count;
+
+    /// <summary>
+    /// Olvida qué canciones se aplicaron ya, para que vuelvan a proponerse al analizar. Se llama ya
+    /// confirmado desde la vista: no se puede deshacer y afecta a miles de canciones de golpe.
+    /// </summary>
+    public void OlvidarAplicadas()
     {
         var n = _engine.Applied.Count;
         if (n == 0) { Status = "No hay ninguna canción marcada como aplicada."; return; }
         _engine.Applied.Clear();
         Status = $"Olvidadas {n} canciones aplicadas. Volverán a salir al analizar.";
+        _engine.Logger.Log($"Olvidadas {n} canciones aplicadas.");
     }
 }

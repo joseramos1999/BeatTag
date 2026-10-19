@@ -33,8 +33,14 @@ public sealed class ApplyEngine
 
     public ApplyEngine(CoverFetcher? covers = null) => _covers = covers;
 
+    /// <param name="aplicada">
+    /// true si quien llama da la canción por aplicada (aplicadas.json) cuando sale bien: Enriquecer y
+    /// No encontradas. Queda en el manifiesto (<see cref="UndoRecord.Aplicada"/>) para que deshacer
+    /// sepa qué devolver a pendientes. Incompletas no lo hace: no lleva a aplicadas.json.
+    /// </param>
     public async Task<ApplyOneResult> ApplyOneAsync(ProcessResult info, bool over, FieldFlags fields,
-        string coverMode, TagLib.Picture? pngPic, string? undoFile, string doneLogPath, CancellationToken ct = default)
+        string coverMode, TagLib.Picture? pngPic, string? undoFile, string doneLogPath, CancellationToken ct = default,
+        bool aplicada = false)
     {
         var origPath = info.FilePath;
         var dir = Path.GetDirectoryName(origPath) ?? "";
@@ -106,7 +112,8 @@ public sealed class ApplyEngine
         {
             try
             {
-                var rec = new UndoRecord { OrigPath = origPath, FinalPath = finalPath, Renamed = didRename, Fields = log };
+                // Con el renombrado fallido nadie la da por aplicada (sigue en su lista con el aviso).
+                var rec = new UndoRecord { OrigPath = origPath, FinalPath = finalPath, Renamed = didRename, Fields = log, Aplicada = aplicada && renOk };
                 File.AppendAllText(undoFile, JsonSerializer.Serialize(rec, Json) + Environment.NewLine, Encoding.UTF8);
             }
             catch (Exception e)

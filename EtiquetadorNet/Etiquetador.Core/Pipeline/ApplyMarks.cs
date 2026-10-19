@@ -40,6 +40,19 @@ public sealed class ApplyMarks
         if (_noSobrescribir) _olvidadas.Add(path);
     }
 
+    /// <summary>
+    /// Olvida de una vez las decisiones cuya clave cumpla la condición (para podar las que ya no
+    /// sirven sin recorrer el mapa una vez por canción). Devuelve cuántas.
+    /// </summary>
+    public int OlvidarSi(System.Func<string, bool> condicion)
+    {
+        var fuera = new List<string>();
+        foreach (var clave in _map.Keys) if (condicion(clave)) fuera.Add(clave);
+        foreach (var clave in fuera) _map.Remove(clave);
+        if (fuera.Count > 0) _dirty = true;
+        return fuera.Count;
+    }
+
     public void Clear()
     {
         if (_noSobrescribir) { _vaciadas = true; _dirty = true; }

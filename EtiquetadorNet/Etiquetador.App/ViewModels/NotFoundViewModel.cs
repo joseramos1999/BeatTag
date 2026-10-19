@@ -17,9 +17,15 @@ using Etiquetador.Core.Pipeline;
 
 namespace Etiquetador.App.ViewModels;
 
-public sealed partial class NotFoundRow : ObservableObject
+public sealed partial class NotFoundRow : ObservableObject, IFilaBuscable
 {
     [ObservableProperty] private string _rowStatus = "";
+
+    private string? _textoBusqueda;
+
+    /// <summary>Lo que encuentra el cuadro «Buscar…». Los campos no cambian: se prepara una sola vez.</summary>
+    public string TextoBusqueda => _textoBusqueda ??= ConsultaTabla.Preparar(FileName, Query, Suggestion, Folder);
+
     public string FileName { get; init; } = "";
     public string Query { get; init; } = "";
     public string Folder { get; init; } = "";
@@ -63,15 +69,23 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
         _engine = engine;
         RowsView = new DataGridCollectionView(Rows);
         RowsView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(NotFoundRow.Folder)));
+        _filtroDiferido = new BusquedaDiferida(AplicarFiltro);
     }
+
+    private readonly BusquedaDiferida _filtroDiferido;
 
     partial void OnBusquedaChanged(string value)
     {
-        RowsView.Filter = Busqueda.Trim().Length == 0
-            ? null
-            : o => o is NotFoundRow r && BusquedaTexto.Coincide(Busqueda, r.FileName, r.Query, r.Suggestion, r.Folder);
-        RowsView.Refresh();
-        FiltroInfo = Busqueda.Trim().Length == 0 ? "" : $"{RowsView.Count} de {Rows.Count}";
+        if (string.IsNullOrWhiteSpace(value)) _filtroDiferido.Ahora();
+        else _filtroDiferido.Pedir();   // se filtra al dejar de teclear, no en cada pulsación
+    }
+
+    private void AplicarFiltro()
+    {
+        var consulta = ConsultaTabla.De(Busqueda);
+        // Asignar el filtro ya rehace la vista; no hace falta otro Refresh().
+        RowsView.Filter = consulta.Vacia ? null : o => o is NotFoundRow r && consulta.Coincide(r);
+        FiltroInfo = consulta.Vacia ? "" : $"{RowsView.Count} de {Rows.Count}";
     }
 
     /// <summary>
@@ -128,6 +142,8 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
         Progress = 0;
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
+        // Spotify y la IA local, si se desactivaron solos en un análisis anterior, vuelven a probarse.
+        TiradaAnalisis.Empezar(_engine.Spotify, _engine.Ai, _engine.Config.UseAi);
         try
         {
             if (!_engine.Library.IsScanned) { Status = "Escaneando biblioteca…"; await _engine.Library.ScanAsync(); }
@@ -153,7 +169,10 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
             }
             _engine.Analysis.Save();
             RowsView.Refresh();
-            Status = $"{Rows.Count} no encontradas de {tracks.Count} analizadas.";
+            var avisoIa = TiradaAnalisis.AvisoIa(_engine.Ai, _engine.Config.UseAi);
+            if (avisoIa.Length > 0) _engine.Logger.Err(avisoIa);
+            Status = $"{Rows.Count} no encontradas de {tracks.Count} analizadas."
+                   + (avisoIa.Length > 0 ? "  ⚠ " + avisoIa : "");
         }
         catch (OperationCanceledException) { _engine.Analysis.Save(); RowsView.Refresh(); Status = $"Cancelado ({Rows.Count} no encontradas hasta ahora)."; }
         finally { IsBusy = false; _cts.Dispose(); _cts = null; }
@@ -200,9 +219,10 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
 
         // Un solo manifiesto para todo el lote: deshacerlo devuelve las mismas canciones que se
         // aceptaron juntas, en vez de obligar a deshacer una por una.
-        var undo = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+        var undo = _engine.Paths.NuevoManifiesto();
         var campos = new FieldFlags { Title = true, Artist = true, Album = false, Genre = false, Year = false, Bpm = false };
-        int hechas = 0, fallidas = 0, sinHistorial = 0;
+        int hechas = 0, sinRenombrar = 0, fallidas = 0, sinHistorial = 0;
+        ApplyOneResult? ultimo = null;
 
         try
         {
@@ -222,21 +242,32 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
 
                 // Solo artista y título: lo demás (álbum, año, género, BPM) no lo sabe la IA, y
                 // sobrescribir a ciegas se pisa: el usuario ha aceptado un NOMBRE, no una ficha entera.
-                var res = await Task.Run(() => _engine.AplicarUnoAsync(info, over: true, campos, "keep", null, undo, _engine.Paths.DoneLog));
+                var res = await Task.Run(() => _engine.AplicarUnoAsync(info, over: true, campos, "keep", null, undo, _engine.Paths.DoneLog, aplicada: true));
+                ultimo = res;
+                if (res.UndoErr.Length > 0) sinHistorial++;
 
-                if (res.TagOk || res.DidRename)
+                // Aceptar la sugerencia es sobre todo RENOMBRAR: si el renombrado falla (el Explorador,
+                // rekordbox o el antivirus tienen el archivo abierto), la canción NO está aplicada.
+                // Antes bastaba con haber escrito las etiquetas: la fila desaparecía, el estado decía
+                // «Aplicada la sugerencia» y la canción quedaba en aplicadas.json con su nombre viejo.
+                switch (ResultadoAplicacion.Clasificar(res))
                 {
-                    hechas++;
-                    if (res.UndoErr.Length > 0) sinHistorial++;
-                    Rows.Remove(row);
-                    _engine.Applied.Add(res.FinalPath);   // ya aplicada: no reaparecerá al analizar
-                    _engine.Logger.Detail($"    '{row.FileName}' -> '{row.Suggestion}'");
-                }
-                else
-                {
-                    fallidas++;
-                    row.RowStatus = "⚠ no se pudo escribir: " + res.TagErr;
-                    _engine.Logger.Err($"No se pudo aplicar la sugerencia en '{row.FileName}': {res.TagErr}");
+                    case DesenlaceAplicacion.Aplicada:
+                        hechas++;
+                        Rows.Remove(row);
+                        _engine.Applied.Add(res.FinalPath);   // ya aplicada: no reaparecerá al analizar
+                        _engine.Logger.Detail($"    '{row.FileName}' -> '{row.Suggestion}'");
+                        break;
+                    case DesenlaceAplicacion.SinRenombrar:
+                        sinRenombrar++;
+                        row.RowStatus = ResultadoAplicacion.EstadoFila(res);
+                        _engine.Logger.Err($"Sugerencia en '{row.FileName}': artista y título escritos, pero no se pudo renombrar: {res.RenErr}");
+                        break;
+                    default:
+                        fallidas++;
+                        row.RowStatus = ResultadoAplicacion.EstadoFila(res);
+                        _engine.Logger.Err($"No se pudo aplicar la sugerencia en '{row.FileName}': {res.TagErr}{res.RenErr}");
+                        break;
                 }
             }
 
@@ -245,13 +276,30 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
             SetSelection(Array.Empty<NotFoundRow>());
             await _engine.Library.ScanAsync();
 
-            Status = (hechas == 1 && fallidas == 0
-                        ? $"Aplicada la sugerencia: {filas[0].Suggestion}"
-                        : $"Aplicadas {hechas} de {filas.Count}" + (fallidas > 0 ? $" · {fallidas} sin poder escribir" : ""))
+            Status = ResumenSugerencias(filas.Count, hechas, sinRenombrar, fallidas, filas[0], ultimo)
                    + (sinHistorial > 0 ? $"  ⚠ {sinHistorial} no quedaron anotadas: esos cambios no se pueden deshacer." : "");
         }
         catch (Exception e) { Status = "Error al aplicar la sugerencia: " + e.Message; }
         finally { IsBusy = false; }
+    }
+
+    /// <summary>
+    /// Estado tras aceptar sugerencias. Las que se quedaron sin renombrar se cuentan aparte: no
+    /// están aplicadas, siguen en la lista y se pueden reintentar cuando se cierre el programa que
+    /// tenía el archivo abierto.
+    /// </summary>
+    public static string ResumenSugerencias(int total, int hechas, int sinRenombrar, int fallidas,
+                                            NotFoundRow primera, ApplyOneResult? ultimo)
+    {
+        if (total == 1)
+            return hechas == 1 ? $"Aplicada la sugerencia: {primera.Suggestion}"
+                 : sinRenombrar == 1 ? $"Se escribieron artista y título en «{primera.FileName}», pero no se pudo renombrar"
+                                       + $" ({ultimo?.RenErr}). Sigue en la lista para reintentarlo."
+                 : $"No se pudo aplicar la sugerencia en «{primera.FileName}»: {(ultimo == null ? "" : (ultimo.TagErr + " " + ultimo.RenErr).Trim())}";
+
+        return $"Aplicadas {hechas} de {total}"
+             + (sinRenombrar > 0 ? $" · {sinRenombrar} sin renombrar (siguen en la lista; tienen ya artista y título)" : "")
+             + (fallidas > 0 ? $" · {fallidas} sin poder escribir" : "");
     }
 
     [RelayCommand]
@@ -344,23 +392,30 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 return;
             }
             var fields = _engine.BuildFields();
-            var undo = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
-            var res = await Task.Run(() => _engine.AplicarUnoAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog));
+            var undo = _engine.Paths.NuevoManifiesto();
+            var res = await Task.Run(() => _engine.AplicarUnoAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog, aplicada: true));
             await _engine.Library.ScanAsync();
-            if (res.TagOk)
+            var sinAnotar = res.UndoErr.Length > 0
+                ? $"  ⚠ el cambio NO quedó anotado, no se podrá deshacer ({res.UndoErr})"
+                : "";
+            switch (ResultadoAplicacion.Clasificar(res))
             {
-                Rows.Remove(row);   // solo se quita si de verdad se escribió
-                RowsView.Refresh();
-                _engine.Applied.Add(res.FinalPath);   // ya aplicada: no reaparecerá al analizar
-                _engine.Applied.Save();
-                Status = res.UndoErr.Length > 0
-                    ? $"¡Encontrada y actualizada!: {row.FileName}  ⚠ el cambio NO quedó anotado, no se podrá deshacer ({res.UndoErr})"
-                    : $"¡Encontrada y actualizada!: {row.FileName}";
-            }
-            else
-            {
-                row.RowStatus = "⚠ no se pudo escribir: " + res.TagErr;
-                Status = "Encontrada pero NO se pudo escribir: " + row.FileName;
+                case DesenlaceAplicacion.Aplicada:
+                    Rows.Remove(row);   // solo se quita si de verdad se escribió y se renombró
+                    RowsView.Refresh();
+                    _engine.Applied.Add(res.FinalPath);   // ya aplicada: no reaparecerá al analizar
+                    _engine.Applied.Save();
+                    Status = $"¡Encontrada y actualizada!: {row.FileName}" + sinAnotar;
+                    break;
+                case DesenlaceAplicacion.SinRenombrar:
+                    // Las etiquetas ya están escritas, pero el nombre es el viejo: no se da por aplicada.
+                    row.RowStatus = ResultadoAplicacion.EstadoFila(res);
+                    Status = $"Encontrada: se escribieron las etiquetas de «{row.FileName}», pero no se pudo renombrar ({res.RenErr}). Sigue en la lista." + sinAnotar;
+                    break;
+                default:
+                    row.RowStatus = ResultadoAplicacion.EstadoFila(res);
+                    Status = "Encontrada pero NO se pudo escribir: " + row.FileName;
+                    break;
             }
         }
         catch (Exception e) { Status = "Error al reanalizar: " + e.Message; }

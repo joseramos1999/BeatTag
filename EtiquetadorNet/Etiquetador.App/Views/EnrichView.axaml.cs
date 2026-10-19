@@ -163,6 +163,23 @@ public partial class EnrichView : UserControl
         await vm.ReanalyzeRowAsync(row, terms.Artist, terms.Title, terms.Source);   // la fila capturada, no SelectedRow
     }
 
+    // «Aplicar marcadas»: se confirma SIEMPRE, diciendo cuántas, cuántas se renombran y cuántas
+    // oculta la búsqueda. Visto en un registro real: con ~640 marcadas, buscar «bunny», ver 3 y
+    // pulsar Aplicar renombraba las ~640 sin preguntar.
+    private async void Apply_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not EnrichViewModel vm || vm.IsBusy) return;
+        var plan = vm.PlanDeAplicacion();
+        var motivo = vm.MotivoParaNoAplicar(plan);
+        if (motivo.Length > 0) { vm.Status = motivo; return; }
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+
+        var c = EnrichViewModel.Confirmacion(plan);
+        var eleccion = await ConfirmDialog.ElegirAsync(owner, c.Titulo, c.Cuerpo, c.Nota, c.Aceptar, c.Alternativa);
+        if (eleccion == ConfirmDialog.Eleccion.Cancelar) return;
+        await vm.AplicarMarcadasAsync(soloVisibles: eleccion == ConfirmDialog.Eleccion.Aceptar && c.AceptarSoloVisibles);
+    }
+
     private void ExpandAll_Click(object? sender, RoutedEventArgs e) => GridBehaviors.SetAllGroups(this.FindDescendantOfType<DataGrid>(), true);
     private void CollapseAll_Click(object? sender, RoutedEventArgs e) => GridBehaviors.SetAllGroups(this.FindDescendantOfType<DataGrid>(), false);
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -21,7 +22,7 @@ using Etiquetador.App.Views;
 namespace Etiquetador.App.ViewModels;
 
 /// <summary>Una fila de la previsualización: cambio propuesto para un archivo, con casilla Aplicar.</summary>
-public partial class PreviewRow : ObservableObject
+public partial class PreviewRow : ObservableObject, IFilaBuscable
 {
     private static readonly IBrush AppliedBrush = new SolidColorBrush(Color.FromArgb(0x33, 0x16, 0xA3, 0x4A)); // verde
     private static readonly IBrush ErrorBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xDC, 0x26, 0x26));   // rojo
@@ -65,12 +66,31 @@ public partial class PreviewRow : ObservableObject
 
     public required ProcessResult Result { get; set; }
 
+    /// <summary>
+    /// Huella de la propuesta del análisis (<see cref="EnrichViewModel.HuellaPropuesta"/>). Se fija al
+    /// crear la fila y al reanalizarla, no al editar una celda: la casilla que se guarda se refiere a
+    /// lo que propuso el análisis, que es lo que volverá a salir al abrir la aplicación.
+    /// </summary>
+    public string Huella { get; private set; } = "";
+
+    private string? _textoBusqueda;
+
+    /// <summary>Lo que encuentra el cuadro «Buscar…», preparado una vez y rehecho si se edita una celda.</summary>
+    public string TextoBusqueda => _textoBusqueda ??= ConsultaTabla.Preparar(Old, New, Artist, Title, Album, Genre);
+
+    protected override void OnPropertyChanged(PropertyChangedEventArgs e)
+    {
+        _textoBusqueda = null;
+        base.OnPropertyChanged(e);
+    }
+
     public void Toggle() => Apply = !Apply;
 
     /// <summary>Vuelca los campos mostrables desde un ProcessResult (al crear y al reanalizar).</summary>
     public void UpdateFrom(ProcessResult r)
     {
         Result = r;
+        Huella = EnrichViewModel.HuellaPropuesta(r);
         New = r.New; Score = r.Score; Source = r.Source;
         Remixer = r.Remixer.Length > 0 ? $"{r.Remixer} ({r.RemixKind})" : r.RemixKind;
         Title = r.Title; Artist = r.Artist; Album = r.Album; Genre = r.Genre; Year = r.Year; Bpm = r.Bpm;
@@ -82,6 +102,100 @@ public partial class PreviewRow : ObservableObject
         Result.New = New;
         Result.Title = Title; Result.Artist = Artist; Result.Album = Album;
         Result.Genre = Genre; Result.Year = Year; Result.Bpm = Bpm;
+    }
+}
+
+/// <summary>
+/// Cuántas filas de Enriquecer están marcadas y cuántas de ellas renombran, al día con cada cambio:
+/// filas que entran o salen, la casilla (también el doble clic) y el nombre propuesto editado.
+///
+/// Antes se recontaba a mano en unos pocos sitios (tras analizar y tras aplicar). El aviso de
+/// rekordbox («Se van a renombrar N archivos») no salía al arrancar con 300 propuestas en caché
+/// que renombraban, y tras «Desmarcar todo» seguía diciendo 300.
+/// </summary>
+public sealed partial class RecuentoMarcadas : ObservableObject
+{
+    [ObservableProperty] private int _marcadas;
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(HayRenombrados))] private int _renombran;
+
+    public bool HayRenombrados => Renombran > 0;
+
+    private readonly IReadOnlyList<PreviewRow> _filas;
+    private int _lote;
+
+    public RecuentoMarcadas(ObservableCollection<PreviewRow> filas)
+    {
+        _filas = filas;
+        foreach (var f in filas) f.PropertyChanged += AlCambiarFila;
+        filas.CollectionChanged += AlCambiarLista;
+        Recontar();
+    }
+
+    /// <summary>¿Renombra el archivo esta propuesta?</summary>
+    public static bool Renombra(PreviewRow r)
+        => r.New.Length > 0 && !string.Equals(r.New, r.Old, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Marcadas y, de ellas, las que renombran.</summary>
+    public static (int Marcadas, int Renombran) Contar(IEnumerable<PreviewRow> filas)
+    {
+        int marcadas = 0, renombran = 0;
+        foreach (var r in filas)
+        {
+            if (!r.Apply) continue;
+            marcadas++;
+            if (Renombra(r)) renombran++;
+        }
+        return (marcadas, renombran);
+    }
+
+    public void Recontar() => (Marcadas, Renombran) = Contar(_filas);
+
+    /// <summary>
+    /// Para cambiar muchas filas de golpe («Marcar todo»): se recuenta una sola vez al terminar, no
+    /// una por fila, que con cientos de propuestas recorrería la lista cientos de veces.
+    /// </summary>
+    public IDisposable EnLote()
+    {
+        _lote++;
+        return new FinDeLote(this);
+    }
+
+    private sealed class FinDeLote(RecuentoMarcadas r) : IDisposable
+    {
+        private bool _hecho;
+        public void Dispose()
+        {
+            if (_hecho) return;
+            _hecho = true;
+            if (--r._lote == 0) r.Recontar();
+        }
+    }
+
+    private void AlCambiarLista(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems != null) foreach (PreviewRow f in e.OldItems) f.PropertyChanged -= AlCambiarFila;
+        if (e.NewItems != null) foreach (PreviewRow f in e.NewItems) f.PropertyChanged += AlCambiarFila;
+        if (_lote > 0) return;
+
+        // Al analizar, las filas llegan de una en una: se suman sin recorrer la lista entera.
+        if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems != null)
+        {
+            foreach (PreviewRow f in e.NewItems)
+            {
+                if (!f.Apply) continue;
+                Marcadas++;
+                if (Renombra(f)) Renombran++;
+            }
+            return;
+        }
+        Recontar();
+    }
+
+    private void AlCambiarFila(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_lote > 0) return;
+        // Editar «Archivo propuesto» puede hacer que una fila pase a renombrar o deje de hacerlo.
+        if (e.PropertyName is nameof(PreviewRow.Apply) or nameof(PreviewRow.New)) Recontar();
     }
 }
 
@@ -166,16 +280,27 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     /// </summary>
     [ObservableProperty] private string _busqueda = "";
 
-    partial void OnBusquedaChanged(string value) => AplicarFiltro();
+    partial void OnBusquedaChanged(string value)
+    {
+        // Vaciar el cuadro devuelve la lista al momento; mientras se escribe, se espera a la pausa.
+        if (string.IsNullOrWhiteSpace(value)) _filtroDiferido.Ahora();
+        else _filtroDiferido.Pedir();
+    }
+
+    /// <summary>La búsqueda que está aplicada a la tabla (no la que se está tecleando).</summary>
+    private ConsultaTabla _consulta = ConsultaTabla.De("");
+    private readonly BusquedaDiferida _filtroDiferido;
 
     private void AplicarFiltro()
     {
-        RowsView.Filter = Busqueda.Trim().Length == 0
-            ? null
-            : o => o is PreviewRow r && BusquedaTexto.Coincide(Busqueda, r.Old, r.New, r.Artist, r.Title, r.Album, r.Genre);
-        RowsView.Refresh();
-        FiltroInfo = Busqueda.Trim().Length == 0 ? "" : $"{RowsView.Count} de {Rows.Count}";
+        var consulta = _consulta = ConsultaTabla.De(Busqueda);
+        // Asignar el filtro ya rehace la vista: el Refresh() que venía detrás la recorría otra vez.
+        RowsView.Filter = consulta.Vacia ? null : o => o is PreviewRow r && consulta.Coincide(r);
+        FiltroInfo = consulta.Vacia ? "" : $"{RowsView.Count} de {Rows.Count}";
     }
+
+    /// <summary>¿La deja ver la búsqueda aplicada?</summary>
+    private bool EsVisible(PreviewRow r) => _consulta.Vacia || _consulta.Coincide(r);
 
     /// <summary>Cuántas quedan a la vista mientras hay búsqueda. Vacío si no se está filtrando.</summary>
     [ObservableProperty] private string _filtroInfo = "";
@@ -201,6 +326,18 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
 
         RowsView = new DataGridCollectionView(Rows);
         RowsView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(PreviewRow.Folder)));
+        _filtroDiferido = new BusquedaDiferida(AplicarFiltro);
+
+        Recuento = new RecuentoMarcadas(Rows);
+        Recuento.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(RecuentoMarcadas.Marcadas)) OnPropertyChanged(nameof(Marcadas));
+            else if (e.PropertyName == nameof(RecuentoMarcadas.Renombran))
+            {
+                OnPropertyChanged(nameof(RenombradosPendientes));
+                OnPropertyChanged(nameof(HayRenombrados));
+            }
+        };
     }
 
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)
@@ -267,6 +404,10 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         var ct = _cts.Token;
         var sw = Stopwatch.StartNew();
 
+        // Spotify y la IA local, si se desactivaron solos en un análisis anterior, vuelven a probarse.
+        TiradaAnalisis.Empezar(_engine.Spotify, _engine.Ai, UseAi);
+        AvisoIa = "";
+
         // Barra secundaria: avance dentro de la canción en curso. Progress<T> marshalea al hilo de UI.
         _engine.StepProgress = new Progress<(string Phase, double Fraction)>(p =>
         {
@@ -324,6 +465,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
                     catch { continue; }
                 }
                 seenResults.Add(r);
+                VigilarIa();
                 if (r.Skip) continue;
                 if (r.Found || r.CleanOnly) { if (!AddRow(r, t)) sinCambio++; }
             }
@@ -335,6 +477,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
                                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             _engine.Analysis.Prune(seen, raices);
             _engine.Analysis.Save();
+            PodarMarcas(_engine.Marks, HuellasVigentes(seenResults));
             _engine.Marks.Save();
             RowsView.Refresh();
             Progress = 100;
@@ -342,7 +485,8 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
                    + (alreadyApplied > 0 ? $" · {alreadyApplied} ya aplicadas (omitidas)" : "")
                    + (yaCorrectas > 0 ? $" · {yaCorrectas} saltadas (nombre y tags ya coinciden)" : "")
                    + (sinCambio > 0 ? $" · {sinCambio} ya estaban bien" : "")
-                   + $" · en {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}.";
+                   + $" · en {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}."
+                   + (AvisoIa.Length > 0 ? "  ⚠ " + AvisoIa : "");
             var low = Rows.Count(r => r.RowStatus.StartsWith('⚠'));
             if (alreadyApplied > 0)
                 _engine.Logger.Detail($"    {alreadyApplied} ya aplicadas, omitidas (se recuperan con «Olvidar aplicadas» en Ajustes).");
@@ -353,14 +497,16 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             _engine.Logger.Sum($"Análisis terminado: {tracks.Count} revisadas · {Rows.Count} propuestas · {fromCache} de caché · "
                              + $"{low} de baja confianza · {TextUtils.FormatEta(sw.Elapsed.TotalSeconds)}");
             _engine.Logger.Detail($"Caché de red: {_engine.Api.CacheHits} aciertos / {_engine.Api.CacheMiss} peticiones nuevas");
-            RecontarRenombrados();
             WriteAnalysisReport(seenResults);
             AnalysisCompleted?.Invoke();   // las no encontradas van solas a su pestaña
         }
         catch (OperationCanceledException)
         {
             _engine.Analysis.Save(); RowsView.Refresh();
-            Status = $"Análisis cancelado ({Rows.Count} propuestas hasta ahora).";
+            PodarMarcas(_engine.Marks, HuellasVigentes(seenResults));   // de lo que sí se llegó a ver
+            _engine.Marks.Save();
+            Status = $"Análisis cancelado ({Rows.Count} propuestas hasta ahora)."
+                   + (AvisoIa.Length > 0 ? "  ⚠ " + AvisoIa : "");
             _engine.Logger.Err($"Análisis cancelado por el usuario ({Rows.Count} propuestas hasta ahora).");
             // El resumen también se escribe al cancelar: es lo que hace comparable una tirada con
             // otra, y una pasada larga que se corta a medias no debe dejar el registro sin cifras.
@@ -387,34 +533,136 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
 
         var row = new PreviewRow { Result = r, Old = r.Old, Folder = t.Folder, Duration = t.Duration, Quality = t.Quality, Cambio = indice, Why = r.Why };
         row.UpdateFrom(r);
-        if (r.Revisar.Length > 0)
-        {
-            // Fuente de rescate o nombre con huellas de una regla fallida (ProcessResult.Revisar).
-            row.Apply = false;
-            row.RowStatus = "⚠ revisar: " + r.Revisar;
-        }
-        else if (double.TryParse(r.Score, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sc) && sc < LowConfidence)
-        {
-            row.Apply = false;
-            row.RowStatus = "⚠ baja confianza — revisar";
-        }
+        var (apply, estado) = EstadoInicial(r);
+        row.Apply = apply;
+        if (estado.Length > 0) row.RowStatus = estado;
 
-        // Si el usuario ya decidió sobre esta canción, manda su decisión sobre el valor por defecto:
-        // revisar cientos de propuestas lleva su rato y cerrar la aplicación no puede tirarlo.
-        var decidida = _engine.Marks.Get(r.FilePath);
+        // Si el usuario ya decidió sobre ESTA propuesta, manda su decisión sobre el valor por
+        // defecto: revisar cientos de propuestas lleva su rato y cerrar la aplicación no puede tirarlo.
+        var decidida = DecisionGuardada(_engine.Marks, r.FilePath, row.Huella);
         if (decidida is bool v) row.Apply = v;
 
         // A partir de aquí, cualquier cambio de la casilla es cosa del usuario (la casilla de la
         // tabla escribe directamente en la propiedad, sin pasar por ningún comando).
-        row.PropertyChanged += RowApplyChanged;
+        row.PropertyChanged += RowChanged;
         Rows.Add(row);
         return true;
     }
 
-    private void RowApplyChanged(object? sender, PropertyChangedEventArgs e)
+    /// <summary>
+    /// Casilla y estado con los que nace una propuesta, antes de mirar lo que decidió el usuario: lo
+    /// que hay que revisar (fuente de rescate, nombre con huellas de una regla fallida) y lo de baja
+    /// confianza salen desmarcados y con el motivo.
+    /// </summary>
+    public static (bool Apply, string Estado) EstadoInicial(ProcessResult r)
+    {
+        if (r.Revisar.Length > 0) return (false, "⚠ revisar: " + r.Revisar);
+        if (double.TryParse(r.Score, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sc)
+            && sc < LowConfidence)
+            return (false, "⚠ baja confianza — revisar");
+        return (true, "");
+    }
+
+    // --- Casillas guardadas (E13) ---
+    //
+    // Antes la casilla se guardaba solo por ruta y sobrevivía a cambios de propuesta: tras «Marcar
+    // todo», una propuesta distinta para esa canción semanas después (otra coincidencia, confianza
+    // 0,8, fondo rojo) salía ya marcada y «Aplicar» la escribía. Ahora la decisión se guarda junto con
+    // la propuesta a la que se refería, y si la propuesta cambia, decide otra vez el análisis.
+
+    /// <summary>
+    /// Huella corta de una propuesta: el nombre propuesto, artista y título, la fuente y la
+    /// confianza. Es lo que identifica la coincidencia; si cambia cualquiera de esas cosas, la
+    /// propuesta ya es otra y la casilla que el usuario puso en la anterior no vale para ella.
+    /// </summary>
+    public static string HuellaPropuesta(ProcessResult r)
+    {
+        var texto = string.Join("\u001F", r.New, r.Artist, r.Title, r.Source, r.Score);
+        var hash = System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(texto));
+        return Convert.ToHexString(hash, 0, 8).ToLowerInvariant();
+    }
+
+    /// <summary>Clave con la que se guarda la casilla: la ruta y la huella de la propuesta.</summary>
+    public static string ClaveMarca(string ruta, string huella) => ruta + "\u001F" + huella;
+
+    /// <summary>
+    /// Lo que el usuario decidió para ESTA propuesta, o null si no decidió nada o decidió sobre otra.
+    ///
+    /// Las casillas de versiones anteriores se guardaron solo por ruta y no dicen a qué propuesta se
+    /// referían. Un «no» se respeta (desmarcar nunca escribe nada) y pasa a la clave nueva; un «sí»
+    /// se descarta y decide el análisis, porque es justo lo que podía aprobar de antemano una
+    /// propuesta distinta. En una propuesta que el análisis ya marca, eso no cambia nada.
+    /// </summary>
+    public static bool? DecisionGuardada(ApplyMarks marcas, string ruta, string huella)
+    {
+        if (marcas.Get(ClaveMarca(ruta, huella)) is bool propia) return propia;
+        if (marcas.Get(ruta) is not bool antigua) return null;
+        marcas.Forget(ruta);
+        if (antigua) return null;
+        marcas.Set(ClaveMarca(ruta, huella), false);
+        return false;
+    }
+
+    /// <summary>Guarda la casilla que el usuario ha puesto en esta propuesta.</summary>
+    public static void GuardarDecision(ApplyMarks marcas, string ruta, string huella, bool aplicar)
+        => marcas.Set(ClaveMarca(ruta, huella), aplicar);
+
+    /// <summary>Olvida la decisión sobre esta propuesta (y la antigua por ruta, si quedaba).</summary>
+    public static void OlvidarDecision(ApplyMarks marcas, string ruta, string huella)
+    {
+        marcas.Forget(ClaveMarca(ruta, huella));
+        marcas.Forget(ruta);
+    }
+
+    /// <summary>
+    /// La huella de la propuesta vigente de cada canción vista en una pasada (analizar o cargar de la
+    /// caché). Las que no tienen propuesta no entran: de esas no se sabe qué casilla sobra.
+    /// </summary>
+    public static Dictionary<string, string> HuellasVigentes(IEnumerable<ProcessResult> vistas)
+    {
+        var vigentes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in vistas)
+            if (!r.Skip && (r.Found || r.CleanOnly) && r.FilePath.Length > 0)
+                vigentes[r.FilePath] = HuellaPropuesta(r);
+        return vigentes;
+    }
+
+    /// <summary>
+    /// Olvida las casillas de propuestas que ya no son la vigente: misma ruta, otra huella. Devuelve
+    /// cuántas.
+    ///
+    /// Visto en revisión: con la huella en la clave, cada reanálisis que daba otra propuesta dejaba
+    /// la clave de la anterior para siempre, y «Marcar todo» o «Desmarcar todo» escriben una por fila.
+    /// Antes había una sola clave por ruta; marcas-aplicar.json (84 KB en el equipo del usuario)
+    /// crecía con cada «Reanalizar todo». Esa casilla ya no se puede usar: la propuesta a la que se
+    /// refería no es la que hay. Las de canciones que no se han visto en esta pasada (carpetas
+    /// desmarcadas, un disco desconectado) y las antiguas guardadas solo por ruta (las migra
+    /// <see cref="DecisionGuardada"/>) se quedan.
+    /// </summary>
+    public static int PodarMarcas(ApplyMarks marcas, IReadOnlyDictionary<string, string> huellaVigente)
+    {
+        if (huellaVigente.Count == 0) return 0;
+        return marcas.OlvidarSi(clave =>
+        {
+            var corte = clave.LastIndexOf('\u001F');
+            return corte > 0
+                && huellaVigente.TryGetValue(clave[..corte], out var vigente)
+                && !string.Equals(clave[(corte + 1)..], vigente, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    private void RowChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName != nameof(PreviewRow.Apply) || sender is not PreviewRow row) return;
-        _engine.Marks.Set(row.Result.FilePath, row.Apply);
+        GuardarDecision(_engine.Marks, row.Result.FilePath, row.Huella, row.Apply);
+    }
+
+    /// <summary>Pone la casilla sin anotarla como decisión del usuario (es el valor por defecto).</summary>
+    private void PonerSinAnotar(PreviewRow row, bool aplicar)
+    {
+        row.PropertyChanged -= RowChanged;
+        row.Apply = aplicar;
+        row.PropertyChanged += RowChanged;
     }
 
     /// <summary>Al iniciar: rellena la previsualización SOLO con lo que ya hay en la caché (sin red).</summary>
@@ -427,6 +675,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         Rows.Clear();
         int loaded = 0;
         var campos = _engine.BuildFields();
+        var vistas = new List<ProcessResult>();
         foreach (var t in tracks)
         {
             if (_engine.Ignored.Contains(t.FilePath)) continue;   // descartada por el usuario
@@ -435,8 +684,10 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             if (SeSalta(t, campos)) continue;
             var c = _engine.Analysis.Get(t.FilePath, sig);
             if (c == null || c.Skip) continue;
+            vistas.Add(c);
             if (c.Found || c.CleanOnly) { if (AddRow(c, t)) loaded++; }
         }
+        PodarMarcas(_engine.Marks, HuellasVigentes(vistas));
         RowsView.Refresh();
         if (loaded > 0) Status = $"{loaded} propuestas cargadas de la caché. Pulsa Analizar para completar el resto.";
     }
@@ -453,26 +704,133 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     /// da por perdidos. Se puede reparar después (Ajustes → Reparar colección de rekordbox), pero
     /// más vale saberlo antes que descubrirlo en cabina.
     /// </summary>
-    [ObservableProperty] private int _renombradosPendientes;
+    public int RenombradosPendientes => Recuento.Renombran;
 
-    public bool HayRenombrados => RenombradosPendientes > 0;
+    /// <summary>
+    /// Cuántas filas están marcadas: es lo que aplica el botón, y lo dice en su texto. Antes ponía
+    /// «Aplicar seleccionados» al lado de la insignia «3 seleccionadas» de la selección de la tabla,
+    /// y aplicaba las ~640 MARCADAS, no las 3 seleccionadas.
+    /// </summary>
+    public int Marcadas => Recuento.Marcadas;
 
-    partial void OnRenombradosPendientesChanged(int value) => OnPropertyChanged(nameof(HayRenombrados));
+    /// <summary>Lleva al día marcadas y renombrados con cada cambio de la lista (ver <see cref="RecuentoMarcadas"/>).</summary>
+    public RecuentoMarcadas Recuento { get; }
 
-    /// <summary>Recuenta los renombrados pendientes. Se llama tras analizar y tras aplicar.</summary>
-    public void RecontarRenombrados()
-        => RenombradosPendientes = Rows.Count(r => r.Apply
-                                                && r.New.Length > 0
-                                                && !string.Equals(r.New, r.Old, StringComparison.OrdinalIgnoreCase));
+    /// <summary>
+    /// Por qué el análisis en curso (o el último) sigue sin IA local, o "" si no se ha desactivado.
+    /// Se enseña encima de la tabla mientras dure, no solo en el registro.
+    /// </summary>
+    [ObservableProperty] private string _avisoIa = "";
 
-    /// <summary>Aplica todas las filas marcadas.</summary>
-    [RelayCommand]
-    private Task ApplyAsync()
+    /// <summary>Mira, canción a canción, si la IA local se acaba de desactivar sola, y lo dice una vez.</summary>
+    private void VigilarIa()
     {
-        if (Rows.Count == 0) { Status = "No hay nada que aplicar. Analiza primero."; return Task.CompletedTask; }
-        var marked = Rows.Where(r => r.Apply).ToList();
-        if (marked.Count == 0) { Status = "No hay ninguna canción marcada."; return Task.CompletedTask; }
-        return ApplyRowsAsync(marked);
+        if (AvisoIa.Length > 0) return;
+        var aviso = TiradaAnalisis.AvisoIa(_engine.Ai, UseAi);
+        if (aviso.Length == 0) return;
+        AvisoIa = aviso;
+        _engine.Logger.Err(aviso);
+    }
+
+    public bool HayRenombrados => Recuento.HayRenombrados;
+
+    /// <summary>¿Renombra el archivo esta propuesta?</summary>
+    public static bool Renombra(PreviewRow r) => RecuentoMarcadas.Renombra(r);
+
+    // --- Aplicar las marcadas (E3) ---
+
+    /// <summary>
+    /// Qué aplicaría «Aplicar marcadas»: cuántas, cuántas renombran y cuántas tapa la búsqueda.
+    /// </summary>
+    public sealed record PlanAplicar(int Marcadas, int Renombran, int Visibles, int VisiblesRenombran, string Busqueda)
+    {
+        public int Ocultas => Marcadas - Visibles;
+    }
+
+    public static PlanAplicar Planificar(IEnumerable<PreviewRow> filas, Func<PreviewRow, bool> visible, string busqueda)
+    {
+        int marcadas = 0, renombran = 0, visibles = 0, visiblesRenombran = 0;
+        foreach (var r in filas)
+        {
+            if (!r.Apply) continue;
+            var renombra = Renombra(r);
+            marcadas++;
+            if (renombra) renombran++;
+            if (!visible(r)) continue;
+            visibles++;
+            if (renombra) visiblesRenombran++;
+        }
+        return new PlanAplicar(marcadas, renombran, visibles, visiblesRenombran, busqueda.Trim());
+    }
+
+    /// <summary>El plan con lo que hay ahora en la tabla y en el cuadro de búsqueda.</summary>
+    public PlanAplicar PlanDeAplicacion()
+    {
+        _filtroDiferido.AplicarSiPendiente();   // «visibles» tiene que ser lo que dice el cuadro
+        return Planificar(Rows, EsVisible, Busqueda);
+    }
+
+    /// <summary>Por qué no hay nada que confirmar, o "" si lo hay.</summary>
+    public string MotivoParaNoAplicar(PlanAplicar p)
+        => Rows.Count == 0 ? "No hay nada que aplicar. Analiza primero."
+         : p.Marcadas == 0 ? "No hay ninguna canción marcada."
+         : "";
+
+    /// <summary>Textos del diálogo de confirmación.</summary>
+    /// <param name="Alternativa">Segundo botón ("" si no hay): con búsqueda activa, aplicar todas las marcadas.</param>
+    /// <param name="AceptarSoloVisibles">El botón principal aplica solo las que deja ver la búsqueda.</param>
+    public sealed record ConfirmacionAplicar(string Titulo, string Cuerpo, string Nota, string Aceptar,
+                                             string Alternativa, bool AceptarSoloVisibles);
+
+    /// <summary>
+    /// Lo que se le pregunta al usuario antes de aplicar. Visto en un registro real: 728 propuestas
+    /// («15184 revisadas · 728 propuestas»), unas 640 marcadas; se busca «bunny», se ven 3, y
+    /// aplicar sin preguntar renombraba las ~640. Con búsqueda activa, lo que se ofrece primero son
+    /// las que se ven: es lo que espera quien acaba de buscar, y es lo menos que se puede tocar.
+    /// </summary>
+    public static ConfirmacionAplicar Confirmacion(PlanAplicar p)
+    {
+        static string Canciones(int n) => n == 1 ? "1 canción" : $"{n} canciones";
+        static string Archivos(int n) => n == 1 ? "1 archivo" : $"{n} archivos";
+        static string QueHace(int n, int renombran)
+            => $"se escribirán las etiquetas de {Canciones(n)}"
+             + (renombran > 0 ? $" y se renombrarán {Archivos(renombran)}." : "; ningún archivo cambia de nombre.");
+        static string Frase(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
+
+        var nota = "Se puede deshacer con «Deshacer última»."
+                 + (p.Renombran > 0
+                     ? " Si usas rekordbox, los archivos renombrados pierden allí sus cue points y su beatgrid hasta que repares la colección (Ajustes → Reparar colección de rekordbox)."
+                     : "");
+
+        if (p.Ocultas == 0)
+            return new ConfirmacionAplicar($"Aplicar {Canciones(p.Marcadas)} {(p.Marcadas == 1 ? "marcada" : "marcadas")}",
+                                           Frase(QueHace(p.Marcadas, p.Renombran)), nota, $"Aplicar ({p.Marcadas})", "", false);
+
+        if (p.Visibles == 0)
+            return new ConfirmacionAplicar("Las canciones marcadas están ocultas por la búsqueda",
+                $"La búsqueda «{p.Busqueda}» no deja ver ninguna de las {Canciones(p.Marcadas)} marcadas. "
+                + "Si continúas, se aplicarán todas aunque no las estés viendo: " + QueHace(p.Marcadas, p.Renombran),
+                nota, $"Aplicar las {p.Marcadas} marcadas", "", false);
+
+        return new ConfirmacionAplicar($"Aplicar con la búsqueda «{p.Busqueda}» activa",
+            $"Hay {Canciones(p.Marcadas)} marcadas, pero la búsqueda solo deja ver {p.Visibles}; "
+            + $"{(p.Ocultas == 1 ? "la otra está oculta" : $"las otras {p.Ocultas} están ocultas")} y también se aplicaría"
+            + $"{(p.Ocultas == 1 ? "" : "n")} si eliges todas.\n\n"
+            + $"Solo las visibles: {QueHace(p.Visibles, p.VisiblesRenombran)}\n"
+            + $"Todas las marcadas: {QueHace(p.Marcadas, p.Renombran)}",
+            nota, $"Solo las visibles ({p.Visibles})", $"Todas las marcadas ({p.Marcadas})", true);
+    }
+
+    /// <summary>Las filas que se aplican: las marcadas, y con <paramref name="soloVisibles"/> solo las que se ven.</summary>
+    public static List<PreviewRow> FilasAAplicar(IEnumerable<PreviewRow> filas, Func<PreviewRow, bool> visible, bool soloVisibles)
+        => filas.Where(r => r.Apply && (!soloVisibles || visible(r))).ToList();
+
+    /// <summary>Aplica las marcadas, ya confirmadas en la vista (ConfirmDialog, como el resto de la aplicación).</summary>
+    public Task AplicarMarcadasAsync(bool soloVisibles)
+    {
+        var filas = FilasAAplicar(Rows, EsVisible, soloVisibles);
+        if (filas.Count == 0) { Status = "No hay ninguna canción marcada."; return Task.CompletedTask; }
+        return ApplyRowsAsync(filas);
     }
 
     /// <summary>Aplica SOLO la canción seleccionada (menú contextual), esté marcada o no.</summary>
@@ -494,7 +852,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         try
         {
             var fields = _engine.BuildFields();
-            var undoFile = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+            var undoFile = _engine.Paths.NuevoManifiesto();   // dos tiradas en el mismo segundo no se mezclan
             var doneLog = _engine.Paths.DoneLog;
 
             // Portada PNG local: se carga una vez para toda la tirada.
@@ -525,7 +883,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
                 try
                 {
                     row.SyncToResult();   // respeta lo editado en la tabla (nombre y tags)
-                    var res = await Task.Run(() => _engine.AplicarUnoAsync(row.Result, Overwrite, fields, CoverMode, png, undoFile, doneLog, ct), ct);
+                    var res = await Task.Run(() => _engine.AplicarUnoAsync(row.Result, Overwrite, fields, CoverMode, png, undoFile, doneLog, ct, aplicada: true), ct);
                     row.RowStatus = res is { TagOk: true, RenOk: true }
                         ? (res.UndoErr.Length > 0 ? "✔ aplicado (sin marcha atrás)" : "✔ aplicado")
                         : $"⚠ {res.TagErr}{res.RenErr}";
@@ -538,10 +896,10 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
                     if (res.TagOk && res.RenOk)
                     {
                         applied++; appliedRows.Add(row);
-                        // Queda marcada como aplicada: "Analizar" ya no volverá a proponerla
-                        // (sí lo hará "Reanalizar todo", que ignora estas marcas a propósito).
+                        // Queda marcada como aplicada: ni "Analizar" ni "Reanalizar todo" volverán a
+                        // proponerla. Se recupera con "Olvidar aplicadas" o deshaciendo la tirada.
                         _engine.Applied.Add(res.FinalPath);
-                        _engine.Marks.Forget(row.Result.FilePath);   // ya aplicada: su marca deja de tener sentido
+                        OlvidarDecision(_engine.Marks, row.Result.FilePath, row.Huella);   // ya aplicada: su casilla deja de tener sentido
                         _engine.Logger.Detail($"    OK  '{row.Old}' -> '{row.New}'");
                     }
                     else
@@ -562,7 +920,6 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             }
             _engine.Applied.Save();
             _engine.Marks.Save();
-            RecontarRenombrados();
             _engine.Logger.Sum($"Aplicación terminada: {applied} de {marked} correctas"
                              + (applied < marked ? $" · {marked - applied} con problemas" : "")
                              + (cancelled ? " (cancelada)" : ""));
@@ -588,25 +945,97 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         IsBusy = true;
         Status = "Deshaciendo la última ejecución…";
         _engine.Logger.Head("Deshaciendo la última ejecución…");
+        UndoResult res;
+        var vuelven = 0;
         try
         {
-            var res = await Task.Run(() => _engine.Undo.UndoLastRun());
+            res = await Task.Run(() => _engine.Undo.UndoLastRun());
             _engine.Logger.Sum($"Deshacer: {res.Reverted} revertidos · {res.Manual} conservados · {res.Missing} ausentes · {res.Errors} errores.");
+            // Solo lo que se había dado por aplicado: deshacer un ajuste de volumen, Unificar géneros
+            // o la importación de rekordbox no devuelve a pendientes nada de Enriquecer.
+            vuelven = OlvidarRevertidas(_engine.Applied, _engine.Marks, res.AplicadasRevertidas);
+            if (vuelven > 0)
+            {
+                _engine.Applied.Save();
+                _engine.Marks.Save();
+                _engine.Logger.Detail($"    {vuelven} canciones revertidas dejan de contar como aplicadas.");
+            }
             if (!res.None) await _engine.Library.ScanAsync();   // refleja el estado revertido
-            Status = res.None
-                ? "No hay ninguna ejecución que deshacer."
-                : $"Deshecho: {res.Reverted} revertidos · {res.Manual} conservados · {res.Missing} ausentes · {res.Errors} errores."
-                  + (res.Pendientes > 0 ? $" Quedan {res.Pendientes} pendientes: «Deshacer última» reintentará solo esos." : "")
-                  + (res.Aviso.Length > 0 ? " ⚠ " + res.Aviso : "");
         }
         finally { IsBusy = false; }
+
+        // Salen de la lista SOLO las propuestas de los archivos cuyo nombre o etiquetas acaba de
+        // devolver el deshacer (no las de un deshacer de volumen): se calcularon sobre etiquetas o
+        // nombres que ya no son los que hay. Antes se rehacía la lista
+        // entera desde la caché, que da lo mismo para esas (deshacer cambia la fecha del archivo y su
+        // caché deja de valer) pero tiraba lo editado en las celdas y los avisos «⚠» de todas las
+        // demás, y miraba en disco las 15-20k pistas desde el hilo de la interfaz.
+        var retiradas = 0;
+        if (!res.None)
+        {
+            var quitar = FilasRevertidas(Rows, res.Revertidas);
+            if (quitar.Count > 0)
+            {
+                using (Recuento.EnLote())
+                    foreach (var f in quitar) Rows.Remove(f);
+                RowsView.Refresh();
+                retiradas = quitar.Count;
+            }
+        }
+        Status = res.None
+            ? "No hay ninguna ejecución que deshacer."
+            : $"Deshecho: {res.Reverted} revertidos · {res.Manual} conservados · {res.Missing} ausentes · {res.Errors} errores."
+              + (res.Pendientes > 0 ? $" Quedan {res.Pendientes} pendientes: «Deshacer última» reintentará solo esos." : "")
+              + (vuelven > 0 ? $" {(vuelven == 1 ? "1 canción vuelve" : $"{vuelven} canciones vuelven")} a estar pendiente{(vuelven == 1 ? "" : "s")}: pulsa «Analizar» para ver de nuevo sus propuestas." : "")
+              + (retiradas > 0 ? $" {(retiradas == 1 ? "Se retira 1 propuesta" : $"Se retiran {retiradas} propuestas")} de la lista porque su archivo ha cambiado: «Analizar» la{(retiradas == 1 ? "" : "s")} vuelve a calcular." : "")
+              + (res.Aviso.Length > 0 ? " ⚠ " + res.Aviso : "");
+    }
+
+    /// <summary>
+    /// Filas cuyo archivo acaba de revertirse (por su ruta antes o después del cambio deshecho).
+    /// </summary>
+    public static List<PreviewRow> FilasRevertidas(IEnumerable<PreviewRow> filas, IEnumerable<string> rutas)
+    {
+        var revertidas = new HashSet<string>(rutas, StringComparer.OrdinalIgnoreCase);
+        return revertidas.Count == 0 ? new List<PreviewRow>()
+             : filas.Where(f => revertidas.Contains(f.Result.FilePath)).ToList();
+    }
+
+    /// <summary>
+    /// Deja de dar por aplicado lo que se acaba de revertir, para que Analizar lo vuelva a proponer.
+    /// Devuelve cuántas canciones dejan de contar como aplicadas.
+    ///
+    /// Visto en el código: aplicadas.json solo crecía (Add y Clear, nunca Remove). Una canción que
+    /// solo cambió tags conserva la misma ruta al aplicarse, así que tras deshacerla seguía omitida
+    /// como «ya aplicada» para siempre; las renombradas sí volvían porque su ruta cambiaba. La única
+    /// salida era «Olvidar aplicadas», que devolvía también las miles aplicadas de verdad.
+    ///
+    /// Recibe <see cref="UndoResult.AplicadasRevertidas"/>, no todo lo revertido: si no, deshacer un
+    /// ajuste de volumen de la biblioteca devolvía a pendientes las 640 aplicadas en Enriquecer.
+    /// </summary>
+    public static int OlvidarRevertidas(IgnoreList aplicadas, ApplyMarks marcas, IEnumerable<string> rutas)
+    {
+        var n = 0;
+        foreach (var ruta in rutas.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (aplicadas.Contains(ruta)) { aplicadas.Remove(ruta); n++; }
+            marcas.Forget(ruta);   // casilla antigua guardada solo por ruta, si quedaba alguna
+        }
+        return n;
     }
 
     [RelayCommand]
-    private void MarkAll() { foreach (var r in Rows) r.Apply = true; }
+    private void MarkAll() => MarcarEnLote(Rows, true);
 
     [RelayCommand]
-    private void MarkNone() { foreach (var r in Rows) r.Apply = false; }
+    private void MarkNone() => MarcarEnLote(Rows, false);
+
+    /// <summary>Marca o desmarca muchas filas y recuenta una sola vez al final.</summary>
+    private void MarcarEnLote(IEnumerable<PreviewRow> filas, bool valor)
+    {
+        using (Recuento.EnLote())
+            foreach (var r in filas) r.Apply = valor;
+    }
 
     // --- Menú contextual (sobre lo que haya seleccionado) ---
 
@@ -656,8 +1085,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         if (filas.Count == 0) return;
 
         var marcar = DebeMarcar(filas);
-        foreach (var f in filas) f.Apply = marcar;
-        RecontarRenombrados();
+        MarcarEnLote(filas, marcar);
         if (filas.Count > 1) Status = $"{filas.Count} {(marcar ? "marcadas" : "desmarcadas")}.";
     }
 
@@ -671,8 +1099,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     {
         var filas = Objetivo();
         if (filas.Count == 0) { Status = "Selecciona antes una o varias canciones."; return; }
-        foreach (var f in filas) f.Apply = valor;
-        RecontarRenombrados();
+        MarcarEnLote(filas, valor);
         Status = $"{filas.Count} {(valor ? "marcadas" : "desmarcadas")}.";
     }
 
@@ -687,11 +1114,10 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         if (filas.Count == 0) { Status = "Selecciona antes una o varias canciones."; return; }
 
         _engine.IgnoreTracks(filas.Select(f => f.Result.FilePath));
-        foreach (var f in filas) _engine.Marks.Forget(f.Result.FilePath);
+        foreach (var f in filas) OlvidarDecision(_engine.Marks, f.Result.FilePath, f.Huella);
         _engine.Marks.Save();
         foreach (var f in filas) Rows.Remove(f);
         RowsView.Refresh();
-        RecontarRenombrados();
         SetSelection(Array.Empty<PreviewRow>());
 
         _engine.Logger.Log($"Descartadas {filas.Count} (total descartadas: {_engine.Ignored.Count})");
@@ -840,15 +1266,26 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             opts.SearchTitle = searchTitle;
             opts.SearchSource = searchSource;
             var r = await Task.Run(() => _engine.Processor.ProcessAsync(row.Result.FilePath, isAcapella: false, opts));
+            var huellaAntes = row.Huella;
             row.UpdateFrom(r);
+            var encontrada = r.Found || r.CleanOnly;
+            var (porDefecto, estadoInicial) = EstadoInicial(r);
+            if (row.Huella != huellaAntes)
+            {
+                // La propuesta es otra: la casilla puesta en la anterior no vale para esta, igual que
+                // al volver a abrir la aplicación. Vuelve a decidir el análisis.
+                OlvidarDecision(_engine.Marks, row.Result.FilePath, huellaAntes);
+                PonerSinAnotar(row, encontrada && porDefecto);
+            }
             RowsView.Refresh();   // repinta la celda en la vista agrupada
 
-            if (r.Found || r.CleanOnly)
+            if (encontrada)
             {
                 // Igual que al cargar la fila (AddRow): lo que solo encontró una fuente de rescate o
                 // un nombre con huellas de una regla fallida no se queda marcado para aplicar. Antes
                 // aquí salía «reanalizado» y la casilla seguía como estuviera.
                 if (r.Revisar.Length > 0) DesmarcarParaRevisar(row, r.Revisar);
+                else if (estadoInicial.Length > 0) row.RowStatus = estadoInicial;   // baja confianza
                 else row.RowStatus = manual ? "✔ búsqueda manual" : "reanalizado";
                 // La propuesta pasa a ser la buena de este archivo (misma firma que el análisis normal).
                 _engine.Analysis.Set(row.Result.FilePath, _engine.BuildOptions().Signature(), r);
@@ -878,10 +1315,8 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     /// </summary>
     private void DesmarcarParaRevisar(PreviewRow row, string motivo)
     {
-        row.PropertyChanged -= RowApplyChanged;
-        row.Apply = false;
-        row.PropertyChanged += RowApplyChanged;
-        _engine.Marks.Forget(row.Result.FilePath);
+        PonerSinAnotar(row, false);
+        OlvidarDecision(_engine.Marks, row.Result.FilePath, row.Huella);
         row.RowStatus = "⚠ revisar: " + motivo;
     }
 
@@ -897,14 +1332,16 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         var fila = Rows.FirstOrDefault(x => string.Equals(x.Result.FilePath, r.FilePath, StringComparison.OrdinalIgnoreCase));
         if (fila != null)
         {
+            var huellaAntes = fila.Huella;
             fila.UpdateFrom(r);
+            if (fila.Huella != huellaAntes) OlvidarDecision(_engine.Marks, r.FilePath, huellaAntes);
             if (r.Revisar.Length > 0) DesmarcarParaRevisar(fila, r.Revisar);
             RowsView.Refresh();
             return true;
         }
         var t = _engine.Library.Tracks.FirstOrDefault(x => string.Equals(x.FilePath, r.FilePath, StringComparison.OrdinalIgnoreCase));
         if (t == null) return false;
-        _engine.Marks.Forget(r.FilePath);   // AddRow la deja desmarcada con el motivo
+        OlvidarDecision(_engine.Marks, r.FilePath, HuellaPropuesta(r));   // AddRow la deja desmarcada con el motivo
         var dentro = AddRow(r, t);
         RowsView.Refresh();
         return dentro;

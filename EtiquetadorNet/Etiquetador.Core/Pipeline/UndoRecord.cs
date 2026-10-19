@@ -49,4 +49,21 @@ public sealed class UndoRecord
     public string FinalPath { get; set; } = "";  // ruta absoluta tras renombrar (o = OrigPath)
     public bool Renamed { get; set; }
     public Dictionary<string, FieldChange>? Fields { get; set; }
+
+    /// <summary>
+    /// true si este cambio dio la canción por aplicada (aplicadas.json): lo anotan Enriquecer y No
+    /// encontradas al aplicar una propuesta. Deshacer solo devuelve a «pendientes» lo que lleva esta
+    /// marca.
+    ///
+    /// Visto en revisión: «Deshacer última» es un único botón para todo (volumen, Unificar géneros,
+    /// fichas al comentario, BPM y clave de rekordbox, Renombrar con IA…), y deshacer un ajuste de
+    /// volumen sacaba de aplicadas.json las 640 canciones aplicadas antes en Enriquecer, sin forma de
+    /// recuperarlas: volvían a consultarse y las aplicadas con la propuesta editada reaparecían
+    /// marcadas.
+    ///
+    /// Se escribe SIEMPRE, también cuando es false, a propósito: así un registro sin el campo es de un
+    /// manifiesto anterior a esta marca (ver <see cref="UndoEngine.DioPorAplicada"/>). Quien escribe
+    /// el manifiesto serializando un UndoRecord con las opciones por defecto la lleva sin hacer nada.
+    /// </summary>
+    public bool Aplicada { get; set; }
 }

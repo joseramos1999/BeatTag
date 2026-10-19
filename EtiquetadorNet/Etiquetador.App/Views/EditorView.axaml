@@ -23,7 +23,9 @@
             </StackPanel>
             <TextBox DockPanel.Dock="Top" PlaceholderText="Buscar (archivo / título / artista)…"
                      Text="{Binding Search}" Margin="0,0,0,6" />
-            <DataGrid ItemsSource="{Binding TracksView}" SelectedItem="{Binding SelectedTrack}"
+            <!-- Bloqueada mientras «Reanalizar…» busca o se guarda: la propuesta y el guardado son de la
+                 canción que estaba elegida, y cambiar de fila a mitad los mezclaba con otra. -->
+            <DataGrid ItemsSource="{Binding TracksView}" SelectedItem="{Binding SelectedTrack}" IsEnabled="{Binding !IsBusy}"
                       x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
                       CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
                       DoubleTapped="Grid_DoubleTapped">
@@ -52,7 +54,7 @@
                 <TextBox Text="{Binding Artist}" />
                 <TextBlock Text="Álbum" />
                 <TextBox Text="{Binding Album}" />
-                <TextBlock Text="Género" />
+                <TextBlock Text="Género (varios separados por punto y coma)" />
                 <TextBox Text="{Binding Genre}" />
                 <Grid ColumnDefinitions="*,12,*">
                     <StackPanel Grid.Column="0" Spacing="6">
@@ -68,7 +70,7 @@
                 <TextBox Text="{Binding Comment}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" />
 
                 <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-                    <Button Content="Guardar" Command="{Binding SaveCommand}"
+                    <Button Content="Guardar" Command="{Binding SaveCommand}" IsEnabled="{Binding !IsBusy}"
                             Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
                     <Button Content="🔎 Reanalizar…" Click="Reanalyze_Click"
                             Background="#2563EB" Foreground="White" FontWeight="SemiBold"

@@ -199,7 +199,11 @@ public static class OllamaInstaller
             }
 
             using var p = Process.Start(psi);
-            if (p == null) return "No se pudo ejecutar winget.";
+            if (p == null) return $"No se pudo ejecutar {GestorDePaquetes}.";
+            // Cancelar solo dejaba de esperar: winget o brew seguían instalando en segundo plano.
+            // (Lo que ya corra con permisos de administrador, tras la confirmación de Windows, no se
+            // puede detener desde aquí; quien llama lo avisa.)
+            using var alCancelar = ct.Register(() => { try { p.Kill(entireProcessTree: true); } catch { } });
 
             var salida = Task.Run(async () =>
             {
@@ -219,7 +223,7 @@ public static class OllamaInstaller
             if (p.ExitCode == 0) return "";
             // winget devuelve este código cuando el paquete ya está puesto: no es un fallo.
             if (unchecked((uint)p.ExitCode) == 0x8A150061) return "";
-            return $"winget terminó con código {p.ExitCode}. {err.Trim()}".Trim();
+            return $"{GestorDePaquetes} terminó con código {p.ExitCode}. {err.Trim()}".Trim();
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { return "Instalación cancelada."; }
         catch (Exception e) { return e.Message; }

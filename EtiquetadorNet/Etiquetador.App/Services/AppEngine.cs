@@ -494,10 +494,11 @@ public sealed class AppEngine
     /// encontradas e Incompletas en lugar de ir directamente a <see cref="Apply"/>.
     /// </summary>
     public async Task<ApplyOneResult> AplicarUnoAsync(ProcessResult info, bool over, FieldFlags fields,
-        string coverMode, TagLib.Picture? pngPic, string? undoFile, string doneLogPath, CancellationToken ct = default)
+        string coverMode, TagLib.Picture? pngPic, string? undoFile, string doneLogPath, CancellationToken ct = default,
+        bool aplicada = false)
     {
         var antes = SelloArchivo.De(info.FilePath);
-        var res = await Apply.ApplyOneAsync(info, over, fields, coverMode, pngPic, undoFile, doneLogPath, ct).ConfigureAwait(false);
+        var res = await Apply.ApplyOneAsync(info, over, fields, coverMode, pngPic, undoFile, doneLogPath, ct, aplicada).ConfigureAwait(false);
         SeguirArchivo(info.FilePath, res.FinalPath, antes);
         return res;
     }
