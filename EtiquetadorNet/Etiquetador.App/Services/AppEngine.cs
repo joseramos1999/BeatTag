@@ -84,6 +84,12 @@ public sealed class AppEngine
     public AlmacenBandeja Bandeja { get; }
 
     /// <summary>
+    /// Avisos que la ventana enseña de forma persistente: archivos que no se pudieron leer al
+    /// arrancar, guardados que fallan, carpetas no disponibles. Antes solo iban al registro.
+    /// </summary>
+    public AvisosApp Avisos { get; } = new();
+
+    /// <summary>
     /// Alguna ficha ha cambiado. Las fichas se editan desde dos páginas (Ficha DJ y Bandeja) y se
     /// leen desde una tercera (Colecciones): sin este aviso, una colección seguiría enseñando lo de
     /// antes de guardar.
@@ -140,7 +146,21 @@ public sealed class AppEngine
 
         Fase("Leyendo los ajustes…");
         Config = AppConfig.Load(Paths, out var cfgErr);
-        if (cfgErr.Length > 0) Logger.Err(cfgErr);
+        if (cfgErr.Length > 0)
+        {
+            Logger.Err(cfgErr);
+            Avisos.Poner("carga:config", cfgErr);
+            // Load aparta el archivo ilegible ANTES de que exista uno nuevo. Si la aplicación se
+            // cerrase a la fuerza antes del primer guardado (el Stop-Process de Compilar-BeatTag.ps1
+            // -CerrarApp, un corte de luz), el siguiente arranque no encontraría config.net.json y
+            // empezaría con los valores de fábrica, con las carpetas solo en el «.ilegible». Por eso
+            // lo rescatado se guarda ya.
+            if (!Config.GuardadoBloqueado && !File.Exists(Paths.ConfigPath))
+            {
+                if (Config.Save(Paths, out var errRescate)) Logger.Detail("Configuración: lo rescatado queda guardado como config.net.json.");
+                else Logger.Err("Configuración: no se pudo guardar lo rescatado: " + errRescate);
+            }
+        }
         Api = new ApiClient(Paths) { CacheOn = Config.Cache, Log = Logger };
         Logger.Detail($"Config: caché={Config.Cache} · fuentes: deezer={Config.UseDeezer} itunes={Config.UseItunes} "
                     + $"spotify={Config.UseSpotify} discogs={Config.UseDiscogs} mb={Config.UseMusicBrainz} "
@@ -194,15 +214,30 @@ public sealed class AppEngine
         Fichas = new AlmacenFichas(Paths.FichasDjPath);
         Colecciones = new AlmacenColecciones(Paths.ColeccionesPath);
         Bandeja = new AlmacenBandeja(Paths.BandejaPath);
-        foreach (var aviso in new[] { Fichas.AvisoCarga, Colecciones.AvisoCarga, Bandeja.AvisoCarga,
-                                      Analysis.AvisoCarga, Ignored.AvisoCarga, Applied.AvisoCarga, Marks.AvisoCarga, AudioAceptadas.AvisoCarga })
-            if (aviso.Length > 0) Logger.Err(aviso);
+        // Lo que no se pudo leer al arrancar se dice en la ventana, no solo en el registro: con
+        // fichas-dj.json bloqueado por otra ventana de BeatTag el almacén queda en solo lectura, y
+        // el usuario seguiría poniendo fichas que no se van a guardar sin nada que lo dijera.
+        foreach (var (clave, aviso) in new[]
+                 {
+                     ("fichas", Fichas.AvisoCarga), ("colecciones", Colecciones.AvisoCarga), ("bandeja", Bandeja.AvisoCarga),
+                     ("analisis", Analysis.AvisoCarga), ("descartadas", Ignored.AvisoCarga), ("aplicadas", Applied.AvisoCarga),
+                     ("marcas", Marks.AvisoCarga), ("audio-aceptadas", AudioAceptadas.AvisoCarga), ("escaneo", Library.AvisoCache),
+                 })
+        {
+            if (aviso.Length == 0) continue;
+            Logger.Err(aviso);
+            Avisos.Poner("carga:" + clave, aviso);
+        }
         Logger.Detail($"Fichas de DJ: {Fichas.Count} · colecciones: {Colecciones.Todas.Count}");
 
         // Cada vez que la biblioteca se reescanea -típicamente tras aplicar o deshacer renombrados-,
         // las fichas se recolocan con sus archivos. Se suscribe AQUÍ, antes de que existan las
         // páginas, para que cuando estas recalculen las fichas ya estén en su sitio.
         Library.Changed += ReubicarFichas;
+
+        // Una carpeta marcada que no se ha podido leer (el disco externo sin enchufar) se dice en la
+        // ventana, y el aviso se quita solo cuando vuelve a estar (hallazgo M7).
+        Library.Changed += () => Avisos.Poner("carpetas", Library.AvisoNoDisponibles());
 
         // La firma de la caché pasó a distinguir QUÉ credenciales se usan, no solo si las hay. Lo
         // ya analizado con las mismas claves sigue siendo válido, así que se le pone la firma nueva
@@ -212,39 +247,350 @@ public sealed class AppEngine
         var migradas = Analysis.MigrarFirma(opts.SignatureLegacy(), opts.Signature());
         if (migradas > 0)
         {
-            Analysis.Save();
+            Registrar("la caché de análisis", Analysis.Save());
             Logger.Detail($"Caché de análisis: {migradas} entradas conservadas al cambiar el formato de la firma.");
         }
 
+        IniciarGuardadoPeriodico();
+
         Fase("");   // cierra la última fase en el log
         Logger.Detail($"Arranque · motor listo en {_arranque.ElapsedMilliseconds} ms");
+        Listo = true;
+    }
+
+    /// <summary>
+    /// El motor terminó de montarse. Si el arranque falló a medias, <see cref="Current"/> ya apunta a
+    /// este motor incompleto, y al cerrar no hay que intentar guardar nada con él.
+    /// </summary>
+    public bool Listo { get; private set; }
+
+    // --- Guardar lo que vive en memoria (hallazgos M9, T3 y T10) ---
+    //
+    // Visto en los registros: un «Reanalizar todo» del 22-09 llevaba 66 minutos (18:23 → 19:29)
+    // cuando se canceló. Cancelado, guardó; cerrado con la X, no habría guardado nada: los análisis,
+    // las huellas, las medidas de sonoridad y las respuestas de «Comprobar audio» (algunas de pago)
+    // solo estaban en memoria. Al cerrar solo se guardaban las casillas «Aplicar».
+
+    /// <summary>
+    /// Guarda todo lo que vive en memoria y tiene cambios: análisis, casillas «Aplicar», aplicadas,
+    /// descartadas, avisos aceptados de «Comprobar audio», sonoridad, huellas e identificación. Cada
+    /// uno solo escribe si hay algo nuevo, así que llamarlo de más no cuesta. Los fallos se anotan en
+    /// el registro y en los avisos de la ventana, y se devuelven.
+    ///
+    /// Hay que llamarlo desde el hilo que modifica esas cachés (el de la interfaz) o con todo parado:
+    /// la caché de análisis no admite que se guarde mientras otro hilo le añade resultados.
+    /// </summary>
+    public IReadOnlyList<string> GuardarTodo(string cuando)
+    {
+        var fallos = new List<string>();
+        if (!Listo) return fallos;
+        void Uno(string que, Func<string> guardar)
+        {
+            string error;
+            try { error = guardar(); }
+            catch (Exception e) { error = e.Message; }
+            if (error.Length > 0) fallos.Add($"{que}: {error}");
+        }
+
+        Uno("el análisis", Analysis.Save);
+        Uno("las casillas «Aplicar»", Marks.Save);
+        Uno("las canciones aplicadas", Applied.Save);
+        Uno("las canciones descartadas", Ignored.Save);
+        Uno("los avisos aceptados de Comprobar audio", AudioAceptadas.Save);
+        // Estas tres registran por su cuenta lo que les pase al guardar.
+        Uno("la sonoridad", () => { Loudness.Save(); return ""; });
+        Uno("las huellas", () => { EsperarColaDeHuellas(); Fingerprints.Save(); return ""; });
+        Uno("la identificación", () => { Identificacion.Save(); return ""; });
+
+        foreach (var f in fallos) Logger.Err($"No se pudo guardar ({cuando}) {f}");
+        if (fallos.Count > 0) Avisos.Poner("guardar", "No se ha podido guardar " + string.Join(" · ", fallos));
+        else Avisos.Quitar("guardar");
+        return fallos;
+    }
+
+    /// <summary>
+    /// Anota en el registro y en los avisos un guardado que ha fallado (antes el error se perdía:
+    /// ninguna llamada miraba lo que devolvía Save). Si ahora ha ido bien, quita el aviso que hubiera
+    /// de una vez anterior. Devuelve el error.
+    /// </summary>
+    private string Registrar(string que, string error)
+    {
+        if (error.Length == 0) { Avisos.Quitar("guardar:" + que); return error; }
+        Logger.Err($"No se pudo guardar {que}: {error}");
+        Avisos.Poner("guardar:" + que, $"No se ha podido guardar {que}: {error}");
+        return error;
+    }
+
+    /// <summary>Cada cuántas canciones guarda un bucle largo lo que lleva hecho.</summary>
+    public const int CancionesEntrePuntos = 200;
+
+    /// <summary>Y como mucho cada cuánto tiempo, aunque vaya despacio (una canción puede tardar un minuto en red).</summary>
+    public static readonly TimeSpan TiempoEntrePuntos = TimeSpan.FromMinutes(5);
+
+    private int _desdeElUltimoPunto;
+    private readonly System.Diagnostics.Stopwatch _relojPunto = System.Diagnostics.Stopwatch.StartNew();
+
+    /// <summary>¿Toca guardar? Cada <see cref="CancionesEntrePuntos"/> canciones o cada <see cref="TiempoEntrePuntos"/>.</summary>
+    internal static bool TocaPuntoDeControl(int cancionesDesdeElUltimo, TimeSpan desdeElUltimo)
+        => cancionesDesdeElUltimo >= CancionesEntrePuntos || desdeElUltimo >= TiempoEntrePuntos;
+
+    /// <summary>
+    /// Punto de control para los bucles largos que van canción a canción (Enriquecer, No
+    /// encontradas): se llama tras cada canción y guarda lo hecho cada ~200 canciones o cada 5
+    /// minutos. Así un cierre a la fuerza, un corte de luz o un reinicio de Windows Update pierden
+    /// como mucho eso, y no la tirada entera. Devuelve si ha guardado.
+    ///
+    /// Hay que llamarlo desde el bucle, entre canción y canción (cuando nada está escribiendo en la
+    /// caché de análisis). El análisis, que es lo que más pesa, se escribe fuera del hilo de la
+    /// interfaz mientras el bucle espera.
+    /// </summary>
+    public async Task<bool> PuntoDeControlAsync()
+    {
+        _desdeElUltimoPunto++;
+        if (!TocaPuntoDeControl(_desdeElUltimoPunto, _relojPunto.Elapsed)) return false;
+        _desdeElUltimoPunto = 0;
+        _relojPunto.Restart();
+
+        // Lo que pesa (el análisis son varios MB; las huellas, más de cien), fuera del hilo de la
+        // interfaz; lo pequeño, que se toca desde la interfaz, aquí.
+        var errorAnalisis = await Task.Run(() =>
+        {
+            var e = Analysis.Save();
+            EsperarColaDeHuellas();
+            Fingerprints.Save();
+            Identificacion.Save();
+            Loudness.Save();
+            return e;
+        }).ConfigureAwait(true);
+        Registrar("la caché de análisis", errorAnalisis);
+        Registrar("las casillas «Aplicar»", Marks.Save());
+        Registrar("las canciones aplicadas", Applied.Save());
+        Registrar("las canciones descartadas", Ignored.Save());
+        Logger.Detail("Punto de control: lo hecho hasta ahora queda guardado.");
+        return true;
+    }
+
+    // Hay que guardar la referencia: un Timer al que no apunta nadie lo recoge el recolector y deja de sonar.
+    private Timer? _guardadoPeriodico;
+    private int _vueltasGuardado;
+
+    /// <summary>
+    /// Las huellas, la identificación y la sonoridad se calculan en bucles en paralelo que no pasan
+    /// por la interfaz. Sus cachés admiten que se guarden mientras se calculan, así que un reloj las
+    /// guarda cada 30 s (la identificación, con respuestas que pueden haberse pagado, y la
+    /// sonoridad, que pesan poco) y cada 5 min las huellas (153 MB en una biblioteca real). Si no
+    /// hay nada nuevo, guardar no escribe nada.
+    /// </summary>
+    private void IniciarGuardadoPeriodico()
+    {
+        _guardadoPeriodico = new Timer(_ =>
+        {
+            try
+            {
+                Identificacion.Save();
+                Loudness.Save();
+                if (++_vueltasGuardado % 10 == 0) Fingerprints.Save();
+            }
+            catch (Exception e) { Logger.Error("Guardado periódico de las cachés de audio", e); }
+        }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+    }
+
+    /// <summary>Guarda las cachés de audio y los avisos aceptados tras una operación por lotes (fuera del hilo de la interfaz).</summary>
+    private void GuardarCachesDeAudio()
+    {
+        EsperarColaDeHuellas();
+        Fingerprints.Save();
+        Identificacion.Save();
+        Loudness.Save();
+        Registrar("los avisos aceptados de Comprobar audio", AudioAceptadas.Save());
+    }
+
+    // --- Las cachés de audio siguen al archivo (hallazgos A2 y X4) ---
+
+    /// <summary>
+    /// La aplicación acaba de escribir SOLO etiquetas en <paramref name="origen"/> y quizá lo ha
+    /// renombrado a <paramref name="destino"/>: el audio es el mismo. Las huellas, las respuestas de
+    /// «Comprobar audio» (algunas pagadas en AudD), las medidas de sonoridad y los avisos ya
+    /// descartados lo siguen, en vez de caducar por la fecha o perderse con la ruta. Visto en los
+    /// datos reales: de 15.241 huellas guardadas solo valían 8.205, y unificar el género de 3.000
+    /// canciones volvía a mandar a AudD las que AcoustID no reconocía.
+    ///
+    /// <paramref name="antes"/> es el sello tomado justo antes de escribir: solo se pone al día lo
+    /// que valía entonces.
+    /// </summary>
+    public void SeguirArchivo(string origen, string destino, SelloArchivo antes)
+    {
+        var mueve = !string.Equals(origen, destino, StringComparison.Ordinal);
+        try
+        {
+            if (mueve)
+            {
+                Identificacion.Mover(origen, destino);
+                Loudness.Mover(origen, destino);
+                if (AudioAceptadas.Contains(origen))
+                {
+                    AudioAceptadas.Remove(origen);
+                    AudioAceptadas.Add(destino);
+                }
+            }
+            if (antes.Existe)
+            {
+                Identificacion.Retocar(destino, antes.M, antes.S);
+                Loudness.Retocar(destino, antes.M, antes.S);
+            }
+        }
+        catch (Exception e) { Logger.Error($"No se pudieron poner al día las cachés de audio de «{Path.GetFileName(destino)}»", e); }
+
+        if (!mueve && !antes.Existe) return;
+        EnColaDeHuellas(() =>
+        {
+            if (mueve) Fingerprints.Mover(origen, destino);
+            if (antes.Existe) Fingerprints.Retocar(destino, antes.M, antes.S);
+        });
+    }
+
+    /// <summary>
+    /// La aplicación acaba de ajustar el volumen del archivo. Eso sí cambia el audio de cara a la
+    /// sonoridad (la pone al día quien ajusta, con la ganancia aplicada), pero no la huella ni QUÉ
+    /// canción es: esas dos siguen valiendo.
+    /// </summary>
+    public void VolumenAjustado(string ruta, SelloArchivo antes)
+    {
+        if (!antes.Existe) return;
+        try { Identificacion.Retocar(ruta, antes.M, antes.S); }
+        catch (Exception e) { Logger.Error($"No se pudo poner al día la identificación de «{Path.GetFileName(ruta)}»", e); }
+        EnColaDeHuellas(() => Fingerprints.Retocar(ruta, antes.M, antes.S));
+    }
+
+    private readonly object _cerrojoHuellas = new();
+    private Task _colaHuellas = Task.CompletedTask;
+
+    /// <summary>
+    /// Las huellas se ponen al día en segundo plano y en orden. Su caché se lee del disco la primera
+    /// vez que hace falta, y MEDIDO: 153 MB, ~1,3 s (hallazgo A3); el Editor, Volumen y la Bandeja
+    /// llaman desde el hilo de la interfaz, y la ventana no puede quedarse parada por eso.
+    /// </summary>
+    private void EnColaDeHuellas(Action accion)
+    {
+        lock (_cerrojoHuellas)
+            _colaHuellas = _colaHuellas.ContinueWith(_ =>
+            {
+                try { accion(); }
+                catch (Exception e) { Logger.Error("No se pudieron poner al día las huellas de audio", e); }
+            }, TaskScheduler.Default);
+    }
+
+    /// <summary>Espera (como mucho un rato) a que las huellas pendientes de poner al día lo estén, antes de guardarlas.</summary>
+    private void EsperarColaDeHuellas()
+    {
+        Task cola;
+        lock (_cerrojoHuellas) cola = _colaHuellas;
+        try { cola.Wait(TimeSpan.FromSeconds(10)); } catch { /* lo que falte se pone al día la próxima vez */ }
+    }
+
+    /// <summary>
+    /// Aplica una propuesta (etiquetas, carátula y nombre) igual que <see cref="ApplyEngine.ApplyOneAsync"/>,
+    /// y además hace que las cachés de audio sigan al archivo. Es lo que deben llamar Enriquecer, No
+    /// encontradas e Incompletas en lugar de ir directamente a <see cref="Apply"/>.
+    /// </summary>
+    public async Task<ApplyOneResult> AplicarUnoAsync(ProcessResult info, bool over, FieldFlags fields,
+        string coverMode, TagLib.Picture? pngPic, string? undoFile, string doneLogPath, CancellationToken ct = default)
+    {
+        var antes = SelloArchivo.De(info.FilePath);
+        var res = await Apply.ApplyOneAsync(info, over, fields, coverMode, pngPic, undoFile, doneLogPath, ct).ConfigureAwait(false);
+        SeguirArchivo(info.FilePath, res.FinalPath, antes);
+        return res;
     }
 
     /// <summary>
     /// Devuelve a su archivo las fichas cuyo archivo ha cambiado de nombre o de sitio.
     ///
-    /// Primero se pregunta si hace falta, que es barato: casi todas las fichas son de canciones de
-    /// la biblioteca en memoria y no hay que ir al disco para saber que existen. Solo si alguna no
-    /// aparece se leen los manifiestos de deshacer, que es lo caro.
+    /// Se hace FUERA del hilo de la interfaz y solo cuando aparecen fichas huérfanas NUEVAS
+    /// (hallazgo I8). Antes, una sola ficha de una canción enviada a la papelera dejaba la condición
+    /// «hay huérfanas» a true para siempre (las huérfanas no se borran, a propósito), y cada escaneo,
+    /// cada envío a la papelera y cada renombrado volvían a leer TODOS los manifiestos de deshacer en
+    /// el hilo de la interfaz. Datos reales: 177 manifiestos, 15 MB, 27.173 líneas y 7.761
+    /// renombrados, y creciendo con cada ejecución.
+    ///
+    /// Aquí solo se copian las rutas de la biblioteca (unos milisegundos con 15.000 canciones);
+    /// mirar el disco y leer los manifiestos va en segundo plano. Si llega otro cambio mientras tanto,
+    /// se atiende al terminar, una sola vez y con la biblioteca más reciente.
     /// </summary>
     private void ReubicarFichas()
     {
         if (Fichas.Count == 0 || !Library.IsScanned) return;
-        try
+        var enBiblioteca = new HashSet<string>(Library.Tracks.Select(t => t.FilePath), StringComparer.OrdinalIgnoreCase);
+        var hiloInterfaz = SynchronizationContext.Current;
+        lock (_cerrojoReubicar)
         {
-            var enBiblioteca = new HashSet<string>(Library.Tracks.Select(t => t.FilePath), StringComparer.OrdinalIgnoreCase);
-            bool Existe(string ruta) => enBiblioteca.Contains(ruta) || File.Exists(ruta);
-
-            if (!Fichas.HayHuerfanas(Existe)) return;
-
-            var movidas = Fichas.Reubicar(RekordboxRelocator.ReadRenames(Paths.UndoDir), Existe);
-            if (movidas == 0) return;
-
-            var err = Fichas.Guardar();
-            Logger.Detail($"Fichas de DJ: {movidas} recolocada(s) tras renombrar archivos."
-                        + (err.Length > 0 ? $" ⚠ No se pudo guardar: {err}" : ""));
+            _reubicarCon = enBiblioteca;
+            if (_reubicando) return;
+            _reubicando = true;
         }
-        catch (Exception e) { Logger.Error("Error al recolocar las fichas de DJ", e); }
+        _ = Task.Run(() => BucleReubicar(hiloInterfaz));
+    }
+
+    private readonly object _cerrojoReubicar = new();
+    private HashSet<string>? _reubicarCon;
+    private bool _reubicando;
+
+    /// <summary>Huérfanas que ya se buscaron en los manifiestos sin encontrar adónde fueron.</summary>
+    private IReadOnlySet<string> _huerfanasConocidas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    private void BucleReubicar(SynchronizationContext? hiloInterfaz)
+    {
+        while (true)
+        {
+            HashSet<string> enBiblioteca;
+            lock (_cerrojoReubicar)
+            {
+                if (_reubicarCon == null) { _reubicando = false; return; }
+                enBiblioteca = _reubicarCon;
+                _reubicarCon = null;
+            }
+            try
+            {
+                var r = ReubicarHuerfanas(Fichas, ruta => enBiblioteca.Contains(ruta) || File.Exists(ruta),
+                                          () => RekordboxRelocator.ReadRenames(Paths.UndoDir), _huerfanasConocidas);
+                _huerfanasConocidas = r.Huerfanas;
+                if (r.Movidas == 0) continue;
+
+                var err = Fichas.Guardar();
+                Logger.Detail($"Fichas de DJ: {r.Movidas} recolocada(s) tras renombrar archivos."
+                            + (err.Length > 0 ? $" ⚠ No se pudo guardar: {err}" : ""));
+                if (err.Length > 0) Avisos.Poner("guardar:fichas", "No se han podido guardar las fichas de DJ: " + err);
+                // Las páginas ya se recalcularon con el escaneo: hay que decirles que las fichas se movieron.
+                if (hiloInterfaz != null) hiloInterfaz.Post(_ => AvisarFichasCambiadas(), null);
+                else AvisarFichasCambiadas();
+            }
+            catch (Exception e) { Logger.Error("Error al recolocar las fichas de DJ", e); }
+        }
+    }
+
+    /// <summary>Lo que dio buscar adónde fueron las fichas huérfanas.</summary>
+    /// <param name="Movidas">Fichas devueltas a su archivo.</param>
+    /// <param name="Huerfanas">Las que siguen sin archivo (para no volver a buscarlas mientras no cambie nada).</param>
+    /// <param name="LeyoManifiestos">Si hizo falta leer los manifiestos de deshacer, que es lo caro.</param>
+    internal sealed record Reubicacion(int Movidas, IReadOnlySet<string> Huerfanas, bool LeyoManifiestos);
+
+    /// <summary>
+    /// La regla de <see cref="ReubicarFichas"/>, aparte para poder probarla: solo se leen los
+    /// manifiestos si hay alguna huérfana que no se hubiera buscado ya. Una huérfana ya buscada no
+    /// puede aparecer de repente en un manifiesto nuevo: la aplicación solo anota renombrados de
+    /// archivos que existen, y si su archivo volviera a existir ya no sería huérfana.
+    /// </summary>
+    internal static Reubicacion ReubicarHuerfanas(AlmacenFichas fichas, Func<string, bool> existe,
+        Func<IReadOnlyDictionary<string, string>> leerRenombres, IReadOnlySet<string> conocidas)
+    {
+        var huerfanas = new HashSet<string>(fichas.Rutas.Where(r => !existe(r)), StringComparer.OrdinalIgnoreCase);
+        if (huerfanas.Count == 0 || huerfanas.All(conocidas.Contains))
+            return new Reubicacion(0, huerfanas, false);
+
+        var movidas = fichas.Reubicar(leerRenombres(), existe);
+        var quedan = movidas == 0
+            ? huerfanas
+            : new HashSet<string>(fichas.Rutas.Where(r => !existe(r)), StringComparer.OrdinalIgnoreCase);
+        return new Reubicacion(movidas, quedan, true);
     }
 
     // --- Fichas de DJ: lo comparten la página de fichas y la bandeja ---
@@ -271,64 +617,130 @@ public sealed class AppEngine
         return err;
     }
 
-    public sealed record ResultadoGeneros(int Escritas, int SinCambio, IReadOnlyList<string> Fallos, string UndoErr, bool Cancelado);
+    /// <param name="UndoErr">Cambios que están en disco y NO quedaron anotados para deshacer ("" si ninguno).</param>
+    /// <param name="Detenido">
+    /// Por qué se paró antes de terminar porque el historial para deshacer no se podía escribir, o ""
+    /// (hallazgo M10). Lo que no se llegó a anotar no se ha tocado.
+    /// </param>
+    public sealed record ResultadoGeneros(int Escritas, int SinCambio, IReadOnlyList<string> Fallos, string UndoErr, bool Cancelado,
+                                          string Detenido = "");
 
     /// <summary>
     /// Escribe el género nuevo en cada archivo («» lo quita). Como toda escritura de etiquetas, queda
-    /// anotada para deshacer EN CUANTO se hace, así que cancelar a medias deja reversible lo ya
-    /// escrito. Hay que llamarla fuera del hilo de la interfaz y con el reproductor parado.
+    /// anotada para deshacer, así que cancelar a medias deja reversible lo ya escrito; y si el
+    /// historial no se puede escribir, no se toca ningún archivo más. Hay que llamarla fuera del hilo
+    /// de la interfaz y con el reproductor parado.
     /// </summary>
     public ResultadoGeneros AplicarGeneros(IReadOnlyList<(string Ruta, string Genero)> cambios,
                                            IProgress<double>? progreso, CancellationToken ct)
     {
-        var undo = Path.Combine(Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+        ResultadoGeneros res;
+        using (var manifiesto = ManifiestoDeshacer.Abrir(Paths.NuevoManifiesto(), out var error))
+            res = EscribirGeneros(cambios, manifiesto, error, SeguirArchivo, Logger, progreso, ct);
+        GuardarCachesDeAudio();
+        return res;
+    }
+
+    /// <summary>
+    /// Un género propuesto como lista se escribe como VARIOS géneros, uno por valor (hallazgo I11).
+    /// «Unificar géneros» propone «Hip Hop; Latino» para una etiqueta que tenía dos, y antes se
+    /// escribía como un único valor con ese texto: BeatTag lo leía igual, pero rekordbox, Serato o el
+    /// Explorador veían un solo género llamado «Hip Hop; Latino».
+    /// </summary>
+    internal static string[] GenerosAEscribir(string genero)
+        => genero.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>
+    /// El bucle de <see cref="AplicarGeneros"/>, aparte para poder probar qué pasa si el historial
+    /// falla. <paramref name="historial"/> null significa que no se pudo abrir (el motivo, en
+    /// <paramref name="errorHistorial"/>): entonces no se toca nada.
+    /// </summary>
+    internal static ResultadoGeneros EscribirGeneros(IReadOnlyList<(string Ruta, string Genero)> cambios,
+        IHistorialDeshacer? historial, string errorHistorial, Action<string, string, SelloArchivo>? seguir,
+        Logger? log, IProgress<double>? progreso, CancellationToken ct)
+    {
         int escritas = 0, sinCambio = 0;
         var fallos = new List<string>();
-        var undoErr = "";
+        if (historial == null)
+            return new ResultadoGeneros(0, 0, fallos, "", true, SinHistorial(errorHistorial, log));
 
         for (var i = 0; i < cambios.Count; i++)
         {
             if (ct.IsCancellationRequested)
-                return new ResultadoGeneros(escritas, sinCambio, fallos, undoErr, true);
+                return new ResultadoGeneros(escritas, sinCambio, fallos, "", true);
 
             var (ruta, genero) = cambios[i];
             try
             {
-                using var f = TagLib.File.Create(ruta);
-                var antes = f.Tag.Genres ?? Array.Empty<string>();
-                var despues = genero.Length == 0 ? Array.Empty<string>() : new[] { genero };
-                if (antes.SequenceEqual(despues, StringComparer.Ordinal)) { sinCambio++; continue; }
-
-                f.Tag.Genres = despues;
-                f.Save();
-                escritas++;
-
-                var rec = new UndoRecord
+                SelloArchivo? sello = null;
+                using (var f = TagLib.File.Create(ruta))
                 {
-                    OrigPath = ruta, FinalPath = ruta, Renamed = false,
-                    Fields = new Dictionary<string, FieldChange> { ["Genre"] = FieldChange.Arr(antes, despues) },
-                };
-                try { File.AppendAllText(undo, System.Text.Json.JsonSerializer.Serialize(rec) + "\n"); }
-                catch (Exception e) { undoErr = e.Message; }
+                    var antes = f.Tag.Genres ?? Array.Empty<string>();
+                    var despues = GenerosAEscribir(genero);
+                    if (antes.SequenceEqual(despues, StringComparer.Ordinal)) sinCambio++;
+                    else
+                    {
+                        // Se anota ANTES de tocar el archivo: si el historial ya no se puede escribir,
+                        // este archivo y los siguientes se quedan como estaban. Que quede anotado un
+                        // cambio que luego falle no estorba: deshacer solo devuelve un campo si sigue
+                        // teniendo lo que escribió la aplicación.
+                        var anotado = historial.Anotar(new UndoRecord
+                        {
+                            OrigPath = ruta, FinalPath = ruta, Renamed = false,
+                            Fields = new Dictionary<string, FieldChange> { ["Genre"] = FieldChange.Arr(antes, despues) },
+                        });
+                        if (anotado.Length > 0)
+                            return new ResultadoGeneros(escritas, sinCambio, fallos, "", true, Parada(ruta, anotado, log));
+
+                        sello = SelloArchivo.De(ruta);
+                        f.Tag.Genres = despues;
+                        f.Save();
+                        escritas++;
+                    }
+                }
+                // Con el archivo ya cerrado, que es cuando su fecha queda al día.
+                if (sello is { } s) seguir?.Invoke(ruta, ruta, s);
             }
             catch (Exception e)
             {
                 fallos.Add(Path.GetFileName(ruta) + ": " + e.Message);
-                Logger.Log($"Género: {Path.GetFileName(ruta)}: {e.Message}", LogKind.Err);
+                log?.Log($"Género: {Path.GetFileName(ruta)}: {e.Message}", LogKind.Err);
             }
             progreso?.Report(100.0 * (i + 1) / cambios.Count);
         }
-        Logger.Detail($"Géneros unificados: {escritas} escritos · {sinCambio} ya estaban · {fallos.Count} fallos.");
-        return new ResultadoGeneros(escritas, sinCambio, fallos, undoErr, false);
+        log?.Detail($"Géneros unificados: {escritas} escritos · {sinCambio} ya estaban · {fallos.Count} fallos.");
+        return new ResultadoGeneros(escritas, sinCambio, fallos, "", false);
     }
 
+    /// <summary>El historial no se pudo ni abrir: no se ha tocado nada.</summary>
+    private static string SinHistorial(string error, Logger? log)
+    {
+        var texto = $"No se ha tocado ningún archivo: no se pudo crear el historial para deshacer ({error}). " +
+                    "Revisa que la carpeta de datos tenga espacio libre y permiso de escritura.";
+        log?.Err(texto);
+        return texto;
+    }
+
+    /// <summary>El historial dejó de poder escribirse a mitad: se para en ese archivo.</summary>
+    private static string Parada(string ruta, string error, Logger? log)
+    {
+        var texto = $"Se ha detenido en «{Path.GetFileName(ruta)}»: no se pudo anotar en el historial para deshacer ({error}). " +
+                    "Ese archivo y los siguientes se han quedado como estaban; lo anterior sí se puede deshacer. " +
+                    "Revisa que la carpeta de datos tenga espacio libre y permiso de escritura.";
+        log?.Err(texto);
+        return texto;
+    }
+
+    /// <param name="UndoErr">Renombrados que están hechos y NO quedaron anotados para deshacer ("" si ninguno).</param>
+    /// <param name="Detenido">Por qué se paró porque el historial no se podía escribir, o "" (hallazgo M10).</param>
     public sealed record ResultadoRenombrado(IReadOnlyList<(string Origen, string Destino)> Hechos, IReadOnlyList<string> Fallos,
-                                             string UndoErr, bool Cancelado);
+                                             string UndoErr, bool Cancelado, string Detenido = "");
 
     /// <summary>
     /// Renombra archivos dentro de su carpeta. Cada renombrado queda anotado para deshacer en cuanto
-    /// se hace, y con eso también sirve para reparar la colección de rekordbox. La ficha de DJ sigue
-    /// al archivo.
+    /// se hace, y con eso también sirve para reparar la colección de rekordbox. La ficha de DJ y las
+    /// cachés de audio siguen al archivo. Si el historial no se puede escribir, el que no quedó
+    /// anotado vuelve a su nombre y no se renombra ninguno más.
     ///
     /// A diferencia de Enriquecer, si el nombre ya existe NO se añade «(2)»: dos archivos que acaban
     /// llamándose igual suelen ser la misma canción, y eso se dice en vez de esconderlo.
@@ -337,40 +749,69 @@ public sealed class AppEngine
     public ResultadoRenombrado RenombrarArchivos(IReadOnlyList<(string Ruta, string NuevoNombre)> cambios,
                                                  IProgress<double>? progreso, CancellationToken ct)
     {
-        var undo = Path.Combine(Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+        ResultadoRenombrado res;
+        using (var manifiesto = ManifiestoDeshacer.Abrir(Paths.NuevoManifiesto(), out var error))
+            res = Renombrar(cambios, manifiesto, error, (de, a) =>
+            {
+                Fichas.Mover(de, a);
+                SeguirArchivo(de, a, default);   // renombrar no cambia ni la fecha ni el tamaño
+            }, Logger, progreso, ct);
+
+        if (res.Hechos.Count > 0)
+        {
+            var err = Fichas.Guardar();
+            if (err.Length > 0) Registrar("las fichas de DJ", err);
+        }
+        GuardarCachesDeAudio();
+        return res;
+    }
+
+    /// <summary>El bucle de <see cref="RenombrarArchivos"/>, aparte para poder probar qué pasa si el historial falla.</summary>
+    internal static ResultadoRenombrado Renombrar(IReadOnlyList<(string Ruta, string NuevoNombre)> cambios,
+        IHistorialDeshacer? historial, string errorHistorial, Action<string, string>? alRenombrar,
+        Logger? log, IProgress<double>? progreso, CancellationToken ct)
+    {
         var hechos = new List<(string, string)>();
         var fallos = new List<string>();
-        var undoErr = "";
+        if (historial == null)
+            return new ResultadoRenombrado(hechos, fallos, "", true, SinHistorial(errorHistorial, log));
 
         for (var i = 0; i < cambios.Count; i++)
         {
-            if (ct.IsCancellationRequested) return new ResultadoRenombrado(hechos, fallos, undoErr, true);
+            if (ct.IsCancellationRequested) return new ResultadoRenombrado(hechos, fallos, "", true);
             var (ruta, nuevo) = cambios[i];
             var nombre = Path.GetFileName(ruta);
             var t = Etiquetador.Core.Ai.RenombradoIa.RenombrarArchivo(ruta, nuevo);
             if (t.Ok)
             {
+                // El destino solo se sabe después de renombrar, así que aquí se anota después; si no
+                // se puede, se le devuelve su nombre y se para.
+                var anotado = historial.Anotar(new UndoRecord { OrigPath = t.Origen, FinalPath = t.Destino, Renamed = true });
+                if (anotado.Length > 0)
+                {
+                    try { File.Move(t.Destino, t.Origen); }
+                    catch (Exception e)
+                    {
+                        hechos.Add((t.Origen, t.Destino));
+                        alRenombrar?.Invoke(t.Origen, t.Destino);
+                        var sinVuelta = $"«{Path.GetFileName(t.Destino)}» se renombró, pero no quedó anotado ni se pudo devolver a su nombre ({e.Message})";
+                        log?.Err("Renombrado con IA: " + sinVuelta);
+                        return new ResultadoRenombrado(hechos, fallos, sinVuelta, true, Parada(ruta, anotado, log));
+                    }
+                    return new ResultadoRenombrado(hechos, fallos, "", true, Parada(ruta, anotado, log));
+                }
                 hechos.Add((t.Origen, t.Destino));
-                Fichas.Mover(t.Origen, t.Destino);
-                var rec = new UndoRecord { OrigPath = t.Origen, FinalPath = t.Destino, Renamed = true };
-                try { File.AppendAllText(undo, System.Text.Json.JsonSerializer.Serialize(rec) + "\n"); }
-                catch (Exception e) { undoErr = e.Message; }
-                Logger.Detail($"Renombrado con IA: «{nombre}» → «{Path.GetFileName(t.Destino)}»");
+                alRenombrar?.Invoke(t.Origen, t.Destino);
+                log?.Detail($"Renombrado con IA: «{nombre}» → «{Path.GetFileName(t.Destino)}»");
             }
             else
             {
                 fallos.Add($"{nombre}: {t.Error}");
-                Logger.Log($"Renombrado con IA: {nombre}: {t.Error}", LogKind.Err);
+                log?.Log($"Renombrado con IA: {nombre}: {t.Error}", LogKind.Err);
             }
             progreso?.Report(100.0 * (i + 1) / cambios.Count);
         }
-
-        if (hechos.Count > 0)
-        {
-            var err = Fichas.Guardar();
-            if (err.Length > 0) Logger.Err("No se pudieron guardar las fichas tras renombrar: " + err);
-        }
-        return new ResultadoRenombrado(hechos, fallos, undoErr, false);
+        return new ResultadoRenombrado(hechos, fallos, "", false);
     }
 
     /// <summary>Borra la ficha de cada archivo. Devuelve "" o el error.</summary>
@@ -382,53 +823,75 @@ public sealed class AppEngine
         return err;
     }
 
-    public sealed record ResultadoVolcado(int Escritas, int SinCambio, IReadOnlyList<string> Fallos, string UndoErr);
+    /// <param name="UndoErr">Cambios que están en disco y NO quedaron anotados para deshacer ("" si ninguno).</param>
+    /// <param name="Detenido">Por qué se paró porque el historial no se podía escribir, o "" (hallazgo M10).</param>
+    public sealed record ResultadoVolcado(int Escritas, int SinCambio, IReadOnlyList<string> Fallos, string UndoErr,
+                                          string Detenido = "");
 
     /// <summary>
     /// Copia la ficha de cada archivo a su comentario, conservando lo que el comentario ya tenía.
     ///
     /// Es la única acción de las fichas que toca la música, y por eso queda anotada para deshacer
-    /// como cualquier otra escritura. Cada cambio se anota EN CUANTO se hace, no al final: si algo se
-    /// interrumpe a medias, lo ya escrito sigue siendo reversible. Hay que llamarla fuera del hilo de
-    /// la interfaz y con el reproductor parado (<see cref="ReleaseAudio"/>).
+    /// como cualquier otra escritura: cada cambio se anota ANTES de hacerlo, y si el historial no se
+    /// puede escribir no se toca ningún archivo más. Hay que llamarla fuera del hilo de la interfaz y
+    /// con el reproductor parado (<see cref="ReleaseAudio"/>).
     /// </summary>
     public ResultadoVolcado VolcarFichasAlComentario(IReadOnlyList<string> rutas)
     {
-        var undo = Path.Combine(Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+        ResultadoVolcado res;
+        using (var manifiesto = ManifiestoDeshacer.Abrir(Paths.NuevoManifiesto(), out var error))
+            res = VolcarComentarios(rutas, r => Fichas.Obtener(r), manifiesto, error, SeguirArchivo, Logger);
+        GuardarCachesDeAudio();
+        return res;
+    }
+
+    /// <summary>El bucle de <see cref="VolcarFichasAlComentario"/>, aparte para poder probar qué pasa si el historial falla.</summary>
+    internal static ResultadoVolcado VolcarComentarios(IReadOnlyList<string> rutas, Func<string, FichaDj?> fichaDe,
+        IHistorialDeshacer? historial, string errorHistorial, Action<string, string, SelloArchivo>? seguir, Logger? log)
+    {
         int escritas = 0, sinCambio = 0;
         var fallos = new List<string>();
-        var undoErr = "";
+        if (historial == null)
+            return new ResultadoVolcado(0, 0, fallos, "", SinHistorial(errorHistorial, log));
 
         foreach (var ruta in rutas)
         {
             try
             {
-                var ficha = Fichas.Obtener(ruta) ?? new FichaDj();
-                using var f = TagLib.File.Create(ruta);
-                var antes = f.Tag.Comment ?? "";
-                var despues = Etiquetador.Core.Dj.Fichas.ComentarioCombinado(antes, ficha);
-                if (despues == antes) { sinCambio++; continue; }
-
-                f.Tag.Comment = despues.Length == 0 ? null : despues;
-                f.Save();
-                escritas++;
-
-                var rec = new UndoRecord
+                SelloArchivo? sello = null;
+                var ficha = fichaDe(ruta) ?? new FichaDj();
+                using (var f = TagLib.File.Create(ruta))
                 {
-                    OrigPath = ruta, FinalPath = ruta, Renamed = false,
-                    Fields = new Dictionary<string, FieldChange> { ["Comment"] = FieldChange.Str(antes, despues) },
-                };
-                try { File.AppendAllText(undo, System.Text.Json.JsonSerializer.Serialize(rec) + "\n"); }
-                catch (Exception e) { undoErr = e.Message; }
+                    var antes = f.Tag.Comment ?? "";
+                    var despues = Etiquetador.Core.Dj.Fichas.ComentarioCombinado(antes, ficha);
+                    if (despues == antes) sinCambio++;
+                    else
+                    {
+                        // Antes de tocar el archivo, como en los géneros.
+                        var anotado = historial.Anotar(new UndoRecord
+                        {
+                            OrigPath = ruta, FinalPath = ruta, Renamed = false,
+                            Fields = new Dictionary<string, FieldChange> { ["Comment"] = FieldChange.Str(antes, despues) },
+                        });
+                        if (anotado.Length > 0)
+                            return new ResultadoVolcado(escritas, sinCambio, fallos, "", Parada(ruta, anotado, log));
+
+                        sello = SelloArchivo.De(ruta);
+                        f.Tag.Comment = despues.Length == 0 ? null : despues;
+                        f.Save();
+                        escritas++;
+                    }
+                }
+                if (sello is { } s) seguir?.Invoke(ruta, ruta, s);
             }
             catch (Exception e)
             {
                 fallos.Add(Path.GetFileName(ruta) + ": " + e.Message);
-                Logger.Log($"Ficha al comentario: {Path.GetFileName(ruta)}: {e.Message}", LogKind.Err);
+                log?.Log($"Ficha al comentario: {Path.GetFileName(ruta)}: {e.Message}", LogKind.Err);
             }
         }
-        Logger.Detail($"Fichas al comentario: {escritas} escritas · {sinCambio} ya estaban al día · {fallos.Count} fallos.");
-        return new ResultadoVolcado(escritas, sinCambio, fallos, undoErr);
+        log?.Detail($"Fichas al comentario: {escritas} escritas · {sinCambio} ya estaban al día · {fallos.Count} fallos.");
+        return new ResultadoVolcado(escritas, sinCambio, fallos, "");
     }
 
     /// <summary>Opciones de proceso a partir de la config actual.</summary>
@@ -479,10 +942,29 @@ public sealed class AppEngine
             var cached = Analysis.Get(filePath, sig);
             if (cached != null) return cached;
         }
+        // Se cuentan los fallos de red de ESTA canción (va por flujo asíncrono, así que vale también
+        // con varias en paralelo).
+        using var medicion = Api.MedirFallos();
         var r = await Processor.ProcessAsync(filePath, isAcapella: false, opts, ct).ConfigureAwait(false);
+        if (!SeGuardaEnCache(r, medicion.Fallos))
+        {
+            Logger.Detail($"    {Path.GetFileName(filePath)}: no encontrada con {medicion.Fallos} fallo(s) de red; no se guarda, se volverá a buscar.");
+            return r;
+        }
         Analysis.Set(filePath, sig, r);
         return r;
     }
+
+    /// <summary>
+    /// ¿Se guarda este resultado en la caché de análisis? Un «no encontrada» al que le fallaron
+    /// peticiones (sin conexión, tiempo agotado, 503, cuota agotada) no dice nada de la canción: no
+    /// se pudo preguntar. Guardarlo la dejaba como no encontrada para siempre, porque «Analizar» no
+    /// vuelve a mirar lo que ya está en la caché (hallazgo C8). Visto en los registros: 98 respuestas
+    /// «musicbrainz.org HTTP 503» y 23 «se abandona tras 2 intentos», todas en canciones que acabaron
+    /// guardadas como no encontradas.
+    /// </summary>
+    internal static bool SeGuardaEnCache(ProcessResult r, int fallosDeRed)
+        => r.Found || r.Skip || r.CleanOnly || fallosDeRed == 0;
 
     /// <summary>Progreso dentro de la canción en curso (fase, 0..1) para la barra secundaria.</summary>
     public IProgress<(string Phase, double Fraction)>? StepProgress
@@ -545,9 +1027,9 @@ public sealed class AppEngine
     public void IgnoreTrack(string filePath)
     {
         Analysis.Remove(filePath);
-        Analysis.Save();
+        Registrar("la caché de análisis", Analysis.Save());
         Ignored.Add(filePath);
-        Ignored.Save();
+        Registrar("las canciones descartadas", Ignored.Save());
     }
 
     /// <summary>
@@ -566,8 +1048,8 @@ public sealed class AppEngine
             n++;
         }
         if (n == 0) return;
-        Analysis.Save();
-        Ignored.Save();
+        Registrar("la caché de análisis", Analysis.Save());
+        Registrar("las canciones descartadas", Ignored.Save());
     }
 
     /// <summary>Vuelve a tener en cuenta todas las canciones descartadas.</summary>
@@ -577,6 +1059,6 @@ public sealed class AppEngine
     public void RestoreIgnored(IEnumerable<string> filePaths)
     {
         foreach (var p in filePaths) Ignored.Remove(p);
-        Ignored.Save();
+        Registrar("las canciones descartadas", Ignored.Save());
     }
 }

@@ -112,6 +112,7 @@ public partial class EditorViewModel : ViewModelBase, IEstadoPagina
             // Lo de ANTES, para poder deshacerlo: se lee del archivo justo antes de tocarlo.
             var previo = TagEditor.Read(t.FilePath);
             var origPath = t.FilePath;
+            var sello = SelloArchivo.De(origPath);   // para que las cachés de audio sigan al archivo
 
             await Task.Run(() => TagEditor.Write(t.FilePath, Title, Artist, Album, Genre, year, bpm, Comment));
             // Refleja los cambios en la biblioteca en memoria (para las demás pestañas).
@@ -119,6 +120,7 @@ public partial class EditorViewModel : ViewModelBase, IEstadoPagina
 
             var renamed = TryRename(t, out var renameMsg);
             WriteUndo(origPath, t.FilePath, renamed, previo, year, bpm);
+            _engine.SeguirArchivo(origPath, t.FilePath, sello);
 
             TracksView.Refresh();
             Status = $"Guardado: {t.FileName}" + (renameMsg.Length > 0 ? " · " + renameMsg : "")

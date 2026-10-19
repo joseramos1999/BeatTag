@@ -14,8 +14,53 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         Restaurar();
-        Closing += (_, _) => Guardar();
+        Closing += AlCerrar;
         DataContextChanged += (_, _) => SeguirPaginaActiva();
+    }
+
+    // --- Cerrar (hallazgos M9 y T3) ---
+    //
+    // Antes, al cerrar solo se guardaban el tamaño de la ventana y las casillas «Aplicar», y no se
+    // preguntaba nada aunque hubiera un proceso en marcha. Visto en los registros: un «Reanalizar
+    // todo» del 22-09 llevaba 66 minutos cuando se canceló; cerrado con la X en vez de cancelado, no
+    // habría guardado nada. Lo mismo las horas de la primera pasada de huellas y las respuestas de
+    // «Comprobar audio», algunas pagadas.
+
+    private bool _cierreConfirmado;
+    private bool _preguntando;
+
+    private async void AlCerrar(object? sender, WindowClosingEventArgs e)
+    {
+        Guardar();
+        if (DataContext is not MainViewModel vm) return;
+
+        // Sin nada en marcha, o con Windows apagándose (no hay tiempo para preguntar): se guarda
+        // todo y se cierra.
+        if (_cierreConfirmado || !vm.Busy || e.CloseReason == WindowCloseReason.OSShutdown)
+        {
+            vm.GuardarAlCerrar();
+            return;
+        }
+
+        e.Cancel = true;
+        // Ya se está preguntando o cerrando: otro clic en la X no abre otra pregunta.
+        if (_preguntando || vm.Cerrando) return;
+        bool cerrar;
+        _preguntando = true;
+        try
+        {
+            cerrar = await ConfirmDialog.AskAsync(this,
+                "¿Cerrar BeatTag con un proceso en marcha?",
+                $"«{vm.BusyWhat}» todavía está trabajando. Si cierras ahora, el proceso se detendrá.",
+                "Antes de cerrar se guarda lo que lleve hecho: análisis, huellas, respuestas de «Comprobar audio» y medidas de volumen.",
+                "Cerrar de todos modos");
+        }
+        finally { _preguntando = false; }
+        if (!cerrar) return;
+
+        await vm.CancelarParaCerrarAsync();
+        _cierreConfirmado = true;
+        Close();
     }
 
     // --- Páginas perezosas ---

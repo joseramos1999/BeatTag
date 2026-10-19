@@ -323,7 +323,9 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 var pasos = Mp3Gain.StepsFor(aplicable);
                 if (pasos == 0) continue;
 
+                var sello = SelloArchivo.De(fila.FilePath);   // la huella y la identificación siguen valiendo
                 var res = await Task.Run(() => Mp3Gain.Apply(fila.FilePath, pasos), ct);
+                if (res.Ok) _engine.VolumenAjustado(fila.FilePath, sello);
                 if (!res.Ok)
                 {
                     fallidas++;

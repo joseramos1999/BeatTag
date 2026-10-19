@@ -14,6 +14,25 @@
     <DockPanel>
 
         <!--
+            Avisos que no pueden quedarse solo en el registro: un archivo de datos que no se pudo
+            leer al arrancar (y que por eso no se guardará), un guardado que ha fallado, una carpeta
+            que no está disponible. Se quedan hasta que se pulsa «Entendido»; si el problema sigue,
+            vuelven a salir cuando se repita.
+        -->
+        <Border DockPanel.Dock="Top" IsVisible="{Binding HayAvisos}"
+                Background="{DynamicResource AvisoFondo}" BorderBrush="{DynamicResource AvisoBorde}"
+                BorderThickness="0,0,0,1" Padding="10,6">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Entendido" VerticalAlignment="Top" Margin="10,0,0,0"
+                        Command="{Binding DescartarAvisosCommand}"
+                        ToolTip.Tip="Ocultar estos avisos. Si el problema sigue, volverán a aparecer." />
+                <TextBlock DockPanel.Dock="Left" Text="⚠" VerticalAlignment="Top" Margin="0,1,8,0" />
+                <SelectableTextBlock Text="{Binding Avisos}" Foreground="{DynamicResource AvisoTexto}"
+                                     TextWrapping="Wrap" VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+
+        <!--
             Aviso de bloqueo. Mientras hay un proceso en marcha, las demás pestañas se deshabilitan:
             tocar archivos que otro proceso está usando hace fallar la operación. La pestaña que
             trabaja sigue activa para poder ver el avance y cancelar.
@@ -24,7 +43,26 @@
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBlock Text="⏳" VerticalAlignment="Center" />
                 <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap"
+                           IsVisible="{Binding !Cerrando}"
                            Text="{Binding BusyWhat, StringFormat='Proceso en curso en «{0}». El resto de la aplicación permanece bloqueado hasta que termine, para no alterar archivos que se están usando.'}" />
+                <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap"
+                           IsVisible="{Binding Cerrando}"
+                           Text="{Binding BusyWhat, StringFormat='Cerrando: se está deteniendo «{0}» y guardando lo que lleva hecho…'}" />
+            </StackPanel>
+        </Border>
+
+        <!--
+            La biblioteca se comprueba sin bloquear nada: al arrancar se enseña la de la última vez y
+            se buscan los cambios en segundo plano. Se dice para que una fila que aparece o cambia
+            sola no pille por sorpresa.
+        -->
+        <Border DockPanel.Dock="Bottom" IsVisible="{Binding ComprobandoBiblioteca}"
+                Background="{DynamicResource InfoFondo}" BorderBrush="{DynamicResource InfoBorde}"
+                BorderThickness="0,1,0,0" Padding="10,4">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="🔄" VerticalAlignment="Center" />
+                <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource InfoTexto}" TextWrapping="Wrap"
+                           Text="Comprobando si hay cambios en tus carpetas. Puedes seguir trabajando mientras tanto." />
             </StackPanel>
         </Border>
 

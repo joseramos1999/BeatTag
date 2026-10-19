@@ -6,7 +6,7 @@
         x:Class="Etiquetador.App.Views.SplashWindow"
         Icon="/Assets/beattag.ico"
         Title="BeatTag"
-        Width="440" Height="200"
+        Width="440" MinHeight="200" SizeToContent="Height"
         CanResize="False" WindowDecorations="None"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource NavFondo}">
@@ -16,6 +16,9 @@
         el arranque parecía que la aplicación no había abierto, y se acababa haciendo doble clic
         otra vez. Aquí no hay ViewModel a propósito: esta ventana tiene que poder pintarse antes de
         que exista nada de lo demás.
+
+        Si el arranque falla, aquí mismo se dice por qué y aparece un botón para cerrar: la ventana
+        no tiene marco, y antes se quedaba girando para siempre sin forma de cerrarla.
     -->
     <Border BorderBrush="{DynamicResource BordeSuave}" BorderThickness="1" Padding="28,24">
         <DockPanel>
@@ -32,7 +35,13 @@
                 <TextBlock Name="Estado" Text="Iniciando…" FontSize="13"
                            Foreground="{DynamicResource TextoSecundario}"
                            TextTrimming="CharacterEllipsis" />
-                <ProgressBar IsIndeterminate="True" Height="4" />
+                <ProgressBar Name="Barra" IsIndeterminate="True" Height="4" />
+
+                <!-- Solo si el arranque falla. -->
+                <TextBlock Name="Error" IsVisible="False" FontSize="13" TextWrapping="Wrap"
+                           Foreground="{DynamicResource AvisoTexto}" Margin="0,4,0,0" />
+                <Button Name="Cerrar" IsVisible="False" Content="Cerrar" MinWidth="110"
+                        HorizontalAlignment="Right" IsDefault="True" />
             </StackPanel>
 
             <!-- Relleno: mantiene el estado pegado abajo sin estirar los textos. -->

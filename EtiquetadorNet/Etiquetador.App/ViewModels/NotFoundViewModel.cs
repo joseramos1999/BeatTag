@@ -222,7 +222,7 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
 
                 // Solo artista y título: lo demás (álbum, año, género, BPM) no lo sabe la IA, y
                 // sobrescribir a ciegas se pisa: el usuario ha aceptado un NOMBRE, no una ficha entera.
-                var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(info, over: true, campos, "keep", null, undo, _engine.Paths.DoneLog));
+                var res = await Task.Run(() => _engine.AplicarUnoAsync(info, over: true, campos, "keep", null, undo, _engine.Paths.DoneLog));
 
                 if (res.TagOk || res.DidRename)
                 {
@@ -345,7 +345,7 @@ public partial class NotFoundViewModel : ViewModelBase, IEstadoPagina, IProgreso
             }
             var fields = _engine.BuildFields();
             var undo = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
-            var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog));
+            var res = await Task.Run(() => _engine.AplicarUnoAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog));
             await _engine.Library.ScanAsync();
             if (res.TagOk)
             {

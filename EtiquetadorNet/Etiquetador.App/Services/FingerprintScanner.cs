@@ -226,4 +226,57 @@ public sealed class FingerprintScanner
         _cache.Clear();
         try { if (File.Exists(_cacheFile)) File.Delete(_cacheFile); } catch { }
     }
+
+    // --- Seguir al archivo cuando lo cambia la propia aplicación (hallazgos A2 y X4) ---
+    //
+    // La huella se valida por ruta, fecha y tamaño, y la aplicación cambia las tres cosas sin tocar
+    // el audio: renombra (Enriquecer, Asistente, Editor) y escribe etiquetas o el volumen. MEDIDO
+    // en una biblioteca real (solo lectura): de 15.241 huellas guardadas solo seguían valiendo
+    // 8.205; 1.070 habían cambiado de fecha o tamaño (111 con el mismo tamaño, lo típico de un
+    // ajuste de volumen). Cada una son ~1 s de fpcalc al volver a Duplicados o a Comprobar audio.
+
+    /// <summary>
+    /// La huella acompaña al archivo que la aplicación acaba de renombrar o mover. Se llama DESPUÉS
+    /// de moverlo. Un renombrado no cambia ni la fecha ni el tamaño, así que la entrada sigue
+    /// valiendo (o no) exactamente igual que antes. Devuelve si había algo que mover.
+    ///
+    /// Si la caché aún no se había leído en esta sesión se lee ahora (MEDIDO: ~1,3 s con 153 MB):
+    /// es mucho menos que recalcular aunque sea un puñado de huellas.
+    /// </summary>
+    public bool Mover(string origen, string destino)
+    {
+        if (string.IsNullOrWhiteSpace(origen) || string.IsNullOrWhiteSpace(destino)) return false;
+        if (string.Equals(origen, destino, StringComparison.Ordinal)) return false;
+        Cargar();
+        if (!_cache.TryRemove(origen, out var e)) return false;
+        _cache[destino] = e;
+        Interlocked.Exchange(ref _sucio, 1);
+        return true;
+    }
+
+    /// <summary>
+    /// La aplicación acaba de escribir en el archivo algo que no cambia la huella (etiquetas, o el
+    /// volumen: Chromaprint trabaja con el croma, no con el nivel). Si la entrada valía JUSTO antes
+    /// de escribir (fecha y tamaño <paramref name="mAntes"/> y <paramref name="sAntes"/>), se le
+    /// ponen la fecha y el tamaño de ahora. Si ya no valía, se deja como estaba: resucitarla daría
+    /// por buena la huella de un audio que cambió por otro lado. Devuelve si la puso al día.
+    /// </summary>
+    public bool Retocar(string ruta, long mAntes, long sAntes)
+    {
+        if (string.IsNullOrWhiteSpace(ruta)) return false;
+        Cargar();
+        if (!_cache.TryGetValue(ruta, out var e) || e.M != mAntes || e.S != sAntes) return false;
+        try
+        {
+            var fi = new FileInfo(ruta);
+            if (!fi.Exists) return false;
+            if (fi.LastWriteTimeUtc.Ticks == e.M && fi.Length == e.S) return true;   // no se llegó a escribir: nada que guardar
+            // Se cambia en la misma entrada para no perder ningún campo de la huella.
+            e.M = fi.LastWriteTimeUtc.Ticks;
+            e.S = fi.Length;
+            Interlocked.Exchange(ref _sucio, 1);
+            return true;
+        }
+        catch { return false; }
+    }
 }

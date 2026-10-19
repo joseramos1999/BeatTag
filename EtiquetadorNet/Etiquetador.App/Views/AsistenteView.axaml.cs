@@ -82,7 +82,7 @@ public partial class AsistenteView : UserControl
             : string.Join("\n", filas.Take(5).Select(f => System.IO.Path.GetFileName(f.RutaArchivo)))
               + (filas.Count > 5 ? $"\n… y {filas.Count - 5} más" : "");
         var ok = await ConfirmDialog.AskAsync(owner, titulo, cuerpo,
-            "Van a la papelera del sistema, así que puedes recuperarlos desde ahí si te arrepientes.",
+            Services.Papelera.NotaConfirmacion(filas.Select(f => f.RutaArchivo)),
             "Enviar a la papelera");
         if (!ok) return;
 

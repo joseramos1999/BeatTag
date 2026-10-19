@@ -549,12 +549,13 @@ public sealed partial class GenerosIaViewModel : ObservableObject
         var progreso = new Progress<double>(v => _p.Progress = v);
         var res = await Task.Run(() => _p.Engine.AplicarGeneros(cambios, progreso, ct));
 
-        await _p.Engine.Library.ScanAsync();   // los géneros nuevos, en todas las pestañas
+        await _p.Engine.Library.RefrescarAsync(cambios.Select(c => c.FilePath));   // solo lo escrito, sin recorrer las carpetas
         foreach (var f in Filas.Where(f => f.Aplicar).ToList()) Filas.Remove(f);
 
         var texto = $"Género actualizado en {res.Escritas} canciones";
         if (res.Fallos.Count > 0) texto += $" · {res.Fallos.Count} no se pudieron escribir (detalle en el registro)";
-        if (res.Cancelado) texto += " · cancelado a medias";
+        if (res.Detenido.Length > 0) texto += " · ⚠ " + res.Detenido.TrimEnd('.');   // se paró sin poder anotar para deshacer
+        else if (res.Cancelado) texto += " · cancelado a medias";
         texto += res.UndoErr.Length > 0
             ? $". ⚠ El cambio NO quedó anotado y no se podrá deshacer: {res.UndoErr}"
             : res.Escritas > 0 ? ". Se puede deshacer desde Enriquecer." : ".";
@@ -693,12 +694,13 @@ public sealed partial class RenombrarIaViewModel : ObservableObject
 
         var hechos = new HashSet<string>(res.Hechos.Select(h => h.Origen), StringComparer.OrdinalIgnoreCase);
         foreach (var f in Filas.Where(f => hechos.Contains(f.Ruta)).ToList()) Filas.Remove(f);
-        if (res.Hechos.Count > 0) await _p.Engine.Library.ScanAsync();
+        if (res.Hechos.Count > 0) await _p.Engine.Library.RefrescarAsync(res.Hechos.SelectMany(h => new[] { h.Origen, h.Destino }));
         if (res.Hechos.Count > 0) _p.Engine.AvisarFichasCambiadas();
 
         var texto = $"{res.Hechos.Count} archivos renombrados";
         if (res.Fallos.Count > 0) texto += $" · {res.Fallos.Count} no ({res.Fallos[0]})";
-        if (res.Cancelado) texto += " · cancelado a medias";
+        if (res.Detenido.Length > 0) texto += " · ⚠ " + res.Detenido.TrimEnd('.');   // se paró sin poder anotar para deshacer
+        else if (res.Cancelado) texto += " · cancelado a medias";
         texto += res.UndoErr.Length > 0
             ? $". ⚠ El cambio NO quedó anotado y no se podrá deshacer: {res.UndoErr}"
             : res.Hechos.Count > 0 ? ". Se puede deshacer desde Enriquecer; si usas rekordbox, repara la colección en Ajustes." : ".";
@@ -903,13 +905,14 @@ public sealed partial class CompletarNombresViewModel : ObservableObject
         foreach (var f in Filas.Where(f => hechos.Contains(f.Ruta)).ToList()) Filas.Remove(f);
         if (res.Hechos.Count > 0)
         {
-            await _p.Engine.Library.ScanAsync();
+            await _p.Engine.Library.RefrescarAsync(res.Hechos.SelectMany(h => new[] { h.Origen, h.Destino }));
             _p.Engine.AvisarFichasCambiadas();
         }
 
         var texto = $"{res.Hechos.Count} nombres completados";
         if (res.Fallos.Count > 0) texto += $" · {res.Fallos.Count} no ({res.Fallos[0]})";
-        if (res.Cancelado) texto += " · cancelado a medias";
+        if (res.Detenido.Length > 0) texto += " · ⚠ " + res.Detenido.TrimEnd('.');   // se paró sin poder anotar para deshacer
+        else if (res.Cancelado) texto += " · cancelado a medias";
         texto += res.UndoErr.Length > 0
             ? $". ⚠ El cambio NO quedó anotado y no se podrá deshacer: {res.UndoErr}"
             : res.Hechos.Count > 0 ? ". Se puede deshacer desde Enriquecer; si usas rekordbox, repara la colección en Ajustes." : ".";

@@ -61,6 +61,35 @@ public sealed class ScanCache
     }
 
     /// <summary>
+    /// Las canciones tal como quedaron guardadas, SIN ir al disco: ni se recorre la carpeta ni se
+    /// mira la fecha de cada archivo. Es lo que permite abrir la aplicación con la biblioteca ya
+    /// puesta y comprobar los cambios después, en segundo plano (hallazgo M12). MEDIDO en los
+    /// registros: el escaneo de arranque costaba 7.774 ms con la caché y el disco de giro en frío,
+    /// con todas las pestañas en gris mientras tanto.
+    /// </summary>
+    /// <param name="raizDe">
+    /// A qué carpeta raíz pertenece cada ruta guardada, o null si a ninguna de las que cuentan: lo
+    /// de fuera se queda en la caché pero no sale en la lista.
+    /// </param>
+    public List<Track> Guardadas(Func<string, string?> raizDe)
+    {
+        var lista = new List<Track>();
+        foreach (var (path, e) in _map)
+        {
+            var raiz = raizDe(path);
+            if (raiz == null) continue;
+            lista.Add(new Track
+            {
+                FilePath = path, Folder = raiz,
+                Title = e.Ti, Artist = e.Ar, Album = e.Al, Genre = e.Ge,
+                Year = e.Yr, Bpm = e.Bp, Key = e.Ke, DurationSeconds = e.Du,
+                Bitrate = e.Br, SampleRate = e.Sr, Channels = e.Ch,
+            });
+        }
+        return lista;
+    }
+
+    /// <summary>
     /// Elimina de la caché los archivos que ya no existen DENTRO de las carpetas escaneadas.
     ///
     /// Lo de fuera se conserva. Antes se borraba todo lo que no estuviera en el escaneo, y medido

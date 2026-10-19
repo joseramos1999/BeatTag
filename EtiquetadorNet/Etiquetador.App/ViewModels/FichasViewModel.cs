@@ -160,6 +160,7 @@ public partial class FichasViewModel : ScanViewModelBase
         var texto = $"Comentario actualizado en {res.Escritas} canción(es)";
         if (res.SinCambio > 0) texto += $" · {res.SinCambio} ya estaban al día";
         if (res.Fallos.Count > 0) texto += $" · {res.Fallos.Count} no se pudieron escribir (detalle en el registro)";
+        if (res.Detenido.Length > 0) texto += " · ⚠ " + res.Detenido.TrimEnd('.');   // se paró sin poder anotar para deshacer
         texto += res.UndoErr.Length > 0
             ? $". ⚠ El cambio NO quedó anotado y no se podrá deshacer: {res.UndoErr}"
             : res.Escritas > 0 ? ". Se puede deshacer desde Enriquecer." : ".";
