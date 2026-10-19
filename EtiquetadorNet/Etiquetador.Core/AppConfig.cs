@@ -459,4 +459,14 @@ public sealed class AppConfig
     /// algunos DJ la fecha del pack sirve para ordenar por pack.
     /// </summary>
     public bool PacksAlComentario { get; set; } = true;
+
+    // --- Catálogo: ISRC (equipo catalogo_bandeja, C14) ---
+
+    /// <summary>
+    /// Escribir el código ISRC que da Deezer al aplicar una propuesta. Desactivado por defecto: casi
+    /// ningún programa de DJ lo enseña, y activarlo de fábrica añadiría un cambio a miles de archivos
+    /// al aplicar. Solo rellena el campo si está vacío, y solo cuando el archivo es la grabación del
+    /// catálogo (ver FileProcessor.IsrcDelArchivo).
+    /// </summary>
+    public bool WriteIsrc { get; set; }
 }

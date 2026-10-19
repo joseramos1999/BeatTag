@@ -10,6 +10,12 @@ public sealed class FieldFlags
     public bool Year { get; set; } = true;
     public bool Bpm { get; set; } = true;
 
+    /// <summary>
+    /// Escribir el ISRC (C14). Desactivado salvo que el usuario lo active en Ajustes: es un dato que
+    /// casi nadie mira y que tocaría miles de archivos al aplicar.
+    /// </summary>
+    public bool Isrc { get; set; }
+
     public static FieldFlags All => new();
 }
 
@@ -122,4 +128,40 @@ public sealed class ProcessResult
     /// <summary>¿Un «no encontrada» que puede deberse a la red y no al catálogo?</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IncompletoPorLaRed => !Found && !Skip && !CleanOnly && FallosDeRed > 0;
+
+    // ---- ISRC y letra del catálogo (C14) ----
+    //
+    // Compatibilidad con la caché de análisis: lo que guardó una versión anterior no trae estos
+    // campos, se leen como "" y «sin dato», no se escribe nada y no se invalida ninguna entrada. La
+    // firma de la caché no cambia: solo se rellenan al volver a analizar una canción.
+
+    /// <summary>
+    /// El ISRC de la grabación que identificó Deezer, o "". Solo cuando el archivo ES esa grabación:
+    /// sin versiones que el título del catálogo no nombre (una extended, un remix o una intro de DJ
+    /// tienen otro código, o ninguno) y con la misma letra (la versión clean tiene el suyo). Ver
+    /// FileProcessor.IsrcDelArchivo.
+    /// </summary>
+    public string Isrc { get; set; } = "";
+
+    /// <summary>
+    /// A qué propuesta pertenece <see cref="Isrc"/>: artista y título normalizados en el momento del
+    /// análisis. Si el usuario los cambia en la tabla -porque la coincidencia era otra canción- el ISRC
+    /// deja de valer y no se escribe (igual que <see cref="BpmCatalogo"/>). Ver <see cref="IsrcVigente"/>.
+    /// </summary>
+    public string IsrcDe { get; set; } = "";
+
+    /// <summary>
+    /// Lo que dice Deezer de la letra de la pista que identificó, o «sin dato». Es el dato del catálogo
+    /// sin mezclar con el nombre: quien lo use lo junta con <see cref="Analysis.ExplicitDetector.Combinar"/>.
+    /// Se guarda como texto («Explicit») para que la caché no dependa del orden del enumerado.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<Analysis.Explicitness>))]
+    public Analysis.Explicitness Explicit { get; set; }
+
+    /// <summary>La clave con la que se ata el ISRC a la propuesta (artista|título normalizados).</summary>
+    public static string ClaveIsrc(string? artista, string? titulo) => TextUtils.Nk(artista) + "|" + TextUtils.Nk(titulo);
+
+    /// <summary>El ISRC que se puede escribir ahora: "" si no hay o si la propuesta se ha editado a mano.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string IsrcVigente => Isrc.Length > 0 && IsrcDe == ClaveIsrc(Artist, Title) ? Isrc : "";
 }

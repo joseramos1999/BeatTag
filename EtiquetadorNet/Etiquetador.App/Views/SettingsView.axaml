@@ -145,6 +145,13 @@
                                ToolTip.Tip="Archivos que BeatTag renombró y que siguen con el nombre nuevo. No cuenta los renombrados que se deshicieron." />
                 </StackPanel>
 
+                <!-- ================= ISRC (equipo catalogo_bandeja, C14) ================= -->
+                <TextBlock Classes="sec" Text="Código ISRC" />
+                <TextBlock Classes="ayuda"
+                           Text="El ISRC es el código internacional que identifica una grabación concreta. Deezer lo facilita cuando identifica una canción, sin consultas adicionales. Si activas esta opción, al aplicar una propuesta se escribe en el archivo, solo si el archivo no tiene ya uno y solo cuando es exactamente la grabación del catálogo: en un remix, una extended o una edición de DJ sería el código de otra grabación. Se puede deshacer como el resto de cambios." />
+                <CheckBox Content="Escribir el ISRC al aplicar propuestas" IsChecked="{Binding EscribirIsrc}"
+                          ToolTip.Tip="En MP3, AIFF y WAV va en el campo TSRC; en FLAC y OGG, en ISRC; en M4A, en su campo equivalente. Se aplica al momento." />
+
                 <!-- ================= MANTENIMIENTO ================= -->
                 <TextBlock Classes="sec" Text="Mantenimiento" />
                 <CheckBox Content="Usar caché de respuestas (recomendado)" IsChecked="{Binding Cache}"

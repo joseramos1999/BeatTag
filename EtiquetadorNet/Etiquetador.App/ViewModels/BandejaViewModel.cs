@@ -32,18 +32,43 @@ public sealed partial class BandejaRow : FichaRow
     /// <summary>
     /// Todos los avisos en corto, para la columna. El detalle (con qué archivo coincide) va en el
     /// panel de la derecha: en la columna, el texto largo del primero tapaba que hubiera un segundo.
+    /// Si la descarga mejora la copia de la biblioteca, se dice así en lugar de «Ya en la biblioteca»:
+    /// es la que conviene sustituir, no descartar (I14).
     /// </summary>
-    public string AvisoPrincipal => string.Join(" · ", Avisos.Select(a => RevisionBandeja.NombreCorto(a.Tipo)));
+    public string AvisoPrincipal => string.Join(" · ", Avisos.Select(a =>
+        a.Tipo == TipoAviso.YaEnBiblioteca && PuedeSustituir ? "Mejora la de la biblioteca" : RevisionBandeja.NombreCorto(a.Tipo)));
 
-    public string AvisosDetalle => string.Join("\n", Avisos.Select(a => "• " + a.Texto));
+    public string AvisosDetalle
+    {
+        get
+        {
+            var texto = string.Join("\n", Avisos.Select(a => "• " + a.Texto));
+            if (Sustitucion == null) return texto;
+            var linea = $"• Es de mejor calidad que la copia de la biblioteca ({Sustitucion.Motivo}): "
+                      + "puedes sustituirla con «Sustituir la copia de la biblioteca».";
+            return texto.Length == 0 ? linea : texto + "\n" + linea;
+        }
+    }
 
-    public void PonerAvisos(IReadOnlyList<AvisoBandeja> avisos)
+    /// <summary>¿Dice algún aviso que esta canción ya la tienes? Para el filtro «Con aviso de duplicado» (X15).</summary>
+    public bool TieneAvisoDeDuplicado => RevisionBandeja.TieneAvisoDeDuplicado(Avisos);
+
+    /// <summary>La copia de la biblioteca que esta descarga puede sustituir (I14), o null.</summary>
+    public PropuestaSustitucion? Sustitucion { get; private set; }
+
+    public bool PuedeSustituir => Sustitucion != null;
+
+    public void PonerAvisos(IReadOnlyList<AvisoBandeja> avisos, PropuestaSustitucion? sustitucion = null)
     {
         Avisos = avisos;
+        Sustitucion = sustitucion;
         OnPropertyChanged(nameof(Avisos));
         OnPropertyChanged(nameof(HayAvisos));
         OnPropertyChanged(nameof(AvisoPrincipal));
         OnPropertyChanged(nameof(AvisosDetalle));
+        OnPropertyChanged(nameof(TieneAvisoDeDuplicado));
+        OnPropertyChanged(nameof(Sustitucion));
+        OnPropertyChanged(nameof(PuedeSustituir));
     }
 
     public void EstadoCambiado()
@@ -104,7 +129,16 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
     [ObservableProperty] private string _recuento = "";
     [ObservableProperty] private string _detalle = "";
 
-    public IReadOnlyList<string> Filtros { get; } = new[] { "Todas", "Con avisos", "Recibidas", "Analizadas", "Revisadas", "Preparadas" };
+    public IReadOnlyList<string> Filtros => TodosLosFiltros;
+
+    internal static readonly IReadOnlyList<string> TodosLosFiltros =
+        new[] { "Todas", "Con avisos", FiltroDuplicado, "Recibidas", "Analizadas", "Revisadas", "Preparadas" };
+
+    /// <summary>
+    /// Las que ya tienes: copia exacta en la biblioteca o repetida en la bandeja (X15). Con este filtro
+    /// y Ctrl+A se descartan de una vez las descargas sobrantes.
+    /// </summary>
+    internal const string FiltroDuplicado = "Con aviso de duplicado";
     [ObservableProperty] private string _filtro = "Todas";
 
     public bool HayCarpeta => Carpeta.Length > 0;
@@ -261,8 +295,13 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         {
             var carpeta = Carpeta;
             var progreso = new Progress<double>(p => Progress = p);
+            var diario = SustitucionBandeja.CarpetaDiario(_engine.Paths.DataDir);
+            IReadOnlyList<string> recogidas = Array.Empty<string>();
             var tracks = await Task.Run(() =>
             {
+                // Antes de leer la carpeta: una sustitución que se cortó al cerrarse la aplicación
+                // devuelve aquí la descarga a la bandeja (I14), y así entra en esta misma lectura.
+                recogidas = SustitucionBandeja.Recuperar(diario);
                 var rutas = LibraryScanner.EnumerateFiles(carpeta, recursive: true).ToList();
                 var lista = new List<Track>(rutas.Count);
                 for (var i = 0; i < rutas.Count; i++)
@@ -294,6 +333,8 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
             Status = tracks.Count == 0
                 ? "La bandeja está vacía."
                 : $"{tracks.Count} canciones en la bandeja" + (nuevas > 0 ? $", {nuevas} nuevas." : ".");
+            foreach (var r in recogidas) _engine.Logger.Log("Bandeja: " + r, LogKind.Err);
+            if (recogidas.Count > 0) Status = "⚠ " + string.Join(" ", recogidas) + " " + Status;
         }
         catch (Exception e)
         {
@@ -325,7 +366,8 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         var bandeja = new IndiceCanciones(Rows.Select(r => r.Track));
         var destino = Destino ?? "";
         foreach (var r in Rows)
-            r.PonerAvisos(RevisionBandeja.Revisar(r.Track, biblioteca, bandeja, destino, File.Exists));
+            r.PonerAvisos(RevisionBandeja.Revisar(r.Track, biblioteca, bandeja, destino, File.Exists),
+                          SustitucionBandeja.Proponer(r.Track, biblioteca));
         AplicarFiltro();
         ActualizarRecuento();
         MostrarDetalle();
@@ -357,6 +399,7 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         Func<BandejaRow, bool> porEstado = Filtro switch
         {
             "Con avisos" => r => r.HayAvisos,
+            FiltroDuplicado => r => r.TieneAvisoDeDuplicado,
             "Recibidas" => r => r.EstadoValor == EstadoBandeja.Recibida,
             "Analizadas" => r => r.EstadoValor == EstadoBandeja.Analizada,
             "Revisadas" => r => r.EstadoValor == EstadoBandeja.Revisada,
@@ -403,10 +446,20 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         Detalle = Seleccion.Count switch
         {
             0 => "",
-            1 => Seleccion[0].HayAvisos ? Seleccion[0].AvisosDetalle : "Sin avisos.",
+            1 => Seleccion[0].HayAvisos || Seleccion[0].PuedeSustituir ? Seleccion[0].AvisosDetalle : "Sin avisos.",
             _ => $"{Seleccion.Count} seleccionadas · {Seleccion.Count(r => r.HayAvisos)} con avisos.",
         };
+        OnPropertyChanged(nameof(PuedeSustituirSeleccion));
     }
+
+    /// <summary>Las filas seleccionadas ahora, para que la vista confirme antes de descartar.</summary>
+    public IReadOnlyList<BandejaRow> Seleccionadas => Seleccion.ToList();
+
+    /// <summary>Una sola fila seleccionada y que puede sustituir a su copia de la biblioteca (I14).</summary>
+    public bool PuedeSustituirSeleccion => Seleccion.Count == 1 && Seleccion[0].PuedeSustituir;
+
+    /// <summary>La fila que se sustituiría ahora, o null.</summary>
+    public BandejaRow? FilaASustituir => PuedeSustituirSeleccion ? Seleccion[0] : null;
 
     [RelayCommand]
     private void MarcarRevisadas() => Marcar(EstadoBandeja.Revisada);
@@ -564,6 +617,238 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
             Status = "Error al pasar a la biblioteca: " + e.Message;
         }
         finally { IsBusy = false; Progress = 0; }
+    }
+
+    // --- Descartar a la papelera (X15) ---
+    //
+    // Entraban 80 descargas, 25 salían con «Ya está en la biblioteca», y para quitarlas había que
+    // abrir la carpeta en el explorador, buscarlas a mano, borrarlas y volver a Analizar. Ahora se
+    // envían a la papelera desde aquí, en segundo plano, y salen de la tabla sin releer la bandeja.
+
+    /// <summary>
+    /// Qué se descarta de verdad de las filas seleccionadas: de cada canción repetida en la bandeja
+    /// que no está en la biblioteca y tiene todas sus copias seleccionadas, la mejor se conserva (ver
+    /// <see cref="RevisionBandeja.PlanearDescarte{T}"/>). La vista confirma con este plan.
+    /// </summary>
+    public PlanDescarte<BandejaRow> PlanearDescarte(IReadOnlyList<BandejaRow> filas)
+        => RevisionBandeja.PlanearDescarte(filas, Rows, r => r.Track,
+                                           r => r.Avisos.Any(a => a.Tipo == TipoAviso.YaEnBiblioteca));
+
+    /// <summary>
+    /// Envía a la papelera las descargas del plan (la vista ya ha confirmado), olvida sus entradas y
+    /// las quita de la tabla. Las que la papelera rechaza (una unidad sin papelera, un archivo en uso)
+    /// se quedan en la tabla y se dice el motivo. Las que el plan conserva no se tocan.
+    /// </summary>
+    public async Task DescartarAsync(PlanDescarte<BandejaRow> plan)
+    {
+        var filas = plan.Descartar;
+        if (IsBusy || filas.Count == 0) return;
+
+        // Lo escrito en el panel se guarda antes, como al pasar a la biblioteca: después, las rutas
+        // de la selección ya no existen.
+        GuardarLoEscrito("antes de descartar");
+        IsBusy = true;
+        Progress = 0;
+        Status = EnvioPapelera.TextoAvance(0, filas.Count);
+        try
+        {
+            _engine.ReleaseAudio();   // si suena, el archivo está abierto y no se puede mover a la papelera
+            var rutas = filas.Select(r => r.FilePath).ToList();
+            var avance = new Progress<(int Hechas, int Total)>(p =>
+            {
+                if (!IsBusy) return;
+                Progress = p.Total > 0 ? 100.0 * p.Hechas / p.Total : 0;
+                Status = EnvioPapelera.TextoAvance(p.Hechas, p.Total);
+            });
+            var res = await EnvioPapelera.EnviarAsync(rutas, progreso: avance);
+
+            foreach (var ruta in res.Enviadas)
+            {
+                _engine.Bandeja.Olvidar(ruta);
+                _engine.Logger.Detail($"Bandeja: descartada a la papelera {Path.GetFileName(ruta)}");
+            }
+            foreach (var (archivo, motivo) in res.Fallos)
+                _engine.Logger.Log($"Bandeja: no se descartó {archivo}: {motivo}", LogKind.Err);
+            if (res.Enviadas.Count > 0) GuardarBandeja();
+
+            QuitarFilas(res.Enviadas);
+            // Sin releer ningún archivo: solo se rehacen los avisos, porque la que estaba «repetida en
+            // la bandeja» puede haber dejado de estarlo.
+            if (res.Enviadas.Count > 0) await RevisarAsync();
+            Status = EnvioPapelera.Resumen(res.Enviadas.Count, res.Fallos, "descarga")
+                   + (plan.Conservar.Count > 0 ? " " + RevisionBandeja.TextoConservadasTrasDescartar(plan.Conservar.Count) : "");
+        }
+        catch (Exception e)
+        {
+            _engine.Logger.Error("Error al descartar descargas de la bandeja", e);
+            Status = "Error al descartar: " + e.Message;
+        }
+        finally { IsBusy = false; Progress = 0; }
+    }
+
+    /// <summary>Quita de la tabla las filas de esas rutas, sin releer la bandeja.</summary>
+    private void QuitarFilas(IReadOnlyCollection<string> rutas)
+    {
+        if (rutas.Count == 0) return;
+        var fuera = new HashSet<string>(rutas, StringComparer.OrdinalIgnoreCase);
+        // La selección se suelta ANTES de quitar las filas: lo escrito en el panel ya se guardó.
+        if (Seleccion.Any(r => fuera.Contains(r.FilePath))) Seleccionar(Array.Empty<BandejaRow>());
+        foreach (var r in Rows.Where(r => fuera.Contains(r.FilePath)).ToList()) Rows.Remove(r);
+        AplicarFiltro();
+        ActualizarRecuento();
+    }
+
+    // --- Sustituir la copia de la biblioteca (I14) ---
+
+    /// <summary>
+    /// La descarga ocupa el lugar de su copia de la biblioteca: la antigua va a la papelera, la nueva
+    /// toma su carpeta y su nombre (con su propia extensión) y se lleva la ficha de DJ fusionada. Queda
+    /// anotado para deshacer. La vista ya ha confirmado.
+    ///
+    /// Si la unidad de la copia antigua no tiene papelera, no se sustituye: enviar ahí sería borrar
+    /// para siempre. Si el historial para deshacer no se puede abrir, no se toca ningún archivo.
+    /// </summary>
+    public async Task SustituirAsync(BandejaRow fila)
+    {
+        if (IsBusy || fila.Sustitucion is not { } propuesta) return;
+        var nueva = fila.FilePath;
+        var vieja = propuesta.Vieja.FilePath;
+
+        var sinPapelera = MotivoParaNoSustituir(fila);
+        if (sinPapelera.Length > 0) { Status = sinPapelera; return; }
+
+        GuardarLoEscrito("antes de sustituir");
+        IsBusy = true;
+        Status = $"Sustituyendo «{propuesta.Vieja.FileName}» por la descarga…";
+        try
+        {
+            _engine.ReleaseAudio();
+            var paths = _engine.Paths;
+            var res = await Task.Run(() =>
+            {
+                using var manifiesto = ManifiestoDeshacer.Abrir(paths.NuevoManifiesto(), out var error);
+                if (manifiesto == null)
+                    return new ResultadoSustitucion(vieja,
+                        $"No se puede anotar el cambio para deshacer ({error}), así que no se ha tocado ningún archivo.", false);
+                return SustitucionBandeja.Ejecutar(nueva, vieja, Papelera.Enviar, manifiesto.Anotar,
+                                                   SustitucionBandeja.CarpetaDiario(paths.DataDir));
+            });
+
+            if (!res.Ok)
+            {
+                _engine.Logger.Log($"Bandeja: no se sustituyó {Path.GetFileName(vieja)}: {res.Error}", LogKind.Err);
+                Status = res.Error;
+                // La antigua ya no está aunque algo fallara después: la biblioteca tiene que saberlo.
+                if (res.ViejaEnPapelera) await _store.RefrescarAsync(new[] { vieja });
+                return;
+            }
+
+            SustitucionBandeja.LlevarFicha(_engine.Fichas, vieja, nueva, res.Destino);
+            var errFichas = _engine.Fichas.Guardar();
+            // ANTES de que las cachés sigan a la descarga: lo decidido sobre la copia antigua no vale
+            // para ella (aplicada, descartada, casillas, avisos de audio aceptados).
+            var errDecisiones = OlvidarLoDecididoSobre(new[] { vieja, res.Destino }, _engine.Applied, _engine.Ignored,
+                                                       _engine.Marks, _engine.AudioAceptadas)
+                ? GuardarDecisiones()
+                : "";
+            _engine.SeguirArchivo(nueva, res.Destino, default);   // huella, identificación y sonoridad de la descarga
+            _engine.Bandeja.Olvidar(nueva);
+            GuardarBandeja();
+            QuitarFilas(new[] { nueva });
+            _guardando = true;
+            try { _engine.AvisarFichasCambiadas(); }
+            finally { _guardando = false; }
+            _engine.Logger.Detail($"Bandeja: {Path.GetFileName(nueva)} sustituye a {vieja} (la antigua, a la papelera) → {res.Destino}");
+
+            // Solo esas dos rutas: la antigua sale y la nueva entra. Recorrer la biblioteca entera
+            // costaría segundos con 15.000 canciones (M12). Esto vuelve a revisar la bandeja.
+            await _store.RefrescarAsync(new[] { vieja, res.Destino });
+
+            Status = TextoSustituida(propuesta.Vieja.FileName, res.Destino, SustitucionBandeja.TextoRekordbox(vieja, res.Destino),
+                                     errFichas, errDecisiones);
+        }
+        catch (Exception e)
+        {
+            _engine.Logger.Error("Error al sustituir una copia de la biblioteca", e);
+            Status = "Error al sustituir: " + e.Message;
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>
+    /// Por qué no se puede sustituir ahora la copia de la biblioteca de esta fila, o "". Lo mira la
+    /// vista ANTES de abrir el diálogo: visto en revisión, con la copia antigua en una memoria USB el
+    /// diálogo prometía «se puede recuperar desde la papelera» y, tras confirmar, se negaba.
+    /// </summary>
+    public string MotivoParaNoSustituir(BandejaRow fila)
+    {
+        if (fila.Sustitucion is not { } propuesta) return "";
+        var motivo = Papelera.MotivoSinPapelera(propuesta.Vieja.FilePath);
+        return motivo.Length == 0 ? "" : TextoSinPapelera(motivo);
+    }
+
+    internal static string TextoSinPapelera(string motivo)
+        => "No se sustituye la copia de la biblioteca: " + (motivo.Length == 0 ? "" : char.ToLowerInvariant(motivo[0]) + motivo[1..]);
+
+    /// <summary>El estado tras sustituir. Puro, para probarlo.</summary>
+    internal static string TextoSustituida(string viejaNombre, string destino, string textoRekordbox, string errFichas,
+                                           string errDecisiones = "")
+    {
+        var texto = $"Sustituida: «{viejaNombre}» está en la papelera y la descarga ocupa su lugar como «{Path.GetFileName(destino)}». "
+                  + "Se puede deshacer desde Enriquecer; la copia antigua se recupera desde la papelera. " + textoRekordbox;
+        if (errFichas.Length > 0) texto += $" ⚠ No se pudieron guardar las fichas: {errFichas}";
+        if (errDecisiones.Length > 0)
+            texto += $" ⚠ No se pudo guardar que la descarga está pendiente de revisar en Enriquecer: {errDecisiones}";
+        return texto;
+    }
+
+    /// <summary>
+    /// Lo que se decidió sobre el archivo que había en esas rutas deja de valer: ahora hay OTRO archivo.
+    /// Devuelve si ha cambiado algo (y entonces hay que guardar).
+    ///
+    /// Visto en revisión (I14): con la misma extensión, el caso habitual (MP3 de 128 por MP3 de 320),
+    /// la descarga ocupa la ruta de la copia antigua, y esa ruta seguía en aplicadas.json. Enriquecer
+    /// la saltaba como «ya aplicada» incluso con «Reanalizar todo», así que la descarga se quedaba con
+    /// las etiquetas de la tienda (alias y grafías del artista, género) mientras las normalizadas se
+    /// iban a la papelera con la vieja; y la copia que se sustituye suele ser justo una que BeatTag ya
+    /// había procesado. Por lo mismo se olvidan las descartadas a mano en Enriquecer, las casillas
+    /// «Aplicar» (que se guardan por ruta y propuesta) y los avisos aceptados de «Comprobar audio»:
+    /// todo eso se decidió mirando el otro archivo.
+    /// </summary>
+    internal static bool OlvidarLoDecididoSobre(IEnumerable<string> rutas, IgnoreList aplicadas, IgnoreList descartadas,
+                                                ApplyMarks marcas, IgnoreList audioAceptadas)
+    {
+        var cambia = false;
+        foreach (var ruta in rutas.Where(r => !string.IsNullOrWhiteSpace(r)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var lista in new[] { aplicadas, descartadas, audioAceptadas })
+                if (lista.Contains(ruta)) { lista.Remove(ruta); cambia = true; }
+            // La casilla va por ruta y huella de la propuesta (y, la de versiones antiguas, solo por ruta).
+            var prefijo = EnrichViewModel.ClaveMarca(ruta, "");
+            if (marcas.OlvidarSi(k => string.Equals(k, ruta, StringComparison.OrdinalIgnoreCase)
+                                      || k.StartsWith(prefijo, StringComparison.OrdinalIgnoreCase)) > 0)
+                cambia = true;
+        }
+        return cambia;
+    }
+
+    /// <summary>Guarda lo que <see cref="OlvidarLoDecididoSobre"/> ha cambiado. Devuelve "" o los fallos.</summary>
+    private string GuardarDecisiones()
+    {
+        var fallos = new List<string>();
+        foreach (var (que, guardar) in new (string, Func<string>)[]
+                 {
+                     ("aplicadas", _engine.Applied.Save), ("descartadas", _engine.Ignored.Save),
+                     ("casillas «Aplicar»", _engine.Marks.Save), ("avisos aceptados de Comprobar audio", _engine.AudioAceptadas.Save),
+                 })
+        {
+            string err;
+            try { err = guardar(); }
+            catch (Exception e) { err = e.Message; }
+            if (err.Length > 0) fallos.Add($"{que}: {err}");
+        }
+        foreach (var f in fallos) _engine.Logger.Err("Bandeja: no se pudo guardar " + f);
+        return string.Join(" · ", fallos);
     }
 
     private void GuardarBandeja()

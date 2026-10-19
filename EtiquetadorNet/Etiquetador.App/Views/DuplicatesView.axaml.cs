@@ -39,6 +39,7 @@ public partial class DuplicatesView : UserControl
     {
         if (DataContext is not ViewModels.DuplicatesViewModel vm) return;
         if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (vm.EnviandoAPapelera) return;
 
         var objetivo = vm.ParaPapelera();
         if (objetivo.Count == 0) { vm.Status = "No hay ninguna copia marcada."; return; }
@@ -51,6 +52,7 @@ public partial class DuplicatesView : UserControl
             Services.Papelera.NotaConfirmacion(objetivo.Select(r => r.FilePath)),
             "Enviar a la papelera");
 
-        if (ok) vm.SendMarkedToRecycleBin();
+        // Los archivos se envían en segundo plano: la ventana sigue respondiendo y el estado dice por dónde va.
+        if (ok) await vm.SendMarkedToRecycleBinAsync();
     }
 }

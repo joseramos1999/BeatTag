@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Etiquetador.Core.Analysis;
 
 namespace Etiquetador.Core.Providers;
 
@@ -27,9 +28,14 @@ public sealed class DeezerProvider
     /// versiones del catálogo se tratan como no pedidas. Si el título que llega aún la nombra, se
     /// deduce solo.
     /// </param>
+    /// <param name="letra">
+    /// Lo que dice el NOMBRE del archivo de su letra («Clean», «Dirty»…; ver
+    /// <see cref="ExplicitDetector.DelNombre"/>). Sirve para elegir entre las dos versiones que
+    /// publican los catálogos (ver <see cref="CoherenciaDeLetra"/>).
+    /// </param>
     public async Task<ProviderResult?> SearchAsync(string artist, string title, bool wantRemix, bool wantLive,
         int localDur = 0, bool isEdit = false, CancellationToken ct = default, string expectedRemixer = "", bool verbatim = false,
-        bool wantTool = false)
+        bool wantTool = false, Explicitness letra = Explicitness.Unknown)
     {
         var kw = verbatim ? Descriptors.BuildKwVerbatim(artist, title) : Descriptors.BuildKw(artist, title);
         if (kw.Length == 0) kw = Descriptors.CleanKeywords(title);
@@ -42,7 +48,7 @@ public sealed class DeezerProvider
         if (data == null || data.Count == 0) { Log?.Detail("      dz: 0 resultados"); return null; }
 
         var pick = SelectBest(data, artist, title, wantRemix, wantLive, localDur, isEdit, out var bestSc, out var bestWhy,
-            Log == null ? null : m => Log.Detail("      dz: " + m), expectedRemixer, wantTool);
+            Log == null ? null : m => Log.Detail("      dz: " + m), expectedRemixer, wantTool, letra);
         if (pick == null) { Log?.Detail($"      dz: {data.Count} resultados, ninguno aceptado"); return null; }
 
         // Enriquecido: BPM, año y contribuidores completos vía track/{id}
@@ -70,8 +76,19 @@ public sealed class DeezerProvider
             }
         }
 
+        // ISRC y letra (C14): vienen en las respuestas que ya se han pedido, así que no cuestan nada.
+        // Manda track/{id}, que es la ficha completa; si no llegó, la pista de la búsqueda también los trae.
+        var isrc = NormalizarIsrc(J.S(J.P(tk, "isrc")));
+        if (isrc.Length == 0) isrc = NormalizarIsrc(J.S(J.P(pick, "isrc")));
+        var letraCatalogo = LetraDe(tk);
+        if (letraCatalogo == Explicitness.Unknown) letraCatalogo = LetraDe(pick);
+        if (isrc.Length > 0 || letraCatalogo != Explicitness.Unknown)
+            Log?.Detail($"      dz: isrc={(isrc.Length > 0 ? isrc : "-")} letra={letraCatalogo}");
+
         return new ProviderResult
         {
+            Isrc = isrc,
+            Explicit = letraCatalogo,
             Title = J.S(J.P(pick, "title")),
             Artist = artistFull,
             Album = J.S(J.P(pick, "album", "title")),
@@ -106,13 +123,15 @@ public sealed class DeezerProvider
     /// descarte en las decenas de pruebas de scoring, a las que el motivo no les aporta nada.
     /// </summary>
     public static JsonNode? SelectBest(JsonArray data, string artist, string title, bool wantRemix, bool wantLive,
-        int localDur, bool isEdit, out double bestSc, Action<string>? trace = null, string expectedRemixer = "", bool wantTool = false)
-        => SelectBest(data, artist, title, wantRemix, wantLive, localDur, isEdit, out bestSc, out _, trace, expectedRemixer, wantTool);
+        int localDur, bool isEdit, out double bestSc, Action<string>? trace = null, string expectedRemixer = "", bool wantTool = false,
+        Explicitness letra = Explicitness.Unknown)
+        => SelectBest(data, artist, title, wantRemix, wantLive, localDur, isEdit, out bestSc, out _, trace, expectedRemixer, wantTool, letra);
 
     /// <summary>Selección + scoring pura sobre los items de Deezer (data). Devuelve el item elegido o null.</summary>
+    /// <param name="letra">Lo que dice el nombre del archivo de su letra; ver <see cref="CoherenciaDeLetra"/>.</param>
     public static JsonNode? SelectBest(JsonArray data, string artist, string title, bool wantRemix, bool wantLive,
         int localDur, bool isEdit, out double bestSc, out string bestWhy, Action<string>? trace = null, string expectedRemixer = "",
-        bool wantTool = false)
+        bool wantTool = false, Explicitness letra = Explicitness.Unknown)
     {
         var nRemixer = TextUtils.Nk(expectedRemixer);
         var na = TextUtils.Nk(artist);
@@ -125,6 +144,9 @@ public sealed class DeezerProvider
         JsonNode? pick = null;
         bestSc = -999.0;
         bestWhy = "";
+        // El desempate por la letra del candidato elegido (ver CoherenciaDeLetra): decide la elección
+        // pero no entra en la confianza que se devuelve.
+        var bestLetra = 0.0;
         // Motivo por el que gana el candidato elegido. Antes solo iba a la traza y se perdia: es
         // justo lo que hace falta para decidir sobre una propuesta dudosa sin abrir el registro.
         var razones = new List<string>();
@@ -249,8 +271,9 @@ public sealed class DeezerProvider
                 else why.Add($"dur Δ{dd}s (edit)");
             }
             else why.Add("sin duracion");
+            var letraP = PuntuarLetra(letra, x, why);
             trace?.Invoke($"candidato '{J.S(J.P(x, "artist", "name"))} - {rt}' = {sc:0.##}  [{string.Join(", ", why)}]");
-            if (sc > bestSc) { bestSc = sc; pick = x; razones = why; }
+            if (sc + letraP > bestSc + bestLetra) { bestSc = sc; bestLetra = letraP; pick = x; razones = why; }
         }
         if (pick != null && bestSc <= -8)
         {
@@ -266,6 +289,7 @@ public sealed class DeezerProvider
         if (pick == null && na.Length == 0 && nt.Length > 0 && J.WordCount(title) >= 2)
         {
             var best = double.NegativeInfinity;
+            var bestOrden = double.NegativeInfinity;   // con el desempate por la letra
             foreach (var x in data)
             {
                 var tnx = TextUtils.Nk(J.S(J.P(x, "title")));
@@ -295,8 +319,9 @@ public sealed class DeezerProvider
                     }
                     else why.Add($"dur Δ{dd2}s (version)");
                 }
+                var letraP = PuntuarLetra(letra, x, why);
                 trace?.Invoke($"respaldo '{J.S(J.P(x, "artist", "name"))} - {rt}' = {sc:0.##}  [{string.Join(", ", why)}]");
-                if (sc > best) { best = sc; pick = x; razones = why; }
+                if (sc + letraP > bestOrden) { bestOrden = sc + letraP; best = sc; pick = x; razones = why; }
             }
             if (pick != null) bestSc = best;
         }
@@ -329,4 +354,73 @@ public sealed class DeezerProvider
         bestWhy = pick == null ? "" : string.Join(", ", razones);
         return pick;
     }
+
+    // ---- ISRC y letra del catálogo (C14) ----
+
+    /// <summary>
+    /// Lo que pesa, al ELEGIR, que la letra del candidato cuadre con la del archivo. Es un desempate:
+    /// no pasa por encima del título ni de la duración, pero decide entre dos pistas que por lo demás
+    /// puntúan igual, que es justo el caso de un tema publicado en versión explícita y en versión
+    /// editada (mismo título, misma duración). Antes ganaba la primera de la lista, y con un archivo
+    /// «(Clean)» del pool se proponían el álbum, el año y el ISRC de la explícita.
+    ///
+    /// No se suma a la confianza que se devuelve (visto en revisión): un archivo «(Clean)» del que
+    /// Deezer solo tiene la explícita, que es lo habitual, perdía un punto de confianza y podía pasar a
+    /// revisión por algo que no dice nada de si la coincidencia es buena.
+    /// </summary>
+    internal const double PuntosLetra = 1.0;
+
+    /// <summary>
+    /// +1 si el candidato es la misma versión que dice el nombre del archivo («Dirty» y pista
+    /// explícita, «Clean» y pista editada), −1 si es la contraria, 0 si alguno de los dos no lo dice.
+    /// Una pista «no explícita» no cuenta como clean: es la marca por defecto de muchas distribuidoras.
+    /// </summary>
+    public static double CoherenciaDeLetra(Explicitness archivo, JsonNode? candidato)
+    {
+        if (archivo == Explicitness.Unknown) return 0;
+        var cat = LetraDe(candidato);
+        if (cat == Explicitness.Unknown) return 0;
+        return cat == archivo ? PuntosLetra : -PuntosLetra;
+    }
+
+    private static double PuntuarLetra(Explicitness archivo, JsonNode? candidato, List<string> why)
+    {
+        var p = CoherenciaDeLetra(archivo, candidato);
+        if (p > 0) why.Add("letra como la del archivo (desempate)");
+        else if (p < 0) why.Add("letra contraria a la del archivo (desempate)");
+        return p;
+    }
+
+    /// <summary>
+    /// La letra de una pista de Deezer. «explicit_lyrics» verdadero, o «explicit_content_lyrics» 1
+    /// (explícita) o 4 (en parte explícita): explícita. 3 («editada»): la versión clean. El resto (0 «no
+    /// explícita», 2 y 5 «desconocida», 6 y 7 «sin indicación»): sin dato. Una respuesta guardada por
+    /// una versión anterior se lee igual: estos campos ya venían en ella.
+    /// </summary>
+    public static Explicitness LetraDe(JsonNode? pista)
+    {
+        if (pista == null) return Explicitness.Unknown;
+        if (J.P(pista, "explicit_lyrics") is JsonValue v && v.TryGetValue<bool>(out var explicita) && explicita)
+            return Explicitness.Explicit;
+        if (J.P(pista, "explicit_content_lyrics") is not JsonValue) return Explicitness.Unknown;
+        return J.I(J.P(pista, "explicit_content_lyrics")) switch
+        {
+            1 or 4 => Explicitness.Explicit,
+            3 => Explicitness.Clean,
+            _ => Explicitness.Unknown,
+        };
+    }
+
+    /// <summary>
+    /// El ISRC en su forma canónica de 12 caracteres (país, registrante, año y número: «USUYG1017706»),
+    /// o "" si lo que llega no lo es. Se aceptan guiones y espacios («US-UYG-10-17706»), que algunas
+    /// fuentes intercalan; cualquier otra cosa se descarta en vez de escribirla en el archivo.
+    /// </summary>
+    public static string NormalizarIsrc(string? isrc)
+    {
+        var s = (isrc ?? "").Replace("-", "").Replace(" ", "").Trim().ToUpperInvariant();
+        return IsrcRe.IsMatch(s) ? s : "";
+    }
+
+    private static readonly Regex IsrcRe = new(@"^[A-Z]{2}[A-Z0-9]{3}\d{7}$", RegexOptions.CultureInvariant);
 }

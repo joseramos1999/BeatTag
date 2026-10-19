@@ -23,6 +23,12 @@ public static class LibraryScanner
     // AIFF: es habitual entre DJs (lo venden las tiendas y rekordbox lo usa), TagLib lo lee y
     // escribe, y el resto del código ya lo trataba como sin pérdida (AudioQuality). Sin él aquí,
     // esos archivos no aparecían en ninguna pestaña y nada lo avisaba.
+    //
+    // Comprobado con AIFF de prueba (M15): etiquetas, renombrado y deshacer como cualquier otro;
+    // Volumen los mide y no los ajusta (Mp3Gain solo toca MP3); fpcalc 1.5.1 da su huella (MEDIDO);
+    // la vista previa y «Comprobar audio» los abren con el lector de AIFF de NAudio, porque Media
+    // Foundation no sabe (MEDIDO: 0xC00D36C4). Añadir extensiones no invalida la caché de escaneo,
+    // que va por ruta, fecha y tamaño: lo que ya estaba sale de ella y solo se leen los AIFF nuevos.
     public static readonly string[] AudioExtensions =
         { ".mp3", ".flac", ".m4a", ".aac", ".wav", ".ogg", ".wma", ".opus", ".aiff", ".aif" };
 

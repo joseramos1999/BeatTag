@@ -917,4 +917,24 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
         await Shell.OpenUrlAsync(url);
         Status = "Abierta en el navegador la búsqueda de «Daft Punk One More Time». Si sale la página de resultados de tu pool, la dirección es correcta.";
     }
+
+    // --- Catálogo: ISRC (equipo catalogo_bandeja, C14) ---
+    //
+    // Como el tema y las tablas compactas, se guarda al momento: es una casilla que no depende de
+    // las claves, y obligar a pulsar Guardar para que cuente en la próxima aplicación sería un tropiezo.
+
+    /// <summary>Escribir el ISRC del catálogo al aplicar propuestas (desactivado por defecto).</summary>
+    public bool EscribirIsrc
+    {
+        get => _engine.Config.WriteIsrc;
+        set
+        {
+            if (_engine.Config.WriteIsrc == value) return;
+            _engine.Config.WriteIsrc = value;
+            Status = _engine.SaveConfig(out var error)
+                ? (value ? "Se escribirá el ISRC al aplicar propuestas." : "Ya no se escribirá el ISRC al aplicar propuestas.")
+                : "⚠ NO se guardó (config anterior intacta): " + error;
+            OnPropertyChanged();
+        }
+    }
 }

@@ -145,14 +145,24 @@ public partial class AsistenteView : UserControl
         if (vm.IsBusy) { vm.Status = "Espera a que termine el proceso en curso."; return; }
 
         vm.Engine.Preview.Stop();   // si suena, el archivo está abierto y no se puede mover
-        var enviadas = new List<IFilaConArchivo>();
-        var fallos = new List<string>();
-        foreach (var f in filas)
+        // T2 (equipo catalogo_bandeja): fuera del hilo de la interfaz, con avance y cancelable, como en
+        // Duplicados y la Bandeja. Antes el bucle iba aquí mismo y la ventana se quedaba congelada (en
+        // macOS, un osascript por archivo que puede esperar hasta 20 s al permiso del sistema).
+        Services.EnvioPapeleraResultado? res = null;
+        await vm.TrabajarAsync(Services.EnvioPapelera.TextoAvance(0, filas.Count), async ct =>
         {
-            var (bien, error) = Services.Papelera.Enviar(f.RutaArchivo);
-            if (bien) enviadas.Add(f);
-            else fallos.Add($"{System.IO.Path.GetFileName(f.RutaArchivo)}: {error}");
-        }
+            var avance = new Progress<(int Hechas, int Total)>(p =>
+            {
+                if (!vm.IsBusy) return;
+                vm.Progress = p.Total > 0 ? 100.0 * p.Hechas / p.Total : 0;
+                vm.Status = Services.EnvioPapelera.TextoAvance(p.Hechas, p.Total);
+            });
+            res = await Services.EnvioPapelera.EnviarAsync(filas.Select(f => f.RutaArchivo).ToList(), progreso: avance, ct: ct);
+        }, escribeArchivos: true);
+        if (res == null) return;   // el error ya lo ha dicho TrabajarAsync
+        var rutasEnviadas = new HashSet<string>(res.Enviadas, StringComparer.OrdinalIgnoreCase);
+        var enviadas = filas.Where(f => rutasEnviadas.Contains(f.RutaArchivo)).ToList();
+        var fallos = res.Fallos.Select(f => $"{f.Archivo}: {f.Motivo}").ToList();
 
         // De una sola vez: la biblioteca avisa a todas las pestañas en cada cambio.
         vm.Engine.Library.RemoveTracks(enviadas.Select(f => f.RutaArchivo));
@@ -167,6 +177,9 @@ public partial class AsistenteView : UserControl
             ? (enviadas.Count == 1 ? "Enviado a la papelera." : $"{enviadas.Count} archivos enviados a la papelera.")
               + (ReferenceEquals(tabla, TablaMezcla) ? " Vuelve a ordenar para recalcular las transiciones." : "")
             : $"{enviadas.Count} enviados, {fallos.Count} con problemas. El primero: {fallos[0]}";
+        if (res.Interrumpido)
+            vm.Status = $"Cancelado: {enviadas.Count} de {filas.Count} enviados a la papelera; el resto no se ha tocado."
+                      + (fallos.Count > 0 ? $" {fallos.Count} con problemas. El primero: {fallos[0]}" : "");
     }
 
     private static MenuItem Opcion(string texto, Action accion)

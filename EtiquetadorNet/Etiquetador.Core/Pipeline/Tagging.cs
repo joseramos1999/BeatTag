@@ -82,10 +82,31 @@ public static class Tagging
             var cambio = SustituirCaratula(tag, coverPic, overwrite, carpetaPortadas);
             if (cambio != null) log["Cover"] = cambio;
         }
+        EscribirIsrc(tag, info, fields, log);
 
         f.Save();
         f.Dispose();
         return log;
+    }
+
+    /// <summary>Clave del ISRC en el manifiesto de deshacer (la restaura UndoEngine).</summary>
+    public const string IsrcField = "Isrc";
+
+    /// <summary>
+    /// Escribe el ISRC (TSRC en ID3, también en AIFF y WAV con ID3; ISRC en Vorbis; su átomo en MP4)
+    /// si el usuario lo ha activado en Ajustes (C14). Solo rellena: un ISRC que el archivo ya trae no
+    /// se sustituye ni con «Sobrescribir», porque suele venir de la tienda y es el de ESE archivo,
+    /// mientras que el del catálogo es el de la pista que se encontró. Tampoco se escribe si el usuario
+    /// ha cambiado a mano el artista o el título de la propuesta (ver ProcessResult.IsrcVigente).
+    /// Queda anotado para deshacer; un formato sin ese campo no anota nada.
+    /// </summary>
+    private static void EscribirIsrc(TagLib.Tag tag, ProcessResult info, FieldFlags fields, Dictionary<string, FieldChange> log)
+    {
+        var isrc = info.IsrcVigente;
+        if (!fields.Isrc || isrc.Length == 0 || !string.IsNullOrEmpty(tag.ISRC)) return;
+        try { tag.ISRC = isrc; }
+        catch { return; /* el formato no lo admite */ }
+        if ((tag.ISRC ?? "") == isrc) log[IsrcField] = FieldChange.Str("", isrc);
     }
 
     // Artistas cuyo nombre lleva una coma. Partir el crédito por comas los rompía en dos intérpretes
