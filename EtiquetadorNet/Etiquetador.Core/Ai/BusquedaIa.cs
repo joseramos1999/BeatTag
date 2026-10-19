@@ -186,10 +186,11 @@ public static class BusquedaIa
     private static readonly Regex EnergiaBaja = new(@"\b(suaves?|tranquil[ao]s?|relajad[ao]s?|chill|calmad[ao]s?)\b", IC);
     private static readonly Regex EnergiaAlta = new(@"\b(mucha energia|dur[ao]s?|potentes?|caner[ao]s?|intens[ao]s?|energetic[ao]s?|a tope)\b", IC);
 
-    private static readonly Regex BpmRango = new(@"\b(\d{2,3})\s*(?:-|a|y|hasta|to)\s*(\d{2,3})\s*bpm\b|\bentre\s+(\d{2,3})\s+y\s+(\d{2,3})\s*(?:bpm)?\b", IC);
+    // Los rangos admiten guion o raya («120-124», «120–124»), «a», «al», «y», «hasta» o «to».
+    private static readonly Regex BpmRango = new(@"\b(\d{2,3})\s*(?:-|–|al|a|y|hasta|to)\s*(\d{2,3})\s*bpm\b|\bentre\s+(\d{2,3})\s+y\s+(\d{2,3})\s*(?:bpm)?\b", IC);
     private static readonly Regex BpmSuelto = new(@"\b(?:a\s+)?(\d{2,3})\s*bpm\b", IC);
     private static readonly Regex Decada = new(@"\b(?:de\s+)?(?:los\s+)?(?:anos\s+)?(\d{2}|19\d0|20\d0)s?\b", IC);
-    private static readonly Regex AniosRango = new(@"\b(19\d\d|20\d\d)\s*(?:-|a|y|hasta)\s*(19\d\d|20\d\d)\b", IC);
+    private static readonly Regex AniosRango = new(@"\b(19\d\d|20\d\d)\s*(?:-|–|al|a|y|hasta)\s*(19\d\d|20\d\d)\b", IC);
 
     /// <summary>Lo que se puede leer en la frase sin interpretar nada.</summary>
     public static List<FiltroPropuesto> DesdeFrase(string peticion, VocabularioBiblioteca voc)
@@ -197,6 +198,11 @@ public static class BusquedaIa
         var res = new List<FiltroPropuesto>();
         var texto = VocabularioBiblioteca.Clave(peticion);   // sin acentos: las reglas se escriben sin ellos
         if (texto.Length == 0) return res;
+
+        // Los rangos se leen sobre la frase sin acentos pero CON sus guiones: Clave() los cambia por
+        // espacios, y «house vocal 120-124 bpm» se leía como «120 124 bpm», con lo que el rango no
+        // encajaba y se cogía «124 bpm» suelto (una colección de 122 a 126). Igual con «2010-2015».
+        var textoRangos = Regex.Replace(TextUtils.RemoveDiacritics(peticion).ToLowerInvariant(), @"\s+", " ").Trim();
 
         void Anadir(string campo, string valor, Match m) => res.Add(new FiltroPropuesto(campo, valor, m.Value.Trim(), OrigenFiltro.Frase));
 
@@ -206,8 +212,7 @@ public static class BusquedaIa
         foreach (var a in voc.ArtistasEn(peticion).Take(1))
             res.Add(new FiltroPropuesto("artista", a, a, OrigenFiltro.Frase));
 
-        // El BPM se lee sobre el texto con números intactos: Clave() no los toca.
-        if (BpmRango.Match(texto) is { Success: true } br)
+        if (BpmRango.Match(textoRangos) is { Success: true } br)
         {
             var a = int.Parse(br.Groups[1].Success ? br.Groups[1].Value : br.Groups[3].Value, CultureInfo.InvariantCulture);
             var b = int.Parse(br.Groups[2].Success ? br.Groups[2].Value : br.Groups[4].Value, CultureInfo.InvariantCulture);
@@ -216,8 +221,12 @@ public static class BusquedaIa
         else if (BpmSuelto.Match(texto) is { Success: true } bs && int.TryParse(bs.Groups[1].Value, out var bpm) && BpmValido(bpm))
             Anadir("bpm", $"{bpm - 2}-{bpm + 2}", bs);   // «a 128 bpm» admite el margen de un pitch pequeño
 
-        if (AniosRango.Match(texto) is { Success: true } ar)
-            Anadir("anio", $"{ar.Groups[1].Value}-{ar.Groups[2].Value}", ar);
+        if (AniosRango.Match(textoRangos) is { Success: true } ar)
+        {
+            var desde = int.Parse(ar.Groups[1].Value, CultureInfo.InvariantCulture);
+            var hasta = int.Parse(ar.Groups[2].Value, CultureInfo.InvariantCulture);
+            Anadir("anio", $"{Math.Min(desde, hasta)}-{Math.Max(desde, hasta)}", ar);
+        }
         else
             foreach (Match d in Decada.Matches(texto))
             {
@@ -246,15 +255,22 @@ public static class BusquedaIa
 
     private static bool BpmValido(int bpm) => bpm is >= 50 and <= 220;
 
-    /// <summary>«80» → 1980-1989; «2000» → 2000-2009; «10» → 2010-2019.</summary>
-    public static string? RangoDecada(string d)
+    /// <summary>
+    /// «80» → 1980-1989; «2000» → 2000-2009; «10» → 2010-2019; «40» → 1940-1949.
+    ///
+    /// Con dos cifras se toma el siglo XXI solo si esa década ya ha empezado. Antes el corte era fijo
+    /// en 50, y «boleros de los 40» creaba una colección de 2040-2049: siempre vacía.
+    /// </summary>
+    /// <param name="anioActual">El año de hoy; 0 para tomarlo del reloj. Se pasa en las pruebas.</param>
+    public static string? RangoDecada(string d, int anioActual = 0)
     {
+        if (anioActual <= 0) anioActual = DateTime.Now.Year;
         if (!int.TryParse(d, out var n)) return null;
         int inicio;
         if (d.Length == 4) inicio = n;
         else if (n % 10 != 0) return null;
-        else inicio = n >= 50 ? 1900 + n : 2000 + n;
-        if (inicio % 10 != 0 || inicio < 1950 || inicio > 2090) return null;
+        else inicio = 2000 + n <= anioActual ? 2000 + n : 1900 + n;
+        if (inicio % 10 != 0 || inicio < 1900 || inicio > anioActual) return null;
         return $"{inicio}-{inicio + 9}";
     }
 
@@ -368,6 +384,10 @@ public static class BusquedaIa
                     break;
             }
         }
+
+        // El modelo puede devolver el mínimo y el máximo al revés: con 128-120 la colección salía vacía.
+        if (bpmMin > bpmMax) (bpmMin, bpmMax) = (bpmMax, bpmMin);
+        if (anioMin > anioMax) (anioMin, anioMax) = (anioMax, anioMin);
 
         if (bpmMin != null || bpmMax != null)
             res.Add(new FiltroPropuesto("bpm", $"{bpmMin ?? 0}-{bpmMax ?? 0}", citaBpm, OrigenFiltro.Ia));

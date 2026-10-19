@@ -10,6 +10,15 @@ namespace Etiquetador.Core.Ai;
 public sealed record AiParse(string Artist, string Title, string Version, bool IsMashup, double Confidence);
 
 /// <summary>
+/// Si la IA local se puede usar con el modelo elegido en Ajustes y, si no, por qué.
+/// </summary>
+/// <param name="Modelo">El modelo que se usará; vacío si la IA no está disponible.</param>
+/// <param name="Disponible">Ollama responde y el modelo está descargado.</param>
+/// <param name="Motivo">Por qué no está disponible, para enseñárselo al usuario. Vacío si lo está.</param>
+/// <param name="Instalados">Los modelos descargados en Ollama (vacío si no responde), para ofrecer otro.</param>
+public sealed record EstadoModelo(string Modelo, bool Disponible, string Motivo, IReadOnlyList<string> Instalados);
+
+/// <summary>
 /// IA local a través de Ollama (http://localhost:11434). No requiere clave ni conexión a internet.
 ///
 /// Su cometido NO es identificar audio —de eso se encarga la huella acústica— sino LIMPIAR nombres de
@@ -30,9 +39,43 @@ public sealed class OllamaClient
 
     /// <summary>Se pone a true cuando Ollama no está disponible: evita reintentar en cada archivo.</summary>
     public bool AiBlocked { get; private set; }
+
+    /// <summary>
+    /// Por qué se desactivó la IA (<see cref="AiBlocked"/>), en palabras para el usuario. Vacío si no
+    /// está desactivada.
+    ///
+    /// Antes el motivo solo iba al archivo de log: Enriquecer analizaba quince mil canciones sin IA
+    /// porque el modelo elegido no estaba descargado, y en la interfaz no lo decía nadie.
+    /// </summary>
+    public string MotivoBloqueo { get; private set; } = "";
+
     public int AiCalls { get; private set; }
     private string? _autoModel;
     private bool _probed;
+
+    /// <summary>
+    /// Cuántas veces seguidas puede agotarse el tiempo de espera antes de desactivar la IA. Una
+    /// primera carga lenta del modelo agota los 180 s y la siguiente petición ya responde: desactivar
+    /// la IA a la primera dejaba el resto de la tirada sin ella por un fallo pasajero.
+    /// </summary>
+    public const int TiemposAgotadosParaDesactivar = 2;
+    private int _tiemposAgotadosSeguidos;
+
+    /// <summary>
+    /// Cuántos fallos seguidos de <see cref="PedirJsonAsync"/> que no dependen de la canción (no hay
+    /// conexión, tiempo agotado, el modelo no está) bastan para dejar de preguntar un rato.
+    /// </summary>
+    public const int FallosSeguidosParaPausar = 3;
+
+    /// <summary>
+    /// Cuánto se deja de preguntar tras <see cref="FallosSeguidosParaPausar"/> fallos seguidos. Sin
+    /// esa pausa, proponer fichas (hasta 5000 canciones) repetía el mismo fallo canción a canción, y
+    /// con un cortafuegos que descarta los paquetes cada una esperaba los 180 s enteros.
+    /// </summary>
+    public TimeSpan PausaTrasFallos { get; set; } = TimeSpan.FromSeconds(30);
+    private int _fallosSeguidos;
+    private string _ultimoFallo = "";
+    private DateTime _pausadoHasta = DateTime.MinValue;
 
     public string Host { get; set; } = DefaultHost;
 
@@ -99,8 +142,20 @@ public sealed class OllamaClient
     public void Reset()
     {
         AiBlocked = false;
+        MotivoBloqueo = "";
         _probed = false;
         _autoModel = null;
+        _tiemposAgotadosSeguidos = 0;
+        _fallosSeguidos = 0;
+        _pausadoHasta = DateTime.MinValue;
+    }
+
+    /// <summary>Desactiva la IA para el resto de la tirada, con el motivo para el usuario y para el log.</summary>
+    private void Bloquear(string motivo)
+    {
+        AiBlocked = true;
+        MotivoBloqueo = motivo;
+        _log?.Log($"        · IA local DESACTIVADA: {motivo}", LogKind.Err, fileOnly: true);
     }
 
     /// <summary>
@@ -163,15 +218,20 @@ public sealed class OllamaClient
             var ms = await ListModelsAsync(ct).ConfigureAwait(false);
             if (ms is not { Count: > 0 })
             {
-                AiBlocked = true;
-                _log?.Log($"        · IA local DESACTIVADA: Ollama no responde en {Host} o no tiene modelos instalados.",
-                          LogKind.Err, fileOnly: true);
+                Bloquear(ms == null ? MotivoSinOllama() : MotivoSinModelos());
                 return null;
             }
             if (string.IsNullOrWhiteSpace(model))
             {
                 _autoModel = Automatico(ms);
                 _log?.Log($"        · IA local: se usará el modelo «{_autoModel}».", LogKind.Dim, fileOnly: true);
+            }
+            // El modelo elegido en Ajustes puede no estar descargado: el desplegable ofrece también
+            // los sugeridos. Se sabe ya, sin esperar al 404 de la primera canción.
+            else if (!EstaInstalado(model, ms))
+            {
+                Bloquear(MotivoNoDescargado(model.Trim(), ms));
+                return null;
             }
         }
         if (string.IsNullOrWhiteSpace(model)) model = _autoModel ?? DefaultModel;
@@ -204,24 +264,32 @@ public sealed class OllamaClient
             {
                 var det = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                 // 404 = el modelo no está descargado: es un fallo de configuración, no algo transitorio.
-                if ((int)resp.StatusCode == 404)
-                {
-                    AiBlocked = true;
-                    _log?.Log($"        · IA local DESACTIVADA: el modelo '{model}' no está descargado en Ollama "
-                            + $"(ejecuta: ollama pull {model})", LogKind.Err, fileOnly: true);
-                }
+                if ((int)resp.StatusCode == 404) Bloquear(MotivoNoDescargado(model, Array.Empty<string>()));
                 else _log?.Log($"        · IA local: error HTTP {(int)resp.StatusCode} · {Trim(det)}", LogKind.Err, fileOnly: true);
                 return null;
             }
             raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            _tiemposAgotadosSeguidos = 0;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException)
+        {
+            // Sin cancelar nosotros, es el tiempo de espera del cliente. Ollama respondió al sondeo, así
+            // que suele ser la primera carga del modelo en memoria: la siguiente petición ya responde.
+            // Solo si se repite se da por perdido.
+            if (++_tiemposAgotadosSeguidos >= TiemposAgotadosParaDesactivar)
+                Bloquear($"La IA local no ha respondido a tiempo ({_http.Timeout.TotalSeconds:0} s) {_tiemposAgotadosSeguidos} veces "
+                       + $"seguidas con el modelo «{model}». Puede que el equipo no tenga memoria suficiente para él: "
+                       + "prueba con un modelo más pequeño en Ajustes.");
+            else
+                _log?.Log($"        · IA local: no respondió a tiempo ({_http.Timeout.TotalSeconds:0} s); se vuelve a intentar con la siguiente.",
+                          LogKind.Err, fileOnly: true);
+            return null;
+        }
         catch (Exception e)
         {
             // Ollama no está arrancado (o se cayó): desactivar para el resto de la tirada.
-            AiBlocked = true;
-            _log?.Log($"        · IA local DESACTIVADA: no se pudo contactar con Ollama en {Host} ({e.Message})",
-                      LogKind.Err, fileOnly: true);
+            Bloquear($"No se pudo contactar con Ollama en {Host} ({e.Message}). Arráncalo o instálalo en Ajustes.");
             return null;
         }
 
@@ -276,16 +344,58 @@ public sealed class OllamaClient
     }
 
     /// <summary>
-    /// El modelo que se usará: el elegido en Ajustes o, si no hay ninguno, el primero instalado.
-    /// Devuelve "" si Ollama no responde o no tiene modelos, que es la forma de saber que la IA no está.
+    /// El modelo que se usará: el elegido en Ajustes o, si no hay ninguno, el automático.
+    /// Devuelve "" si la IA no se puede usar, que es la forma de saber que no está; el motivo lo da
+    /// <see cref="ComprobarModeloAsync"/>.
     /// </summary>
     public async Task<string> ModeloEfectivoAsync(string elegido, CancellationToken ct = default)
+        => (await ComprobarModeloAsync(elegido, ct).ConfigureAwait(false)).Modelo;
+
+    /// <summary>
+    /// Si la IA se puede usar con el modelo elegido en Ajustes (vacío = automático) y, si no, por qué.
+    ///
+    /// Que Ollama responda no basta: el desplegable de Ajustes ofrece también modelos sugeridos sin
+    /// descargar, y esa elección se guarda. Antes se daba por disponible cualquier modelo elegido,
+    /// y el Asistente decía «IA local: llama3.1:8b» para luego acabar «Renombrar con IA» con 200
+    /// descartes por «la IA no respondió», sin explicar por qué.
+    /// </summary>
+    public async Task<EstadoModelo> ComprobarModeloAsync(string elegido, CancellationToken ct = default)
     {
         var instalados = await ListModelsAsync(ct).ConfigureAwait(false);
-        if (instalados is not { Count: > 0 }) return "";
-        if (string.IsNullOrWhiteSpace(elegido)) return Automatico(instalados);
-        return elegido.Trim();
+        if (instalados == null) return new EstadoModelo("", false, MotivoSinOllama(), Array.Empty<string>());
+        if (instalados.Count == 0) return new EstadoModelo("", false, MotivoSinModelos(), instalados);
+        if (string.IsNullOrWhiteSpace(elegido)) return new EstadoModelo(Automatico(instalados), true, "", instalados);
+
+        var modelo = elegido.Trim();
+        return EstaInstalado(modelo, instalados)
+            ? new EstadoModelo(modelo, true, "", instalados)
+            : new EstadoModelo("", false, MotivoNoDescargado(modelo, instalados), instalados);
     }
+
+    /// <summary>
+    /// El modelo está entre los instalados. Sin distinguir «:latest»: Ollama lista «llama3.2:latest»
+    /// aunque se descargara como «llama3.2», y los dos nombres son el mismo modelo.
+    /// </summary>
+    public static bool EstaInstalado(string modelo, IEnumerable<string> instalados)
+    {
+        static string SinLatest(string m)
+        {
+            m = m.Trim();
+            return m.EndsWith(":latest", StringComparison.OrdinalIgnoreCase) ? m[..^":latest".Length] : m;
+        }
+        var buscado = SinLatest(modelo);
+        return buscado.Length > 0 && instalados.Any(x => string.Equals(SinLatest(x), buscado, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string MotivoSinOllama()
+        => $"Ollama no responde en {Host}. Arráncalo o instálalo en Ajustes.";
+
+    private static string MotivoSinModelos()
+        => "Ollama no tiene ningún modelo descargado. Descarga uno en Ajustes.";
+
+    private static string MotivoNoDescargado(string modelo, IReadOnlyCollection<string> instalados)
+        => $"El modelo «{modelo}» no está descargado en Ollama. Descárgalo en Ajustes"
+         + (instalados.Count > 0 ? $" o elige uno de los instalados: {string.Join(", ", instalados)}." : ".");
 
     /// <summary>
     /// Pregunta al modelo y devuelve su respuesta como JSON, o el motivo por el que no hay respuesta.
@@ -309,6 +419,10 @@ public sealed class OllamaClient
             try { return (JsonNode.Parse(guardada), ""); } catch { /* se vuelve a preguntar */ }
         }
 
+        // Tras varios fallos seguidos que no dependen de la canción, no se vuelve a preguntar hasta
+        // que pase la pausa: se devuelve el mismo motivo, sin esperar a que falle otra vez.
+        if (DateTime.UtcNow < _pausadoHasta) return (null, _ultimoFallo);
+
         var body = JsonSerializer.Serialize(new
         {
             model = modelo,
@@ -319,17 +433,32 @@ public sealed class OllamaClient
             options = new { temperature = 0.0, num_predict = maxTokens },
         });
 
+        string raw;
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Post, $"{Host}/api/generate")
             { Content = new StringContent(body, Encoding.UTF8, "application/json") };
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
-            var raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
-                return (null, (int)resp.StatusCode == 404
+                return Fallo((int)resp.StatusCode == 404
                     ? $"El modelo «{modelo}» no está descargado. Descárgalo en Ajustes."
                     : $"Ollama respondió {(int)resp.StatusCode}. {Trim(raw)}");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException)
+        {
+            return Fallo($"La IA local no ha respondido a tiempo ({_http.Timeout.TotalSeconds:0} s).");
+        }
+        catch (Exception e) { return Fallo($"No se pudo contactar con Ollama en {Host}. {e.Message}"); }
 
+        // Ollama ha respondido: lo que venga a partir de aquí depende de la canción, no de la conexión.
+        _fallosSeguidos = 0;
+
+        // Un JSON ilegible es una mala respuesta del modelo para ESTA petición, no un problema de
+        // conexión. Antes caía en el mismo catch y se informaba como «No se pudo contactar con Ollama».
+        try
+        {
             var txt = J.S(J.P(JsonNode.Parse(raw), "response"));
             var m = Regex.Match(txt, @"\{.*\}", RegexOptions.Singleline);
             if (!m.Success) return (null, "La IA no devolvió una respuesta legible.");
@@ -339,8 +468,25 @@ public sealed class OllamaClient
             if (clave != null && _api.CachePath(clave) is { } cp) _api.CacheStore(cp, m.Value);
             return (json, "");
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (Exception e) { return (null, $"No se pudo contactar con Ollama en {Host}. {e.Message}"); }
+        catch (Exception) { return (null, "La IA no devolvió una respuesta legible."); }
+    }
+
+    /// <summary>
+    /// Anota un fallo de <see cref="PedirJsonAsync"/> que no depende de la canción y, si ya van
+    /// <see cref="FallosSeguidosParaPausar"/> seguidos, deja de preguntar durante <see cref="PausaTrasFallos"/>.
+    /// </summary>
+    private (JsonNode? Json, string Error) Fallo(string motivo)
+    {
+        _ultimoFallo = motivo;
+        // El contador no vuelve a cero al pausar: si al acabar la pausa el primer intento también
+        // falla, se vuelve a pausar en vez de esperar otros tres fallos.
+        if (++_fallosSeguidos >= FallosSeguidosParaPausar)
+        {
+            _pausadoHasta = DateTime.UtcNow + PausaTrasFallos;
+            _log?.Log($"        · IA local: {FallosSeguidosParaPausar} fallos seguidos ({motivo}); "
+                    + $"no se vuelve a preguntar en {PausaTrasFallos.TotalSeconds:0} s.", LogKind.Err, fileOnly: true);
+        }
+        return (null, motivo);
     }
 
     private static string Trim(string s) => s.Length <= 140 ? s : s[..140];

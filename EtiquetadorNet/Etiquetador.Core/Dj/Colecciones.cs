@@ -1,3 +1,7 @@
+using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
+using Etiquetador.Core.Ai;
+
 namespace Etiquetador.Core.Dj;
 
 /// <summary>
@@ -18,8 +22,8 @@ public sealed class ColeccionInteligente
     public string Texto { get; set; } = "";
 
     /// <summary>
-    /// Texto que debe contener el género («house» encuentra también «Deep House»). Varios separados
-    /// por comas valen como «cualquiera de ellos»: «cumbia, merengue».
+    /// Palabras que debe contener el género («house» encuentra también «Deep House», pero «rap» no
+    /// encuentra «Trap»). Varios separados por comas valen como «cualquiera de ellos»: «cumbia, merengue».
     /// </summary>
     public string Genero { get; set; } = "";
 
@@ -79,9 +83,12 @@ public static class FiltroColeccion
 
         if (c.Genero.Trim().Length > 0)
         {
-            var buscados = Fichas.PartirLista(c.Genero).Select(TextUtils.Nk).Where(g => g.Length > 0).ToList();
-            var genero = TextUtils.Nk(t.Genre);
-            if (buscados.Count > 0 && !buscados.Any(b => genero.Contains(b, StringComparison.Ordinal))) return false;
+            var buscados = ClavesPedidas(c.Genero);
+            if (buscados.Length > 0)
+            {
+                var delTema = ClavesDelTema(t.Genre);
+                if (!buscados.Any(b => delTema.Any(g => ContieneGenero(g, b)))) return false;
+            }
         }
 
         // Sin año conocido no se puede afirmar que sea de esa época.
@@ -113,6 +120,79 @@ public static class FiltroColeccion
         return true;
     }
 
+    // --- Género ---
+    //
+    // Se compara por PALABRAS. Antes se buscaba un trozo de texto sin espacios ni signos, y MEDIDO en
+    // una biblioteca real (237 géneros distintos): «rap» metía además 432 canciones de «Trap», y
+    // «dance» 82 de «Dancehall» y 2 de «Eurodance». Por palabras, «house» sigue encontrando «Deep
+    // House», que es lo que se quiere: un estilo dentro de otro.
+    //
+    // Las claves se calculan una vez por texto y se reutilizan: una colección se evalúa contra
+    // quince mil canciones, pero en una biblioteca hay unos cientos de géneros distintos.
+
+    private static readonly ConcurrentDictionary<string, string[]> _clavesPedidas = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, string[]> _clavesDelTema = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Los géneros pedidos, cada uno tal cual y con su sinónimo conocido: «rap» también es «Hip Hop»
+    /// para <see cref="GenreNormalizer"/>, y así lo cuenta el Asistente al proponer colecciones.
+    /// </summary>
+    private static string[] ClavesPedidas(string genero)
+        => Recordar(_clavesPedidas, genero, g => Fichas.PartirLista(g)
+            .SelectMany(x => new[] { VocabularioBiblioteca.Clave(x), VocabularioBiblioteca.Clave(GenreNormalizer.Canonical(x)) })
+            .Where(k => k.Length > 0).Distinct(StringComparer.Ordinal).ToArray());
+
+    /// <summary>
+    /// El género de la canción entero y cada uno de los que lista («Rap; Hip Hop; Latino»), también
+    /// con su sinónimo conocido: una canción etiquetada «Rap» entra en una colección de «Hip Hop».
+    /// </summary>
+    private static string[] ClavesDelTema(string? genero)
+    {
+        if (string.IsNullOrWhiteSpace(genero)) return Array.Empty<string>();
+        return Recordar(_clavesDelTema, genero, g => new[] { VocabularioBiblioteca.Clave(g) }
+            .Concat(Regex.Split(g, @"\s*[/;,|]\s*").Select(s => VocabularioBiblioteca.Clave(GenreNormalizer.Canonical(s))))
+            .Where(k => k.Length > 0).Distinct(StringComparer.Ordinal).ToArray());
+    }
+
+    private static string[] Recordar(ConcurrentDictionary<string, string[]> cache, string clave, Func<string, string[]> calcular)
+    {
+        if (cache.Count > 4096) cache.Clear();   // nunca debería pasar: son géneros, no canciones
+        return cache.GetOrAdd(clave, calcular);
+    }
+
+    /// <summary>Terminaciones de género y número que no cambian el estilo: «Latin» / «Latino» / «Latina».</summary>
+    private static readonly string[] Terminaciones = { "s", "es", "o", "a", "os", "as" };
+
+    /// <summary>
+    /// <paramref name="claveGenero"/> contiene las palabras de <paramref name="claveBuscada"/>, seguidas
+    /// y enteras. Se admite la misma palabra con otra terminación de género o número, porque comparando
+    /// por palabras «latin» dejaba de encontrar las 27 canciones de «Latino» que antes sí encontraba.
+    /// </summary>
+    private static bool ContieneGenero(string claveGenero, string claveBuscada)
+    {
+        var tema = claveGenero.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var pedido = claveBuscada.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (pedido.Length == 0) return false;
+        for (var i = 0; i + pedido.Length <= tema.Length; i++)
+        {
+            var todas = true;
+            for (var k = 0; k < pedido.Length && todas; k++) todas = MismaPalabra(tema[i + k], pedido[k]);
+            if (todas) return true;
+        }
+        return false;
+    }
+
+    private static bool MismaPalabra(string a, string b)
+        => string.Equals(a, b, StringComparison.Ordinal) || Flexion(a, b) || Flexion(b, a);
+
+    /// <summary>
+    /// <paramref name="larga"/> es <paramref name="corta"/> con una terminación de género o número.
+    /// Solo con palabras de cuatro letras o más: con menos, «pop» + «s» o «rap» + «a» ya no son el estilo.
+    /// </summary>
+    private static bool Flexion(string larga, string corta)
+        => corta.Length >= 4 && larga.Length > corta.Length && larga.StartsWith(corta, StringComparison.Ordinal)
+           && Terminaciones.Contains(larga[corta.Length..], StringComparer.Ordinal);
+
     private static bool ContieneTodas(List<string>? tiene, List<string> pedidas)
     {
         if (pedidas.Count == 0) return true;
@@ -130,13 +210,17 @@ public sealed class AlmacenColecciones
     public List<ColeccionInteligente> Todas { get; }
     public string AvisoCarga { get; }
 
+    /// <summary>No se pudo leer ni apartar el archivo al abrirlo: <see cref="Guardar"/> no lo pisa.</summary>
+    public bool SoloLectura { get; }
+
     public AlmacenColecciones(string archivo)
     {
         _archivo = archivo;
-        Todas = ArchivoJson.Leer(archivo, () => new List<ColeccionInteligente>(), out var aviso);
+        Todas = ArchivoJson.Leer(archivo, () => new List<ColeccionInteligente>(), out var aviso, out var soloLectura);
         AvisoCarga = aviso;
+        SoloLectura = soloLectura;
     }
 
-    /// <summary>Devuelve "" si fue bien, o el motivo del fallo.</summary>
-    public string Guardar() => ArchivoJson.Escribir(_archivo, Todas);
+    /// <summary>Devuelve "" si fue bien, o el motivo del fallo. En solo lectura no escribe nada.</summary>
+    public string Guardar() => SoloLectura ? ArchivoJson.AvisoSoloLectura(_archivo) : ArchivoJson.Escribir(_archivo, Todas);
 }

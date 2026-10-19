@@ -108,8 +108,18 @@ public static class NombreCortado
 
         // Se prueba primero con el título solo: si el nombre ya trae su artista, meter el de la
         // etiqueta sería repetirlo.
-        foreach (var candidato in new[] { titulo, artista.Length > 0 ? $"{artista} - {titulo}" : "" })
-            if (candidato.Length > 0 && Extender(nombre, SinPublicidad(candidato)) is { } completo)
+        var candidatos = new[] { titulo, artista.Length > 0 ? $"{artista} - {titulo}" : "" }
+                         .Where(c => c.Length > 0).Select(SinPublicidad).ToList();
+        foreach (var candidato in candidatos)
+            if (Extender(nombre, candidato) is { } completo)
+                return completo;
+
+        // Si empalmar con el texto de la etiqueta le quitaba al nombre su « - », se completa en
+        // modo literal: el nombre tal cual y solo la cola que faltaba. Visto en una biblioteca real:
+        // «LA PRENDO - BAD GYAL (AGA TECH REMIX) [EXTEN» con la etiqueta «La Prendo (Bad Gyal AgA
+        // Tech Remix) [Extended]» quedaba sin el separador del artista.
+        foreach (var candidato in candidatos)
+            if (Extender(nombre, candidato, literal: true) is { } completo)
                 return completo;
 
         return null;
@@ -145,8 +155,13 @@ public static class NombreCortado
     /// Gente (Transition 100-105 Bpm)» coincide «Mos» con «Moscow», así que lo que hay delante del
     /// empalme -«Bad Bunny X J Balvin X Comando Tiburon - »- se queda TAL CUAL y detrás va el texto
     /// completo. Así no se antepone nada, no se repite el artista y no se pierde lo que ya estaba.
+    ///
+    /// Con <paramref name="literal"/> ni siquiera las palabras que coinciden se toman del texto
+    /// completo: el nombre se queda letra a letra hasta la palabra cortada, y de
+    /// <paramref name="textoCompleto"/> solo se aprovecha lo que va desde esa palabra. Es lo que
+    /// necesita la IA, que no escribe el nombre: lo recompone (ver <see cref="DesdeIa"/>).
     /// </summary>
-    public static string? Extender(string nombre, string textoCompleto)
+    public static string? Extender(string nombre, string textoCompleto, bool literal = false)
     {
         var n = PalabrasCon(nombre);
         var c = PalabrasCon(textoCompleto);
@@ -181,13 +196,38 @@ public static class NombreCortado
                 var yaEstaban = PalabrasCon(conservado).Select(p => p.Nk).Where(w => w.Length >= 3).ToHashSet(StringComparer.Ordinal);
                 if (PalabrasCon(cola).Any(p => p.Nk.Length >= 3 && yaEstaban.Contains(p.Nk))) continue;
 
+                string propuesto;
+                if (literal)
+                {
+                    // El nombre hasta la palabra cortada, tal cual, y desde ella lo que dice el
+                    // texto completo. Visto en una biblioteca real: con el empalme desde la primera
+                    // palabra, «Bzrp 48 x Aprovecha (97-90 Bpm) (Try It Mash» acababa como «Bzrp 48 x
+                    // Aprovecha ((97-90 Bpm) (Try It Mashup))», que es lo que la IA había recompuesto.
+                    var empalmado = EmpalmarLiteral(nombre[..n[^1].Pos], textoCompleto[c[j + largo - 1].Pos..], nombre[n[^1].Pos..]);
+                    if (empalmado == null) continue;
+                    propuesto = Sanear(empalmado);
+                    // Ni paréntesis anidados que el nombre no tenía: «(Intr» con «Intro (Clean)»
+                    // dejaría «(Intro (Clean))».
+                    if (Profundidad(propuesto) > Math.Max(1, Profundidad(nombre))) continue;
+                }
+                else propuesto = Sanear(SinCierreSuelto(conservado + cola));
+
                 // Completar un nombre no puede crear un «Artista - Título» de más. Visto en la
                 // aplicación: «Vazteria X - No Break» (que ni siquiera estaba cortado) empalmaba
                 // «Break» con el «Zona Breakbeat DJ's» de la etiqueta de artista y quedaba «Vazteria
                 // X - No Breakbeat DJ's; DJ Goku - No Break».
                 var maxGuiones = Math.Max(Separadores(nombre), Separadores(textoCompleto));
-                var propuesto = Sanear(SinCierreSuelto(conservado + cola));
                 if (Separadores(propuesto) > maxGuiones) continue;
+
+                // Ni quitar los que ya tenía. Visto en una biblioteca real: «LA PRENDO - BAD GYAL
+                // (AGA TECH REMIX) [EXTEN» acababa como «La Prendo (Bad Gyal (AgA Tech Remix)
+                // Extended)», sin el guion que separaba al artista.
+                if (Separadores(propuesto) < Separadores(nombre)) continue;
+
+                // Ni los paréntesis o corchetes que ya tenía. Con la etiqueta «La Prendo (Bad Gyal
+                // AgA Tech Remix) [Extended]», el empalme a partir de «BAD» dejaba «LA PRENDO - Bad
+                // Gyal AgA Tech Remix [Extended]»: el paréntesis del nombre había desaparecido.
+                if (Aperturas(propuesto) < Aperturas(nombre)) continue;
 
                 // Si el resultado sigue pareciendo cortado, no se ha completado nada: pasa cuando la
                 // etiqueta viene cortada a su vez («Efecto Vs DJ No Pare Remix (DJ»).
@@ -209,6 +249,70 @@ public static class NombreCortado
 
     /// <summary>Cuántos «Artista - Título» separa un texto: los guiones con espacio a los dos lados.</summary>
     private static int Separadores(string s) => Regex.Matches(s, @"\s[-–]\s").Count;
+
+    /// <summary>Cuántos paréntesis o corchetes se abren en un texto.</summary>
+    private static int Aperturas(string s) => s.Count(ch => ch is '(' or '[');
+
+    /// <summary>Cuántos paréntesis o corchetes hay como mucho uno dentro de otro.</summary>
+    private static int Profundidad(string s)
+    {
+        int nivel = 0, max = 0;
+        foreach (var ch in s)
+        {
+            if (ch is '(' or '[') max = Math.Max(max, ++nivel);
+            else if (ch is ')' or ']' && nivel > 0) nivel--;
+        }
+        return max;
+    }
+
+    /// <summary>
+    /// Pega a <paramref name="conservado"/> (el nombre hasta la palabra cortada, sin tocar) la
+    /// <paramref name="cola"/> que propone el texto completo, desde la palabra que completa la cortada.
+    ///
+    /// Los cierres de la cola se ajustan a lo que abrió el NOMBRE: el modelo recompone el nombre a su
+    /// manera y cierra con «)» lo que el nombre abrió con «[» («… [EXTEN» → «… [EXTENDED]»), y los
+    /// cierres que sobran porque el modelo había envuelto la versión en otro paréntesis se quitan. Lo
+    /// que el nombre dejó abierto y la cola no cierra se cierra al final. Si es la propia cola la que
+    /// abre algo y no lo cierra, el texto completo también venía cortado: null.
+    ///
+    /// La palabra completada conserva lo que ya estaba escrito, con sus mayúsculas: «MASHU» se
+    /// completa como «MASHUP» y no como «Mashup».
+    /// </summary>
+    private static string? EmpalmarLiteral(string conservado, string cola, string cortadaEnElNombre)
+    {
+        var cortada = Regex.Match(cortadaEnElNombre, @"^[\p{L}\p{N}']+").Value;
+        var completa = Regex.Match(cola, @"^[\p{L}\p{N}']+").Value;
+        if (cortada.Length > 0 && completa.StartsWith(cortada, StringComparison.OrdinalIgnoreCase))
+        {
+            var resto = completa[cortada.Length..];
+            var letras = cortada.Where(char.IsLetter).ToList();
+            resto = letras.Count > 0 && letras.All(char.IsUpper) ? resto.ToUpperInvariant() : resto.ToLowerInvariant();
+            cola = cortada + resto + cola[completa.Length..];
+        }
+
+        var abiertos = new Stack<(char Abre, bool DeLaCola)>();
+        foreach (var ch in conservado)
+        {
+            if (ch is '(' or '[') abiertos.Push((ch, false));
+            else if (ch is ')' or ']' && abiertos.Count > 0) abiertos.Pop();
+        }
+
+        var sb = new System.Text.StringBuilder(conservado, conservado.Length + cola.Length + 2);
+        foreach (var ch in cola)
+        {
+            if (ch is '(' or '[') { abiertos.Push((ch, true)); sb.Append(ch); }
+            else if (ch is ')' or ']')
+            {
+                if (abiertos.Count == 0) continue;   // cierre sin pareja: era del envoltorio del modelo
+                sb.Append(abiertos.Pop().Abre == '(' ? ')' : ']');
+            }
+            else sb.Append(ch);
+        }
+
+        if (abiertos.Any(a => a.DeLaCola)) return null;
+        foreach (var (abre, _) in abiertos) sb.Append(abre == '(' ? ')' : ']');   // de dentro afuera
+        return sb.ToString();
+    }
 
     /// <summary>
     /// Quita un paréntesis o corchete de cierre que se quedó sin su pareja.
@@ -260,6 +364,11 @@ public static class NombreCortado
     /// palabras, y con eso el modelo acababa reescribiéndolo entero. Ahora tiene que empezar
     /// exactamente por el nombre actual: lo único que puede hacer es añadirle la cola que le falta,
     /// y lo que ya estaba escrito se queda tal cual, con sus acentos.
+    ///
+    /// Y «tal cual» es letra a letra (empalme literal): la propuesta del modelo pasa por
+    /// <see cref="AiSuggestion.Compose"/>, que mete la versión entre paréntesis aunque ya traiga los
+    /// suyos. Visto en una biblioteca real (4 de 27 renombrados de una tanda): «Todo De Ti X Se
+    /// Vuelve Loca v2 (TRY IT MASHU» → «… Loca (v2 (TRY IT MASHUP))».
     /// </summary>
     public static string? DesdeIa(string archivo, string artista, string titulo, string version)
     {
@@ -279,7 +388,11 @@ public static class NombreCortado
             // fallo más repetido del modelo: medido con 40 nombres cortados reales, de 25 propuestas
             // la mayoría se limitaba a recolocar el trozo cortado entre paréntesis -«… (Paul» → «…
             // (Paul)», «… (CARME-1» → «… (CARME-1)»-. Eso no completa nada.
-            if (Extender(nombre, candidato) is { } completo) return completo;
+            //
+            // La publicidad del pool se quita como con las etiquetas: el modelo también la copia.
+            // Visto en una biblioteca real: «Doja Cat - Woman [The Shooters Bootleg] [Edm» se
+            // «completaba» con «[EdmPacks.com]».
+            if (Extender(nombre, SinPublicidad(candidato), literal: true) is { } completo) return completo;
         }
 
         return null;

@@ -65,6 +65,12 @@ public static class AiSuggestion
     /// El modelo responde casi siempre sin tildes -«Titi Me Pregunto», «Feliz Cumpleanos»- y con eso
     /// un renombrado que venía a arreglar el nombre lo empeoraba. Solo se cambian palabras que ya
     /// estaban escritas en el original: no se inventan tildes nuevas.
+    ///
+    /// Las palabras que en español solo se distinguen por la tilde (sé/se, tú/tu, él/el, sí/si…) no
+    /// se pueden restaurar por su forma sin tilde: visto en una biblioteca real, con
+    /// «Ya_Sé_Que_Se_Fue (Extended)» la tilde de «Sé» acababa también en el otro «Se» («Ya Sé Que Sé
+    /// Fue»). Cuando el original trae la palabra de las dos formas, se alinean por orden de aparición,
+    /// y si la propuesta no la trae las mismas veces, se deja como la escribió la IA.
     /// </summary>
     public static string RestaurarAcentos(string propuesto, string original)
     {
@@ -73,17 +79,41 @@ public static class AiSuggestion
         propuesto = propuesto.Normalize(NormalizationForm.FormC);
         original = original.Normalize(NormalizationForm.FormC);
 
-        var conTilde = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        static bool ConTilde(string palabra) => !string.Equals(TextUtils.ToAscii(palabra), palabra, StringComparison.Ordinal);
+
+        // Cada palabra del original por su forma sin tildes, con TODAS las formas en que aparece, en orden.
+        var formas = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (Match m in Regex.Matches(original, Palabra))
         {
-            var palabra = m.Value;
-            var sin = TextUtils.ToAscii(palabra);
-            if (!string.Equals(sin, palabra, StringComparison.Ordinal)) conTilde.TryAdd(sin, palabra);
+            var sin = TextUtils.ToAscii(m.Value);
+            if (!formas.TryGetValue(sin, out var lista)) formas[sin] = lista = new List<string>();
+            lista.Add(m.Value);
         }
-        if (conTilde.Count == 0) return propuesto;
+        if (!formas.Values.Any(l => l.Any(ConTilde))) return propuesto;
+
+        var vecesEnPropuesta = Regex.Matches(propuesto, Palabra)
+            .GroupBy(m => TextUtils.ToAscii(m.Value), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+        var vistas = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         return Regex.Replace(propuesto, Palabra, m =>
-            conTilde.TryGetValue(TextUtils.ToAscii(m.Value), out var c) ? Mayusculiza(c, m.Value) : m.Value);
+        {
+            var sin = TextUtils.ToAscii(m.Value);
+            if (!formas.TryGetValue(sin, out var lista)) return m.Value;
+            var orden = vistas.GetValueOrDefault(sin);
+            vistas[sin] = orden + 1;
+
+            var acentuadas = lista.Where(ConTilde).Select(f => f.ToLowerInvariant()).Distinct(StringComparer.Ordinal).Count();
+            if (acentuadas == 0) return m.Value;
+
+            // Sin ambigüedad (solo aparece con una tilde): la recupera en todas partes, como siempre.
+            if (acentuadas == 1 && lista.All(ConTilde)) return Mayusculiza(lista.First(ConTilde), m.Value);
+
+            // Ambigua: solo se puede saber cuál es cuál si la propuesta la trae las mismas veces.
+            if (vecesEnPropuesta.GetValueOrDefault(sin) != lista.Count) return m.Value;
+            var suya = lista[orden];
+            return ConTilde(suya) ? Mayusculiza(suya, m.Value) : m.Value;
+        });
     }
 
     /// <summary>Copia en <paramref name="palabra"/> el uso de mayúsculas que traía <paramref name="como"/>.</summary>
