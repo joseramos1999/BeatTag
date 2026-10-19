@@ -194,19 +194,29 @@ public class FingerprintDuplicatesTests
     }
 
     // Guarda: muestrear por contenido no puede abrir la puerta a juntar canciones distintas.
-    // Con 40 huellas sin relación y de duración parecida no debe salir ningún grupo.
+    //
+    // Visto en revisión: la versión anterior de esta prueba usaba 40 huellas sin ningún valor en
+    // común, que tampoco se juntaban con el índice viejo ni con ningún muestreo, así que no probaba
+    // nada. Aquí un mashup contiene un tramo del original (300 de 960 valores): comparten valores
+    // muestreados de sobra para ser candidatas, y lo que impide juntarlas es el umbral de
+    // Similarity, como debe ser.
     [Fact]
     public void Muestrear_por_contenido_no_junta_canciones_distintas()
     {
-        var tracks = new List<Track>();
-        var mapa = new Dictionary<string, int[]>();
-        for (var i = 0; i < 40; i++)
-        {
-            var t = Cancion($"tema{i:00}.mp3", 200 + i % 5);
-            tracks.Add(t);
-            mapa[t.FilePath] = Huella(1000 + i, ElementosHuellaReal);
-        }
+        var original = Huella(7, ElementosHuellaReal);
+        var mashup = Huella(8, ElementosHuellaReal);
+        Array.Copy(original, 0, mashup, 0, 300);
 
-        Assert.Empty(FingerprintDuplicates.Find(tracks, t => mapa[t.FilePath]));
+        var compartidos = original.Take(300).Where(FingerprintDuplicates.SeIndexa).Distinct().Count();
+        Assert.True(compartidos >= FingerprintDuplicates.MinimoValoresComunes, $"solo {compartidos} valores muestreados en común");
+        Assert.InRange(AudioFingerprint.Similarity(original, mashup), 0.5, AudioFingerprint.UmbralIgual - 0.05);
+
+        var a = Cancion("Original.mp3", 200);
+        var b = Cancion("Mashup.mp3", 202);
+        var mapa = new Dictionary<string, int[]> { [a.FilePath] = original, [b.FilePath] = mashup };
+        Assert.Empty(FingerprintDuplicates.Find(new[] { a, b }, t => mapa[t.FilePath]));
+
+        // Con el umbral rebajado sí se juntarían: es el umbral, y no el muestreo, lo que las separa.
+        Assert.Single(FingerprintDuplicates.Find(new[] { a, b }, t => mapa[t.FilePath], umbral: 0.5));
     }
 }

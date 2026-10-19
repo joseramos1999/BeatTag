@@ -103,6 +103,23 @@ public sealed class ProcessResult
     /// </summary>
     public int Reglas { get; set; }
 
-    /// <summary>Versión actual de las reglas de análisis (ver <see cref="Reglas"/>).</summary>
-    public const int ReglasActuales = 1;
+    /// <summary>
+    /// Versión actual de las reglas de análisis (ver <see cref="Reglas"/>). 2: los catálogos ya no
+    /// dan la instrumental o la acapella por la canción (C2), y lo guardado antes que la proponga
+    /// sin que el archivo la nombre sale para revisar (ver <see cref="ResultadoAnterior"/>).
+    /// </summary>
+    public const int ReglasActuales = 2;
+
+    /// <summary>
+    /// Peticiones a los catálogos que se quedaron sin respuesta mientras se analizaba ESTE archivo
+    /// (sin conexión, tiempo agotado, 5xx, cuota…; ver ApiClient.FallosDeRed). Si no se encontró
+    /// nada y esto es mayor que cero, «no encontrada» no es un dato: AnalysisCache no lo guarda,
+    /// y el siguiente análisis vuelve a preguntar. No se guarda en la caché.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int FallosDeRed { get; set; }
+
+    /// <summary>¿Un «no encontrada» que puede deberse a la red y no al catálogo?</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IncompletoPorLaRed => !Found && !Skip && !CleanOnly && FallosDeRed > 0;
 }

@@ -82,6 +82,17 @@ public static class Secretos
         return Dpapi.PareceBlobDpapi(datos) ? ("", UnprotectStatus.CryptoError) : (s, UnprotectStatus.Cleartext);
     }
 
+    /// <summary>
+    /// macOS: vuelve a preguntar al Llavero en la siguiente lectura. Si el Llavero estaba bloqueado,
+    /// el fallo se recuerda durante la sesión para no lanzar `security` (hasta 15 s y un aviso de
+    /// desbloqueo) en cada credencial; esto es el reintento explícito, para cuando el usuario lo
+    /// haya desbloqueado. En Windows no hace nada.
+    /// </summary>
+    public static void ReintentarLlavero()
+    {
+        if (!OperatingSystem.IsWindows()) LlaveroMac.Reintentar();
+    }
+
     /// <summary>Compat: descifra devolviendo solo el valor (claro heredado se devuelve tal cual).</summary>
     public static string Unprotect(string? s) => TryUnprotect(s).Value;
 

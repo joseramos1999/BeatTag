@@ -141,8 +141,13 @@ public static class NombreCortado
         // Primero los paréntesis o corchetes que solo contienen la web: se van enteros.
         var t = Regex.Replace(texto, @"[\[(]\s*[^\[\]()]*[\])]", m => Web.IsMatch(m.Value) ? " " : m.Value);
         t = Web.Replace(t, " ");
-        // Y la tonalidad con el BPM pegados al final: «… 6A 130», «… 130 6A».
-        t = Regex.Replace(t, @"\s*(?:\b(?:1[0-2]|[1-9])[AB]\b\s*\d{2,3}|\d{2,3}\s*\b(?:1[0-2]|[1-9])[AB]\b)\s*$", "", IC);
+        // Y la tonalidad con el BPM pegados al final: «… 6A 130», «… 130 6A», también delante del
+        // cierre de un paréntesis. Visto en revisión: la IA da la versión «Intro Clean 6A 95»,
+        // Compose la envuelve en paréntesis, y con el ancla en el final del texto el «)» impedía
+        // quitarlos: «Karol G - Provenza (Intro Clea» → «… (Intro Clean 6A 95)».
+        t = Regex.Replace(t, @"\s*(?:\b(?:1[0-2]|[1-9])[AB]\b\s*\d{2,3}|\d{2,3}\s*\b(?:1[0-2]|[1-9])[AB]\b)\s*(?=[\)\]]*\s*$)", "", IC);
+        // Un paréntesis que solo traía eso se queda vacío: fuera.
+        t = Regex.Replace(t, @"[\(\[]\s*[\)\]]", " ");
         return Regex.Replace(t, @"\s{2,}", " ").Trim().TrimEnd('-', '@', ' ');
     }
 
@@ -373,6 +378,9 @@ public static class NombreCortado
     public static string? DesdeIa(string archivo, string artista, string titulo, string version)
     {
         var nombre = Path.GetFileNameWithoutExtension(archivo);
+        // La versión se limpia ANTES de componer (web del pool, tonalidad y BPM): Compose la mete
+        // entre paréntesis, y lo que va dentro ya no está al final del texto.
+        version = SinPublicidad(version ?? "");
 
         // Se prueba también con el título y la versión solos: el modelo casi siempre rellena el campo
         // de artista, y si el nombre no empezaba por ese artista, anteponerlo no sería completarlo.

@@ -42,7 +42,12 @@ public sealed class IgnoreList
     public void Remove(string path)
     {
         if (_set.Remove(path)) _dirty = true;
+        if (_noSobrescribir) _quitadas.Add(path);
     }
+
+    // Lo que se recuperó a mano mientras el archivo no se podía leer: al juntar con lo guardado
+    // (ver Save) no puede volver.
+    private readonly HashSet<string> _quitadas = new(System.StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Olvida las descartadas cuyos archivos ya no existen en la biblioteca.</summary>
     public void Prune(ISet<string> livePaths)
@@ -65,10 +70,31 @@ public sealed class IgnoreList
     public string Save()
     {
         if (!_dirty) return "";
-        if (_noSobrescribir) return AvisoCarga;
+        if (_noSobrescribir && !Releer()) return AvisoCarga;
         var error = ArchivoDatos.EscribirJson(_file, _set);
         if (error.Length == 0) _dirty = false;
         return error;
+    }
+
+    /// <summary>
+    /// Vuelve a intentar leer el archivo que al arrancar no se pudo leer, y si ya se puede, junta lo
+    /// guardado con lo de esta sesión. Devuelve true si ya se puede guardar.
+    ///
+    /// Visto en revisión (T10): si descartadas.json estaba bloqueado un momento al arrancar (OneDrive,
+    /// el antivirus), no se volvía a intentar nunca y todas las decisiones de la sesión se perdían
+    /// al cerrar, sin aviso en la interfaz.
+    /// </summary>
+    private bool Releer()
+    {
+        var leido = ArchivoDatos.LeerJson<HashSet<string>>(_file);
+        AvisoCarga = leido.Aviso;
+        if (leido.NoSobrescribir) return false;
+        if (leido.Datos != null)
+            foreach (var p in leido.Datos)
+                if (!_quitadas.Contains(p)) _set.Add(p);
+        _noSobrescribir = false;
+        _quitadas.Clear();
+        return true;
     }
 
     private void Load()

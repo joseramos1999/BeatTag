@@ -151,8 +151,22 @@ public static class FiltroColeccion
         if (string.IsNullOrWhiteSpace(genero)) return Array.Empty<string>();
         return Recordar(_clavesDelTema, genero, g => new[] { VocabularioBiblioteca.Clave(g) }
             .Concat(Regex.Split(g, @"\s*[/;,|]\s*").Select(s => VocabularioBiblioteca.Clave(GenreNormalizer.Canonical(s))))
+            .SelectMany(k => EstiloQueContiene.TryGetValue(k, out var padre) ? new[] { k, padre } : new[] { k })
             .Where(k => k.Length > 0).Distinct(StringComparer.Ordinal).ToArray());
     }
+
+    /// <summary>
+    /// Géneros de UNA palabra que son un estilo dentro de otro, como «Deep House» lo es de «House».
+    /// Comparando por palabras, «pop» dejó de encontrar «Electropop» (un canónico de
+    /// GenreNormalizer) y «house» «Housemusic», que sí son ese estilo. Va en una lista cerrada a
+    /// propósito: «Eurodance» no entra en «dance», ni «Electronica» en «electro», que es otro
+    /// género, igual que «Trap» no entra en «rap».
+    /// </summary>
+    private static readonly Dictionary<string, string> EstiloQueContiene = new(StringComparer.Ordinal)
+    {
+        ["electropop"] = "pop",
+        ["housemusic"] = "house",
+    };
 
     private static string[] Recordar(ConcurrentDictionary<string, string[]> cache, string clave, Func<string, string[]> calcular)
     {

@@ -296,7 +296,7 @@ public sealed class AppEngine
             {
                 using var f = TagLib.File.Create(ruta);
                 var antes = f.Tag.Genres ?? Array.Empty<string>();
-                var despues = genero.Length == 0 ? Array.Empty<string>() : new[] { genero };
+                var despues = GenerosIa.ValoresParaEscribir(genero);   // «Hip Hop; Latino» → dos valores, como venían
                 if (antes.SequenceEqual(despues, StringComparer.Ordinal)) { sinCambio++; continue; }
 
                 f.Tag.Genres = despues;

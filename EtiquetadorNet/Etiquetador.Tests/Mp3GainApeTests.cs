@@ -129,7 +129,9 @@ public class Mp3GainApeTests
 
     // Un MP3 que MP3Gain solo analizó (sin aplicar nada) trae MINMAX y ReplayGain pero no UNDO.
     // Tras el cambio de BeatTag hay que anotar el deshacer, donde lo pone MP3Gain; y al deshacer en
-    // BeatTag el UNDO vuelve a cero y desaparece, como hace MP3Gain.
+    // BeatTag el UNDO vuelve a cero y se quita. MP3Gain lo dejaría a «+000,+000,N» (en mp3gain.c,
+    // changeGainAndTag pone siempre haveUndo); aquí se quita para que la etiqueta vuelva idéntica,
+    // y MP3Gain trata la falta de UNDO como cero.
     [Fact]
     public void Si_MP3Gain_solo_lo_habia_analizado_se_anota_el_deshacer_y_luego_se_quita()
     {

@@ -25,6 +25,36 @@ public static class EnlaceCorto
     /// </summary>
     public static async Task<T?> SeguirAsync<T>(HttpClient http, string url, Func<string?, T?> reconocer, string patron,
         CancellationToken ct) where T : struct
+        => (await AbrirAsync(http, url, ct).ConfigureAwait(false)).Reconocer(reconocer, patron);
+
+    /// <summary>
+    /// Lo que dio seguir un enlace corto: la dirección final y el cuerpo de la página, o por qué no
+    /// se pudo abrir.
+    /// </summary>
+    /// <param name="DireccionFinal">La dirección a la que llevó tras las redirecciones ("" si no respondió).</param>
+    /// <param name="Cuerpo">La página final, por si redirige por script.</param>
+    /// <param name="Error">"" si respondió; si no, el motivo (sin conexión, tiempo agotado…).</param>
+    public sealed record Seguido(string DireccionFinal, string Cuerpo, string Error)
+    {
+        /// <summary>El servidor contestó (aunque sea con algo que no se reconoce).</summary>
+        public bool Respondio => Error.Length == 0;
+
+        /// <summary>Lo que <paramref name="reconocer"/> saque de la dirección final o, si no, de la página.</summary>
+        public T? Reconocer<T>(Func<string?, T?> reconocer, string patron) where T : struct
+        {
+            if (!Respondio) return null;
+            if (reconocer(DireccionFinal) is { } final) return final;
+            var m = Regex.Match(Cuerpo, patron, IC);
+            return m.Success ? reconocer(m.Value) : null;
+        }
+    }
+
+    /// <summary>
+    /// Sigue el enlace y devuelve a dónde lleva, distinguiendo «no responde» de «lleva a otra
+    /// cosa». Antes los dos acababan en un null, y «Reanalizar… por enlace» decía sin conexión lo
+    /// mismo que con el enlace de una lista: «no lleva a una canción», que confunde.
+    /// </summary>
+    public static async Task<Seguido> AbrirAsync(HttpClient http, string url, CancellationToken ct)
     {
         try
         {
@@ -33,13 +63,12 @@ public static class EnlaceCorto
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0");
             using var resp = await http.SendAsync(req, ct).ConfigureAwait(false);
-            if (reconocer(resp.RequestMessage?.RequestUri?.ToString()) is { } final) return final;
-
+            var final = resp.RequestMessage?.RequestUri?.ToString() ?? url;
             var cuerpo = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            var m = Regex.Match(cuerpo, patron, IC);
-            return m.Success ? reconocer(m.Value) : null;
+            return new Seguido(final, cuerpo, "");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch { return null; }
+        catch (OperationCanceledException) { return new Seguido("", "", "no respondió a tiempo"); }
+        catch (Exception e) { return new Seguido("", "", e is HttpRequestException ? "sin conexión o el servidor no responde" : e.Message); }
     }
 }

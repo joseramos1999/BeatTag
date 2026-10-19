@@ -117,7 +117,23 @@ public sealed class FileProcessor
     private static string Desc(ProviderResult? r)
         => r == null ? "-" : $"'{r.Artist} - {r.Title}' ({r.Score}, {r.Dur}s)";
 
+    /// <summary>
+    /// Analiza un archivo. El resultado dice además cuántas peticiones a los catálogos se quedaron
+    /// sin respuesta mientras tanto (<see cref="ProcessResult.FallosDeRed"/>): un «no encontrada» con
+    /// fallos de red no es un dato, y AnalysisCache no lo guarda (contrato C8a de ApiClient). Se
+    /// mide por flujo asíncrono, así que vale también con varias canciones a la vez.
+    /// </summary>
     public async Task<ProcessResult> ProcessAsync(string filePath, bool isAcapella, ProcessOptions o, CancellationToken ct = default)
+    {
+        using var medicion = new MedicionFallos();
+        var r = await ProcesarAsync(filePath, isAcapella, o, ct).ConfigureAwait(false);
+        r.FallosDeRed = medicion.Fallos;
+        if (r.IncompletoPorLaRed)
+            _log?.Detail($"    -> {medicion.Fallos} petición(es) sin respuesta: «no encontrada» no se guarda en la caché y se volverá a preguntar");
+        return r;
+    }
+
+    private async Task<ProcessResult> ProcesarAsync(string filePath, bool isAcapella, ProcessOptions o, CancellationToken ct)
     {
         var fileName = Path.GetFileName(filePath);
         var ext = Path.GetExtension(filePath);
@@ -212,6 +228,14 @@ public sealed class FileProcessor
         var descSrc = manual ? $"{rawForOtros} {o.SearchTitle}" : rawForOtros;
         var wantRemix = Regex.IsMatch(descSrc, @"(?i)\b(remix|rmx|bootleg|flip|mashup|vip)\b");
         var wantLive = Regex.IsMatch(descSrc, @"(?i)\b(live|en\s+vivo|en\s+directo|unplugged|ac[uú]stic[oa])\b");
+        // ¿El archivo ES una instrumental o una acapella? Hay que decírselo a los catálogos: el
+        // título con el que se busca (qTitle) ya llega sin «(Instrumental)» ni «(Acapella)», y sin
+        // esto el catálogo castiga esas versiones como «no pedidas». Visto en data.txt: «Enur -
+        // Calabria 2007 (Acapella)», «George Michael - Faith (Instrumental)», «The Weeknd - Popular
+        // (A Cappella)»… cogían la vocal (y el nombre conservaba el descriptor de rebote), y si el
+        // catálogo solo tenía la acapella salía con confianza negativa. Las ediciones «Acapella
+        // In/Out/Intro» llevan la canción entera y no cuentan (ver ReglasCatalogo.EsHerramienta).
+        var wantTool = isAcapella || DescriptorDeHerramienta(Descriptors.SinArtistas(descSrc, new[] { fnArtist }, soloDebiles: true), filePath);
 
         // Quién firma la versión. Se calcula ANTES de buscar para poder puntuar mejor: si el catálogo
         // devuelve justo esa versión ("... (Yaniss Remix)"), es la pista correcta y no una coincidencia
@@ -255,30 +279,30 @@ public sealed class FileProcessor
             if (o.Deezer && !onlyIt && !onlySp)
             {
                 Step("Deezer", 0.15);
-                dz = await _dz.SearchAsync(fnArtist, qTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "nombre";
-                if (dz == null && fnArtist.Length > 0) { dz = await _dz.SearchAsync(fnTitle, fnArtist, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "invertido"; }
-                if (dz == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(tagArtist, tagTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "tag"; }
-                if (dz == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(firstArtist, firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "principal"; }
-                if (dz == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { dz = await _dz.SearchAsync(firstTitleArtist, firstArtist, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "principal"; }
-                if (dz == null && firstTitle.Length > 0) { dz = await _dz.SearchAsync("", firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz != null) variant = "titulo"; }
+                dz = await _dz.SearchAsync(fnArtist, qTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual, wantTool: wantTool).ConfigureAwait(false); if (dz != null) variant = "nombre";
+                if (dz == null && fnArtist.Length > 0) { dz = await _dz.SearchAsync(fnTitle, fnArtist, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual, wantTool: wantTool).ConfigureAwait(false); if (dz != null) variant = "invertido"; }
+                if (dz == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(tagArtist, tagTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual, wantTool: wantTool).ConfigureAwait(false); if (dz != null) variant = "tag"; }
+                if (dz == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { dz = await _dz.SearchAsync(firstArtist, firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual, wantTool: wantTool).ConfigureAwait(false); if (dz != null) variant = "principal"; }
+                if (dz == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { dz = await _dz.SearchAsync(firstTitleArtist, firstArtist, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual, wantTool: wantTool).ConfigureAwait(false); if (dz != null) variant = "principal"; }
+                if (dz == null && firstTitle.Length > 0) { dz = await _dz.SearchAsync("", firstTitle, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual, wantTool: wantTool).ConfigureAwait(false); if (dz != null) variant = "titulo"; }
             }
             if (o.Itunes && dz == null && !onlyDz && !onlySp)
             {
                 Step("iTunes", 0.3);
-                it = await _it.SearchAsync(fnArtist, qTitle, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it != null) variant = "nombre";
-                if (it == null && fnArtist.Length > 0) { it = await _it.SearchAsync(fnTitle, fnArtist, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it != null) variant = "invertido"; }
-                if (it == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { it = await _it.SearchAsync(tagArtist, tagTitle, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it != null) variant = "tag"; }
-                if (it == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { it = await _it.SearchAsync(firstArtist, firstTitle, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it != null) variant = "principal"; }
-                if (it == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { it = await _it.SearchAsync(firstTitleArtist, firstArtist, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it != null) variant = "principal"; }
-                if (it == null && firstTitle.Length > 0) { it = await _it.SearchAsync("", firstTitle, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it != null) variant = "titulo"; }
+                it = await _it.SearchAsync(fnArtist, qTitle, localDur, isEdit, ct, verbatim: manual, wantRemix: wantRemix, wantTool: wantTool).ConfigureAwait(false); if (it != null) variant = "nombre";
+                if (it == null && fnArtist.Length > 0) { it = await _it.SearchAsync(fnTitle, fnArtist, localDur, isEdit, ct, verbatim: manual, wantRemix: wantRemix, wantTool: wantTool).ConfigureAwait(false); if (it != null) variant = "invertido"; }
+                if (it == null && tagTitle.Length > 0 && Nk2(tagArtist, tagTitle) != Nk2(fnArtist, qTitle)) { it = await _it.SearchAsync(tagArtist, tagTitle, localDur, isEdit, ct, verbatim: manual, wantRemix: wantRemix, wantTool: wantTool).ConfigureAwait(false); if (it != null) variant = "tag"; }
+                if (it == null && firstArtist.Length > 0 && firstTitle.Length > 0 && Nk2(firstArtist, firstTitle) != Nk2(fnArtist, qTitle)) { it = await _it.SearchAsync(firstArtist, firstTitle, localDur, isEdit, ct, verbatim: manual, wantRemix: wantRemix, wantTool: wantTool).ConfigureAwait(false); if (it != null) variant = "principal"; }
+                if (it == null && firstTitleArtist.Length > 0 && firstArtist.Length > 0 && Nk2(firstTitleArtist, firstArtist) != Nk2(fnTitle, fnArtist)) { it = await _it.SearchAsync(firstTitleArtist, firstArtist, localDur, isEdit, ct, verbatim: manual, wantRemix: wantRemix, wantTool: wantTool).ConfigureAwait(false); if (it != null) variant = "principal"; }
+                if (it == null && firstTitle.Length > 0) { it = await _it.SearchAsync("", firstTitle, localDur, isEdit, ct, verbatim: manual, wantRemix: wantRemix, wantTool: wantTool).ConfigureAwait(false); if (it != null) variant = "titulo"; }
             }
             if (o.Spotify && o.SpotifyId.Length > 0 && o.SpotifySecret.Length > 0
                 && ((dz == null && it == null && !forced) || onlySp))
             {
                 Step("Spotify", 0.42);
-                sp = await _sp.SearchAsync(fnArtist, qTitle, o.SpotifyId, o.SpotifySecret, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (sp != null) variant = "nombre";
-                if (sp == null && fnArtist.Length > 0) { sp = await _sp.SearchAsync(fnTitle, fnArtist, o.SpotifyId, o.SpotifySecret, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (sp != null) variant = "invertido"; }
-                if (sp == null && tagTitle.Length > 0) { sp = await _sp.SearchAsync(tagArtist, tagTitle, o.SpotifyId, o.SpotifySecret, wantRemix, wantLive, localDur, isEdit, ct).ConfigureAwait(false); if (sp != null) variant = "tag"; }
+                sp = await _sp.SearchAsync(fnArtist, qTitle, o.SpotifyId, o.SpotifySecret, wantRemix, wantLive, localDur, isEdit, ct, wantTool).ConfigureAwait(false); if (sp != null) variant = "nombre";
+                if (sp == null && fnArtist.Length > 0) { sp = await _sp.SearchAsync(fnTitle, fnArtist, o.SpotifyId, o.SpotifySecret, wantRemix, wantLive, localDur, isEdit, ct, wantTool).ConfigureAwait(false); if (sp != null) variant = "invertido"; }
+                if (sp == null && tagTitle.Length > 0) { sp = await _sp.SearchAsync(tagArtist, tagTitle, o.SpotifyId, o.SpotifySecret, wantRemix, wantLive, localDur, isEdit, ct, wantTool).ConfigureAwait(false); if (sp != null) variant = "tag"; }
             }
             var spDiag = o.Spotify ? _sp.SpDiag : "off";
             primary = dz ?? it ?? sp;
@@ -312,8 +336,8 @@ public sealed class FileProcessor
                 if (ai != null && ai.Title.Length > 0 && ai.Confidence >= 0.5 && !ai.IsMashup)
                 {
                     var aiA = ai.Artist; var aiT = ai.Title;
-                    if (o.Deezer) { dz = await _dz.SearchAsync(aiA, aiT, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); if (dz == null && aiA.Length > 0) dz = await _dz.SearchAsync(aiT, aiA, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual).ConfigureAwait(false); }
-                    if (dz == null && o.Itunes) { it = await _it.SearchAsync(aiA, aiT, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (it == null && aiA.Length > 0) it = await _it.SearchAsync(aiT, aiA, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); }
+                    if (o.Deezer) { dz = await _dz.SearchAsync(aiA, aiT, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual, wantTool: wantTool).ConfigureAwait(false); if (dz == null && aiA.Length > 0) dz = await _dz.SearchAsync(aiT, aiA, wantRemix, wantLive, localDur, isEdit, ct, remixerBusqueda, verbatim: manual, wantTool: wantTool).ConfigureAwait(false); }
+                    if (dz == null && o.Itunes) { it = await _it.SearchAsync(aiA, aiT, localDur, isEdit, ct, verbatim: manual, wantRemix: wantRemix, wantTool: wantTool).ConfigureAwait(false); if (it == null && aiA.Length > 0) it = await _it.SearchAsync(aiT, aiA, localDur, isEdit, ct, verbatim: manual, wantRemix: wantRemix, wantTool: wantTool).ConfigureAwait(false); }
                     primary = dz ?? it;
                     if (primary != null) variant = "ia";
                     _log?.Log($"        · IA local propuso: {aiA} - {aiT} (conf {ai.Confidence}) -> {(primary != null ? "VERIFICADO en " + (dz != null ? "Deezer" : "iTunes") : "no verificado en catalogo")}", LogKind.Dim, true);
@@ -358,8 +382,8 @@ public sealed class FileProcessor
                     {
                         variant = "acoustid";
                         _log?.Detail($"      huella: AcoustID -> {ac.Artist} - {ac.Title}");
-                        if (o.Deezer) dz = await _dz.SearchAsync(ac.Artist, ac.Title, false, false, localDur, isEdit, ct).ConfigureAwait(false);
-                        if (dz == null && o.Itunes) it = await _it.SearchAsync(ac.Artist, ac.Title, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false);
+                        if (o.Deezer) dz = await _dz.SearchAsync(ac.Artist, ac.Title, false, false, localDur, isEdit, ct, wantTool: wantTool).ConfigureAwait(false);
+                        if (dz == null && o.Itunes) it = await _it.SearchAsync(ac.Artist, ac.Title, localDur, isEdit, ct, verbatim: manual, wantRemix: wantRemix, wantTool: wantTool).ConfigureAwait(false);
                         primary = dz ?? it;
                         if (primary == null) acHit = ac;
                     }
@@ -383,7 +407,7 @@ public sealed class FileProcessor
         // Estrategia POR CAMPO: rellena huecos (album/año/carátula) con una fuente secundaria.
         if (primary != null && !cleanOnly && (primary.Album.Length == 0 || primary.Year.Length == 0 || primary.CoverUrl.Length == 0))
         {
-            if (o.Itunes && it == null) { sec = await _it.SearchAsync(primary.Artist, primary.Title, localDur, isEdit, ct, verbatim: manual).ConfigureAwait(false); if (sec != null) secSrc = "AppleMusic"; }
+            if (o.Itunes && it == null) { sec = await _it.SearchAsync(primary.Artist, primary.Title, localDur, isEdit, ct, verbatim: manual, wantRemix: wantRemix, wantTool: wantTool).ConfigureAwait(false); if (sec != null) secSrc = "AppleMusic"; }
             if (sec == null && o.Deezer && dz == null) { sec = await _dz.SearchAsync(primary.Artist, primary.Title, false, false, localDur, isEdit, ct).ConfigureAwait(false); if (sec != null) secSrc = "Deezer"; }
         }
 
@@ -415,9 +439,11 @@ public sealed class FileProcessor
             Step("Discogs", 0.9);
             dc = await _dc.SearchAsync(winner.Artist, winner.Title, AppInfo.UserAgent, o.DiscogsToken, ct).ConfigureAwait(false);
         }
+        // Un resultado SoloArtista (C4a) sale de OTRO disco del artista: su género vale para rellenar
+        // el hueco si nadie más lo da, pero su álbum y su año no son los de esta canción.
         if (genre.Length == 0 && dc != null && dc.Genre.Length > 0) genre = dc.Genre;
-        if (album.Length == 0 && dc != null) album = dc.Album;
-        if (year.Length == 0 && dc != null) year = dc.Year;
+        if (album.Length == 0 && dc is { SoloArtista: false }) album = dc.Album;
+        if (year.Length == 0 && dc is { SoloArtista: false }) year = dc.Year;
         genre = GenreNormalizer.Canonical(genre);   // unifica sinónimos/grafías y da formato
 
         // El BPM del catálogo se decide más abajo, cuando ya se sabe qué versión es el archivo.
@@ -704,6 +730,19 @@ public sealed class FileProcessor
 
     /// <summary>Motivo para revisar lo que solo identificó una fuente de rescate («MusicBrainz», «AcoustID»).</summary>
     public static string MotivoSoloRescate(string fuente) => $"identificada solo por {fuente}, una fuente de rescate";
+
+    /// <summary>
+    /// ¿El archivo es una instrumental o una acapella? Lo dicen los descriptores del nombre
+    /// («(Instrumental)», «(A Cappella)», «(Acappella)») o la carpeta («Acapellas», «Instrumentales»),
+    /// igual que mira la carpeta <see cref="Analysis.Identificacion.EsAcapella"/>. Las ediciones
+    /// «Acapella In/Out/Intro» no cuentan: llevan la canción entera.
+    /// </summary>
+    public static bool DescriptorDeHerramienta(string? descriptores, string? filePath)
+    {
+        if (ReglasCatalogo.EsHerramienta(descriptores)) return true;
+        var carpeta = string.IsNullOrEmpty(filePath) ? "" : Path.GetDirectoryName(filePath) ?? "";
+        return carpeta.Length > 0 && ReglasCatalogo.EsHerramienta(carpeta);
+    }
 
     /// <summary>
     /// El invitado que el nombre de archivo declara con «feat.», «ft.» o «featuring», ya limpio, o ""

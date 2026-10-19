@@ -45,7 +45,16 @@ public static class ExplicitDetector
         "mix", "short", "radio", "club", "original", "quick", "hit", "hype", "transition", "clap",
         "in", "out", "acapella", "acappella", "instrumental", "redrum", "remix", "vocal", "main",
         "album", "single", "cut", "lyrics", "bar", "bars", "dj", "bpm", "letra", "and", "y",
+        "mashup",   // «(Clean Mashup)»: el marcador sigue siendo el de la letra
     };
+
+    /// <summary>
+    /// Palabras que presentan a quien firma la versión: «Clean By Dj», «(Dirty Intro by DJ X)».
+    /// Lo que va detrás es un nombre y no anula el marcador. Visto en el propio explicit_eval.txt
+    /// del equipo: «Diabla en Bellakera (Extended) - Clean By Dj.mp3» pasaba de Limpia a sin indicar
+    /// porque «By» no era un descriptor. Iba en la dirección segura, pero era un marcador verdadero.
+    /// </summary>
+    private static readonly HashSet<string> Autoria = new(StringComparer.OrdinalIgnoreCase) { "by", "por", "de" };
 
     public static Explicitness Detect(Track t)
     {
@@ -91,7 +100,17 @@ public static class ExplicitDetector
         foreach (Match m in marcador.Matches(trozo))
         {
             var detras = trozo[(m.Index + m.Length)..];
-            if (Palabras.Matches(detras).All(p => Descriptores.Contains(p.Value) || EsCifra(p.Value))) return true;
+            var esMarcador = true;
+            foreach (Match p in Palabras.Matches(detras))
+            {
+                if (Descriptores.Contains(p.Value) || EsCifra(p.Value)) continue;
+                // La primera palabra que no describe la versión decide: si presenta al autor
+                // («by», «por», «de»), lo que sigue es su nombre; si no, el marcador era parte de un
+                // nombre («Clean Bandit Remix», «Dirty Sou Mashup»).
+                esMarcador = Autoria.Contains(p.Value);
+                break;
+            }
+            if (esMarcador) return true;
         }
         return false;
     }

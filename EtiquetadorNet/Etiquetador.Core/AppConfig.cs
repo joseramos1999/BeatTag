@@ -213,6 +213,22 @@ public sealed class AppConfig
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
+    // Al LEER se toleran las comas finales y los comentarios: es lo típico de una edición a mano
+    // («"Cache": true,» antes del «}»), y antes eso solo bastaba para que el archivo entero se diera
+    // por ilegible -y el rescate tampoco lo entendía, así que se perdían todos los ajustes-. Al
+    // guardar se escribe JSON estricto, así que la siguiente vez ya sale limpio.
+    private static readonly JsonSerializerOptions JsonLectura = new()
+    {
+        AllowTrailingCommas = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+    };
+
+    private static readonly JsonDocumentOptions DocumentoTolerante = new()
+    {
+        AllowTrailingCommas = true,
+        CommentHandling = JsonCommentHandling.Skip,
+    };
+
     public static AppConfig Load(AppPaths paths) => Load(paths, out _);
 
     /// <summary>
@@ -222,9 +238,17 @@ public sealed class AppConfig
     /// o el automático de las carpetas) escribía encima: se perdían las 43 carpetas, las prioridades
     /// de Duplicados y las 4 credenciales cifradas. Ahora:
     ///   1. se rescata todo lo que se entienda, ajuste a ajuste, y solo se descarta lo que no;
-    ///   2. el archivo original se aparta como «config.net.json.ilegible_fecha», intacto;
-    ///   3. el motivo queda en <paramref name="error"/> y en <see cref="AvisoCarga"/>.
-    /// Si no se puede ni leer ni apartar, <see cref="GuardadoBloqueado"/> impide escribir encima.
+    ///   2. se COPIA el archivo original como «config.net.json.ilegible_fecha», intacto;
+    ///   3. solo entonces se escribe lo rescatado encima del original;
+    ///   4. el motivo queda en <paramref name="error"/> y en <see cref="AvisoCarga"/>.
+    /// Si no se puede ni leer ni copiar, <see cref="GuardadoBloqueado"/> impide escribir encima.
+    ///
+    /// El orden importa. Antes el original se MOVÍA a «.ilegible» y lo rescatado se quedaba solo en
+    /// memoria hasta el primer guardado: si el proceso moría antes (el Stop-Process -Force de
+    /// Compilar-BeatTag.ps1 -CerrarApp, por ejemplo), el siguiente arranque no encontraba
+    /// config.net.json y empezaba con los valores de fábrica sin ningún aviso, con las 43 carpetas
+    /// solo en el «.ilegible». Ahora en cualquier momento hay un config.net.json: el original (que
+    /// el siguiente arranque volvería a rescatar) o el ya rescatado.
     /// </summary>
     public static AppConfig Load(AppPaths paths, out string error)
     {
@@ -246,7 +270,7 @@ public sealed class AppConfig
         string motivo;
         try
         {
-            var cfg = JsonSerializer.Deserialize<AppConfig>(json, JsonOpts);
+            var cfg = JsonSerializer.Deserialize<AppConfig>(json, JsonLectura);
             if (cfg != null)
             {
                 // Se puede seguir, pero hay que decirlo: antes solo bloqueaba el guardado en silencio.
@@ -265,24 +289,41 @@ public sealed class AppConfig
 
         var descartados = new List<string>();
         var rescatada = Rescatar(json, descartados);
-        var apartado = ArchivoDatos.Apartar(paths.ConfigPath);
+
+        // 1) Copia intacta del original. Sin ella no se escribe nada encima.
+        var apartado = ArchivoDatos.CopiarApartado(paths.ConfigPath);
 
         var cfgFinal = rescatada ?? new AppConfig();
         if (apartado.Length == 0)
         {
             cfgFinal.GuardadoBloqueado = true;
             error = $"No se pudo leer la configuración ({motivo}) ni apartarla; no se guardará ningún cambio en esta sesión para no sustituirla.";
+            cfgFinal.AvisoCarga = error;
+            return cfgFinal;
         }
-        else if (rescatada != null)
+
+        if (rescatada != null && descartados.Count > 0)
         {
             error = $"La configuración tenía ajustes que esta versión no entiende ({string.Join(", ", descartados)}); " +
                     $"se han dejado con su valor de fábrica y el resto se conserva. El archivo original se ha guardado como {Path.GetFileName(apartado)}.";
+        }
+        else if (rescatada != null)
+        {
+            error = $"La configuración no se pudo leer a la primera ({motivo}), pero se han recuperado todos los ajustes. " +
+                    $"El archivo original se ha guardado como {Path.GetFileName(apartado)}.";
         }
         else
         {
             error = $"No se pudo leer la configuración ({motivo}); se empieza con los valores de fábrica. " +
                     $"El archivo original se ha guardado como {Path.GetFileName(apartado)}.";
         }
+
+        // 2) Y solo ahora, lo rescatado encima del original (escritura atómica). Si no se puede, el
+        //    original sigue en su sitio y el siguiente guardado lo intentará otra vez: la copia ya
+        //    está hecha, así que no se pierde nada.
+        if (!cfgFinal.Save(paths, out var errGuardar))
+            error += " No se pudo guardar todavía la configuración corregida: " + errGuardar;
+
         cfgFinal.AvisoCarga = error;
         return cfgFinal;
     }
@@ -294,14 +335,14 @@ public sealed class AppConfig
     private static AppConfig? Rescatar(string json, List<string> descartados)
     {
         JsonObject? obj;
-        try { obj = JsonNode.Parse(json) as JsonObject; }
+        try { obj = JsonNode.Parse(json, null, DocumentoTolerante) as JsonObject; }
         catch { return null; }
         if (obj == null) return null;
 
         // Como mucho tantos intentos como ajustes: cada vuelta quita uno.
         for (var intento = 0; intento <= obj.Count; intento++)
         {
-            try { return obj.Deserialize<AppConfig>(JsonOpts); }
+            try { return obj.Deserialize<AppConfig>(JsonLectura); }
             catch (JsonException e)
             {
                 var ajuste = AjusteDe(e.Path);
@@ -346,7 +387,7 @@ public sealed class AppConfig
         try
         {
             if (!File.Exists(paths.ConfigPath)) return cfg;
-            using var doc = JsonDocument.Parse(File.ReadAllText(paths.ConfigPath, Encoding.UTF8));
+            using var doc = JsonDocument.Parse(File.ReadAllText(paths.ConfigPath, Encoding.UTF8), DocumentoTolerante);
             if (doc.RootElement.ValueKind != JsonValueKind.Object) return cfg;
             if (doc.RootElement.TryGetProperty(nameof(Theme), out var tema) && tema.ValueKind == JsonValueKind.String)
                 cfg.Theme = tema.GetString() ?? cfg.Theme;

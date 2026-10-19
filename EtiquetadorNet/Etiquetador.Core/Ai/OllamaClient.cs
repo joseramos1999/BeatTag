@@ -63,7 +63,8 @@ public sealed class OllamaClient
 
     /// <summary>
     /// Cuántos fallos seguidos de <see cref="PedirJsonAsync"/> que no dependen de la canción (no hay
-    /// conexión, tiempo agotado, el modelo no está) bastan para dejar de preguntar un rato.
+    /// conexión, tiempo agotado, el modelo no está, un error 5xx del servidor) bastan para dejar de
+    /// preguntar un rato. Una respuesta 4xx distinta de 404 depende de la petición y no cuenta.
     /// </summary>
     public const int FallosSeguidosParaPausar = 3;
 
@@ -441,9 +442,20 @@ public sealed class OllamaClient
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
             raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
-                return Fallo((int)resp.StatusCode == 404
+            {
+                var codigo = (int)resp.StatusCode;
+                var motivo = codigo == 404
                     ? $"El modelo «{modelo}» no está descargado. Descárgalo en Ajustes."
-                    : $"Ollama respondió {(int)resp.StatusCode}. {Trim(raw)}");
+                    : $"Ollama respondió {codigo}. {Trim(raw)}";
+                // Para la pausa solo cuentan los fallos que no dependen de ESTA petición: el modelo
+                // que no está (404) y los del propio servidor (5xx), además de la conexión y el
+                // tiempo agotado. Un 400 sí puede depender de la petición (visto en revisión: antes
+                // contaba cualquier respuesta no satisfactoria), y Ollama ha respondido: la cuenta
+                // vuelve a cero, como con una respuesta buena.
+                if (codigo == 404 || codigo >= 500) return Fallo(motivo);
+                _fallosSeguidos = 0;
+                return (null, motivo);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (OperationCanceledException)

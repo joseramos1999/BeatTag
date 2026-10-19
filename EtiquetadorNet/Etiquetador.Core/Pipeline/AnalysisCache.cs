@@ -41,6 +41,12 @@ public sealed class AnalysisCache
 
     public void Set(string path, string sig, ProcessResult r)
     {
+        // Un «no encontrada» con fallos de red no es un dato: no se pudo preguntar. Guardado, se
+        // servía para siempre (la caché no caduca) y solo «Reanalizar todo» lo recuperaba. Visto en
+        // los registros reales: 98 «musicbrainz.org HTTP 503» y 23 «se abandona tras 2 intentos»,
+        // todas en canciones que acabaron guardadas como no encontradas. Sin guardarlo, el próximo
+        // análisis vuelve a preguntar; lo que había antes (si había) se queda como estaba.
+        if (r.IncompletoPorLaRed) return;
         if (!Stat(path, out var m, out var s)) return;
         _map[path] = new Entry { M = m, S = s, Sig = sig, R = r };
         _dirty = true;
@@ -114,10 +120,26 @@ public sealed class AnalysisCache
     public string Save()
     {
         if (!_dirty) return "";
-        if (_noSobrescribir) return AvisoCarga;
+        if (_noSobrescribir && !Releer()) return AvisoCarga;
         var error = ArchivoDatos.EscribirJson(_file, _map);
         if (error.Length == 0) _dirty = false;
         return error;
+    }
+
+    /// <summary>
+    /// Si al arrancar el archivo no se pudo leer (bloqueado un momento por OneDrive o el antivirus),
+    /// se vuelve a intentar al guardar y se junta lo guardado con lo de esta sesión, que manda.
+    /// Antes no se reintentaba nunca y todo lo analizado en la sesión se perdía al cerrar (T10).
+    /// </summary>
+    private bool Releer()
+    {
+        var leido = ArchivoDatos.LeerJson<Dictionary<string, Entry>>(_file);
+        AvisoCarga = leido.Aviso;
+        if (leido.NoSobrescribir) return false;
+        if (leido.Datos != null)
+            foreach (var (ruta, entrada) in leido.Datos) _map.TryAdd(ruta, entrada);
+        _noSobrescribir = false;
+        return true;
     }
 
     private void Load()

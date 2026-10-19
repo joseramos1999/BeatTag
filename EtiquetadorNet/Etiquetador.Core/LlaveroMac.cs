@@ -1,10 +1,11 @@
 using System;
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 
-// Las pruebas comprueban la decisión «leer, crear o fallar» con un `security` simulado: en Windows
-// no hay Llavero, y es justo la parte que no puede equivocarse.
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Etiquetador.Tests")]
+// Las pruebas comprueban la decisión «leer, crear o fallar» con un `security` simulado (en Windows
+// no hay Llavero, y es justo la parte que no puede equivocarse). El InternalsVisibleTo va en
+// Etiquetador.Core.csproj, como en el proyecto de la aplicación.
 
 namespace Etiquetador.Core;
 
@@ -37,8 +38,8 @@ internal static class LlaveroMac
 
     private const int EsperaMaxima = 15_000;
 
-    private static byte[]? _cache;
-    private static readonly object _lock = new();
+    // La clave de esta sesión, o el motivo por el que no se pudo obtener.
+    private static readonly ClaveDeSesion Sesion = new(Ejecutar);
 
     /// <summary>
     /// ¿Se puede usar el Llavero en este equipo? Comprueba que la orden `security` responde. Si no,
@@ -55,13 +56,61 @@ internal static class LlaveroMac
     /// La clave de cifrado de este usuario, creándola la primera vez. Lanza excepción si el Llavero
     /// no está disponible: es preferible fallar el guardado a guardar en claro.
     /// </summary>
-    public static byte[] Clave()
+    public static byte[] Clave() => Sesion.Obtener();
+
+    /// <summary>
+    /// Olvida el fallo recordado para que la siguiente lectura vuelva a preguntar al Llavero (por
+    /// ejemplo, cuando el usuario dice que ya lo ha desbloqueado). Ver <see cref="ClaveDeSesion"/>.
+    /// </summary>
+    public static void Reintentar() => Sesion.Reintentar();
+
+    /// <summary>
+    /// La clave de una sesión: se pide a `security` UNA vez, y se recuerda tanto si sale bien como
+    /// si falla.
+    ///
+    /// POR QUÉ el fallo también. Antes solo se guardaba el éxito: con el Llavero bloqueado, cada
+    /// credencial que se descifra al cargar la configuración (cuatro setters *Enc) y cada vuelta del
+    /// rescate de una configuración dañada volvía a lanzar `security`, con hasta 15 s de espera y,
+    /// según el sistema, otro aviso de desbloqueo cada vez: hasta un minuto al arrancar. Ahora el
+    /// primer fallo vale para toda la sesión, hasta un <see cref="Reintentar"/> explícito.
+    /// </summary>
+    internal sealed class ClaveDeSesion
     {
-        lock (_lock)
+        private readonly Func<string, ResultadoSecurity> _ejecutar;
+        private readonly object _lock = new();
+        private byte[]? _clave;
+        private ExceptionDispatchInfo? _fallo;
+
+        public ClaveDeSesion(Func<string, ResultadoSecurity> ejecutar) => _ejecutar = ejecutar;
+
+        public byte[] Obtener()
         {
-            if (_cache != null) return _cache;
-            _cache = ObtenerOCrear(Ejecutar);
-            return _cache;
+            lock (_lock)
+            {
+                if (_clave != null) return _clave;
+                _fallo?.Throw();   // el mismo motivo, sin volver a molestar al Llavero
+                try
+                {
+                    _clave = ObtenerOCrear(_ejecutar);
+                    return _clave;
+                }
+                catch (Exception e)
+                {
+                    _fallo = ExceptionDispatchInfo.Capture(e);
+                    throw;
+                }
+            }
+        }
+
+        public void Reintentar()
+        {
+            lock (_lock) _fallo = null;
+        }
+
+        /// <summary>Olvida la clave y el fallo: la siguiente lectura vuelve a preguntar.</summary>
+        public void Olvidar()
+        {
+            lock (_lock) { _clave = null; _fallo = null; }
         }
     }
 
@@ -155,8 +204,5 @@ internal static class LlaveroMac
     }
 
     /// <summary>Solo para pruebas: olvida la clave cacheada para forzar que se relea del Llavero.</summary>
-    internal static void OlvidarCache()
-    {
-        lock (_lock) _cache = null;
-    }
+    internal static void OlvidarCache() => Sesion.Olvidar();
 }

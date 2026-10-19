@@ -97,6 +97,19 @@ public static class GenerosIa
     /// <summary>El valor lista varios géneros: «Rap; Hip Hop; Latino», «Pop/Rock».</summary>
     public static bool EsLista(string valor) => Segmentos(valor).Count > 1;
 
+    /// <summary>
+    /// Los valores que hay que escribir en la etiqueta para el género <paramref name="propuesto"/>:
+    /// uno por cada género separado por «;», que es como llega a la tabla una etiqueta con varios
+    /// valores (Track.Genre sale de JoinedGenres, que los une con «; »). Lo demás («Pop/Rock»,
+    /// «Dance/Electrónica») es un valor solo, como estaba.
+    ///
+    /// POR QUÉ. «Unificar géneros» escribía new[] { "Hip Hop; Latino" }: UN solo valor con el punto y
+    /// coma dentro. BeatTag lo vuelve a leer igual, pero rekordbox, Serato o Mp3tag ven un único
+    /// género llamado «Hip Hop; Latino» donde antes había dos. Para quien aplica (AppEngine.AplicarGeneros).
+    /// </summary>
+    public static string[] ValoresParaEscribir(string? propuesto)
+        => (propuesto ?? "").Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
     /// <summary>Lo que proponen las reglas, sin IA. <see cref="OrigenGenero.SinCambio"/> si no saben qué hacer.</summary>
     public static PropuestaGenero PorReglas(string original, int canciones)
     {
@@ -125,6 +138,11 @@ public static class GenerosIa
     ///
     /// Solo se quitan los sinónimos repetidos («Rap; Hip Hop» → «Hip Hop», que no pierde nada) y lo
     /// que no es un género («Pop; z1.fm» → «Pop»). Si no queda nada que cambiar, no se propone nada.
+    ///
+    /// Efecto a sabiendas (visto en revisión): cada segmento pasa por las mismas reglas que un género
+    /// suelto, así que «Dance/Electronic», el género principal típico de iTunes, sale como regla
+    /// «Dance/Electrónica», igual que «Electronic» suelto sale «Electrónica». Antes no se tocaba y se
+    /// preguntaba a la IA.
     /// </summary>
     private static PropuestaGenero PorReglasLista(string original, int canciones)
     {

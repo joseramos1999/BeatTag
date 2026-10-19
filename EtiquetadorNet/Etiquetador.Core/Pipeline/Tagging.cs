@@ -42,7 +42,7 @@ public static class Tagging
         if (fields.Artist && info.Artist.Length > 0 && (overwrite || string.IsNullOrEmpty(tag.JoinedPerformers)))
         {
             var old = tag.Performers.ToList();
-            var neu = TextUtils.Rx(@",\s*").Split(info.Artist).ToList();
+            var neu = PartirInterpretes(info.Artist).ToList();
             log["Artist"] = FieldChange.Arr(old, neu);
             tag.Performers = neu.ToArray();
         }
@@ -88,8 +88,37 @@ public static class Tagging
         return log;
     }
 
-    /// <summary>Valor que se anota como escrito en el campo «Cover» del registro de deshacer.</summary>
-    public const string CaratulaSustituida = "sustituida";
+    // Artistas cuyo nombre lleva una coma. Partir el crédito por comas los rompía en dos intérpretes
+    // («Tyler, The Creator» → «Tyler» y «The Creator»), y rekordbox y Serato, que leen cada valor
+    // del tag como un artista, los separaban. Pendiente anotado por el equipo «nombres» en la tanda 1
+    // (que el catálogo diera los artistas como lista); esta lista cubre los casos conocidos sin tener
+    // que cambiar todos los proveedores.
+    private static readonly HashSet<string> NombresConComa = new(StringComparer.Ordinal)
+    {
+        TextUtils.Nk("Tyler, The Creator"), TextUtils.Nk("Earth, Wind & Fire"), TextUtils.Nk("Crosby, Stills & Nash"),
+        TextUtils.Nk("Crosby, Stills, Nash & Young"), TextUtils.Nk("Emerson, Lake & Palmer"),
+        TextUtils.Nk("Blood, Sweat & Tears"), TextUtils.Nk("Peter, Paul and Mary"), TextUtils.Nk("Now, Now"),
+    };
+
+    /// <summary>
+    /// Los intérpretes de un crédito «A, B, C» para escribirlos como valores separados del tag,
+    /// sin partir los nombres que llevan coma («Tyler, The Creator, Kali Uchis» → «Tyler, The
+    /// Creator» y «Kali Uchis»).
+    /// </summary>
+    public static IReadOnlyList<string> PartirInterpretes(string? credito)
+    {
+        var trozos = TextUtils.Rx(@",\s*").Split(credito ?? "");
+        var partes = new List<string>();
+        for (var i = 0; i < trozos.Length; i++)
+        {
+            var hasta = i;
+            for (var j = trozos.Length - 1; j > i; j--)
+                if (NombresConComa.Contains(TextUtils.Nk(string.Join(" ", trozos[i..(j + 1)])))) { hasta = j; break; }
+            partes.Add(string.Join(", ", trozos[i..(hasta + 1)]));
+            i = hasta;
+        }
+        return partes;
+    }
 
     /// <summary>
     /// Pone <paramref name="nueva"/> como carátula frontal. Devuelve el cambio para el registro de
@@ -124,7 +153,9 @@ public static class Tagging
         if (idx >= 0) imagenes[idx] = pic;
         else imagenes.Insert(0, pic);
         tag.Pictures = imagenes.ToArray();
-        return FieldChange.Str(anterior, CaratulaSustituida);
+        // Con la huella de la que se pone: deshacer solo la quita si sigue siendo esta. La marca es
+        // la del contrato de UndoEngine (antes había aquí una constante duplicada).
+        return FieldChange.Portada(anterior, pic.Data?.Data);
     }
 
     /// <summary>Posición de la carátula frontal: la de tipo «FrontCover» o, si no hay, la primera de tipo «Otro». -1 si no hay.</summary>
@@ -154,6 +185,10 @@ public static class Tagging
             Directory.CreateDirectory(carpeta);
             var ruta = Path.GetFullPath(Path.Combine(carpeta, nombre));
             if (!File.Exists(ruta)) File.WriteAllBytes(ruta, datos);
+            // Reutilizada: se le pone la fecha de hoy. La poda (UndoEngine.PodarPortadas) respeta las
+            // copias recientes porque la línea del manifiesto que la cita se escribe DESPUÉS; con la
+            // fecha vieja, una copia reutilizada podría borrarse justo en ese hueco.
+            else File.SetLastWriteTime(ruta, DateTime.Now);
             return ruta;
         }
         catch { return ""; }

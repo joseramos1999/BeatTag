@@ -37,10 +37,12 @@ public sealed class ApplyMarks
     public void Forget(string path)
     {
         if (_map.Remove(path)) _dirty = true;
+        if (_noSobrescribir) _olvidadas.Add(path);
     }
 
     public void Clear()
     {
+        if (_noSobrescribir) { _vaciadas = true; _dirty = true; }
         if (_map.Count == 0) return;
         _map.Clear();
         _dirty = true;
@@ -73,9 +75,34 @@ public sealed class ApplyMarks
     public string Save()
     {
         if (!_dirty) return "";
-        if (_noSobrescribir) return AvisoCarga;
+        if (_noSobrescribir && !Releer()) return AvisoCarga;
         var error = ArchivoDatos.EscribirJson(_file, _map);
         if (error.Length == 0) _dirty = false;
         return error;
+    }
+
+    // Lo que se olvidó (o si se vació todo) mientras el archivo no se podía leer: al juntar con lo
+    // guardado no puede volver.
+    private readonly HashSet<string> _olvidadas = new(System.StringComparer.OrdinalIgnoreCase);
+    private bool _vaciadas;
+
+    /// <summary>
+    /// Vuelve a intentar leer el archivo que al arrancar no se pudo leer y, si ya se puede, junta lo
+    /// guardado con lo de esta sesión (manda lo de esta sesión). Devuelve true si ya se puede guardar.
+    /// Visto en revisión (T10): sin esto, un marcas-aplicar.json bloqueado un momento al arrancar
+    /// hacía perder todas las casillas de la sesión al cerrar.
+    /// </summary>
+    private bool Releer()
+    {
+        var leido = ArchivoDatos.LeerJson<Dictionary<string, bool>>(_file);
+        AvisoCarga = leido.Aviso;
+        if (leido.NoSobrescribir) return false;
+        if (leido.Datos != null && !_vaciadas)
+            foreach (var (ruta, aplicar) in leido.Datos)
+                if (!_olvidadas.Contains(ruta)) _map.TryAdd(ruta, aplicar);
+        _noSobrescribir = false;
+        _olvidadas.Clear();
+        _vaciadas = false;
+        return true;
     }
 }

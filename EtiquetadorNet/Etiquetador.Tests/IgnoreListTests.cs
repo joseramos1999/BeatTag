@@ -120,7 +120,8 @@ public class IgnoreListTests
     }
 
     // Si no se puede ni leer (otro programa lo tiene bloqueado), no se guarda encima: el archivo
-    // quizá está perfectamente bien.
+    // quizá está perfectamente bien. Y en cuanto se puede leer, se junta lo guardado con lo de la
+    // sesión (T10): antes no se reintentaba nunca y las decisiones de la sesión se perdían al cerrar.
     [WindowsFact]
     public void Un_archivo_bloqueado_no_se_pisa()
     {
@@ -132,12 +133,19 @@ public class IgnoreListTests
 
             IgnoreList l;
             using (new FileStream(f, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
                 l = new IgnoreList(f);
-
-            Assert.NotEqual("", l.AvisoCarga);
-            l.Add(@"E:\Musica\b.mp3");
-            Assert.NotEqual("", l.Save());                       // se niega y lo dice
+                Assert.NotEqual("", l.AvisoCarga);
+                l.Add(@"E:\Musica\b.mp3");
+                Assert.NotEqual("", l.Save());                   // se niega y lo dice
+            }
             Assert.Equal("""["E:\\Musica\\a.mp3"]""", File.ReadAllText(f));
+
+            // Ya no está bloqueado: se guarda lo de antes MÁS lo de esta sesión.
+            Assert.Equal("", l.Save());
+            var guardado = new IgnoreList(f);
+            Assert.True(guardado.Contains(@"E:\Musica\a.mp3"));
+            Assert.True(guardado.Contains(@"E:\Musica\b.mp3"));
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }

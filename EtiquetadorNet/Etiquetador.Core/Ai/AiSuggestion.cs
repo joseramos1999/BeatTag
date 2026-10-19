@@ -69,8 +69,13 @@ public static class AiSuggestion
     /// Las palabras que en español solo se distinguen por la tilde (sé/se, tú/tu, él/el, sí/si…) no
     /// se pueden restaurar por su forma sin tilde: visto en una biblioteca real, con
     /// «Ya_Sé_Que_Se_Fue (Extended)» la tilde de «Sé» acababa también en el otro «Se» («Ya Sé Que Sé
-    /// Fue»). Cuando el original trae la palabra de las dos formas, se alinean por orden de aparición,
-    /// y si la propuesta no la trae las mismas veces, se deja como la escribió la IA.
+    /// Fue»). Esas palabras -las de <see cref="Diacriticas"/>, y cualquiera que el original traiga de
+    /// las dos formas- se emparejan una a una con las del original: primero por las palabras que
+    /// tienen al lado (así da igual que la IA las reordene: «Se Fue Ya Se» → «Se Fue Ya Sé») y luego
+    /// por orden. Ninguna del original se usa dos veces: si la propuesta trae la palabra más veces
+    /// que el original, las que sobran se quedan como las escribió la IA. Visto en revisión, al
+    /// completar un nombre: «Él Me Mintió (Remix De» con la etiqueta «… (Remix De El Alfa)» daba
+    /// «(Remix De Él Alfa)». Si la propuesta la trae MENOS veces, solo vale lo que case por contexto.
     /// </summary>
     public static string RestaurarAcentos(string propuesto, string original)
     {
@@ -81,39 +86,99 @@ public static class AiSuggestion
 
         static bool ConTilde(string palabra) => !string.Equals(TextUtils.ToAscii(palabra), palabra, StringComparison.Ordinal);
 
-        // Cada palabra del original por su forma sin tildes, con TODAS las formas en que aparece, en orden.
-        var formas = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (Match m in Regex.Matches(original, Palabra))
+        var delOriginal = Ocurrencias(original);
+        // Cada palabra del original por su forma sin tildes, con TODAS sus apariciones, en orden.
+        var formas = delOriginal.GroupBy(o => o.Sin, StringComparer.OrdinalIgnoreCase)
+                                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+        if (!delOriginal.Any(o => ConTilde(o.Forma))) return propuesto;
+
+        var dePropuesta = Ocurrencias(propuesto);
+        var decision = new string?[dePropuesta.Count];
+
+        foreach (var grupo in Enumerable.Range(0, dePropuesta.Count).GroupBy(i => dePropuesta[i].Sin, StringComparer.OrdinalIgnoreCase))
         {
-            var sin = TextUtils.ToAscii(m.Value);
-            if (!formas.TryGetValue(sin, out var lista)) formas[sin] = lista = new List<string>();
-            lista.Add(m.Value);
+            if (!formas.TryGetValue(grupo.Key, out var lista)) continue;
+            var acentuadas = lista.Where(o => ConTilde(o.Forma)).Select(o => o.Forma.ToLowerInvariant()).Distinct(StringComparer.Ordinal).Count();
+            if (acentuadas == 0) continue;
+
+            // Sin ambigüedad (solo aparece con una tilde y no es de las que la tilde distingue): la
+            // recupera en todas partes, como siempre («Despechá (DESPECHÁ Intro)»).
+            var sensible = Diacriticas.Contains(grupo.Key) || acentuadas > 1 || lista.Any(o => !ConTilde(o.Forma));
+            if (!sensible)
+            {
+                var forma = lista.First(o => ConTilde(o.Forma)).Forma;
+                foreach (var i in grupo) decision[i] = Mayusculiza(forma, dePropuesta[i].Forma);
+                continue;
+            }
+
+            foreach (var (i, o) in Emparejar(grupo.ToList(), dePropuesta, lista))
+                if (ConTilde(lista[o].Forma)) decision[i] = Mayusculiza(lista[o].Forma, dePropuesta[i].Forma);
         }
-        if (!formas.Values.Any(l => l.Any(ConTilde))) return propuesto;
 
-        var vecesEnPropuesta = Regex.Matches(propuesto, Palabra)
-            .GroupBy(m => TextUtils.ToAscii(m.Value), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
-        var vistas = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var k = 0;
+        return Regex.Replace(propuesto, Palabra, m => decision[k++] ?? m.Value);
+    }
 
-        return Regex.Replace(propuesto, Palabra, m =>
+    /// <summary>
+    /// Palabras que en español cambian de significado con la tilde (tilde diacrítica) y alguna
+    /// interrogativa: su forma sin tilde es otra palabra, así que no se puede dar por hecho que
+    /// cualquier «el» del nombre propuesto sea el «Él» del original. En minúsculas y sin tilde.
+    /// </summary>
+    private static readonly HashSet<string> Diacriticas = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "tu", "el", "mi", "se", "si", "te", "de", "mas", "que", "quien", "quienes", "cual", "cuales",
+        "como", "cuando", "cuanto", "donde", "adonde", "aun", "solo", "o",
+    };
+
+    /// <summary>Una palabra con su forma sin tildes y las palabras que tiene al lado (sin tildes, en minúsculas).</summary>
+    private readonly record struct Ocurrencia(string Forma, string Sin, string Antes, string Despues);
+
+    private static List<Ocurrencia> Ocurrencias(string texto)
+    {
+        var palabras = Regex.Matches(texto, Palabra).Select(m => m.Value).ToList();
+        var sin = palabras.Select(p => TextUtils.ToAscii(p).ToLowerInvariant()).ToList();
+        return palabras.Select((p, i) => new Ocurrencia(p, sin[i], i > 0 ? sin[i - 1] : "", i + 1 < sin.Count ? sin[i + 1] : "")).ToList();
+    }
+
+    /// <summary>
+    /// Empareja las apariciones de una palabra en la propuesta (<paramref name="enPropuesta"/>,
+    /// índices de <paramref name="propuesta"/>) con las del original, sin repetir ninguna del
+    /// original: primero las que comparten las dos palabras vecinas, luego una, y lo que quede, por
+    /// orden si la propuesta la trae al menos tantas veces como el original.
+    /// </summary>
+    private static IEnumerable<(int Propuesta, int Original)> Emparejar(List<int> enPropuesta, List<Ocurrencia> propuesta, List<Ocurrencia> original)
+    {
+        var usada = new bool[original.Count];
+        var asignada = new Dictionary<int, int>();
+        for (var exigido = 2; exigido >= 1; exigido--)
         {
-            var sin = TextUtils.ToAscii(m.Value);
-            if (!formas.TryGetValue(sin, out var lista)) return m.Value;
-            var orden = vistas.GetValueOrDefault(sin);
-            vistas[sin] = orden + 1;
-
-            var acentuadas = lista.Where(ConTilde).Select(f => f.ToLowerInvariant()).Distinct(StringComparer.Ordinal).Count();
-            if (acentuadas == 0) return m.Value;
-
-            // Sin ambigüedad (solo aparece con una tilde): la recupera en todas partes, como siempre.
-            if (acentuadas == 1 && lista.All(ConTilde)) return Mayusculiza(lista.First(ConTilde), m.Value);
-
-            // Ambigua: solo se puede saber cuál es cuál si la propuesta la trae las mismas veces.
-            if (vecesEnPropuesta.GetValueOrDefault(sin) != lista.Count) return m.Value;
-            var suya = lista[orden];
-            return ConTilde(suya) ? Mayusculiza(suya, m.Value) : m.Value;
-        });
+            foreach (var i in enPropuesta)
+            {
+                if (asignada.ContainsKey(i)) continue;
+                var p = propuesta[i];
+                for (var o = 0; o < original.Count; o++)
+                {
+                    if (usada[o]) continue;
+                    var parecido = (p.Antes.Length > 0 && p.Antes == original[o].Antes ? 1 : 0)
+                                 + (p.Despues.Length > 0 && p.Despues == original[o].Despues ? 1 : 0);
+                    if (parecido < exigido) continue;
+                    usada[o] = true;
+                    asignada[i] = o;
+                    break;
+                }
+            }
+        }
+        if (enPropuesta.Count >= original.Count)
+        {
+            var libres = Enumerable.Range(0, original.Count).Where(o => !usada[o]).GetEnumerator();
+            foreach (var i in enPropuesta)
+            {
+                if (asignada.ContainsKey(i)) continue;
+                if (!libres.MoveNext()) break;
+                asignada[i] = libres.Current;
+            }
+        }
+        return asignada.Select(kv => (kv.Key, kv.Value));
     }
 
     /// <summary>Copia en <paramref name="palabra"/> el uso de mayúsculas que traía <paramref name="como"/>.</summary>
