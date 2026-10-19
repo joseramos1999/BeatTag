@@ -19,6 +19,13 @@ namespace Etiquetador.App.ViewModels;
 public partial class DupRow : ObservableObject
 {
     public string Group { get; init; } = "";
+
+    /// <summary>
+    /// Qué grupo es, por posición. La etiqueta <see cref="Group"/> no basta para contar grupos: dos
+    /// grabaciones distintas con el mismo nombre y el mismo número de copias dan la misma etiqueta.
+    /// </summary>
+    public int GrupoId { get; init; }
+
     public string FileName { get; init; } = "";
     public string Quality { get; init; } = "";
     public string Duration { get; init; } = "";
@@ -236,7 +243,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     partial void OnSelectedModeChanged(DupModeOption value)
     {
         OnPropertyChanged(nameof(EsPorHuella));
-        OnPropertyChanged(nameof(ResumenHuellas));
+        _ = ActualizarResumenHuellasAsync();
         if (Store.IsScanned) Recompute();
     }
 
@@ -297,17 +304,27 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     ///
     /// Así que en ese modo no se recalcula solo: se anota que la tabla se ha quedado vieja y se
     /// dice. El usuario vuelve cuando quiera y pulsa Analizar.
+    ///
+    /// Con los demás criterios sí se recalcula, pero CONSERVANDO las marcas de las copias que
+    /// sigan en la tabla: el usuario puede haber revisado y marcado una a una decenas de copias, y
+    /// aplicar algo en otra pestaña no es motivo para tirar ese trabajo.
     /// </summary>
     protected override void RecomputeReactive()
     {
+        // El cambio lo ha hecho esta misma pestaña al enviar copias a la papelera: ya se encarga
+        // QuitarDeLaTabla, sin recalcular y sin perder marcas.
+        if (_quitandoBorradas) return;
+
         if (SelectedMode.Value == DuplicateMode.Fingerprint)
         {
+            _ = ActualizarResumenHuellasAsync();
             if (Rows.Count == 0) return;   // no hay nada que se haya quedado viejo
             Desactualizada = true;
             Status = "La biblioteca ha cambiado: pulsa Analizar para volver a comparar el audio.";
             return;
         }
-        Recompute();
+        var desmarcadas = Recalcular(conservarMarcas: true);
+        Status += NotaDesmarcadas(desmarcadas);
     }
 
     /// <summary>Cuántas ediciones de DJ se dejaron fuera en el último recálculo (para el estado).</summary>
@@ -316,7 +333,20 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     /// <summary>La tabla ya no refleja la biblioteca actual (se avisa en pantalla).</summary>
     [ObservableProperty] private bool _desactualizada;
 
-    protected override void Recompute()
+    /// <summary>Los grupos que se ven ahora en la tabla, para poder quitar copias sin recalcular.</summary>
+    private IReadOnlyList<DuplicateGroup> _grupos = Array.Empty<DuplicateGroup>();
+
+    /// <summary>Esta pestaña está quitando de la biblioteca lo que acaba de enviar a la papelera.</summary>
+    private bool _quitandoBorradas;
+
+    /// <summary>
+    /// Recalcular a petición del usuario (Analizar, cambiar el criterio, las carpetas…). Ahí sí se
+    /// empieza sin marcas: marcar es una decisión sobre la lista que se ve, y la lista es otra.
+    /// </summary>
+    protected override void Recompute() => Recalcular(conservarMarcas: false);
+
+    /// <returns>Cuántas copias se han desmarcado para no dejar un grupo sin ninguna (ver <see cref="ConstruirFilas"/>).</returns>
+    private int Recalcular(bool conservarMarcas)
     {
         Desactualizada = false;
         var excluidas = _engine.Config.ExcludedDupFolders;
@@ -335,20 +365,84 @@ public partial class DuplicatesViewModel : ScanViewModelBase
 
         // Agrupar por audio es caro y NO puede hacerse aquí: Recompute corre en el hilo de la
         // interfaz y la dejaría congelada. Se desvía a un método propio en segundo plano.
-        if (SelectedMode.Value == DuplicateMode.Fingerprint) { _ = RecomputePorHuellaAsync(lista); return; }
+        if (SelectedMode.Value == DuplicateMode.Fingerprint) { _ = RecomputePorHuellaAsync(lista); return 0; }
 
-        Pintar(DuplicateFinder.Find(lista, SelectedMode.Value));
+        return Pintar(DuplicateFinder.Find(lista, SelectedMode.Value), conservarMarcas ? MarcasActuales() : null);
     }
 
-    /// <summary>Vuelca los grupos en la tabla. Compartido por los dos caminos de agrupación.</summary>
-    private void Pintar(IReadOnlyList<DuplicateGroup> groups)
+    /// <summary>Las marcas de la tabla antes de repintarla.</summary>
+    /// <param name="Marcadas">Rutas de las copias marcadas.</param>
+    /// <param name="Recomendadas">
+    /// Las marcadas que además eran la copia recomendada de su grupo: esas se marcaron a sabiendas.
+    /// </param>
+    private sealed record Marcas(HashSet<string> Marcadas, HashSet<string> Recomendadas);
+
+    private Marcas MarcasActuales()
+        => new(Rows.Where(r => r.Marcada).Select(r => r.FilePath).ToHashSet(StringComparer.OrdinalIgnoreCase),
+               Rows.Where(r => r.Marcada && r.EsMejor).Select(r => r.FilePath).ToHashSet(StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Vuelca los grupos en la tabla. Compartido por los dos caminos de agrupación.
+    /// </summary>
+    /// <param name="conservar">
+    /// Marcas que tienen que seguir. Null al recalcular a petición del usuario, que empieza sin
+    /// marcas.
+    /// </param>
+    /// <returns>Cuántas copias se han desmarcado para no dejar un grupo sin ninguna.</returns>
+    private int Pintar(IReadOnlyList<DuplicateGroup> groups, Marcas? conservar = null)
     {
+        _grupos = groups;
         var excluidas = _engine.Config.ExcludedDupFolders;
         var porAudio = SelectedMode.Value == DuplicateMode.Fingerprint;
+        var (filas, conPrioridad) = ConstruirFilas(groups, porAudio, Puntuar, MotivoDe,
+                                                   t => EsPrioritaria(t.Folder), conservar?.Marcadas,
+                                                   conservar?.Recomendadas);
         Rows.Clear();
-        int copies = 0, conPrioridad = 0;
-        foreach (var g in groups)
+        foreach (var f in filas) Rows.Add(f);
+        var copies = filas.Count;
+
+        RowsView.Refresh();
+        RecontarMarcadas();
+        // El filtro de búsqueda guarda los grupos que casaban, y la etiqueta de un grupo cambia con
+        // su número de copias: se rehace para no esconder grupos que siguen coincidiendo.
+        if (Busqueda.Trim().Length > 0) OnBusquedaChanged(Busqueda);
+
+        var excl = excluidas.Count > 0 ? $" · {excluidas.Count} carpeta(s) excluida(s)" : "";
+        var edic = _edicionesFuera > 0 ? $" · {_edicionesFuera} edición(es) de DJ fuera" : "";
+        var prio = conPrioridad > 0 ? $" · {conPrioridad} resueltos por carpeta prioritaria" : "";
+        var nota = porAudio ? " · cada versión conserva un ejemplar" : "";
+        Status = $"{groups.Count} grupo(s) de duplicados · {copies} archivos implicados{excl}{edic}{prio}{nota}.";
+
+        // Las desmarcadas por ConstruirFilas: las marcadas que siguen en la tabla y ya no lo están.
+        return conservar == null ? 0 : filas.Count(f => !f.Marcada && conservar.Marcadas.Contains(f.FilePath));
+    }
+
+    /// <summary>
+    /// Las filas de la tabla para unos grupos: la mejor copia de cada uno (o de cada versión, al
+    /// agrupar por audio) y las marcas que haya que conservar. Estático y sin interfaz, para poder
+    /// probarlo sin montar la aplicación.
+    ///
+    /// Al conservar marcas, ningún grupo (ni versión, al agrupar por audio) se queda con TODAS sus
+    /// copias marcadas por culpa del repintado. Visto en revisión: «Marcar sobrantes» en un grupo de
+    /// 3 y enviar después a la papelera, con el clic derecho, la copia recomendada. Las otras dos
+    /// seguían marcadas, una pasaba a ser la recomendada y «Enviar marcadas» se llevaba la canción
+    /// entera. Ahora esa nueva recomendada se desmarca. No se toca una recomendada que el usuario ya
+    /// tenía marcada (<paramref name="recomendadasMarcadas"/>): esa la marcó sabiendo lo que era, y
+    /// el diálogo de la papelera lo avisa (<see cref="CuerpoConfirmarPapelera"/>).
+    /// </summary>
+    /// <param name="marcadas">Copias que tienen que seguir marcadas, o null para empezar sin marcas.</param>
+    /// <param name="recomendadasMarcadas">De ellas, las que ya eran la copia recomendada.</param>
+    /// <returns>Las filas y cuántos grupos se resolvieron por carpeta prioritaria.</returns>
+    internal static (List<DupRow> Filas, int ConPrioridad) ConstruirFilas(
+        IReadOnlyList<DuplicateGroup> groups, bool porAudio,
+        Func<Track, double> puntuar, Func<Track, string> motivoDe, Func<Track, bool> esPrioritaria,
+        IReadOnlySet<string>? marcadas = null, IReadOnlySet<string>? recomendadasMarcadas = null)
+    {
+        var filas = new List<DupRow>();
+        var conPrioridad = 0;
+        for (var gi = 0; gi < groups.Count; gi++)
         {
+            var g = groups[gi];
             var label = $"{(string.IsNullOrWhiteSpace(g.Artist) ? "¿?" : g.Artist)} - {g.Title}   ({g.Tracks.Count} copias)";
 
             // Al agrupar por AUDIO, un grupo reúne el original con sus ediciones de DJ: comparten la
@@ -365,19 +459,25 @@ public partial class DuplicatesViewModel : ScanViewModelBase
                 double mejorPunt = double.NegativeInfinity;
                 foreach (var t in v)
                 {
-                    var p = Puntuar(t);
+                    var p = puntuar(t);
                     if (p > mejorPunt) { mejorPunt = p; mejor = t; }
                 }
-                if (mejor != null && EsPrioritaria(mejor.Folder)) conPrioridad++;
+                if (mejor != null && esPrioritaria(mejor)) conPrioridad++;
+
+                // La recomendada pierde su marca solo si con ella se irían todas y no estaba ya
+                // marcada como recomendada antes de repintar.
+                var desmarcarMejor = mejor != null && marcadas != null
+                                     && v.All(t => marcadas.Contains(t.FilePath))
+                                     && recomendadasMarcadas?.Contains(mejor.FilePath) != true;
 
                 foreach (var t in v)
                 {
-                    copies++;
                     var esMejor = ReferenceEquals(t, mejor);
                     var version = porAudio ? VersionDe(t) : "";
-                    Rows.Add(new DupRow
+                    filas.Add(new DupRow
                     {
                         Group = label,
+                        GrupoId = gi,
                         FileName = t.FileName,
                         Quality = t.Quality,
                         Duration = t.Duration,
@@ -386,22 +486,127 @@ public partial class DuplicatesViewModel : ScanViewModelBase
                         Version = version,
                         EsMejor = esMejor,
                         Motivo = esMejor
-                            ? (version.Length > 0 ? $"Se conserva ({version})" : MotivoDe(t))
+                            ? (version.Length > 0 ? $"Se conserva ({version})" : motivoDe(t))
                             : "",
+                        Marcada = marcadas?.Contains(t.FilePath) == true && !(esMejor && desmarcarMejor),
                     });
                 }
             }
         }
+        return (filas, conPrioridad);
+    }
 
-        // Al recalcular no queda nada marcado: marcar es una decisión sobre la lista que se ve.
-        RowsView.Refresh();
-        Marcadas = 0;
+    /// <summary>Lo que se añade al estado cuando el repintado ha desmarcado copias. Puro.</summary>
+    internal static string NotaDesmarcadas(int desmarcadas) => desmarcadas switch
+    {
+        <= 0 => "",
+        1 => " Se ha desmarcado 1 copia: ahora es la que se conserva de su grupo y, enviándola, no quedaría ninguna.",
+        _ => $" Se han desmarcado {desmarcadas} copias: ahora son las que se conservan de su grupo y, enviándolas, no quedaría ninguna.",
+    };
 
-        var excl = excluidas.Count > 0 ? $" · {excluidas.Count} carpeta(s) excluida(s)" : "";
-        var edic = _edicionesFuera > 0 ? $" · {_edicionesFuera} edición(es) de DJ fuera" : "";
-        var prio = conPrioridad > 0 ? $" · {conPrioridad} resueltos por carpeta prioritaria" : "";
-        var nota = porAudio ? " · cada versión conserva un ejemplar" : "";
-        Status = $"{groups.Count} grupo(s) de duplicados · {copies} archivos implicados{excl}{edic}{prio}{nota}.";
+    /// <summary>
+    /// Cuántas canciones se quedarían sin ninguna copia si se envían las marcadas: grupos (o, al
+    /// agrupar por audio, versiones de un grupo) con TODAS sus copias marcadas.
+    /// </summary>
+    internal static int SinNingunaCopia(IEnumerable<DupRow> filas)
+        => filas.GroupBy(f => (f.GrupoId, f.Version.ToUpperInvariant()))
+                .Count(g => g.All(f => f.Marcada));
+
+    /// <summary>
+    /// El texto del diálogo antes de enviar las marcadas a la papelera. Puro, para probarlo.
+    ///
+    /// Avisa por separado de las dos cosas que conviene no pasar por alto: que se va alguna copia
+    /// recomendada (puede ser deliberado) y, sobre todo, que alguna canción se quedaría sin ninguna
+    /// copia en la biblioteca.
+    /// </summary>
+    internal static string CuerpoConfirmarPapelera(IReadOnlyList<DupRow> filas)
+    {
+        var marcadas = filas.Where(r => r.Marcada).ToList();
+        var grupos = marcadas.Select(r => r.GrupoId).Distinct().Count();
+        var texto = $"Afecta a {grupos} grupo(s) de duplicados.";
+
+        var mejores = marcadas.Count(r => r.EsMejor);
+        if (mejores > 0)
+            texto += mejores == 1
+                ? " Atención: 1 de ellas es la copia recomendada de su grupo."
+                : $" Atención: {mejores} de ellas son la copia recomendada de su grupo.";
+
+        var sinCopia = SinNingunaCopia(filas);
+        if (sinCopia > 0)
+            texto += sinCopia == 1
+                ? " Hay 1 canción con TODAS sus copias marcadas: desaparecería de la biblioteca."
+                : $" Hay {sinCopia} canciones con TODAS sus copias marcadas: desaparecerían de la biblioteca.";
+        return texto;
+    }
+
+    /// <summary>
+    /// Los mismos grupos sin las copias que ya no están (enviadas a la papelera). Un grupo que se
+    /// queda con una sola copia deja de ser un duplicado y desaparece.
+    ///
+    /// Es lo que permite quitar lo borrado SIN volver a agrupar: al agrupar por audio, recalcular
+    /// son millones de comparaciones, y antes ni se hacía: las copias ya en la papelera seguían en
+    /// la tabla, marcadas, y repetir el envío daba «0 enviadas, 120 con problemas».
+    /// </summary>
+    internal static IReadOnlyList<DuplicateGroup> SinBorradas(IReadOnlyList<DuplicateGroup> grupos,
+                                                              IEnumerable<string> borradas)
+    {
+        var fuera = new HashSet<string>(borradas, StringComparer.OrdinalIgnoreCase);
+        if (fuera.Count == 0) return grupos;
+        var quedan = new List<DuplicateGroup>(grupos.Count);
+        foreach (var g in grupos)
+        {
+            if (!g.Tracks.Any(t => fuera.Contains(t.FilePath))) { quedan.Add(g); continue; }
+            var resto = g.Tracks.Where(t => !fuera.Contains(t.FilePath)).ToList();
+            if (resto.Count >= 2) quedan.Add(g with { Tracks = resto });
+        }
+        return quedan;
+    }
+
+    /// <summary>
+    /// Saca de la tabla y de la biblioteca las copias que acaban de ir a la papelera, sin recalcular
+    /// y sin tocar las marcas del resto.
+    ///
+    /// Visto en uso real: agrupando por artista y título, marcar a mano 30 copias y enviar otra a la
+    /// papelera desde el menú contextual rehacía la tabla entera y las 30 marcas desaparecían.
+    /// </summary>
+    /// <returns>Cuántas copias se han desmarcado para no dejar un grupo sin ninguna.</returns>
+    private int QuitarDeLaTabla(IReadOnlyCollection<string> borradas)
+    {
+        if (borradas.Count == 0) return 0;
+        var marcas = MarcasActuales();
+
+        // La biblioteca avisa a TODAS las pestañas; esta se salta su recálculo (RecomputeReactive)
+        // porque sabe exactamente qué ha cambiado.
+        _quitandoBorradas = true;
+        try { Store.RemoveTracks(borradas); }
+        finally { _quitandoBorradas = false; }
+
+        var desmarcadas = Pintar(SinBorradas(_grupos, borradas), marcas);
+
+        // Saltarse RecomputeReactive también se saltaba el recuento de huellas: «N de M analizadas»
+        // seguía contando las canciones recién enviadas a la papelera. Solo hace algo por audio.
+        _ = ActualizarResumenHuellasAsync();
+        return desmarcadas;
+    }
+
+    /// <summary>
+    /// El estado tras enviar a la papelera. Cuando todas fallan por el MISMO motivo (por ejemplo, una
+    /// unidad sin papelera, donde enviar sería borrar para siempre), se dice ese motivo una vez en
+    /// lugar de «0 enviadas, 120 con problemas» y el primero de la lista.
+    /// </summary>
+    internal static string ResumenPapelera(int enviadas, IReadOnlyList<(string Archivo, string Motivo)> fallos)
+    {
+        if (fallos.Count == 0) return $"{enviadas} copia(s) enviadas a la papelera.";
+
+        var motivos = fallos.Select(f => f.Motivo).Distinct(StringComparer.Ordinal).ToList();
+        if (motivos.Count == 1)
+            return enviadas == 0
+                ? $"No se ha enviado ninguna copia a la papelera: {Motivo(motivos[0])}"
+                : $"{enviadas} copia(s) enviadas a la papelera · {fallos.Count} no se han enviado: {Motivo(motivos[0])}";
+
+        return $"{enviadas} enviadas, {fallos.Count} con problemas. La primera: {fallos[0].Archivo}: {Motivo(fallos[0].Motivo)}";
+
+        static string Motivo(string m) => string.IsNullOrWhiteSpace(m) ? "motivo desconocido." : m;
     }
 
     /// <summary>
@@ -421,18 +626,71 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     [ObservableProperty] private double _fpProgress;
     [ObservableProperty] private bool _fpBusy;
 
-    /// <summary>Estado de las huellas, para saber si hace falta calcularlas antes de agrupar.</summary>
-    public string ResumenHuellas
+    /// <summary>
+    /// Estado de las huellas, para saber si hace falta calcularlas antes de agrupar. Es lo último
+    /// calculado: leerlo no toca el disco.
+    ///
+    /// Antes era una propiedad calculada al vuelo, y su enlace se evalúa al crear la vista aunque el
+    /// recuadro esté oculto. Así, abrir Duplicados -con cualquier criterio- leía en el hilo de la
+    /// interfaz los ~160 MB de huellas y la fecha de 15.000 archivos: la ventana se quedaba
+    /// congelada entre 1,3 y 3,5 s (medido en los registros reales) sin que nadie usara las huellas.
+    /// </summary>
+    [ObservableProperty] private string _resumenHuellas = "";
+
+    /// <summary>Para que un recuento viejo que termine tarde no pise a uno más reciente.</summary>
+    private int _resumenVersion;
+
+    /// <summary>
+    /// Texto del estado de las huellas. Puro, para probarlo.
+    /// </summary>
+    internal static string TextoResumenHuellas(bool fpcalcDisponible, int total, int hechas)
     {
-        get
+        if (!fpcalcDisponible) return "No está disponible el analizador de audio (fpcalc).";
+        if (total == 0) return "";
+        if (hechas == 0) return $"Sin calcular. Hay que analizar el audio de las {total} canciones (la primera vez tarda bastante).";
+        if (hechas < total) return $"{hechas} de {total} analizadas. Faltan {total - hechas}.";
+        return $"Las {total} analizadas.";
+    }
+
+    /// <summary>
+    /// Cuenta en segundo plano cuántas canciones tienen ya su huella. La primera vez incluye leer la
+    /// caché del disco, que también va fuera del hilo de la interfaz.
+    ///
+    /// Si las huellas guardadas no se han podido leer, se dice eso. Contar sobre una caché sin leer
+    /// daba «Sin calcular. Hay que analizar el audio de las 15000 canciones», que invitaba a pasar
+    /// horas recalculando lo que ya estaba en el disco.
+    /// </summary>
+    internal static Task<string> CalcularResumenHuellasAsync(FingerprintScanner huellas, IReadOnlyList<string> rutas)
+        => Task.Run(async () =>
         {
-            if (!_engine.Fingerprints.FpcalcDisponible) return "No está disponible el analizador de audio (fpcalc).";
-            var total = Store.Tracks.Count;
-            if (total == 0) return "";
-            var hechas = _engine.Fingerprints.Contar(Store.Tracks.Select(t => t.FilePath));
-            if (hechas == 0) return $"Sin calcular. Hay que analizar el audio de las {total} canciones (tarda un buen rato la primera vez).";
-            if (hechas < total) return $"{hechas} de {total} analizadas. Faltan {total - hechas}.";
-            return $"Las {total} analizadas.";
+            if (!huellas.FpcalcDisponible) return TextoResumenHuellas(false, rutas.Count, 0);
+            if (rutas.Count == 0) return TextoResumenHuellas(true, 0, 0);
+            await huellas.CargarAsync().ConfigureAwait(false);
+            if (huellas.AvisoCarga.Length > 0) return huellas.AvisoCarga;
+            return TextoResumenHuellas(true, rutas.Count, huellas.Contar(rutas));
+        });
+
+    /// <summary>
+    /// Rehace <see cref="ResumenHuellas"/>, solo si el criterio es el de audio: con los demás no se
+    /// enseña y no hay por qué pagar la lectura.
+    /// </summary>
+    private async Task ActualizarResumenHuellasAsync()
+    {
+        if (!EsPorHuella) return;
+        var version = ++_resumenVersion;
+        var rutas = Store.Tracks.Select(t => t.FilePath).ToList();
+        if (rutas.Count > 0 && _engine.Fingerprints.FpcalcDisponible)
+            ResumenHuellas = _engine.Fingerprints.EstaCargada
+                ? "Comprobando qué canciones tienen ya su huella…"
+                : "Leyendo las huellas guardadas…";
+        try
+        {
+            var texto = await CalcularResumenHuellasAsync(_engine.Fingerprints, rutas);
+            if (version == _resumenVersion) ResumenHuellas = texto;
+        }
+        catch (Exception e)
+        {
+            if (version == _resumenVersion) ResumenHuellas = "No se pudo comprobar el estado de las huellas: " + e.Message;
         }
     }
 
@@ -463,8 +721,9 @@ public partial class DuplicatesViewModel : ScanViewModelBase
                 FpProgress = p.Total > 0 ? p.Hechas * 100.0 / p.Total : 0;
                 Status = $"Analizando el audio: {p.Hechas} de {p.Total}… {p.Archivo}";
             });
-            await _engine.Fingerprints.ScanAsync(rutas, force: false, avance, _fpCts.Token);
-            OnPropertyChanged(nameof(ResumenHuellas));
+            var motivo = await _engine.Fingerprints.ScanAsync(rutas, force: false, avance, _fpCts.Token);
+            _ = ActualizarResumenHuellasAsync();
+            if (motivo.Length > 0) { Status = "No se ha analizado nada. " + motivo; return; }
             Status = _fpCts.IsCancellationRequested
                 ? "Análisis interrumpido. Lo calculado queda guardado; puedes retomarlo cuando quieras."
                 : "Audio analizado.";
@@ -495,6 +754,11 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         {
             var avance = new Progress<(int Hechas, int Total)>(p =>
                 Status = $"Comparando el audio: {p.Hechas} de {p.Total} parejas…");
+
+            // Sin las huellas guardadas, comparar daría «0 grupos con el mismo audio», que es falso:
+            // se dice por qué no se puede comparar y la tabla se queda como estaba.
+            await _engine.Fingerprints.CargarAsync();
+            if (_engine.Fingerprints.AvisoCarga is { Length: > 0 } aviso) { Status = aviso; return; }
 
             var groups = await Task.Run(
                 () => FingerprintDuplicates.Find(lista, t => _engine.Fingerprints.Get(t.FilePath),
@@ -560,7 +824,11 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     /// <summary>Las copias marcadas, para que la vista pueda confirmar antes de borrar.</summary>
     public List<DupRow> ParaPapelera() => Rows.Where(r => r.Marcada).ToList();
 
-    /// <summary>Envía el archivo seleccionado a la Papelera de Windows (recuperable), no lo borra del todo.</summary>
+    /// <summary>
+    /// Envía el archivo seleccionado a la papelera del sistema (recuperable), no lo borra del todo.
+    /// Si la papelera se niega (por ejemplo, en una unidad que no tiene), se dice el motivo y la
+    /// copia se queda en la tabla con su marca.
+    /// </summary>
     [RelayCommand]
     private void SendToRecycleBin()
     {
@@ -568,8 +836,11 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         if (row == null || string.IsNullOrEmpty(row.FilePath)) return;
         _preview.Stop();   // si suena, el archivo está abierto y no se puede mover a la papelera
         var (ok, err) = Services.Papelera.Enviar(row.FilePath);
-        Status = ok ? $"Enviado a la papelera: {row.FileName}" : "No se pudo enviar a la papelera: " + err;
-        if (ok) Store.RemoveTrack(row.FilePath);
+        var desmarcadas = ok ? QuitarDeLaTabla(new[] { row.FilePath }) : 0;
+        // El estado va después: QuitarDeLaTabla repinta y pone el resumen de grupos.
+        Status = ok
+            ? $"Enviado a la papelera: {row.FileName}." + NotaDesmarcadas(desmarcadas)
+            : "No se pudo enviar a la papelera: " + (string.IsNullOrWhiteSpace(err) ? "motivo desconocido." : err);
     }
 
     /// <summary>Envía a la papelera TODAS las copias marcadas. La vista confirma antes de llamar.</summary>
@@ -580,20 +851,18 @@ public partial class DuplicatesViewModel : ScanViewModelBase
 
         _preview.Stop();
         var borrados = new List<string>();
-        var fallos = new List<string>();
+        var fallos = new List<(string Archivo, string Motivo)>();
         foreach (var r in objetivo)
         {
             var (ok, err) = Services.Papelera.Enviar(r.FilePath);
             if (ok) borrados.Add(r.FilePath);
-            else fallos.Add($"{r.FileName}: {err}");
+            else fallos.Add((r.FileName, err));
         }
 
         // De una sola vez: quitarlos uno a uno recalcularía la biblioteca entera por cada archivo.
-        Store.RemoveTracks(borrados);
+        // Las que no se han podido enviar siguen en la tabla y marcadas, para reintentarlo o decidir.
+        var desmarcadas = QuitarDeLaTabla(borrados);
 
-        // RemoveTracks dispara Changed -> Recompute, que rehace la lista; el estado se pone después.
-        Status = fallos.Count == 0
-            ? $"{borrados.Count} copia(s) enviadas a la papelera."
-            : $"{borrados.Count} enviadas, {fallos.Count} con problemas. La primera: {fallos[0]}";
+        Status = ResumenPapelera(borrados.Count, fallos) + NotaDesmarcadas(desmarcadas);
     }
 }

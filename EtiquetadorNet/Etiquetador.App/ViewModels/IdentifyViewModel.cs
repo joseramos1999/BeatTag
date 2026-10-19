@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -147,6 +148,7 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
     public IdentifyViewModel(AppEngine engine)
     {
         _engine = engine;
+        _avisoCargando = new AvisoCompartido(v => Cargando = v);
         // Solo se rehace sola si YA se está usando esta pestaña. Recorrer la biblioteca entera cada
         // vez que otra pestaña la reescanea es trabajo tirado: mientras la tabla esté vacía no hay
         // nada que refrescar, y se rellena al entrar aquí (lo hace el shell).
@@ -186,14 +188,162 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
 
     /// <summary>
     /// Canciones que se enviarían a comprobar: las que no están excluidas y no tienen ya respuesta
-    /// guardada. Es lo que se le enseña al usuario antes de empezar, porque es lo que va a pagar.
+    /// guardada. Es lo que se le enseña al usuario antes de empezar, porque es lo que va a pagar, y
+    /// lo que se consulta después: se calcula una sola vez por clic.
+    ///
+    /// En segundo plano. A cada canción se le parte el nombre (con varias expresiones regulares) y
+    /// se mira la fecha y el tamaño del archivo: con 13.500 canciones en un disco aparte son
+    /// segundos. Antes se hacía en el hilo de la interfaz y DOS veces por clic (antes del diálogo y
+    /// otra vez al aceptar), con la ventana congelada en los dos momentos. RecomponerAsync ya había
+    /// sacado ese mismo trabajo del hilo de la interfaz por el mismo motivo.
     /// </summary>
-    public List<string> PorConsultar(bool force)
-        => _engine.Library.Tracks
-            .Select(t => t.FilePath)
+    public Task<List<string>> PorConsultarAsync(bool force)
+        => PendientesAsync(_engine.Library.Tracks.Select(t => t.FilePath).ToList(),
+                           _engine.Identificacion, PagoEfectivo, force);
+
+    /// <summary>
+    /// Lo que queda por consultar de <paramref name="rutas"/>, decidiendo qué está ya respondido con
+    /// el permiso de pago que de verdad va a usar la pasada.
+    ///
+    /// Tiene que ser <see cref="PagoEfectivo"/> y no la casilla tal cual. Visto en revisión: con
+    /// «Usar también AudD» marcada pero sin clave de AudD, la lista se filtraba como si el de pago
+    /// fuera a consultar, así que todas las canciones a las que AcoustID ya había dicho «no» -el
+    /// 97 % de la biblioteca, si reconoce el 2,8 %- volvían a la lista. Como la pasada ya no vuelve
+    /// a filtrar, cada «Comprobar» repetía unas 13.000 consultas a AcoustID (más de hora y media) y
+    /// las guardaba otra vez como no cerradas, de modo que la siguiente las repetía de nuevo. El
+    /// número del diálogo también salía inflado. Lo mismo con el máximo de pago a 0.
+    /// </summary>
+    internal static Task<List<string>> PendientesAsync(IReadOnlyList<string> rutas, IdentificationScanner escaner,
+                                                       bool pagoEfectivo, bool force)
+        => FiltrarPorConsultarAsync(rutas, p => escaner.Consultado(p, pagoEfectivo), force);
+
+    private bool _preparando;
+
+    /// <summary>
+    /// El aviso que tapa la tabla. Lo piden a la vez la preparación de «Comprobar» y el recálculo de
+    /// la tabla, y antes era un único sí/no: el primero que terminaba lo quitaba aunque el otro
+    /// siguiera, y con la tabla otra vez a la vista se podía lanzar un reanálisis en plena
+    /// preparación.
+    /// </summary>
+    private readonly AvisoCompartido _avisoCargando;
+
+    /// <summary>
+    /// Por qué no se puede empezar ahora otra comprobación ni un reanálisis, o "" si se puede. Puro,
+    /// para probarlo.
+    ///
+    /// Visto en revisión: el reanálisis solo miraba si había una comprobación en curso, no si se
+    /// estaba preparando la lista de «Comprobar». Si se lanzaba entonces, la comprobación que el
+    /// usuario aceptaba después en el diálogo se descartaba sin decir nada.
+    /// </summary>
+    internal static string MotivoParaNoEmpezar(bool comprobando, bool preparando)
+        => comprobando ? "Hay una comprobación en curso: espera a que termine o cancélala."
+         : preparando ? "Se está preparando la lista de «Comprobar»: espera a que aparezca el aviso."
+         : "";
+
+    /// <summary>Lo que impide empezar ahora (ver <see cref="MotivoParaNoEmpezar"/>), o "".</summary>
+    public string MotivoOcupada => MotivoParaNoEmpezar(IsBusy, _preparando);
+
+    /// <summary>
+    /// Calcula, para el diálogo de confirmación, lo que se va a consultar. Mientras tanto se ve el
+    /// aviso de «Preparando la lista…» y un segundo clic no empieza otra preparación. Devuelve null
+    /// si ya había algo en marcha.
+    /// </summary>
+    public async Task<List<string>?> PrepararComprobacionAsync(bool force)
+    {
+        if (MotivoOcupada.Length > 0) return null;
+        _preparando = true;
+        try
+        {
+            using (_avisoCargando.Mostrar())
+                return await PorConsultarAsync(force);
+        }
+        finally { _preparando = false; }
+    }
+
+    /// <summary>
+    /// El filtro de <see cref="PorConsultarAsync"/>, separado de la aplicación para poder probarlo:
+    /// fuera las excluidas (mezclas, mashups, acapellas) y, salvo que se fuerce, las que ya tienen
+    /// respuesta. Corre siempre en un hilo de fondo.
+    /// </summary>
+    internal static Task<List<string>> FiltrarPorConsultarAsync(IReadOnlyList<string> rutas,
+                                                                Func<string, bool> consultado, bool force)
+        => Task.Run(() => rutas
             .Where(p => !Identificacion.SeExcluye(p, out _))
-            .Where(p => force || !_engine.Identificacion.Consultado(p, UsarPago))
-            .ToList();
+            .Where(p => force || !consultado(p))
+            .ToList());
+
+    /// <summary>Lo que se pregunta al usuario antes de consultar, con el coste y lo que sale del equipo.</summary>
+    public sealed record AvisoConsulta(string Titulo, string Cuerpo, string Nota, string Boton);
+
+    /// <summary>Precio de una consulta de pago de AudD, en dólares: 5 $ cada 1.000.</summary>
+    internal const double CostePorConsultaPago = 5.0 / 1000.0;
+
+    /// <summary>
+    /// Sin motor de pago, reanalizar unas pocas filas no necesita confirmación; a partir de aquí sí,
+    /// por el tiempo: AcoustID atiende unas 2,5 consultas por segundo y cada canción hay que
+    /// recortarla antes.
+    /// </summary>
+    internal const int UmbralAvisoSinPago = 50;
+
+    /// <summary>
+    /// El aviso previo a una comprobación, o null si no hace falta preguntar. Puro, para probarlo.
+    ///
+    /// Esto es lo único de la aplicación que gasta dinero del usuario y que además saca audio de su
+    /// ordenador, así que con el motor de pago se pregunta SIEMPRE, también al reanalizar desde el
+    /// clic derecho. Antes «Reanalizar con otro fragmento» llamaba directamente a la comprobación:
+    /// con AudD activado y un máximo de 2.000, reanalizar 400 filas seleccionadas podía enviar 400
+    /// fragmentos de audio y gastar unos 2 $ sin ningún aviso de coste ni de privacidad.
+    /// </summary>
+    /// <param name="canciones">Las que se van a consultar.</param>
+    /// <param name="pagoEfectivo">El motor de pago va a poder consultar (<see cref="PagoEfectivo"/>).</param>
+    /// <param name="maxPago">Tope de consultas de pago de la pasada.</param>
+    /// <param name="force">Se pregunta también por las que ya tenían respuesta.</param>
+    /// <param name="otroFragmento">Es un reanálisis con otro fragmento de las filas elegidas.</param>
+    internal static AvisoConsulta? AvisoAntesDeConsultar(int canciones, bool pagoEfectivo, int maxPago,
+                                                         bool force, bool otroFragmento)
+    {
+        if (canciones <= 0) return null;
+        if (otroFragmento && !pagoEfectivo && canciones <= UmbralAvisoSinPago) return null;
+
+        // Cuántas acabarán en el motor de pago NO se sabe de antemano: depende de cuántas resuelva
+        // el gratuito, que es justo lo que se va a averiguar. Así que se da el TECHO -el caso peor,
+        // si el gratuito no acertara ni una- acotado por el tope que el propio usuario ha puesto.
+        // Prometer una cifra exacta que no se puede calcular sería peor que dar el máximo.
+        var dePago = pagoEfectivo ? Math.Min(canciones, Math.Max(0, maxPago)) : 0;
+        var coste = dePago * CostePorConsultaPago;
+
+        // Qué sale del ordenador NO es lo mismo en los dos motores, y decirlo mal es lo peor que
+        // puede hacer un aviso de privacidad. AcoustID recibe una HUELLA -una firma numérica que se
+        // calcula aquí y de la que no se puede reconstruir el sonido-; AudD recibe AUDIO de verdad.
+        var cuerpo = dePago == 0
+            ? "De cada una se calcula aquí, en tu ordenador, una huella digital del sonido y se envía "
+              + "SOLO esa huella a AcoustID. El audio no sale de tu equipo."
+            : "De cada una se calcula aquí una huella digital del sonido y se envía a AcoustID, que no "
+              + "recibe audio. Únicamente de las que AcoustID no reconozca se enviará además un "
+              + "FRAGMENTO DE AUDIO de 12 segundos a AudD, que es lo que le permite reconocerlas.";
+        if (otroFragmento) cuerpo += " Se usará un punto del tema distinto al de la consulta anterior.";
+        else if (force) cuerpo += " Se preguntará también por las que ya tenían respuesta guardada.";
+
+        var nota = dePago == 0
+            ? "Solo se usará AcoustID, que es gratuito e ilimitado: no cuesta nada. "
+              + $"Atiende unas 2,5 consultas por segundo, así que tardará al menos {TextUtils.FormatEta(canciones / 2.5)}. "
+            : $"Primero AcoustID, que es gratis. Solo lo que no reconozca irá a AudD, con un máximo de "
+              + $"{dePago} consultas de pago: como mucho "
+              + coste.ToString("0.00", CultureInfo.CurrentCulture) + " $, y menos cuantas más resuelva el gratuito. "
+              + "Las primeras 300 de tu cuenta de AudD no se cobran. ";
+
+        nota += "El recorte se escribe en una carpeta temporal y se borra en cuanto se recibe la "
+              + "respuesta. Los archivos no se modifican: esta pestaña solo informa"
+              // Reanalizar y «Comprobar todo de nuevo» preguntan otra vez a propósito: ahí no se
+              // puede prometer que nada se pregunte dos veces.
+              + (otroFragmento || force ? "." : ", y ninguna canción se pregunta dos veces.");
+
+        var cuantas = canciones == 1 ? "1 canción" : $"{canciones} canciones";
+        var verbo = canciones == 1 ? "Se va a" : "Se van a";
+        return otroFragmento
+            ? new AvisoConsulta($"{verbo} reanalizar {cuantas} con otro fragmento", cuerpo, nota, "Reanalizar")
+            : new AvisoConsulta($"{verbo} comprobar {cuantas}", cuerpo, nota, "Comprobar");
+    }
 
     /// <summary>Hay motor gratuito: AcoustID solo necesita una clave, que no cuesta nada.</summary>
     public bool HayGratuito => _engine.Config.AcoustIdKey.Trim().Length > 0;
@@ -206,19 +356,43 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
     /// gastar ni una consulta, así que no cuenta: dejarlo contar permitía confirmar una pasada que
     /// el escáner rechazaba después por no tener ningún motor con el que trabajar.
     /// </summary>
-    public bool PagoEfectivo => HayPago && UsarPago && MaxConsultasPago > 0;
+    public bool PagoEfectivo => PagoEfectivoPara(UsarPago, HayPago, MaxConsultasPago);
+
+    /// <summary>
+    /// La regla de <see cref="PagoEfectivo"/>, pura para probarla: casilla marcada, clave de AudD y
+    /// un máximo mayor que cero. Es la que decide también qué negativas del gratuito siguen
+    /// abiertas (<see cref="PendientesAsync"/>), igual que hace el escáner con sus opciones.
+    /// </summary>
+    internal static bool PagoEfectivoPara(bool usarPago, bool hayPago, int maxConsultasPago)
+        => usarPago && hayPago && maxConsultasPago > 0;
 
     /// <summary>Se puede comprobar algo. Sin ninguna de las dos claves no hay nada que hacer aquí.</summary>
     public bool HayAlgunMotor => HayGratuito || PagoEfectivo;
 
+    /// <summary>Con qué permiso de pago se compuso la tabla (ver <see cref="Fila"/>).</summary>
+    private bool _pagoDeLaTabla;
+
     partial void OnUsarPagoChanged(bool value)
     {
         Avisar();
-        // Activar el de pago abre de nuevo las que el gratuito había dado por perdidas.
-        if (_filas.Count > 0) _ = RecomponerAsync();
+        RecomponerSiCambiaElPago();
     }
 
-    partial void OnMaxConsultasPagoChanged(int value) => Avisar();
+    partial void OnMaxConsultasPagoChanged(int value)
+    {
+        Avisar();
+        RecomponerSiCambiaElPago();
+    }
+
+    /// <summary>
+    /// Activar el de pago abre de nuevo las que el gratuito había dado por perdidas, y desactivarlo
+    /// (o dejar el máximo en 0) las vuelve a cerrar. Solo se rehace la tabla cuando eso cambia: el
+    /// máximo se edita cifra a cifra, y marcar la casilla sin clave de AudD no cambia nada.
+    /// </summary>
+    private void RecomponerSiCambiaElPago()
+    {
+        if (_filas.Count > 0 && PagoEfectivo != _pagoDeLaTabla) _ = RecomponerAsync();
+    }
 
     private void Avisar()
     {
@@ -239,19 +413,22 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
         : "Tienes clave de AudD pero el motor de pago está desactivado, y falta la de AcoustID. Actívalo o añade la clave gratuita.";
 
     // --- Comprobación ---
-
-    [RelayCommand]
-    private Task CheckAsync() => RunAsync(force: false);
-
-    [RelayCommand]
-    private Task RecheckAllAsync() => RunAsync(force: true);
+    //
+    // No hay comandos que lancen la comprobación directamente: tanto los botones como el clic
+    // derecho pasan por la vista, que pide confirmación con el coste (AvisoAntesDeConsultar). Un
+    // comando enlazado sin ese paso es justo lo que permitía gastar sin avisar.
 
     /// <param name="soloEstas">
     /// Comprobar únicamente estas rutas en vez de la biblioteca entera. Es lo que usa el
     /// «reanalizar» del clic derecho, que actúa sobre lo seleccionado.
     /// </param>
     /// <param name="otraParte">Enviar un fragmento distinto al de la vez anterior.</param>
-    public async Task RunAsync(bool force, IReadOnlyList<string>? soloEstas = null, bool otraParte = false)
+    /// <param name="pendientes">
+    /// La lista que ya calculó la vista con <see cref="PorConsultarAsync"/> para el diálogo: se
+    /// consulta exactamente lo que el usuario ha aceptado, sin volver a recorrer la biblioteca.
+    /// </param>
+    public async Task RunAsync(bool force, IReadOnlyList<string>? soloEstas = null, bool otraParte = false,
+                               IReadOnlyList<string>? pendientes = null)
     {
         if (IsBusy) return;
         if (_engine.Library.Folders.Count == 0)
@@ -270,7 +447,7 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
         {
             if (!_engine.Library.IsScanned) { Status = "Escaneando biblioteca…"; await _engine.Library.ScanAsync(); }
 
-            var rutas = soloEstas ?? PorConsultar(force);
+            var rutas = soloEstas ?? pendientes ?? await PorConsultarAsync(force);
             if (rutas.Count == 0)
             {
                 await RecomponerAsync();
@@ -289,7 +466,9 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 _engine.Config.AcoustIdKey.Trim(), _engine.Config.AuddToken.Trim(),
                 UsarPago && HayPago, MaxConsultasPago);
 
-            var r = await _engine.Identificacion.ScanAsync(rutas, opciones, force, prog, _cts.Token, otraParte);
+            // force: true porque «rutas» ya es exactamente lo que hay que consultar (filtrado aquí o
+            // elegido por el usuario); sin él, el escáner volvería a mirar archivo por archivo.
+            var r = await _engine.Identificacion.ScanAsync(rutas, opciones, force: true, prog, _cts.Token, otraParte);
 
             await RecomponerAsync();
             // El informe describe una pasada sobre la biblioteca. Reanalizar cuatro filas desde el
@@ -349,11 +528,14 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
     public async Task RecomponerAsync()
     {
         await _turnoRecomponer.WaitAsync().ConfigureAwait(true);
-        Cargando = true;
+        var aviso = _avisoCargando.Mostrar();
         try
         {
             var tracks = _engine.Library.Tracks.ToList();
-            var pago = UsarPago;
+            // El mismo permiso que usará la pasada: con la casilla marcada pero sin clave de AudD,
+            // una negativa del gratuito no está «pendiente del de pago», está respondida.
+            var pago = PagoEfectivo;
+            _pagoDeLaTabla = pago;
 
             // FUERA del hilo de la interfaz. Son catorce mil archivos y a cada uno se le parte el
             // nombre y se le pasan varias expresiones regulares: segundos de trabajo. Hacerlo aquí
@@ -373,10 +555,11 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
             Resumir();
             AplicarFiltro();
         }
-        finally { Cargando = false; _turnoRecomponer.Release(); }
+        finally { aviso.Dispose(); _turnoRecomponer.Release(); }
     }
 
     /// <summary>Veredicto de una canción a partir de lo guardado. Puro: no toca red ni interfaz.</summary>
+    /// <param name="usarPago">El permiso de pago efectivo (<see cref="PagoEfectivo"/>).</param>
     private IdentifyRow Fila(Track t, bool usarPago)
     {
         if (Identificacion.SeExcluye(t.FilePath, out var motivoExcluida))
@@ -598,18 +781,69 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
     }
 
     /// <summary>
-    /// Vuelve a preguntar por las seleccionadas enviando OTRO fragmento del tema.
+    /// Las filas sobre las que actuaría «Reanalizar con otro fragmento» y el aviso que hay que
+    /// enseñar antes (null si no hace falta). La vista pregunta y, si se acepta, llama a
+    /// <see cref="ReanalizarOtroFragmentoAsync"/> con esas mismas filas.
+    /// </summary>
+    public (List<IdentifyRow> Filas, AvisoConsulta? Aviso) PrepararReanalisis()
+    {
+        var filas = Objetivo();
+        return (filas, AvisoAntesDeConsultar(filas.Count, PagoEfectivo, MaxConsultasPago, force: true, otroFragmento: true));
+    }
+
+    /// <summary>
+    /// Vuelve a preguntar por las filas elegidas enviando OTRO fragmento del tema. La vista ya ha
+    /// confirmado el coste (ver <see cref="AvisoAntesDeConsultar"/>).
     ///
     /// Es la respuesta correcta a la mayoría de los avisos falsos: que un fragmento no se reconozca
     /// -o se reconozca mal- suele significar que cayó en un break, en un solo de percusión o en un
     /// trozo hablado, no que la canción sea otra. Cada intento prueba un punto distinto, y se
     /// recuerda cuál se usó para no repetir el mismo trozo.
     /// </summary>
-    [RelayCommand]
-    private async Task ReanalyzeOtherPartAsync()
+    public async Task ReanalizarOtroFragmentoAsync(IReadOnlyList<IdentifyRow> filas)
     {
-        var filas = Objetivo();
         if (filas.Count == 0) { Status = "Selecciona antes alguna canción de la lista."; return; }
         await RunAsync(force: true, soloEstas: filas.Select(f => f.FilePath).ToList(), otraParte: true);
+    }
+}
+
+/// <summary>
+/// Un aviso en pantalla que pueden pedir varias tareas a la vez y que solo se quita cuando termina
+/// la última. Cada tarea pide el suyo con <see cref="Mostrar"/> y lo suelta al desecharlo.
+///
+/// Con un simple sí/no compartido, la primera tarea en terminar lo quitaba aunque la otra siguiera
+/// trabajando. Se usa siempre desde el hilo de la interfaz, así que no necesita cerrojos.
+/// </summary>
+internal sealed class AvisoCompartido
+{
+    private readonly Action<bool> _cambio;
+    private int _peticiones;
+
+    /// <param name="cambio">Se llama al aparecer (true) y al desaparecer (false), una vez cada uno.</param>
+    public AvisoCompartido(Action<bool> cambio) => _cambio = cambio;
+
+    public bool Visible => _peticiones > 0;
+
+    public IDisposable Mostrar()
+    {
+        if (_peticiones++ == 0) _cambio(true);
+        return new Peticion(this);
+    }
+
+    private void Soltar()
+    {
+        if (--_peticiones == 0) _cambio(false);
+    }
+
+    private sealed class Peticion(AvisoCompartido aviso) : IDisposable
+    {
+        private AvisoCompartido? _aviso = aviso;
+
+        // Soltar dos veces la misma petición no puede quitar la de otra tarea.
+        public void Dispose()
+        {
+            _aviso?.Soltar();
+            _aviso = null;
+        }
     }
 }

@@ -20,11 +20,13 @@ namespace Etiquetador.App.Services;
 /// una instalación aparte en cada equipo), y la biblioteca a la que sirve esto es MP3 en su
 /// práctica totalidad: 14.653 MP3 y 21 WAV en la del autor.
 ///
-/// Reparto:
+/// Reparto para medir (<see cref="Abrir"/>):
 ///   Windows        AudioFileReader, el códec del sistema. IGUAL QUE SIEMPRE, no se toca.
 ///   macOS  .mp3    NLayer, en C# puro.
 ///   macOS  .wav    WaveFileReader de NAudio, que ya era código gestionado.
 ///   macOS  resto   no soportado, y se dice claramente.
+/// Para recortar (<see cref="AbrirComoWaveStream"/>), MP3 y WAV igual en los dos sistemas, y el
+/// resto, en Windows, con Media Foundation.
 ///
 /// No se pierde nada respecto a antes: en macOS no funcionaba NADA, y en Windows sigue funcionando
 /// exactamente lo mismo, con el mismo decodificador y por tanto los mismos números. Verificado no
@@ -63,9 +65,15 @@ public static class AudioSamples
     /// Abre el archivo como <see cref="WaveStream"/>: bytes PCM con posición (CurrentTime, Read),
     /// para lo que necesite saltar a un punto del archivo en vez de leerlo entero.
     ///
-    /// Este camino es el mismo en los dos sistemas, y a diferencia de <see cref="Abrir"/> eso no es
-    /// un problema: aquí no se MIDE nada. Lo que sale de aquí se reproduce o se manda a identificar,
-    /// y para ambas cosas da igual qué decodificador lo produjo.
+    /// MP3 y WAV van por el mismo camino en los dos sistemas, y a diferencia de <see cref="Abrir"/>
+    /// eso no es un problema: aquí no se MIDE nada. Lo que sale de aquí se reproduce o se manda a
+    /// identificar, y para ambas cosas da igual qué decodificador lo produjo.
+    ///
+    /// El resto de formatos (FLAC, M4A, AAC, WMA…) se abren en Windows con el decodificador del
+    /// sistema, igual que ya hacía la vista previa. Antes se rechazaban en TODOS los sistemas con
+    /// «Fuera de Windows solo se pueden leer MP3 y WAV», también en Windows: «Comprobar audio» daba
+    /// por fallida cada canción de una biblioteca en FLAC o M4A, y con el motor de pago activo cada
+    /// una se contaba como consulta de pago aunque no se enviara nada.
     /// </summary>
     public static WaveStream AbrirComoWaveStream(string path)
     {
@@ -78,7 +86,24 @@ public static class AudioSamples
 
         if (ext == ".wav") return new WaveFileReader(path);
 
-        throw new NotSupportedException($"Fuera de Windows solo se pueden leer MP3 y WAV (este es {ext}).");
+        if (OperatingSystem.IsWindows()) return AbrirConMediaFoundation(path, ext);
+
+        throw new NotSupportedException($"En este sistema solo se pueden leer archivos MP3 y WAV (este es {ext}).");
+    }
+
+    /// <summary>
+    /// El decodificador del sistema de Windows (Media Foundation), con un mensaje que se entienda
+    /// si no sabe abrir el archivo: el error de origen es un código COM que no dice nada.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static WaveStream AbrirConMediaFoundation(string path, string ext)
+    {
+        try { return new MediaFoundationReader(path); }
+        catch (Exception e) when (e is not FileNotFoundException and not DirectoryNotFoundException and not UnauthorizedAccessException)
+        {
+            throw new NotSupportedException(
+                $"Windows no ha podido decodificar este archivo {ext}: está dañado o falta el códec en este equipo ({e.Message.Trim()}).", e);
+        }
     }
 
     /// <summary>

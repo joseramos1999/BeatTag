@@ -34,6 +34,12 @@ public sealed class LoudnessScanner
     private readonly object _lock = new();
     private bool _dirty;
 
+    /// <summary>
+    /// El archivo existe pero no se pudo leer ni apartar (bloqueado por otro programa, sin
+    /// permiso). No se guarda encima: perderíamos unas mediciones que quizá están bien.
+    /// </summary>
+    private bool _noSobrescribir;
+
     public LoudnessScanner(string cacheFile, Logger? log = null)
     {
         _file = cacheFile;
@@ -135,19 +141,28 @@ public sealed class LoudnessScanner
         Save();
     }
 
+    /// <summary>
+    /// Guarda las mediciones. Se escribe a un temporal y se intercambia de una vez
+    /// (<see cref="ArchivoDatos.EscribirJson"/>), como las demás cachés.
+    ///
+    /// Antes se escribía directamente encima de sonoridad.json (3,3 MB, 17.000 entradas en una
+    /// biblioteca real). Un cierre o un corte de luz a mitad lo dejaba truncado, el arranque
+    /// siguiente lo leía como vacío sin decir nada y el primer guardado lo pisaba: había que volver
+    /// a decodificar la biblioteca entera, decenas de minutos con todos los núcleos.
+    /// </summary>
     public void Save()
     {
         lock (_lock)
         {
             if (!_dirty) return;
-            try
+            if (_noSobrescribir)
             {
-                var dir = Path.GetDirectoryName(_file);
-                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                File.WriteAllText(_file, JsonSerializer.Serialize(_map), Encoding.UTF8);
-                _dirty = false;
+                _log?.Err("Volumen: sonoridad.json no se pudo leer al arrancar, así que las mediciones nuevas no se guardan encima.");
+                return;
             }
-            catch { }
+            var error = ArchivoDatos.EscribirJson(_file, _map);
+            if (error.Length == 0) _dirty = false;
+            else _log?.Err("Volumen: no se pudieron guardar las mediciones: " + error);
         }
     }
 
@@ -161,15 +176,17 @@ public sealed class LoudnessScanner
         }
     }
 
+    /// <summary>
+    /// Lee las mediciones guardadas. Si el archivo está dañado se aparta como
+    /// «sonoridad.json.ilegible_fecha» y se anota en el registro, en vez de tratarlo como vacío en
+    /// silencio y pisarlo en el siguiente guardado.
+    /// </summary>
     private void Load()
     {
-        try
-        {
-            if (!File.Exists(_file)) return;
-            var d = JsonSerializer.Deserialize<Dictionary<string, Entry>>(File.ReadAllText(_file, Encoding.UTF8));
-            if (d != null) _map = new Dictionary<string, Entry>(d, StringComparer.OrdinalIgnoreCase);
-        }
-        catch { }
+        var leido = ArchivoDatos.LeerJson<Dictionary<string, Entry>>(_file);
+        if (leido.Aviso.Length > 0) _log?.Err("Volumen: " + leido.Aviso);
+        _noSobrescribir = leido.NoSobrescribir;
+        if (leido.Datos != null) _map = new Dictionary<string, Entry>(leido.Datos, StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool Stat(string path, out long m, out long s)

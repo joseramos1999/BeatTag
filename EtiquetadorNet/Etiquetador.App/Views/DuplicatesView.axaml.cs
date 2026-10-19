@@ -43,16 +43,11 @@ public partial class DuplicatesView : UserControl
         var objetivo = vm.ParaPapelera();
         if (objetivo.Count == 0) { vm.Status = "No hay ninguna copia marcada."; return; }
 
-        // Aviso claro si alguna marcada es la que se recomendaba conservar: puede ser deliberado,
-        // pero conviene que no pase inadvertido.
-        var mejores = objetivo.Count(r => r.EsMejor);
-        var aviso = mejores > 0
-            ? $" Atención: {mejores} de ellas son la copia recomendada de su grupo."
-            : "";
-
+        // Aviso claro si alguna marcada es la que se recomendaba conservar, o si alguna canción se
+        // quedaría sin ninguna copia: puede ser deliberado, pero conviene que no pase inadvertido.
         var ok = await ConfirmDialog.AskAsync(owner,
             $"Se van a enviar {objetivo.Count} archivos a la papelera",
-            $"Afecta a {objetivo.Select(r => r.Group).Distinct().Count()} grupo(s) de duplicados." + aviso,
+            ViewModels.DuplicatesViewModel.CuerpoConfirmarPapelera(vm.Rows),
             Services.Papelera.NotaConfirmacion(objetivo.Select(r => r.FilePath)),
             "Enviar a la papelera");
 

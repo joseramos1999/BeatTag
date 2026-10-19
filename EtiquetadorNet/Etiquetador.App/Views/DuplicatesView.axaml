@@ -84,7 +84,7 @@
                     Background="#6B7280" Foreground="White" FontWeight="SemiBold" />
             <Button Content="🗑 Enviar marcadas a la papelera" Click="TrashMarked_Click"
                     Background="#DC2626" Foreground="White" FontWeight="SemiBold"
-                    ToolTip.Tip="Los archivos van a la Papelera de Windows, así que se pueden recuperar desde ahí." />
+                    ToolTip.Tip="Los archivos van a la papelera del sistema, así que se pueden recuperar desde ahí. Si la papelera no admite alguno, no se toca y se indica el motivo." />
             <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource TextoSecundario}"
                        Text="{Binding Marcadas, StringFormat='{}{0} marcadas'}" />
         </StackPanel>

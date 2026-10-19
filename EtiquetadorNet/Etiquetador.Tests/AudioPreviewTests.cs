@@ -89,8 +89,9 @@ public class AudioPreviewTests
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
-    // Un formato que no se sabe leer fuera de Windows falla con un mensaje claro, no con lo que
-    // sea que lance por dentro el intento de abrirlo.
+    // Un formato que no se sabe leer falla con un mensaje claro, no con lo que sea que lance por
+    // dentro el intento de abrirlo. Fuera de Windows se dice qué formatos sí se leen; en Windows
+    // (hallazgo A6) lo intenta el decodificador del sistema, y si no puede, se dice eso.
     [Fact]
     public void Un_formato_no_soportado_falla_claro()
     {
@@ -101,7 +102,7 @@ public class AudioPreviewTests
             File.WriteAllBytes(flac, new byte[] { 0x66, 0x4C, 0x61, 0x43, 0, 0, 0, 0 });
 
             var ex = Assert.Throws<NotSupportedException>(() => AudioPreview.EscribirRecorte(flac));
-            Assert.Contains("MP3", ex.Message);
+            Assert.Contains(OperatingSystem.IsWindows() ? "Windows no ha podido decodificar" : "MP3", ex.Message);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }

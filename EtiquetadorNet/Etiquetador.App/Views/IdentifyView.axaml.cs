@@ -1,5 +1,3 @@
-using System;
-using System.Globalization;
 using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -26,7 +24,10 @@ public partial class IdentifyView : UserControl
     /// No es una formalidad. Esto es lo único de la aplicación que gasta dinero del usuario y que
     /// además saca audio de su ordenador; arrancar una pasada de doce mil canciones porque alguien
     /// pulsó un botón sin saber qué implicaba sería indefendible. Se dice el número exacto, porque
-    /// el número exacto se puede calcular.
+    /// el número exacto se puede calcular. El texto lo compone el ViewModel
+    /// (<see cref="IdentifyViewModel.AvisoAntesDeConsultar"/>), el mismo que usa el reanálisis.
+    ///
+    /// La lista se calcula en segundo plano UNA vez y es la que se consulta al aceptar.
     /// </summary>
     private async System.Threading.Tasks.Task PreguntarYComprobar(bool force)
     {
@@ -35,7 +36,12 @@ public partial class IdentifyView : UserControl
 
         if (!vm.HayAlgunMotor) { vm.Status = vm.MotoresInfo; return; }
 
-        var pendientes = vm.PorConsultar(force);
+        var pendientes = await vm.PrepararComprobacionAsync(force);
+        if (pendientes == null) return;   // ya había una preparación o una comprobación en marcha
+
+        // Si mientras se preparaba la lista ha empezado otra comprobación, no se pregunta: aceptar
+        // el diálogo no haría nada, y RunAsync la descartaría sin decirlo.
+        if (vm.MotivoOcupada is { Length: > 0 } ocupada) { vm.Status = ocupada; return; }
         if (pendientes.Count == 0)
         {
             await vm.RecomponerAsync();
@@ -43,39 +49,37 @@ public partial class IdentifyView : UserControl
             return;
         }
 
-        // Cuántas acabarán en el motor de pago NO se sabe de antemano: depende de cuántas resuelva
-        // el gratuito, que es justo lo que se va a averiguar. Así que se da el TECHO -el caso peor,
-        // si el gratuito no acertara ni una- acotado por el tope que el propio usuario ha puesto.
-        // Prometer una cifra exacta que no se puede calcular sería peor que dar el máximo.
-        var dePago = vm.UsarPago && vm.HayPago ? Math.Min(pendientes.Count, vm.MaxConsultasPago) : 0;
-        var coste = dePago * 5.0 / 1000.0;
+        var aviso = IdentifyViewModel.AvisoAntesDeConsultar(pendientes.Count, vm.PagoEfectivo,
+                                                            vm.MaxConsultasPago, force, otroFragmento: false);
+        if (aviso != null && !await ConfirmDialog.AskAsync(owner, aviso.Titulo, aviso.Cuerpo, aviso.Nota, aviso.Boton))
+            return;
 
-        // Qué sale del ordenador NO es lo mismo en los dos motores, y decirlo mal es lo peor que
-        // puede hacer un aviso de privacidad. AcoustID recibe una HUELLA -una firma numérica que se
-        // calcula aquí y de la que no se puede reconstruir el sonido-; AudD recibe AUDIO de verdad.
-        var cuerpo = dePago == 0
-            ? "De cada una se calcula aquí, en tu ordenador, una huella digital del sonido y se envía "
-              + "SOLO esa huella a AcoustID. El audio no sale de tu equipo."
-            : "De cada una se calcula aquí una huella digital del sonido y se envía a AcoustID, que no "
-              + "recibe audio. Únicamente de las que AcoustID no reconozca se enviará además un "
-              + "FRAGMENTO DE AUDIO de 12 segundos a AudD, que es lo que le permite reconocerlas.";
-        if (force) cuerpo += " Se preguntará también por las que ya tenían respuesta guardada.";
+        await vm.RunAsync(force, pendientes: pendientes);
+    }
 
-        var nota = dePago == 0
-            ? "Solo se usará AcoustID, que es gratuito e ilimitado: esta pasada no cuesta nada. "
-            : $"Primero AcoustID, que es gratis. Solo lo que no reconozca irá a AudD, con un máximo de "
-            + $"{dePago} consultas de pago: como mucho "
-            + coste.ToString("0.00", CultureInfo.CurrentCulture) + " $, y menos cuantas más resuelva el gratuito. "
-            + "Las primeras 300 de tu cuenta de AudD no se cobran. ";
+    private void Reanalyze_Click(object? sender, RoutedEventArgs e) => _ = PreguntarYReanalizar();
 
-        nota += "El recorte se escribe en una carpeta temporal y se borra en cuanto se recibe la "
-              + "respuesta. Los archivos no se modifican: esta pestaña solo informa, y ninguna canción "
-              + "se pregunta dos veces.";
+    /// <summary>
+    /// «Reanalizar con otro fragmento» desde el clic derecho. Con el motor de pago puede gastar una
+    /// consulta por fila y enviar audio, así que pide la misma confirmación que «Comprobar»; sin
+    /// él, solo si son muchas filas, por el tiempo.
+    /// </summary>
+    private async System.Threading.Tasks.Task PreguntarYReanalizar()
+    {
+        if (DataContext is not IdentifyViewModel vm) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
 
-        var ok = await ConfirmDialog.AskAsync(owner,
-            $"Se van a comprobar {pendientes.Count} canciones", cuerpo, nota, "Comprobar");
+        // También mientras se prepara la lista de «Comprobar», no solo durante la comprobación.
+        if (vm.MotivoOcupada is { Length: > 0 } ocupada) { vm.Status = ocupada; return; }
+        if (!vm.HayAlgunMotor) { vm.Status = vm.MotoresInfo; return; }
 
-        if (ok) await vm.RunAsync(force);
+        var (filas, aviso) = vm.PrepararReanalisis();
+        if (filas.Count == 0) { vm.Status = "Selecciona antes alguna canción de la lista."; return; }
+
+        if (aviso != null && !await ConfirmDialog.AskAsync(owner, aviso.Titulo, aviso.Cuerpo, aviso.Nota, aviso.Boton))
+            return;
+
+        await vm.ReanalizarOtroFragmentoAsync(filas);
     }
 
     private void Grid_DoubleTapped(object? sender, TappedEventArgs e) => GridBehaviors.AutoFitOnHeaderDoubleTap(sender, e);

@@ -69,7 +69,9 @@
                     <MenuItem Header="Corregir en el Editor" Command="{Binding EditTrackCommand}" />
                     <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
                     <Separator />
-                    <MenuItem Header="Reanalizar con otro fragmento" Command="{Binding ReanalyzeOtherPartCommand}"
+                    <!-- Por la vista y no por un comando: con AudD activado gasta y envía audio, así que
+                         antes se pide la misma confirmación que en «Comprobar». -->
+                    <MenuItem Header="Reanalizar con otro fragmento" Click="Reanalyze_Click"
                               ToolTip.Tip="Vuelve a preguntar enviando otro trozo del tema. Casi siempre un aviso falso es que el fragmento cayó en un break o en un trozo hablado, no que la canción sea otra." />
                     <MenuItem Header="Descartar el aviso (la canción es correcta)" Command="{Binding DiscardSelectedCommand}"
                               ToolTip.Tip="Deja de contar como discrepancia. No se toca el archivo ni se borra lo identificado." />

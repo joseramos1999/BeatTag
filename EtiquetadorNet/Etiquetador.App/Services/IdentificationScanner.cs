@@ -219,15 +219,34 @@ public sealed class IdentificationScanner
                                          CancellationToken ct = default, bool otraParte = false)
     {
         if (otraParte) force = true;   // pedir otro fragmento implica no hacer caso de lo guardado
-        var pendientes = force ? paths.ToList() : paths.Where(p => !Consultado(p, o.UsarPago)).ToList();
+
+        var gratisOn = o.AcoustIdKey.Trim().Length > 0;
+        var pagoOn = o.UsarPago && o.AuddToken.Trim().Length > 0 && o.MaxPago > 0;
+
+        // Filtrar lo ya respondido mira la fecha y el tamaño de cada archivo: con 13.500 canciones
+        // en un disco aparte son segundos, así que va fuera del hilo de quien llama. La pestaña ya
+        // pasa la lista filtrada (con force), y entonces no se repite.
+        //
+        // Con el permiso de pago que de verdad se va a usar (pagoOn), no con la casilla: sin clave
+        // de AudD o con el máximo a 0, una negativa del gratuito está cerrada, y reabrirla repetiría
+        // la consulta a AcoustID de casi toda la biblioteca en cada pasada sin poder llegar al de pago.
+        List<string> pendientes;
+        try
+        {
+            pendientes = force
+                ? paths.ToList()
+                : await Task.Run(() => paths.Where(p => !Consultado(p, pagoOn)).ToList(), ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return new Resumen(0, 0, 0, 0, 0, "", Cancelada: true);
+        }
         if (pendientes.Count == 0)
         {
             progreso?.Report((paths.Count, paths.Count, ""));
             return new Resumen(0, 0, 0, 0, 0, "");
         }
 
-        var gratisOn = o.AcoustIdKey.Trim().Length > 0;
-        var pagoOn = o.UsarPago && o.AuddToken.Trim().Length > 0 && o.MaxPago > 0;
         if (!gratisOn && !pagoOn)
             return new Resumen(0, 0, 0, 0, 0, "no hay ningún motor disponible: falta la clave de AcoustID y la de AudD");
 
@@ -297,19 +316,38 @@ public sealed class IdentificationScanner
                         return;
                     }
 
-                    // Freno de mano: pasado el tope no se gasta más, y la canción queda SIN cerrar
-                    // para poder retomarla otro día. Marcarla como «no reconocida» sería mentir:
-                    // a esta no se le ha llegado a preguntar.
-                    if (Interlocked.Increment(ref consultasPago) > o.MaxPago)
+                    // El fragmento se prepara ANTES de reservar la consulta. Si el audio no se puede
+                    // leer, no se envía nada y no puede contar como gasto. Antes se reservaba primero
+                    // y no se devolvía: con 300 FLAC ilegibles la pasada se paraba por «alcanzado el
+                    // tope de 300 consultas de pago» y el resumen decía «300 gastadas» sin haber
+                    // enviado ni una.
+                    var fragmento = await PrepararFragmentoAsync(ruta, inicio, SegundosPago, tk).ConfigureAwait(false);
+                    if (fragmento.Error.Length > 0)
                     {
-                        Interlocked.Decrement(ref consultasPago);
-                        if (Interlocked.CompareExchange(ref errorParada, $"alcanzado el tope de {o.MaxPago} consultas de pago", "") == "")
-                            _log?.Log($"Identificación: alcanzado el tope de {o.MaxPago} consultas de pago; se detiene.", LogKind.No);
-                        parada.Cancel();
+                        Interlocked.Increment(ref fallidas);
+                        _log?.Detail($"    {nombre} · PAGO · no se envía: {fragmento.Error}");
+                        Avanzar(ruta);
                         return;
                     }
 
-                    var p = await PorAuddAsync(ruta, o.AuddToken.Trim(), inicio, tk).ConfigureAwait(false);
+                    RespuestaId p;
+                    try
+                    {
+                        // Freno de mano: pasado el tope no se gasta más, y la canción queda SIN cerrar
+                        // para poder retomarla otro día. Marcarla como «no reconocida» sería mentir:
+                        // a esta no se le ha llegado a preguntar.
+                        if (Interlocked.Increment(ref consultasPago) > o.MaxPago)
+                        {
+                            Interlocked.Decrement(ref consultasPago);
+                            if (Interlocked.CompareExchange(ref errorParada, $"alcanzado el tope de {o.MaxPago} consultas de pago", "") == "")
+                                _log?.Log($"Identificación: alcanzado el tope de {o.MaxPago} consultas de pago; se detiene.", LogKind.No);
+                            parada.Cancel();
+                            return;
+                        }
+
+                        p = await _audd.IdentificarAsync(fragmento.Ruta, o.AuddToken.Trim(), tk).ConfigureAwait(false);
+                    }
+                    finally { BorrarRecorte(fragmento.Ruta); }
 
                     if (p.Detener)
                     {
@@ -403,28 +441,34 @@ public sealed class IdentificationScanner
         }
     }
 
-    /// <summary>Motor de pago: recorta, pregunta y borra. El fragmento no sobrevive a la consulta.</summary>
-    private async Task<RespuestaId> PorAuddAsync(string ruta, string token, double inicio, CancellationToken ct)
+    /// <summary>Un fragmento listo para enviar, o el motivo por el que no se pudo preparar.</summary>
+    private readonly record struct Fragmento(string Ruta, string Error);
+
+    /// <summary>
+    /// Recorta el fragmento que se enviará al motor de pago. Quien llama lo borra después de la
+    /// consulta (<see cref="BorrarRecorte"/>): el fragmento no sobrevive a ella.
+    /// </summary>
+    private async Task<Fragmento> PrepararFragmentoAsync(string ruta, double inicio, double segundos, CancellationToken ct)
     {
-        AudioSamples.Recorte? recorte = null;
         try
         {
-            recorte = await Task.Run(
-                () => AudioSamples.EscribirRecorteWav(ruta, inicio, SegundosPago, ct), ct)
+            var recorte = await Task.Run(
+                () => AudioSamples.EscribirRecorteWav(ruta, inicio, segundos, ct), ct)
                 .ConfigureAwait(false);
-
-            return await _audd.IdentificarAsync(recorte.Value.Ruta, token, ct).ConfigureAwait(false);
+            return new Fragmento(recorte.Ruta, "");
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception e)
         {
             _log?.Detail($"      identificación: no se pudo preparar {Path.GetFileName(ruta)} · {e.Message}");
-            return new RespuestaId(null, "no se pudo leer el audio: " + e.Message);
+            return new Fragmento("", "no se pudo leer el audio: " + e.Message);
         }
-        finally
-        {
-            if (recorte != null) { try { File.Delete(recorte.Value.Ruta); } catch { } }
-        }
+    }
+
+    private static void BorrarRecorte(string ruta)
+    {
+        if (ruta.Length == 0) return;
+        try { File.Delete(ruta); } catch { }
     }
 
     /// <summary>Reparte los turnos del motor gratuito para no pasarse de su límite de 3 por segundo.</summary>
