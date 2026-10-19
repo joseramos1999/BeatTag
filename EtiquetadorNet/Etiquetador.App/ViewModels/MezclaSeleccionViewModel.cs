@@ -54,7 +54,7 @@ public sealed partial class MezclaSeleccionViewModel : ObservableObject
         // Sin nombrar teclas: para seleccionar varias se usa Ctrl en Windows y Cmd en macOS.
         => seleccionadas < 2 ? "Selecciona al menos dos canciones para ordenarlas."
          : seleccionadas > MezclaViewModel.Maximo
-            ? $"Has seleccionado {seleccionadas} canciones; para ordenar una sesión el máximo es {MezclaViewModel.Maximo}."
+            ? $"Has seleccionado {seleccionadas:N0} canciones; para ordenar una sesión el máximo es {MezclaViewModel.Maximo:N0}."
          : "";
 
     /// <summary>Ordena la selección; con <paramref name="primera"/>, empezando por esa. Fuera del hilo de la interfaz.</summary>

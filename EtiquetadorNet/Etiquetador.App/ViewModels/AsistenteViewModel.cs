@@ -1488,8 +1488,12 @@ public sealed partial class MezclaViewModel : ObservableObject
     /// </summary>
     public const int Maximo = 1000;
 
-    /// <summary>Las canciones del último orden, con su ficha: «Empezar por esta» las reordena sin volver a filtrar.</summary>
-    private List<(Track Track, FichaDj? Ficha)> _ultimas = new();
+    /// <summary>
+    /// Las rutas de las canciones del último orden: «Empezar por esta» las reordena sin volver a filtrar
+    /// la colección. Solo las rutas: la canción y su ficha se vuelven a buscar al reordenar (ver
+    /// <see cref="Vigentes"/>).
+    /// </summary>
+    private List<string> _ultimas = new();
 
     public MezclaViewModel(AsistenteViewModel padre)
     {
@@ -1535,7 +1539,7 @@ public sealed partial class MezclaViewModel : ObservableObject
             return;
         }
 
-        _ultimas = canciones;
+        _ultimas = canciones.Select(x => x.Track.FilePath).ToList();
         var orden = await Task.Run(() => OrdenMezcla.Ordenar(canciones), ct);
         Mostrar(orden);
         _p.Status = TextoEstado(OrdenMezcla.Resumir(orden));
@@ -1543,17 +1547,68 @@ public sealed partial class MezclaViewModel : ObservableObject
 
     /// <summary>
     /// Rehace el orden con la canción elegida como primera («Empezar por esta», en el menú de la tabla).
-    /// Usa las mismas canciones y fichas del último orden: no vuelve a filtrar la colección.
+    /// Usa las canciones del último orden, sin volver a filtrar la colección, pero tal como están AHORA
+    /// en la biblioteca y con las fichas recién leídas (<see cref="Vigentes"/>).
     /// </summary>
     internal Task EmpezarPorAsync(PasoFila fila) => _p.TrabajarAsync("Reordenando…", async ct =>
     {
         if (_ultimas.Count == 0) { _p.Status = "Ordena antes una colección."; return; }
-        var primera = fila.Paso.Track;
-        var canciones = _ultimas;
+        // Copiar las referencias es inmediato; recorrerlas va fuera del hilo de la interfaz.
+        var rutas = _ultimas;
+        var biblioteca = _p.Engine.Library.Tracks.ToList();
+        var fichas = _p.FichasActuales();
+        var vigentes = await Task.Run(() => Vigentes(rutas, biblioteca, fichas, fila.FilePath), ct);
+        _ultimas = vigentes.Canciones.Select(x => x.Track.FilePath).ToList();
+        if (vigentes.Primera is not { } primera)
+        {
+            _p.Status = "Esa canción ya no está en la biblioteca: se ha enviado a la papelera, movido o renombrado. Vuelve a ordenar la colección.";
+            return;
+        }
+
+        var canciones = vigentes.Canciones;
         var orden = await Task.Run(() => OrdenMezcla.Ordenar(canciones, primera), ct);
         Mostrar(orden);
-        _p.Status = $"Ordenada empezando por «{EntornoCanciones.Nombre(primera)}». " + TextoEstado(OrdenMezcla.Resumir(orden));
+        _p.Status = TextoReordenada(primera, vigentes.Fuera, OrdenMezcla.Resumir(orden));
     });
+
+    /// <summary>Las canciones del último orden tal como están ahora, la de arranque y cuántas ya no están.</summary>
+    internal readonly record struct CancionesVigentes(List<(Track Track, FichaDj? Ficha)> Canciones, Track? Primera, int Fuera);
+
+    /// <summary>
+    /// Vuelve a buscar en la biblioteca, por su ruta, las canciones del último orden, con su ficha
+    /// actual. Las que ya no están se quedan fuera.
+    ///
+    /// Se guardaban los objetos de canción del último «Ordenar», y reordenar con ellos traía de vuelta
+    /// lo que ya no estaba: una canción enviada a la papelera desde la propia tabla volvía a salir con
+    /// «Empezar por esta», y la lista M3U8 la incluía. También el BPM, la tonalidad y la ficha eran los
+    /// de entonces: importar de rekordbox o releer la biblioteca crea objetos nuevos.
+    /// </summary>
+    internal static CancionesVigentes Vigentes(IReadOnlyList<string> rutas, IReadOnlyList<Track> biblioteca,
+                                               IReadOnlyDictionary<string, FichaDj> fichas, string rutaPrimera)
+    {
+        var buscadas = new HashSet<string>(rutas, StringComparer.OrdinalIgnoreCase);
+        var actuales = new Dictionary<string, Track>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in biblioteca)
+            if (buscadas.Contains(t.FilePath)) actuales[t.FilePath] = t;
+
+        var canciones = new List<(Track Track, FichaDj? Ficha)>();
+        var vistas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in rutas)
+            if (vistas.Add(r) && actuales.TryGetValue(r, out var t)) canciones.Add((t, fichas.GetValueOrDefault(t.FilePath)));
+        return new CancionesVigentes(canciones, actuales.GetValueOrDefault(rutaPrimera), buscadas.Count - canciones.Count);
+    }
+
+    /// <summary>La línea de estado tras «Empezar por esta»: con cuál empieza y cuántas se han quedado fuera.</summary>
+    internal static string TextoReordenada(Track primera, int fuera, ResumenMezcla r)
+    {
+        var quitadas = fuera switch
+        {
+            0 => "",
+            1 => "1 canción del orden anterior ya no está en la biblioteca y se ha quitado. ",
+            _ => $"{fuera} canciones del orden anterior ya no están en la biblioteca y se han quitado. ",
+        };
+        return $"Ordenada empezando por «{EntornoCanciones.Nombre(primera)}». " + quitadas + TextoEstado(r);
+    }
 
     private void Mostrar(IReadOnlyList<PasoMezcla> orden)
     {

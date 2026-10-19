@@ -90,7 +90,9 @@ public sealed partial class VersionesViewModel : ObservableObject
         IReadOnlyList<PiezaVersion> piezas;
         try
         {
-            piezas = await Task.Run(() => cache.Obtener(_entorno.Biblioteca, out _).De(q));
+            // Con los datos de esta instantánea, no con los que tenía el índice al construirse: tras
+            // importar BPM y tonalidad, las demás piezas salían con los de antes.
+            piezas = await Task.Run(() => cache.Versiones(_entorno.Biblioteca, q));
         }
         finally { Ocupado = false; }
 

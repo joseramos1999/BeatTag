@@ -270,4 +270,26 @@ public class VersionesCancionTests
         Assert.Equal(2, cache.Construcciones);
         Assert.Single(tercero.De(bib[0]));
     }
+
+    [Fact]
+    public void Las_piezas_salen_con_el_bpm_y_la_tonalidad_de_ahora_aunque_el_indice_se_reutilice()
+    {
+        var original = T("Karol G - Bichota.mp3", "Karol G", "Bichota");
+        var acapella = T("Karol G - Bichota (Acapella).mp3", "Karol G", "Bichota (Acapella)");   // sin BPM ni tonalidad
+        var cache = new CacheIndiceVersiones();
+        Assert.Equal(2, cache.Versiones(new List<Track> { original, acapella }, original).Count);
+
+        // Se importan BPM y tonalidad de rekordbox: la biblioteca relee la acapella y es otro objeto,
+        // con la misma ruta, artista y título. El índice sigue valiendo, pero los datos son los nuevos.
+        var releida = T("Karol G - Bichota (Acapella).mp3", "Karol G", "Bichota (Acapella)");
+        releida.Bpm = 96;
+        releida.Key = "8A";
+        var piezas = cache.Versiones(new List<Track> { original, releida }, original);
+
+        Assert.Equal(1, cache.Construcciones);
+        var pieza = piezas.Single(p => p.Tipo == TipoPieza.Acapella);
+        Assert.Same(releida, pieza.Track);
+        Assert.Equal("8A", pieza.Track.KeyCamelot);
+        Assert.Same(original, piezas.Single(p => p.EsLaConsultada).Track);
+    }
 }

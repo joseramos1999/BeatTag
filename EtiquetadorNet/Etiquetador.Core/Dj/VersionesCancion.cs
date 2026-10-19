@@ -450,4 +450,30 @@ public sealed class CacheIndiceVersiones
         reutilizado = false;
         return indice;
     }
+
+    /// <summary>
+    /// Las versiones de <paramref name="consultada"/>, cada pieza con los datos que tiene AHORA en
+    /// <paramref name="canciones"/>. Es lo que debe usar quien las enseña.
+    ///
+    /// El índice se reutiliza mientras no cambien la ruta, el artista ni el título, pero guarda los
+    /// objetos de canción de cuando se construyó. Al importar BPM y tonalidad de rekordbox, o al
+    /// releer la biblioteca, cada canción retocada pasa a ser un objeto nuevo: con los del índice, el
+    /// diálogo enseñaba el BPM y el Camelot de antes (a menudo vacíos) justo en las columnas que el
+    /// DJ mira para elegir versión. Meter el BPM y la tonalidad en la firma obligaría a rehacer el
+    /// índice (unos 2 s) tras cada importación; volver a buscar cada pieza por su ruta cuesta poco.
+    /// </summary>
+    public IReadOnlyList<PiezaVersion> Versiones(IReadOnlyList<Track> canciones, Track consultada)
+        => ConDatosActuales(Obtener(canciones, out _).De(consultada), canciones);
+
+    /// <summary>Cada pieza con la canción de esa ruta en <paramref name="canciones"/>; si no está, se queda la que tenía.</summary>
+    public static IReadOnlyList<PiezaVersion> ConDatosActuales(IReadOnlyList<PiezaVersion> piezas, IReadOnlyList<Track> canciones)
+    {
+        var buscadas = new HashSet<string>(piezas.Select(p => p.Track.FilePath), StringComparer.OrdinalIgnoreCase);
+        var actuales = new Dictionary<string, Track>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in canciones)
+            if (buscadas.Contains(t.FilePath)) actuales[t.FilePath] = t;
+        return piezas
+            .Select(p => actuales.TryGetValue(p.Track.FilePath, out var t) && !ReferenceEquals(t, p.Track) ? p with { Track = t } : p)
+            .ToList();
+    }
 }

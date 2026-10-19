@@ -16,8 +16,9 @@ public sealed record OpcionesCompatibles
     public double MargenBpm { get; init; } = 0.06;
 
     /// <summary>
-    /// Margen de tempo cuando la consultada es una acapella: 3 %. La voz sola es lo que peor soporta
-    /// el estiramiento de tiempo, y lanzarla sobre una base que exige más ajuste suena artificial.
+    /// Margen de tempo cuando una de las dos es una acapella (la consultada o la candidata): 3 %. La
+    /// voz sola es lo que peor soporta el estiramiento de tiempo, y lanzarla sobre una base que exige
+    /// más ajuste suena artificial.
     /// </summary>
     public double MargenBpmAcapella { get; init; } = 0.03;
 
@@ -62,7 +63,10 @@ public sealed record Compatible(Track Track, TipoPieza Tipo, EncajeTono Tono, in
 
 /// <summary>Lo que ha encontrado la búsqueda, y lo que ha dejado fuera por falta de datos.</summary>
 /// <param name="EsAcapella">La consultada es una acapella: se buscan bases y el margen es el estrecho.</param>
-/// <param name="Margen">El margen de tempo aplicado, en tanto por uno.</param>
+/// <param name="Margen">
+/// El margen de tempo aplicado, en tanto por uno. Desde una canción normal, las acapellas candidatas
+/// se miden con <see cref="OpcionesCompatibles.MargenBpmAcapella"/>.
+/// </param>
 /// <param name="SinBpm">Candidatas con tono compatible que no se han podido comprobar porque no tienen BPM.</param>
 /// <param name="Aviso">Por qué la lista está vacía o es parcial, en una frase. Vacío si no hay nada que decir.</param>
 public sealed record ResultadoCompatibles(IReadOnlyList<Compatible> Canciones, bool EsAcapella, double Margen, int SinBpm, string Aviso);
@@ -89,7 +93,9 @@ public static class Compatibles
     /// cuyo tempo esté dentro del margen. Se excluyen la propia canción y las demás versiones suyas
     /// (otra copia, su extended, su acapella…), que para eso está «Ver sus versiones». Si
     /// <paramref name="x"/> es una acapella, se buscan BASES: fuera otras acapellas y los mashups (ya
-    /// llevan voz, y a veces dos), y el margen de tempo es el estrecho.
+    /// llevan voz, y a veces dos), y el margen de tempo es el estrecho. Desde una canción normal, las
+    /// acapellas candidatas también se miden con el margen estrecho, para que la relación sea la misma
+    /// en los dos sentidos.
     /// </summary>
     /// <param name="fichaDe">La ficha de DJ de cada canción, si la tiene: su energía y su momento entran en el coste.</param>
     public static ResultadoCompatibles Buscar(Track x, IEnumerable<Track> biblioteca, OpcionesCompatibles? opciones = null,
@@ -127,6 +133,13 @@ public static class Compatibles
 
             var tipo = IndiceVersiones.Clasificar(c.FilePath);
             if (esAcapella && tipo is (TipoPieza.Acapella or TipoPieza.Mezcla)) continue;
+            // Una acapella candidata pide también el margen estrecho: lo que no soporta el estiramiento
+            // es la voz, se busque desde ella o desde la base. Sin esto la relación no era simétrica:
+            // con 96 y 100 BPM (un 4 %), la acapella salía entre las compatibles de la base, pero la
+            // base no salía entre las bases de la acapella.
+            if (!esAcapella && tipo == TipoPieza.Acapella && x.Bpm > 0
+                && DiferenciaRelativa(x.Bpm, c.Bpm) > opciones.MargenBpmAcapella + 1e-9)
+                continue;
             if (mismaCancion.Count > 0 && ClavesCancion(c).Overlaps(mismaCancion)) continue;
 
             var d = OrdenMezcla.DiferenciaBpm(x.Bpm, c.Bpm);

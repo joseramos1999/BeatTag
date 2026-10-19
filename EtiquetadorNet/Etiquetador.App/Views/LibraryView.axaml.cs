@@ -95,7 +95,8 @@ public partial class LibraryView : UserControl
 
     /// <summary>
     /// Envía a la papelera las canciones seleccionadas, tras confirmar. Van a la papelera del sistema,
-    /// así que se pueden recuperar; en una unidad sin papelera se niega y lo dice.
+    /// así que se pueden recuperar; en una unidad sin papelera se niega y lo dice. La nota del diálogo y
+    /// el envío van fuera del hilo de la interfaz: la selección puede ser de miles de canciones.
     /// </summary>
     private async Task EnviarAPapeleraAsync()
     {
@@ -108,8 +109,9 @@ public partial class LibraryView : UserControl
         var cuerpo = rutas.Count == 1
             ? Path.GetFileName(rutas[0])
             : string.Join("\n", rutas.Take(5).Select(Path.GetFileName)) + (rutas.Count > 5 ? $"\n… y {rutas.Count - 5} más" : "");
-        var ok = await ConfirmDialog.AskAsync(owner, titulo, cuerpo, Services.Papelera.NotaConfirmacion(rutas), "Enviar a la papelera");
-        if (ok) vm.EnviarAPapelera(rutas);
+        var nota = await vm.NotaPapeleraAsync(rutas);
+        var ok = await ConfirmDialog.AskAsync(owner, titulo, cuerpo, nota, "Enviar a la papelera");
+        if (ok) await vm.EnviarAPapeleraAsync(rutas);
     }
 
     private async void AddFolder_Click(object? sender, RoutedEventArgs e)

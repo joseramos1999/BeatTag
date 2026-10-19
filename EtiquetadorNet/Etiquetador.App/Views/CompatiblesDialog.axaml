@@ -43,13 +43,13 @@
                 <Button Content="Abrir carpeta" Command="{Binding AbrirCarpetaCommand}" />
                 <Button Content="Guardar como lista (M3U8)" Click="Exportar_Click" IsEnabled="{Binding HayFilas}"
                         Background="#0D9488" Foreground="White" FontWeight="SemiBold"
-                        ToolTip.Tip="Guarda la canción consultada y las compatibles, en este orden, como lista M3U8. No copia ni mueve archivos." />
+                        ToolTip.Tip="Guarda la canción consultada y, detrás, las compatibles en el orden en que se ven en la tabla, como lista M3U8. No copia ni mueve archivos." />
                 <Button Content="Cerrar" Click="Cerrar_Click" MinWidth="90" IsCancel="True" />
             </StackPanel>
         </Grid>
 
         <Panel>
-            <DataGrid Name="Tabla" ItemsSource="{Binding Filas}" SelectedItem="{Binding Seleccionada}"
+            <DataGrid Name="Tabla" ItemsSource="{Binding Vista}" SelectedItem="{Binding Seleccionada}"
                       x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
                       CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
                       DoubleTapped="Tabla_DoubleTapped">

@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia.Collections;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Etiquetador.App.Services;
@@ -125,6 +126,12 @@ public sealed partial class CompatiblesViewModel : ObservableObject
 
     public ObservableCollection<CompatibleFila> Filas { get; } = new();
 
+    /// <summary>
+    /// Lo que enseña la tabla: las filas en el orden en que se ven. La tabla deja ordenar por columnas
+    /// (por BPM, por tipo…), y la lista M3U8 se guarda en ese orden, que es el que el DJ tiene delante.
+    /// </summary>
+    public DataGridCollectionView Vista { get; }
+
     public IReadOnlyList<Opcion<FiltroCompatibles>> Filtros { get; } = new[]
     {
         new Opcion<FiltroCompatibles>(FiltroCompatibles.Todas, "Todas"),
@@ -149,6 +156,7 @@ public sealed partial class CompatiblesViewModel : ObservableObject
         _entorno = entorno;
         _filtro = Filtros[0];
         _consultada = consultada;
+        Vista = new DataGridCollectionView(Filas);
     }
 
     public bool HayFilas => Filas.Count > 0;
@@ -181,10 +189,11 @@ public sealed partial class CompatiblesViewModel : ObservableObject
         EsAcapella = _resultado.EsAcapella;
         Titulo = (EsAcapella ? "Bases para «" : "Compatibles con «") + EntornoCanciones.Nombre(x) + "»";
         var margen = $"{_resultado.Margen * 100:0} %";
+        var margenVoz = $"{opciones.MargenBpmAcapella * 100:0} %";
         Detalle = EntornoCanciones.TonoYTempo(x) + ", según las etiquetas del archivo. "
                   + (EsAcapella
                       ? $"Es una acapella: se buscan bases en el mismo tono o a un paso en la rueda Camelot, a menos de un {margen} de tempo, sin otras acapellas ni mashups."
-                      : $"Entran las del mismo tono o a un paso en la rueda Camelot{(IncluirSaltos ? " (o a dos, con los saltos)" : "")}, a menos de un {margen} de tempo, contando doble y mitad.");
+                      : $"Entran las del mismo tono o a un paso en la rueda Camelot{(IncluirSaltos ? " (o a dos, con los saltos)" : "")}, a menos de un {margen} de tempo (un {margenVoz} para las acapellas), contando doble y mitad.");
         Aviso = _resultado.Aviso;
         Rellenar();
         Status = "";
@@ -254,13 +263,14 @@ public sealed partial class CompatiblesViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Guarda como M3U8 la canción consultada seguida de las compatibles, en el orden de la lista. No
-    /// copia ni mueve archivos.
+    /// Guarda como M3U8 la canción consultada seguida de las compatibles, en el orden en que se ven en
+    /// la tabla (<see cref="Vista"/>): si el DJ la ha ordenado por una columna, en ese. No copia ni
+    /// mueve archivos.
     /// </summary>
     public string ExportarM3u(string destino)
     {
         if (Consultada == null || Filas.Count == 0) { Status = "No hay ninguna canción en la lista."; return "vacia"; }
-        var items = new[] { Consultada }.Concat(Filas.Select(f => f.Dato.Track))
+        var items = new[] { Consultada }.Concat(Vista.OfType<CompatibleFila>().Select(f => f.Dato.Track))
             .Select(t => new PlaylistItem(t.FilePath, t.Artist ?? "", string.IsNullOrWhiteSpace(t.Title) ? t.FileName : t.Title, t.DurationSeconds));
         var err = PlaylistWriter.Write(destino, items);
         Status = err.Length == 0

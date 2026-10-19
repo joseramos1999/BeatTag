@@ -370,6 +370,25 @@ public class MezclaCompatiblesTests
     }
 
     [Fact]
+    public void El_margen_estrecho_de_las_acapellas_vale_en_los_dos_sentidos()
+    {
+        var acapella = T("C - Voz (Acapella).mp3", "8A", 96, "C", "Voz (Acapella)");
+        var cerca = T("A - Base cerca.mp3", "8A", 98, "A", "Base cerca");      // 2 %
+        var lejos = T("B - Base lejos.mp3", "8A", 100, "B", "Base lejos");     // 4 %
+        var bib = new[] { acapella, cerca, lejos };
+
+        // Desde la acapella solo entra la base cercana...
+        Assert.Equal(new[] { "A - Base cerca.mp3" }, Compatibles.Buscar(acapella, bib).Canciones.Select(c => c.Track.FileName));
+        // ...y desde las bases, la acapella sale solo en la cercana: antes salía también en la lejana.
+        Assert.Contains(Compatibles.Buscar(cerca, bib).Canciones, c => c.Track == acapella);
+        Assert.DoesNotContain(Compatibles.Buscar(lejos, bib).Canciones, c => c.Track == acapella);
+
+        // A la misma distancia, un tema normal sí entra: el margen ancho no cambia para el resto.
+        var tema = T("D - Tema.mp3", "8A", 96, "D", "Tema");
+        Assert.Contains(Compatibles.Buscar(lejos, new[] { lejos, tema }).Canciones, c => c.Track == tema);
+    }
+
+    [Fact]
     public void Para_una_acapella_a_igual_coste_van_primero_las_instrumentales()
     {
         var x = T("Voz (Acapella).mp3", "8A", 96, "V", "Voz (Acapella)");
