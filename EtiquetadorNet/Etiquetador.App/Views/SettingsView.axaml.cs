@@ -170,4 +170,12 @@ public partial class SettingsView : UserControl
         vm.RepararRekordbox(origen, destino);
         _ = vm.ActualizarRenombradosAsync();
     }
+
+    // --- Pendientes: búsqueda del pool (equipo «listas», tanda 3) ---
+
+    // La plantilla se guarda al salir de la casilla, no con cada tecla.
+    private void PoolBusqueda_LostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.SettingsViewModel vm) vm.GuardarPoolBusqueda();
+    }
 }

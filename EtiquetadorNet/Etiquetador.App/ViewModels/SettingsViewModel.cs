@@ -863,4 +863,58 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
         Status = $"Olvidadas {n} canciones aplicadas. Volverán a salir al analizar.";
         _engine.Logger.Log($"Olvidadas {n} canciones aplicadas.");
     }
+
+    // =================================================================================================
+    // Pendientes: dirección de búsqueda del pool (equipo «listas», tanda 3)
+    // =================================================================================================
+
+    /// <summary>
+    /// Plantilla de «Buscar en mi pool» (Pendientes). Se pone en la configuración al escribirla y se
+    /// guarda al salir de la casilla, con «Probar» o con «Guardar»: guardar con cada tecla volvería a
+    /// cifrar y escribir toda la configuración por cada letra.
+    /// </summary>
+    public string PoolBusquedaUrl
+    {
+        get => _engine.Config.PoolBusquedaUrl;
+        set
+        {
+            var v = (value ?? "").Trim();
+            if (v == _engine.Config.PoolBusquedaUrl) return;
+            _poolBusquedaGuardada ??= _engine.Config.PoolBusquedaUrl;   // la que había en el archivo
+            _engine.Config.PoolBusquedaUrl = v;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(AvisoPoolBusqueda));
+        }
+    }
+
+    /// <summary>Por qué la plantilla escrita no sirve, o vacío.</summary>
+    public string AvisoPoolBusqueda => BusquedaEnPool.Validar(PoolBusquedaUrl);
+
+    public string EjemploPoolBusqueda => BusquedaEnPool.Ejemplo;
+
+    /// <summary>La plantilla tal como está guardada en el archivo; null mientras no se haya tocado.</summary>
+    private string? _poolBusquedaGuardada;
+
+    /// <summary>Guarda la plantilla si ha cambiado desde la última vez.</summary>
+    public void GuardarPoolBusqueda()
+    {
+        if (_poolBusquedaGuardada == null || PoolBusquedaUrl == _poolBusquedaGuardada) return;
+        if (_engine.SaveConfig(out var error))
+        {
+            _poolBusquedaGuardada = PoolBusquedaUrl;
+            Status = PoolBusquedaUrl.Length == 0 ? "Búsqueda del pool borrada." : "Búsqueda del pool guardada.";
+        }
+        else Status = "⚠ NO se guardó la búsqueda del pool: " + error;
+    }
+
+    /// <summary>Abre la búsqueda de una canción de ejemplo, para comprobar que la dirección lleva al sitio correcto.</summary>
+    [RelayCommand]
+    private async Task ProbarPoolBusquedaAsync()
+    {
+        var url = BusquedaEnPool.Url(PoolBusquedaUrl, "Daft Punk", "One More Time", out var motivo);
+        if (url.Length == 0) { Status = motivo; return; }
+        GuardarPoolBusqueda();
+        await Shell.OpenUrlAsync(url);
+        Status = "Abierta en el navegador la búsqueda de «Daft Punk One More Time». Si sale la página de resultados de tu pool, la dirección es correcta.";
+    }
 }

@@ -1,7 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.VisualTree;
 using Etiquetador.App.ViewModels;
 
 namespace Etiquetador.App.Views;
@@ -22,14 +21,9 @@ public partial class TrendsView : UserControl
 
     private void Grid_DoubleTapped(object? sender, TappedEventArgs e) => GridBehaviors.AutoFitOnHeaderDoubleTap(sender, e);
 
-    // Clic derecho: selecciona la fila bajo el puntero para que el menú actúe sobre ella.
-    private void Grid_PointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (sender is not DataGrid grid) return;
-        if (!e.GetCurrentPoint(grid).Properties.IsRightButtonPressed) return;
-        if (e.Source is Control c && c.FindAncestorOfType<DataGridRow>() is { DataContext: { } item })
-            grid.SelectedItem = item;
-    }
+    // Clic derecho: selecciona la fila bajo el puntero para que el menú actúe sobre ella. Sobre una fila
+    // que ya está elegida no cambia nada, para no perder una selección de varias antes de «Añadir a pendientes».
+    private void Grid_PointerPressed(object? sender, PointerPressedEventArgs e) => TeclaEnergia.SeleccionarConClicDerecho(sender, e);
 
     // Copia a una carpeta las canciones del chart que ya tienes.
     private async void CreateFolder_Click(object? sender, RoutedEventArgs e)
@@ -41,5 +35,16 @@ public partial class TrendsView : UserControl
     private async void ExportM3u_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is TrendsViewModel vm) await AccionesLista.ExportarM3uAsync(this, vm);
+    }
+
+    // Lo que falta, a Pendientes: las filas elegidas o todas las que faltan.
+    private void AnadirSeleccionadas_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is TrendsViewModel vm) AccionesLista.AnadirAPendientes(RowsGrid, vm, todasLasQueFaltan: false);
+    }
+
+    private void AnadirTodas_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is TrendsViewModel vm) AccionesLista.AnadirAPendientes(RowsGrid, vm, todasLasQueFaltan: true);
     }
 }

@@ -8,11 +8,13 @@ using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Etiquetador.App.Services;
 using Etiquetador.Core;
 using Etiquetador.Core.Analysis;
+using Etiquetador.Core.Dj;
 using Etiquetador.Core.Providers;
 
 namespace Etiquetador.App.ViewModels;
@@ -52,9 +54,17 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
     /// <summary>Cómo se llama esta pestaña en el registro.</summary>
     protected abstract string Etiqueta { get; }
 
-    partial void OnSoloLasQueTengoChanged(bool value)
+    partial void OnSoloLasQueTengoChanged(bool value) => AplicarFiltro();
+
+    /// <summary>
+    /// Los dos filtros de la tabla a la vez: «solo las disponibles» y «solo las nuevas» de una lista
+    /// seguida. Cada casilla por su lado pisaba el filtro de la otra.
+    /// </summary>
+    private void AplicarFiltro()
     {
-        RowsView.Filter = value ? o => o is TrendRow r && r.Tengo : null;
+        var tengo = SoloLasQueTengo;
+        var nuevas = SoloNuevas;
+        RowsView.Filter = !tengo && !nuevas ? null : o => o is TrendRow r && (!tengo || r.Tengo) && (!nuevas || r.EsNueva);
         RowsView.Refresh();
     }
 
@@ -100,14 +110,14 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
         var rutas = await Task.Run(() => lista.Select(t => r.Indice.Buscar(t.Artist, t.Title)).ToList(), ct);
         ct.ThrowIfCancellationRequested();
 
-        Rows.Clear();
+        OlvidarListaAnterior();
         for (var i = 0; i < lista.Count; i++)
         {
             var t = lista[i];
             Rows.Add(new TrendRow
             {
                 Position = t.Position, Artist = t.Artist, Title = t.Title,
-                DurText = t.DurText, FilePath = rutas[i], SpotifyId = t.SpotifyId,
+                DurText = t.DurText, FilePath = rutas[i], SpotifyId = t.SpotifyId, Enlace = t.Link ?? "",
             });
         }
         RowsView.Refresh();
@@ -189,11 +199,25 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
     {
         var tengo = Rows.Where(r => r.Tengo).OrderBy(r => r.Position).ToList();
         if (tengo.Count == 0) { Status = "Ninguna de esta lista está en la biblioteca."; return "vacio"; }
+        return EscribirM3u(destino, tengo.Select(r => new PlaylistItem(r.FilePath, r.Artist, r.Title, 0)).ToList(), "");
+    }
 
-        var items = tengo.Select(r => new PlaylistItem(r.FilePath, r.Artist, r.Title, 0));
+    /// <summary>
+    /// Como <see cref="ExportarM3u"/>, pero en el orden para mezclar (<see cref="OrdenarParaMezclarCommand"/>)
+    /// en vez de en el de la lista, y con la duración de cada archivo.
+    /// </summary>
+    public string ExportarOrdenM3u(string destino)
+    {
+        if (PasosMezcla.Count == 0) { Status = "Pulsa antes «Ordenar para mezclar»."; return "vacio"; }
+        var items = PasosMezcla.Select(p => new PlaylistItem(p.FilePath, p.Artist, p.Title, p.Paso.Track.DurationSeconds)).ToList();
+        return EscribirM3u(destino, items, " en el orden para mezclar");
+    }
+
+    private string EscribirM3u(string destino, IReadOnlyList<PlaylistItem> items, string comoVa)
+    {
         var err = PlaylistWriter.Write(destino, items);
         Status = err.Length == 0
-            ? $"Lista guardada con {tengo.Count} canciones: {Path.GetFileName(destino)}"
+            ? $"Lista guardada con {items.Count} canciones{comoVa}: {Path.GetFileName(destino)}"
             : "No se pudo guardar la lista: " + err;
         return err;
     }
@@ -256,7 +280,7 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
     private void PlayPreview()
     {
         if (IsBusy) { Status = "Espera a que termine el proceso en curso."; return; }
-        var path = SelectedRow?.FilePath;
+        var path = RutaSeleccionada;
         if (string.IsNullOrEmpty(path)) { Status = "Esa grabación no está en la biblioteca."; return; }
         try { _engine.Preview.Toggle(path); }
         catch (Exception e) { Status = "No se pudo reproducir: " + e.Message; }
@@ -265,10 +289,346 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
     [RelayCommand]
     private async Task OpenContainingFolderAsync()
     {
-        var path = SelectedRow?.FilePath;
+        var path = RutaSeleccionada;
         if (string.IsNullOrEmpty(path)) { Status = "Esa grabación no está en la biblioteca."; return; }
         await Shell.OpenContainingFolderAsync(path);
     }
+
+    /// <summary>El archivo de la fila elegida en la tabla que se está viendo: la lista o el orden para mezclar.</summary>
+    private string? RutaSeleccionada => VerOrdenMezcla ? SelectedPaso?.FilePath : SelectedRow?.FilePath;
+
+    /// <summary>
+    /// Lo que dependía de la lista anterior deja de valer: sus filas, su orden para mezclar y si se
+    /// sigue. Al cargar otra lista, o al cambiar de fuente en Tendencias.
+    /// </summary>
+    protected void OlvidarListaAnterior()
+    {
+        Rows.Clear();
+        PasosMezcla.Clear();
+        VerOrdenMezcla = false;
+        ResumenMezcla = "";
+        _leida = null;
+        EstaSeguida = false;
+        Novedades = "";
+    }
+
+    // =================================================================================================
+    // Pendientes (P6): lo que falta de la lista, a la lista de pendientes
+    // =================================================================================================
+
+    /// <summary>Las pendientes y las listas seguidas, compartidas con la página Pendientes.</summary>
+    protected SeguimientoListas Seguimiento => SeguimientoListas.De(_engine);
+
+    /// <summary>
+    /// Añade a pendientes las filas que te faltan: las elegidas o, con <paramref name="todasLasQueFaltan"/>,
+    /// todas las de la lista. Las que ya tienes no se añaden: no hay nada que conseguir.
+    /// </summary>
+    public void AnadirAPendientes(IEnumerable<TrendRow> elegidas, bool todasLasQueFaltan)
+    {
+        if (IsBusy) { Status = "Espera a que termine el proceso en curso."; return; }
+        if (Rows.Count == 0) { Status = "Carga antes una lista."; return; }
+        var faltan = (todasLasQueFaltan ? Rows : elegidas).Where(r => !r.Tengo).ToList();
+        if (faltan.Count == 0)
+        {
+            Status = todasLasQueFaltan
+                ? "Ya tienes todas las canciones de esta lista."
+                : "Elige en la tabla alguna canción que no esté en la biblioteca: las que ya tienes no se añaden a pendientes.";
+            return;
+        }
+        var origen = DescribirLista()?.Nombre ?? Etiqueta;
+        var r = Seguimiento.AnadirPendientes(faltan.Select(f => new NuevaPendiente(f.Artist, f.Title, origen, f.Enlace)));
+        Status = TextoAlta(r.Hechas, r.Otras) + (r.Error.Length > 0 ? $" No se ha podido guardar: {r.Error}" : "");
+    }
+
+    /// <summary>
+    /// Abre en el navegador la búsqueda de la fila elegida en el pool del usuario (la plantilla de
+    /// Ajustes → Pendientes), igual que desde la página Pendientes.
+    /// </summary>
+    [RelayCommand]
+    private async Task BuscarEnPoolAsync()
+    {
+        if (SelectedRow is not { } fila) { Status = "Elige antes una canción de la tabla."; return; }
+        var url = BusquedaEnPool.Url(_engine.Config.PoolBusquedaUrl, fila.Artist, fila.Title, out var motivo);
+        if (url.Length == 0) { Status = motivo; return; }
+        await Shell.OpenUrlAsync(url);
+        Status = $"Buscando «{BusquedaEnPool.TextoBusqueda(fila.Artist, fila.Title)}» en tu pool, en el navegador.";
+    }
+
+    /// <summary>«3 canciones añadidas a Pendientes (2 ya estaban).»</summary>
+    internal static string TextoAlta(int anadidas, int yaEstaban)
+    {
+        if (anadidas == 0)
+            return yaEstaban == 1 ? "Esa canción ya estaba en Pendientes." : $"Esas {yaEstaban} canciones ya estaban en Pendientes.";
+        var texto = anadidas == 1 ? "1 canción añadida a Pendientes" : $"{anadidas} canciones añadidas a Pendientes";
+        if (yaEstaban > 0) texto += yaEstaban == 1 ? " (1 ya estaba)" : $" ({yaEstaban} ya estaban)";
+        return texto + ". Se tacharán solas cuando aparezcan en la biblioteca.";
+    }
+
+    // =================================================================================================
+    // Seguir la lista (P7): qué ha entrado desde la última vez
+    // =================================================================================================
+
+    [ObservableProperty] private bool _soloNuevas;
+
+    /// <summary>La lista que se está viendo se sigue.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TextoSeguir))]
+    private bool _estaSeguida;
+
+    /// <summary>«3 nuevas desde el 12/10», o por qué todavía no hay con qué comparar. Vacío si no se sigue.</summary>
+    [ObservableProperty] private string _novedades = "";
+
+    public string TextoSeguir => EstaSeguida ? "Dejar de seguir" : "Seguir esta lista";
+
+    partial void OnSoloNuevasChanged(bool value) => AplicarFiltro();
+
+    /// <summary>La última lectura de la lista que se está viendo, para poder empezar a seguirla sin volver a pedirla.</summary>
+    private (IReadOnlyList<ChartTrack> Pistas, DateTime Fecha, bool Completa, string Aviso)? _leida;
+
+    /// <summary>
+    /// La lista que se está viendo, descrita para poder seguirla y para la columna «Origen» de
+    /// Pendientes. La que se CARGÓ, no lo que haya ahora en los selectores. Null si no hay ninguna.
+    /// </summary>
+    protected abstract ListaSeguida? DescribirLista();
+
+    /// <summary>
+    /// Apunta la lectura recién cruzada: si la lista se sigue, marca las nuevas y guarda lo que tiene
+    /// hoy. Se llama después de <see cref="CruzarAsync"/>, con la misma lista en el mismo orden.
+    /// </summary>
+    /// <param name="fecha">De cuándo es el contenido: la descarga de un chart guardado, o ahora.</param>
+    /// <param name="completa">Se leyó entera (un corte de Deezer a mitad no lo es; el tope de Spotify sí).</param>
+    protected void AnotarLectura(IReadOnlyList<ChartTrack> lista, DateTime fecha, bool completa, string aviso)
+    {
+        _leida = (lista, fecha, completa, aviso);
+        var lista0 = DescribirLista();
+        EstaSeguida = lista0 != null && Seguimiento.Seguidas.Sigue(lista0.Clave);
+        Novedades = "";
+        // «Solo nuevas» sobre una lista que no se sigue dejaría la tabla vacía sin motivo aparente.
+        if (!EstaSeguida || lista0 == null) { SoloNuevas = false; return; }
+
+        var pistas = SeguimientoListas.PistasDe(lista, i => i < Rows.Count && Rows[i].Tengo);
+        var nov = Seguimiento.RegistrarLectura(lista0.Clave, pistas, fecha, completa, lista0.Nombre, aviso);
+        Novedades = TextoNovedades(nov, completa);
+        if (nov.Desde is { } desde)
+        {
+            var texto = $"Nueva desde {desde.ToString("dd/MM", System.Globalization.CultureInfo.InvariantCulture)}";
+            foreach (var i in nov.Nuevas) if (i < Rows.Count) Rows[i].Novedad = texto;
+        }
+        if (SoloNuevas) AplicarFiltro();
+    }
+
+    /// <summary>Lo que se dice de las novedades de una lista seguida al abrirla.</summary>
+    internal static string TextoNovedades(NovedadesLista nov, bool completa)
+    {
+        var aviso = completa ? "" : " La lista no se leyó entera: esta lectura no cuenta para la próxima comparación.";
+        if (nov.Desde is not { } desde)
+            return "La sigues desde hoy: a partir de mañana se marcarán las canciones que entren." + aviso;
+        var dia = desde.ToString("dd/MM", System.Globalization.CultureInfo.InvariantCulture);
+        return (nov.Nuevas.Count switch
+        {
+            0 => $"Ninguna canción nueva desde el {dia}.",
+            1 => $"1 canción nueva desde el {dia}.",
+            var n => $"{n} canciones nuevas desde el {dia}.",
+        }) + aviso;
+    }
+
+    /// <summary>Empieza a seguir la lista que se está viendo, o deja de seguirla.</summary>
+    [RelayCommand]
+    private void SeguirLista()
+    {
+        if (IsBusy) { Status = "Espera a que termine el proceso en curso."; return; }
+        var desc = DescribirLista();
+        if (desc == null || _leida is not { } leida || Rows.Count == 0) { Status = "Carga antes una lista para poder seguirla."; return; }
+
+        if (EstaSeguida)
+        {
+            var guardada = Seguimiento.Seguidas.Buscar(desc.Clave);
+            var err = guardada == null ? "" : Seguimiento.DejarDeSeguir(new[] { guardada.Id });
+            EstaSeguida = false;
+            Novedades = "";
+            foreach (var r in Rows) r.Novedad = "";
+            SoloNuevas = false;
+            AplicarFiltro();
+            Status = $"Ya no sigues «{desc.Nombre}»." + (err.Length > 0 ? $" No se ha podido guardar: {err}" : "");
+            return;
+        }
+
+        if (!leida.Completa)
+        {
+            Status = "La lista no se leyó entera. Vuelve a cargarla antes de seguirla: con una lectura a medias, la próxima vez saldrían como nuevas canciones que ya estaban.";
+            return;
+        }
+        var pistas = SeguimientoListas.PistasDe(leida.Pistas, i => i < Rows.Count && Rows[i].Tengo);
+        var error = Seguimiento.Seguir(desc, pistas, leida.Fecha);
+        EstaSeguida = true;
+        Novedades = TextoNovedades(NovedadesLista.Ninguna, completa: true);
+        Status = $"Sigues «{desc.Nombre}». A partir de mañana, al abrirla aquí o con «Actualizar todas» en Pendientes, se marcarán las canciones que entren."
+               + (leida.Aviso.Length > 0 ? " " + leida.Aviso : "")
+               + (error.Length > 0 ? $" No se ha podido guardar: {error}" : "");
+    }
+
+    // =================================================================================================
+    // Ordenar para mezclar (P1)
+    // =================================================================================================
+
+    /// <summary>
+    /// Lo más que se ordena de una vez, como en el Asistente: el orden es voraz (cada paso mira todas
+    /// las que quedan), y con miles de canciones dejaría de ser instantáneo sin que una sesión lo pida.
+    /// </summary>
+    public const int MaximoParaOrdenar = 1000;
+
+    /// <summary>Las canciones que tienes de la lista, en el orden para pincharlas seguidas.</summary>
+    public ObservableCollection<PasoListaFila> PasosMezcla { get; } = new();
+
+    [ObservableProperty] private PasoListaFila? _selectedPaso;
+
+    /// <summary>Se está enseñando el orden para mezclar en lugar de la lista.</summary>
+    [ObservableProperty] private bool _verOrdenMezcla;
+
+    [ObservableProperty] private string _resumenMezcla = "";
+
+    [RelayCommand]
+    private void VolverALaLista() => VerOrdenMezcla = false;
+
+    /// <summary>
+    /// Ordena para pincharlas seguidas las canciones de la lista que tienes, con las mismas reglas que
+    /// «Ordenar para mezclar» del Asistente (<see cref="OrdenMezcla"/>): tono en la rueda Camelot,
+    /// tempo contando doble y mitad y, si tienen ficha, que la energía no baje.
+    ///
+    /// Visto en una biblioteca real: el Top 50 de España se consultó en diez sesiones con «tienes 49 de
+    /// 50», y el M3U8 salía en el orden del chart, que no se puede pinchar tal cual.
+    /// </summary>
+    [RelayCommand]
+    private async Task OrdenarParaMezclarAsync()
+    {
+        if (IsBusy) return;
+        if (Rows.Count == 0) { Status = "Carga antes una lista."; return; }
+        if (!Rows.Any(r => r.Tengo)) { Status = "No tienes ninguna canción de esta lista: no hay nada que ordenar."; return; }
+
+        // Las instantáneas, aquí: la biblioteca y las filas solo se tocan desde el hilo de la interfaz.
+        var filas = Rows.ToList();
+        var biblioteca = _engine.Library.Tracks.ToList();
+        IsBusy = true;
+        Status = "Ordenando para mezclar…";
+        try
+        {
+            var prep = await Task.Run(() => PrepararOrden(filas, biblioteca, _engine.Fichas.Obtener));
+            if (prep.ParaOrdenar.Count > MaximoParaOrdenar)
+            {
+                Status = $"Tienes {prep.ParaOrdenar.Count} canciones de esta lista; para ordenar una sesión el máximo es {MaximoParaOrdenar}.";
+                return;
+            }
+            if (prep.ParaOrdenar.Count == 0)
+            {
+                Status = "Ninguna de las que tienes trae BPM ni tonalidad en las etiquetas: no hay con qué ordenarlas. "
+                       + "Analízalas en tu programa de DJ y escribe esos datos en las etiquetas, o impórtalos de rekordbox en Biblioteca.";
+                return;
+            }
+            var orden = await Task.Run(() => OrdenMezcla.Ordenar(prep.ParaOrdenar));
+            PasosMezcla.Clear();
+            foreach (var paso in orden)
+                PasosMezcla.Add(new PasoListaFila(paso, prep.PosicionEnLista.GetValueOrDefault(paso.Track.FilePath)));
+            ResumenMezcla = ResumenOrden(orden, prep);
+            VerOrdenMezcla = true;
+            Status = ResumenMezcla;
+            _engine.Logger.Detail($"{Etiqueta}: {ResumenMezcla}");
+        }
+        catch (Exception e) { Status = "No se pudo ordenar: " + e.Message; }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Lo que entra en el orden y lo que se queda fuera, y por qué.</summary>
+    /// <param name="ParaOrdenar">Cada archivo una vez, con su ficha de DJ si la tiene.</param>
+    /// <param name="NoLasTienes">Filas de la lista que no están en la biblioteca.</param>
+    /// <param name="SinDatos">Archivos sin BPM ni tonalidad: no hay con qué colocarlos.</param>
+    /// <param name="Repetidas">Filas que apuntan a un archivo que ya entra por otra fila.</param>
+    /// <param name="FueraDeLaBiblioteca">Archivos que ya no están en la biblioteca (cambió desde que se cruzó la lista).</param>
+    /// <param name="PosicionEnLista">La posición de cada archivo en la lista, para enseñarla junto al orden.</param>
+    internal sealed record PreparacionOrden(IReadOnlyList<(Track Track, FichaDj? Ficha)> ParaOrdenar, int NoLasTienes,
+        int SinDatos, int Repetidas, int FueraDeLaBiblioteca, IReadOnlyDictionary<string, int> PosicionEnLista);
+
+    /// <summary>
+    /// Prepara lo que se ordena. Una canción sin BPM pero con tonalidad (o al revés) SÍ entra: el orden
+    /// la coloca con lo que tiene y la transición lo dice («Tono desconocido»). Solo se queda fuera la
+    /// que no tiene ninguno de los dos, porque entraría en un sitio cualquiera y partiría la subida.
+    /// </summary>
+    internal static PreparacionOrden PrepararOrden(IReadOnlyList<TrendRow> filas, IReadOnlyList<Track> biblioteca,
+                                                   Func<string, FichaDj?> ficha)
+    {
+        var porRuta = new Dictionary<string, Track>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in biblioteca) porRuta.TryAdd(t.FilePath, t);
+
+        var posicion = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var para = new List<(Track, FichaDj?)>();
+        int noLasTienes = 0, sinDatos = 0, repetidas = 0, fuera = 0;
+        foreach (var f in filas.OrderBy(f => f.Position))
+        {
+            if (!f.Tengo) { noLasTienes++; continue; }
+            if (!posicion.TryAdd(f.FilePath, f.Position)) { repetidas++; continue; }
+            if (!porRuta.TryGetValue(f.FilePath, out var t)) { fuera++; continue; }
+            if (t.Bpm == 0 && OrdenMezcla.Camelot(t.KeyCamelot) == null) { sinDatos++; continue; }
+            para.Add((t, ficha(t.FilePath)));
+        }
+        return new PreparacionOrden(para, noLasTienes, sinDatos, repetidas, fuera, posicion);
+    }
+
+    /// <summary>
+    /// «38 canciones en orden · 30 de 37 transiciones armónicas · 2 choques de tono. Fuera del orden: 10
+    /// que no tienes, 2 sin BPM ni tonalidad.»
+    /// </summary>
+    internal static string ResumenOrden(IReadOnlyList<PasoMezcla> orden, PreparacionOrden prep)
+    {
+        var transiciones = Math.Max(0, orden.Count - 1);
+        int N(EncajeTono e) => orden.Skip(1).Count(x => x.Tono == e);
+        var texto = (orden.Count == 1 ? "1 canción en orden" : $"{orden.Count} canciones en orden")
+                  + $" · {N(EncajeTono.Igual) + N(EncajeTono.Compatible)} de {transiciones} transiciones armónicas"
+                  + $" · {N(EncajeTono.Choque)} choques de tono";
+        if (N(EncajeTono.Desconocido) > 0) texto += $" · {N(EncajeTono.Desconocido)} sin tonalidad para comparar";
+        texto += ".";
+
+        var fuera = new List<string>();
+        if (prep.NoLasTienes > 0) fuera.Add($"{prep.NoLasTienes} que no tienes");
+        if (prep.SinDatos > 0) fuera.Add($"{prep.SinDatos} sin BPM ni tonalidad");
+        if (prep.FueraDeLaBiblioteca > 0)
+            fuera.Add((prep.FueraDeLaBiblioteca == 1 ? "1 que ya no está" : $"{prep.FueraDeLaBiblioteca} que ya no están")
+                      + " en la biblioteca (vuelve a cargar la lista)");
+        if (fuera.Count > 0) texto += " Fuera del orden: " + string.Join(", ", fuera) + ".";
+        if (prep.Repetidas > 0) texto += prep.Repetidas == 1
+            ? " Una fila apunta al mismo archivo que otra y entra una sola vez."
+            : $" {prep.Repetidas} filas apuntan al mismo archivo que otra y entran una sola vez.";
+        if (orden.Count > 0 && orden.All(p => p.Ficha?.Energia is not > 0))
+            texto += " Sin fichas de DJ, el orden sale solo por tono y BPM.";
+        return texto;
+    }
+}
+
+/// <summary>Una canción en el orden para mezclar de una lista de Tendencias o Playlists.</summary>
+public sealed class PasoListaFila
+{
+    private static readonly IBrush ChoqueBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xDC, 0x26, 0x26));
+
+    public PasoMezcla Paso { get; }
+
+    /// <summary>Su posición en la lista original (el chart, la playlist).</summary>
+    public int EnLista { get; }
+
+    public PasoListaFila(PasoMezcla paso, int enLista)
+    {
+        Paso = paso;
+        EnLista = enLista;
+    }
+
+    public int Posicion => Paso.Posicion;
+    public string Artist => Paso.Track.Artist ?? "";
+    public string Title => Paso.Track.Title ?? Paso.Track.FileName;
+    public string Bpm => Paso.Track.Bpm > 0 ? Paso.Track.Bpm.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
+    public string Camelot => Paso.Track.KeyCamelot;
+    public string Energia => Paso.Ficha?.Energia is > 0 ? Paso.Ficha.Energia.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
+    public string Transicion => Paso.Transicion;
+    public bool Choca => Paso.Posicion > 1 && Paso.Tono == EncajeTono.Choque;
+    public IBrush FondoBrush => Choca ? ChoqueBrush : Brushes.Transparent;
+    public string FilePath => Paso.Track.FilePath;
+    public string FileName => Paso.Track.FileName;
 }
 
 /// <summary>
@@ -380,9 +740,32 @@ public sealed class IndiceBiblioteca
         return salida;
     }
 
-    /// <summary>El título sin adornos ni versiones («Extended», «feat.»…), normalizado.</summary>
+    /// <summary>
+    /// El título sin adornos ni versiones («Extended», «feat.»…), normalizado.
+    ///
+    /// El número de un volumen o de una parte se protege antes («Vol. 53» → «n53») para que la
+    /// limpieza no se lo lleve: quita los números sueltos de dos y tres cifras, que en un nombre de
+    /// archivo suelen ser el BPM o la pista, y «Bizarrap, Quevedo - Bzrp Music Sessions, Vol. 52» y
+    /// «Bizarrap, Shakira - Bzrp Music Sessions, Vol. 53» quedaban con la misma clave por Bizarrap:
+    /// teniendo la 52, Tendencias daba la 53 por «En la biblioteca» y Pendientes la tachaba. MEDIDO en
+    /// una biblioteca real: 84 de 13.590 archivos llevan un número de serie de dos o más cifras tras
+    /// «Vol.», «Part» o «#», casi todos sesiones de Bizarrap escritas de varias formas («Vol. 57»,
+    /// «#54», «Vol.066»). Por eso «Vol», «Volume», «Part» y «#» quedan igual y sin ceros delante.
+    /// </summary>
     internal static string ClaveTitulo(string? titulo)
-        => string.IsNullOrWhiteSpace(titulo) ? "" : TextUtils.NkClave(Descriptors.CleanKeywords(titulo));
+        => string.IsNullOrWhiteSpace(titulo) ? "" : TextUtils.NkClave(Descriptors.CleanKeywords(PegarNumeroDeSerie(titulo)));
+
+    private static readonly Regex NumeroDeSerie = new(
+        @"(?:\b(?:vol|volume|volumen|pt|part|parte)\.?\s*#?|#)\s*(\d{1,4})\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>«Vol. 066», «Volume 66», «Part 66» y «#66» quedan todos como «n66».</summary>
+    internal static string PegarNumeroDeSerie(string titulo)
+        => NumeroDeSerie.Replace(titulo, m =>
+        {
+            var numero = m.Groups[1].Value.TrimStart('0');
+            return "n" + (numero.Length > 0 ? numero : "0");
+        });
 
     /// <summary>
     /// Cada artista del crédito normalizado y, si es un alias registrado, con el nombre canónico:

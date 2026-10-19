@@ -36,4 +36,15 @@ public partial class PlaylistView : UserControl
     {
         if (DataContext is PlaylistViewModel vm) await AccionesLista.ExportarM3uAsync(this, vm);
     }
+
+    // Lo que falta, a Pendientes: las filas elegidas o todas las que faltan.
+    private void AnadirSeleccionadas_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is PlaylistViewModel vm) AccionesLista.AnadirAPendientes(RowsGrid, vm, todasLasQueFaltan: false);
+    }
+
+    private void AnadirTodas_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is PlaylistViewModel vm) AccionesLista.AnadirAPendientes(RowsGrid, vm, todasLasQueFaltan: true);
+    }
 }
