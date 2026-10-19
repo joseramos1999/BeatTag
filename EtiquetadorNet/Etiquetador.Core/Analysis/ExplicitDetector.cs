@@ -4,20 +4,112 @@ namespace Etiquetador.Core.Analysis;
 
 public enum Explicitness { Unknown, Clean, Explicit }
 
-/// <summary>Deduce si una pista es "clean" o explícita/"dirty" a partir del nombre y el título.</summary>
+/// <summary>
+/// Deduce si una pista es "clean" o explícita/"dirty" a partir del nombre y el título.
+///
+/// Los marcadores se buscan SOLO donde va la versión: entre paréntesis o corchetes, en lo que
+/// sigue al último paréntesis («(Manu Garcia Edit) Clean») y en los trozos separados por « - »
+/// que van detrás del título («Artista - Tema - Clean»). Nunca en el artista ni en el título en
+/// sí. Antes se buscaban en el nombre entero y «Clean Bandit - Rockabye.mp3» salía como Limpia y
+/// entraba en una colección «solo limpias» para una boda, que es justo el fallo que más daño hace;
+/// al revés, «Dirty Vegas - Days Go By» salía como Explícita, y «Talk Dirty (Clean Version)»
+/// también, porque se miraba «dirty» antes que «clean».
+/// </summary>
 public static class ExplicitDetector
 {
     private static readonly Regex ExplicitRe = new(
         @"\b(explicit|explicita|explícita|dirty|uncensored|sucia)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // «Radio Edit» ya no cuenta como limpia: dice cuánto dura la versión, no cómo es la letra. En
+    // una biblioteca real hay 18 «Radio Edit» y muchos conservan la letra explícita.
     private static readonly Regex CleanRe = new(
-        @"\b(clean|censored|censurada|radio\s+edit|limpia)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        @"\b(clean|censored|censurada|limpia)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Lo que va entre paréntesis o corchetes.</summary>
+    private static readonly Regex Parentesis = new(@"[\(\[]([^\(\)\[\]]*)[\)\]]", RegexOptions.Compiled);
+
+    /// <summary>Separadores entre descriptores dentro de una misma zona: «(Remix, Clean, Radio Edit)».</summary>
+    private static readonly Regex Separadores = new(@"\s+[-–]\s+|[,;/|+]", RegexOptions.Compiled);
+
+    private static readonly Regex Palabras = new(@"[\p{L}\p{N}]+", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Palabras que pueden ir DETRÁS del marcador sin que deje de serlo: «Clean Extended»,
+    /// «Dirty Intro», «Clean Version». Si detrás viene otra cosa, el marcador es parte de un
+    /// nombre: «(Dirty Sou Mashup)» es un DJ (Dirty Sou firma 13 mashups en la
+    /// biblioteca real) y «(Clean Bandit Remix)», un grupo.
+    /// </summary>
+    private static readonly HashSet<string> Descriptores = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "version", "versión", "ver", "edit", "edits", "extended", "intro", "outro", "introoutro",
+        "mix", "short", "radio", "club", "original", "quick", "hit", "hype", "transition", "clap",
+        "in", "out", "acapella", "acappella", "instrumental", "redrum", "remix", "vocal", "main",
+        "album", "single", "cut", "lyrics", "bar", "bars", "dj", "bpm", "letra", "and", "y",
+    };
 
     public static Explicitness Detect(Track t)
     {
-        var hay = (t.FileName + " " + (t.Title ?? "")); // nombre de archivo + título
-        if (ExplicitRe.IsMatch(hay)) return Explicitness.Explicit;
-        if (CleanRe.IsMatch(hay)) return Explicitness.Clean;
-        return Explicitness.Unknown;
+        var limpia = false;
+        foreach (var zona in Zonas(Path.GetFileNameWithoutExtension(t.FileName), esNombreDeArchivo: true)
+                     .Concat(Zonas(t.Title ?? "", esNombreDeArchivo: false)))
+        {
+            foreach (var trozo in Separadores.Split(zona))
+            {
+                // Explícita manda: si una zona lo dice, no se arriesga a llamarla limpia.
+                if (EsMarcador(trozo, ExplicitRe)) return Explicitness.Explicit;
+                if (EsMarcador(trozo, CleanRe)) limpia = true;
+            }
+        }
+        return limpia ? Explicitness.Clean : Explicitness.Unknown;
+    }
+
+    /// <summary>
+    /// Las partes del texto donde se describe la versión. En el nombre de archivo, los trozos
+    /// separados por « - » a partir del tercero (el primero es el artista y el segundo el título);
+    /// en el título, a partir del segundo.
+    /// </summary>
+    private static IEnumerable<string> Zonas(string texto, bool esNombreDeArchivo)
+    {
+        if (string.IsNullOrWhiteSpace(texto)) yield break;
+
+        foreach (Match m in Parentesis.Matches(texto)) yield return m.Groups[1].Value;
+
+        var cierre = texto.LastIndexOfAny(new[] { ')', ']' });
+        if (cierre >= 0 && cierre + 1 < texto.Length) yield return texto[(cierre + 1)..];
+
+        var segmentos = texto.Split(" - ");
+        for (var k = esNombreDeArchivo ? 2 : 1; k < segmentos.Length; k++) yield return segmentos[k];
+    }
+
+    /// <summary>
+    /// ¿Es este trozo un marcador de letra? Contiene la palabra y lo que va detrás de ella son solo
+    /// descriptores de versión o cifras («Clean Extended», «Dirty 95 Bpm»). Lo de delante da igual:
+    /// «Intro Clean», «IntroOutro Dirty».
+    /// </summary>
+    private static bool EsMarcador(string trozo, Regex marcador)
+    {
+        foreach (Match m in marcador.Matches(trozo))
+        {
+            var detras = trozo[(m.Index + m.Length)..];
+            if (Palabras.Matches(detras).All(p => Descriptores.Contains(p.Value) || EsCifra(p.Value))) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// «95», «2024», «128bpm» y también la tonalidad Camelot («8A», «12B»), que los pools de DJ
+    /// ponen junto a la versión. Visto en una biblioteca real: «(Deville 126-90 Toneplay Trans)
+    /// Clean 8A 126 - Bad Bunny, Enur - bpm - DJTOOLSVIP».
+    /// </summary>
+    private static bool EsCifra(string palabra)
+    {
+        var i = 0;
+        while (i < palabra.Length && char.IsAsciiDigit(palabra[i])) i++;
+        if (i == 0) return false;
+        var resto = palabra[i..];
+        return resto.Length == 0
+               || resto.Equals("bpm", StringComparison.OrdinalIgnoreCase)
+               || (i <= 2 && resto is "A" or "B" or "a" or "b");
     }
 
     public static string Label(Explicitness e) => e switch

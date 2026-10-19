@@ -24,10 +24,29 @@ public static class FingerprintDuplicates
     public const int ToleranciaDuracionSeg = 12;
 
     /// <summary>
-    /// De cada huella se indexa uno de cada N valores. Con ~900 valores por canción quedan unos
-    /// 110, suficientes para que dos copias compartan varios sin inflar el índice.
+    /// De cada huella se indexa, de media, uno de cada 2^N valores (N = 3, uno de cada 8). Con ~900
+    /// valores por canción quedan unos 110, suficientes para que dos copias compartan varios sin
+    /// inflar el índice.
     /// </summary>
-    private const int PasoMuestreo = 8;
+    private const int BitsDeMuestreo = 3;
+
+    /// <summary>
+    /// ¿Entra este valor en el índice? Lo decide el VALOR, nunca su posición en la huella.
+    ///
+    /// Antes se indexaban las posiciones 0, 8, 16… y bastaba con que una copia trajera 0,12 s más
+    /// de silencio al principio (un elemento de huella) para que cada una indexara valores
+    /// distintos y no compartieran ninguno: la pareja no llegaba a compararse aunque Similarity,
+    /// que prueba ±80 desplazamientos, la diera por igual. Visto en una biblioteca real: de 13
+    /// parejas con el mismo nombre que eran la misma grabación, el índice por posición perdía 3
+    /// (desfases +1, −20 y +27 elementos, con parecido 0,986, 0,913 y 0,905). Eligiendo por
+    /// contenido, si A[k] == B[k + d] las dos copias indexan ese valor o ninguna lo hace, sea cual
+    /// sea el desfase d.
+    ///
+    /// El valor se mezcla con la constante de Knuth (2^32 / φ) antes de mirar sus bits altos: así
+    /// la elección no depende de qué bits de la huella cambian más, y sale uno de cada 8 aunque
+    /// los valores no estén repartidos por igual.
+    /// </summary>
+    private static bool SeIndexa(int valor) => unchecked((uint)valor * 2654435761u) >> (32 - BitsDeMuestreo) == 0;
 
     /// <summary>Valores compartidos a partir de los cuales merece la pena comparar a fondo.</summary>
     private const int MinimoValoresComunes = 3;
@@ -59,29 +78,47 @@ public static class FingerprintDuplicates
         if (conHuella.Count < 2) return Array.Empty<DuplicateGroup>();
 
         // --- Índice invertido: valor de huella -> canciones que lo contienen ---
-        var indice = new Dictionary<int, List<int>>(conHuella.Count * 32);
+        // Va en un único vector de long (valor en la parte alta, canción en la baja) que se ordena:
+        // las apariciones de un mismo valor quedan seguidas y con las canciones en orden. Antes era
+        // un Dictionary<int, List<int>> con una lista pequeña por cada valor distinto. MEDIDO con
+        // 13.800 huellas de 960 valores, 300 de ellas copias desplazadas de 1 a 30 elementos: el
+        // índice por posición encontraba 30 parejas (solo las de desfase múltiplo de 8) y pedía
+        // unos 2 GB de memoria en total; este las encuentra las 300 en medio segundo con 16 MB.
+        var total = 0;
+        foreach (var (_, f) in conHuella)
+            foreach (var v in f)
+                if (SeIndexa(v)) total++;
+        var entradas = new long[total];
+        var e = 0;
         for (var i = 0; i < conHuella.Count; i++)
-        {
-            var f = conHuella[i].F;
-            for (var k = 0; k < f.Length; k += PasoMuestreo)
-            {
-                if (!indice.TryGetValue(f[k], out var lista)) indice[f[k]] = lista = new List<int>(2);
-                // Un mismo valor puede repetirse dentro de una canción; basta con anotarla una vez.
-                if (lista.Count == 0 || lista[^1] != i) lista.Add(i);
-            }
-        }
+            foreach (var v in conHuella[i].F)
+                if (SeIndexa(v)) entradas[e++] = ((long)v << 32) | (uint)i;
+        Array.Sort(entradas);
         ct.ThrowIfCancellationRequested();
 
         // --- Parejas candidatas: las que comparten varios valores exactos ---
         var comunes = new Dictionary<long, int>();
-        foreach (var kv in indice)
+        var delValor = new List<int>(MaximoCancionesPorValor + 1);
+        for (var ini = 0; ini < entradas.Length;)
         {
-            var lista = kv.Value;
-            if (lista.Count < 2 || lista.Count > MaximoCancionesPorValor) continue;
-            for (var a = 0; a < lista.Count; a++)
-                for (var b = a + 1; b < lista.Count; b++)
+            var valor = entradas[ini] >> 32;
+            var fin = ini;
+            delValor.Clear();
+            for (; fin < entradas.Length && entradas[fin] >> 32 == valor; fin++)
+            {
+                var cancion = (int)(entradas[fin] & 0xFFFFFFFF);
+                // Un mismo valor puede repetirse dentro de una canción; basta con anotarla una vez
+                // (vienen ordenadas, así que las repeticiones quedan seguidas). Pasado el máximo ya
+                // no hace falta seguir anotando: ese valor se va a ignorar.
+                if (delValor.Count <= MaximoCancionesPorValor && (delValor.Count == 0 || delValor[^1] != cancion)) delValor.Add(cancion);
+            }
+            ini = fin;
+
+            if (delValor.Count < 2 || delValor.Count > MaximoCancionesPorValor) continue;
+            for (var a = 0; a < delValor.Count; a++)
+                for (var b = a + 1; b < delValor.Count; b++)
                 {
-                    var clave = ((long)lista[a] << 32) | (uint)lista[b];
+                    var clave = ((long)delValor[a] << 32) | (uint)delValor[b];
                     comunes[clave] = comunes.TryGetValue(clave, out var n) ? n + 1 : 1;
                 }
         }

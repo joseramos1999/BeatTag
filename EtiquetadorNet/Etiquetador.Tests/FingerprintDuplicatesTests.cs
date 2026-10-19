@@ -105,4 +105,108 @@ public class FingerprintDuplicatesTests
         Assert.Equal("Bad Bunny", grupos[0].Artist);
         Assert.Equal("Tití Me Preguntó", grupos[0].Title);
     }
+
+    // ---------- Copias DESPLAZADAS (hallazgo A1) ----------
+    //
+    // Las pruebas de arriba usan clones exactos, con desfase 0, y por eso no veían el fallo: el
+    // índice muestreaba por POSICIÓN (k = 0, 8, 16…), así que si una copia trae unos pocos
+    // elementos más de silencio al principio, los valores que indexa cada una caen en posiciones
+    // distintas y no comparten ninguno. La pareja nunca llegaba a compararse aunque Similarity la
+    // diera por igual. Visto en una biblioteca real: de 13 parejas con el mismo nombre que eran la
+    // misma grabación, el índice por posición perdía 3, con desfases +1, −20 y +27.
+
+    /// <summary>
+    /// Imita otra codificación del mismo audio: en una fracción de los elementos cambian unos
+    /// pocos bits, como pasa de verdad entre dos MP3 del mismo máster.
+    /// </summary>
+    private static int[] Recodificar(int[] f, int semilla, double fraccionTocada, int bitsPorElemento)
+    {
+        var r = new Random(semilla);
+        var g = (int[])f.Clone();
+        for (var i = 0; i < g.Length; i++)
+        {
+            if (r.NextDouble() >= fraccionTocada) continue;
+            for (var k = 0; k < bitsPorElemento; k++) g[i] ^= 1 << r.Next(32);
+        }
+        return g;
+    }
+
+    /// <summary>
+    /// Desfase positivo: la copia B empieza <paramref name="d"/> elementos más tarde (a la A le
+    /// sobra silencio al principio). Negativo: a la B le sobran |d| elementos delante.
+    /// </summary>
+    private static int[] Desplazar(int[] f, int d, int semilla)
+    {
+        if (d >= 0) return f[d..];
+        var delante = Huella(semilla, -d);
+        return delante.Concat(f).ToArray();
+    }
+
+    // Unos 2 minutos de huella, lo que da fpcalc por defecto (~0,124 s por elemento).
+    private const int ElementosHuellaReal = 960;
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    public void Junta_copias_exactas_desplazadas_unos_elementos(int desfase)
+    {
+        var f = Huella(100 + desfase, ElementosHuellaReal);
+        var a = Cancion("Quevedo - Columbia (Extended).mp3", 186);
+        var b = Cancion("Quevedo - Columbia (Extended) [pool].mp3", 186);
+        var mapa = new Dictionary<string, int[]> { [a.FilePath] = f, [b.FilePath] = Desplazar(f, desfase, 7) };
+
+        // Por la comparación fina son la misma grabación sin discusión...
+        Assert.True(AudioFingerprint.Similarity(mapa[a.FilePath], mapa[b.FilePath]) >= AudioFingerprint.UmbralIgual);
+
+        // ...y por tanto el índice tiene que dejarlas llegar a esa comparación.
+        var grupos = FingerprintDuplicates.Find(new[] { a, b }, t => mapa[t.FilePath]);
+        Assert.Single(grupos);
+        Assert.Equal(2, grupos[0].Tracks.Count);
+    }
+
+    // Los tres casos que se perdían en la biblioteca real, con sus desfases y su parecido medido
+    // (0,986, 0,913 y 0,905). El ruido de recodificación se ajusta para quedar en esas cifras: con
+    // él ya no coinciden todos los valores exactos, solo una parte, que es lo realista.
+    [Theory]
+    [InlineData(1, 0.45, 1, 0.986)]    // 0,12 s más de silencio en una de las dos copias
+    [InlineData(-20, 0.70, 4, 0.913)]  // ~2,5 s más de intro en la otra
+    [InlineData(27, 0.60, 5, 0.905)]   // ~3,3 s recortados al principio
+    public void Junta_los_desfases_medidos_en_una_biblioteca_real(int desfase, double fraccion, int bits, double parecidoReal)
+    {
+        var f = Huella(200 + Math.Abs(desfase), ElementosHuellaReal);
+        var b0 = Recodificar(f, 300 + Math.Abs(desfase), fraccion, bits);
+        var a = Cancion("Bad Bunny - DtMF.mp3", 237);
+        var b = Cancion("Bad Bunny - DtMF (Clean).mp3", 240);
+        var mapa = new Dictionary<string, int[]> { [a.FilePath] = f, [b.FilePath] = Desplazar(b0, desfase, 9) };
+
+        // El parecido sintético queda a menos de 0,02 del medido: el caso es el mismo.
+        var parecido = AudioFingerprint.Similarity(mapa[a.FilePath], mapa[b.FilePath]);
+        Assert.InRange(parecido, parecidoReal - 0.02, parecidoReal + 0.02);
+
+        var grupos = FingerprintDuplicates.Find(new[] { a, b }, t => mapa[t.FilePath]);
+        Assert.Single(grupos);
+        Assert.Equal(2, grupos[0].Tracks.Count);
+    }
+
+    // Guarda: muestrear por contenido no puede abrir la puerta a juntar canciones distintas.
+    // Con 40 huellas sin relación y de duración parecida no debe salir ningún grupo.
+    [Fact]
+    public void Muestrear_por_contenido_no_junta_canciones_distintas()
+    {
+        var tracks = new List<Track>();
+        var mapa = new Dictionary<string, int[]>();
+        for (var i = 0; i < 40; i++)
+        {
+            var t = Cancion($"tema{i:00}.mp3", 200 + i % 5);
+            tracks.Add(t);
+            mapa[t.FilePath] = Huella(1000 + i, ElementosHuellaReal);
+        }
+
+        Assert.Empty(FingerprintDuplicates.Find(tracks, t => mapa[t.FilePath]));
+    }
 }
