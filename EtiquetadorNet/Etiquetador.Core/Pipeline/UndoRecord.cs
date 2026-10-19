@@ -78,6 +78,10 @@ public sealed class UndoRecord
     ///
     /// Sin valor no se escribe, así que los manifiestos de quien no lo pone quedan exactamente como
     /// antes.
+    ///
+    /// PENDIENTE: en la tanda 3 ningún escritor lo pone todavía (el Editor y Unificar géneros son de
+    /// otros equipos), así que una edición del Editor que solo cambia el género sigue saliendo como
+    /// «Géneros». Basta con que cada escritor ponga aquí su <see cref="TipoEjecucion"/>.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? Origen { get; set; }

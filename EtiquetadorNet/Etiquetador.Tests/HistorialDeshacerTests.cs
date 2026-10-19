@@ -130,6 +130,18 @@ public class HistorialDeshacerTests : IDisposable
     }
 
     [Fact]
+    public void El_estado_concuerda_en_singular()
+    {
+        static EjecucionDeshacer E(int pendientes, int deshechos, int perdidos)
+            => new("run_20261001_100000", new DateTime(2026, 10, 1), TipoEjecucion.Generos, pendientes, deshechos, perdidos, 0, "x", null);
+
+        Assert.Equal("Deshecha en parte (2 de 3), 1 dado por perdido", E(1, 1, 1).EstadoTexto);
+        Assert.Equal("Deshecha en parte (3 de 4), 2 dados por perdidos", E(1, 1, 2).EstadoTexto);
+        Assert.Equal("Deshecha (1 dado por perdido)", E(0, 1, 1).EstadoTexto);
+        Assert.Equal("Deshecha (2 dados por perdidos)", E(0, 1, 2).EstadoTexto);
+    }
+
+    [Fact]
     public void Sin_carpeta_de_deshacer_la_lista_esta_vacia()
         => Assert.Empty(new HistorialDeshacer(Path.Combine(_dir, "no-existe")).Listar());
 
@@ -389,6 +401,7 @@ public class HistorialDeshacerTests : IDisposable
         Assert.Equal("run_20261002_100000", bloqueo.Posterior.Id);
         Assert.Equal(p2, bloqueo.RutaActual);
         Assert.False(bloqueo.OtroArchivo);
+        Assert.False(bloqueo.Perdido);   // la posterior se puede deshacer antes
 
         // Deshaciendo antes la posterior, ya se puede.
         new UndoEngine(_paths).UndoLastRun();
@@ -470,8 +483,143 @@ public class HistorialDeshacerTests : IDisposable
 
         Assert.Equal(a, Assert.Single(analisis.ADeshacer).Antes);
         Assert.Empty(analisis.Solapes);
-        Assert.Equal(b, Assert.Single(analisis.Bloqueados).Cambio.Antes);
+        var bloqueo = Assert.Single(analisis.Bloqueados);
+        Assert.Equal(b, bloqueo.Cambio.Antes);
+        Assert.True(bloqueo.Perdido);   // ya no se puede deshacer antes: solo cabe darlo por perdido también
         Assert.Equal(2, analisis.NoEncontrados.Count + analisis.Bloqueados.Count);   // a no existe en disco
+    }
+
+    // --- El nombre anterior, ocupado ---
+
+    [Fact]
+    public void Se_niega_si_una_posterior_llevo_otro_archivo_al_nombre_anterior()
+    {
+        // Enriquecer renombra «tema.mp3»; después la Bandeja trae a la misma carpeta otra descarga
+        // con ese nombre. Deshacer el renombrado fallaría: File.Move no sobrescribe.
+        var tema = Cancion("tema.mp3", "x");
+        var renombrado = Path.Combine(_musica, "Bad Bunny - Tema.mp3");
+        Escribir("run_20261001_100000.jsonl", Renombrar(tema, renombrado, titulo: "Tema"));
+        var descarga = Path.Combine(_dir, "descarga.mp3");
+        Mp3Fixture.WriteMinMp3(descarga);
+        Escribir("run_20261002_100000.jsonl", Renombrar(descarga, tema));
+
+        var h = Historial;
+        var analisis = h.Analizar(h.Listar().Single(e => e.Id == "run_20261001_100000"), null);
+
+        Assert.Empty(analisis.ADeshacer);
+        var bloqueo = Assert.Single(analisis.Bloqueados);
+        Assert.True(bloqueo.OtroArchivo);
+        Assert.True(bloqueo.NombreAnterior);
+        Assert.False(bloqueo.Perdido);
+        Assert.Equal(tema, bloqueo.RutaActual);
+        Assert.Equal("run_20261002_100000", bloqueo.Posterior.Id);
+
+        // Deshaciendo antes la Bandeja, la descarga se va y el nombre queda libre.
+        new UndoEngine(_paths).UndoLastRun();
+        var libre = h.Analizar(h.Listar().Single(e => e.Id == "run_20261001_100000"), null);
+        Assert.Single(libre.ADeshacer);
+        Assert.Empty(libre.Bloqueados);
+        Assert.Empty(libre.NombreOcupado);
+    }
+
+    [Fact]
+    public void Si_otro_archivo_llego_al_nombre_anterior_y_se_fue_no_estorba()
+    {
+        var a = Rutas.Archivo("a.mp3");
+        Escribir("run_20261001_100000.jsonl", new UndoRecord { OrigPath = a, FinalPath = Rutas.Archivo("A bueno.mp3"), Renamed = true });
+        Escribir("run_20261002_100000.jsonl", new UndoRecord { OrigPath = Rutas.Archivo("otro.mp3"), FinalPath = a, Renamed = true });
+        Escribir("run_20261003_100000.jsonl", new UndoRecord { OrigPath = a, FinalPath = Rutas.Archivo("otro bueno.mp3"), Renamed = true });
+
+        var h = Historial;
+        var analisis = h.Analizar(h.Listar().Single(e => e.Id == "run_20261001_100000"), null);
+
+        Assert.Single(analisis.ADeshacer);
+        Assert.Empty(analisis.Bloqueados);
+    }
+
+    [Fact]
+    public void Un_nombre_anterior_ocupado_en_el_disco_se_aparta_sin_tocar_nada()
+    {
+        var tema = Cancion("tema.mp3", "x");
+        var renombrado = Path.Combine(_musica, "Bad Bunny - Tema.mp3");
+        Escribir("run_20261001_100000.jsonl", Renombrar(tema, renombrado, titulo: "Tema"));
+        Cancion("tema.mp3", "copia descargada otra vez");   // fuera de la aplicación: el historial no lo sabe
+
+        var h = Historial;
+        var e = h.Listar().Single();
+        var analisis = h.Analizar(e, null);
+
+        Assert.Empty(analisis.ADeshacer);
+        Assert.Empty(analisis.Bloqueados);
+        Assert.Equal(tema, Assert.Single(analisis.NombreOcupado).Antes);
+    }
+
+    [Fact]
+    public void Dentro_de_una_misma_ejecucion_el_nombre_que_se_libera_no_cuenta_como_ocupado()
+    {
+        // tema.mp3 → «Bad Bunny - Tema.mp3» y, en la misma ejecución, «tema (1).mp3» → tema.mp3.
+        var tema = Cancion("tema.mp3", "original");
+        var copia = Cancion("tema (1).mp3", "copia");
+        var renombrado = Path.Combine(_musica, "Bad Bunny - Tema.mp3");
+        Escribir("run_20261001_100000.jsonl", Renombrar(tema, renombrado), Renombrar(copia, tema));
+
+        var h = Historial;
+        var e = h.Listar().Single();
+        var todo = h.Analizar(e, null);
+        Assert.Equal(2, todo.ADeshacer.Count);
+        Assert.Empty(todo.NombreOcupado);
+
+        // Solo el primero: el segundo no se deshace, así que «tema.mp3» sigue ocupado.
+        var huellaPrimero = h.Cambios(e).Single(c => c.Antes == tema).Huella;
+        Assert.Single(h.Analizar(e, new List<string> { huellaPrimero }).NombreOcupado);
+
+        var res = new UndoEngine(_paths).DeshacerCambios(e.Manifiesto!, todo.Huellas);
+        Assert.Equal(2, res.Reverted);
+        Assert.Equal("original", Mp3Fixture.GetTitle(tema));
+        Assert.Equal("copia", Mp3Fixture.GetTitle(copia));
+    }
+
+    [Fact]
+    public void Se_sabe_si_la_posterior_que_pierde_su_archivo_cambio_el_volumen()
+    {
+        var a = Rutas.Archivo("a.mp3");
+        Escribir("run_20261001_100000.jsonl", new UndoRecord { OrigPath = Rutas.Archivo("viejo.mp3"), FinalPath = a, Renamed = true });
+        Escribir("run_20261002_100000.jsonl", new UndoRecord { OrigPath = a, FinalPath = a, Fields = new() { [UndoEngine.VolumeField] = FieldChange.Num(0, 2) } });
+
+        var h = Historial;
+        var solape = Assert.Single(h.Analizar(h.Listar().Single(e => e.Id == "run_20261001_100000"), null).Solapes);
+
+        Assert.True(solape.PierdeDeshacer);
+        Assert.True(solape.VolumenPosterior);
+    }
+
+    // --- Dar por perdidos con el manifiesto bloqueado ---
+
+    // Visto en revisión: si no se podía mover ni vaciar el manifiesto, la copia «.perdidos» se
+    // quedaba al lado de un manifiesto aún pendiente; el historial contaba esas líneas dos veces y
+    // un reintento creaba «.perdidos-2». En macOS y Linux abrir un archivo no impide renombrarlo.
+    [WindowsFact]
+    public void Dar_por_perdidos_que_no_puede_vaciar_el_manifiesto_no_deja_copia()
+    {
+        var mf = Manifiesto("run_20261009_160301.jsonl");
+        Escribir("run_20261009_160301.jsonl", new UndoRecord { OrigPath = Rutas.Archivo("a.mp3"), FinalPath = Rutas.Archivo("b.mp3"), Renamed = true });
+        var contenido = File.ReadAllText(mf);
+        var undo = new UndoEngine(_paths);
+
+        PendientesDescartados r;
+        using (new FileStream(mf, FileMode.Open, FileAccess.Read, FileShare.Read))   // se deja leer, pero no mover ni sustituir
+            r = undo.DarPorPerdidos(mf);
+
+        Assert.False(r.Ok);
+        Assert.Empty(Directory.GetFiles(_paths.UndoDir, "*.perdidos*"));
+        Assert.Equal(contenido, File.ReadAllText(mf));
+        var e = Historial.Listar().Single();
+        Assert.Equal((1, 0), (e.Pendientes, e.Perdidos));   // no cuenta dos veces lo que sigue pendiente
+
+        // Ya libre, se da por perdido con el nombre de siempre.
+        Assert.True(undo.DarPorPerdidos(mf).Ok);
+        Assert.True(File.Exists(Manifiesto("run_20261009_160301.perdidos.jsonl")));
+        Assert.False(File.Exists(Manifiesto("run_20261009_160301.perdidos-2.jsonl")));
     }
 
     [Fact]

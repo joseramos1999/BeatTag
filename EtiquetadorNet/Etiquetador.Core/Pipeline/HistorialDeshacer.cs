@@ -98,10 +98,12 @@ public sealed record EjecucionDeshacer(string Id, DateTime Fecha, TipoEjecucion 
     {
         EstadoEjecucion.Pendiente => "Pendiente",
         EstadoEjecucion.Parcial => $"Deshecha en parte ({Deshechos + Perdidos} de {Cambios})"
-                                   + (Perdidos > 0 ? $", {Perdidos} dados por perdidos" : ""),
-        EstadoEjecucion.Deshecha => Perdidos > 0 ? $"Deshecha ({Perdidos} dados por perdidos)" : "Deshecha",
+                                   + (Perdidos > 0 ? ", " + DadosPorPerdidos(Perdidos) : ""),
+        EstadoEjecucion.Deshecha => Perdidos > 0 ? $"Deshecha ({DadosPorPerdidos(Perdidos)})" : "Deshecha",
         _ => "Dada por perdida",
     };
+
+    private static string DadosPorPerdidos(int n) => n == 1 ? "1 dado por perdido" : $"{n} dados por perdidos";
 
     /// <summary>Se puede deshacer algo de ella.</summary>
     public bool TienePendientes => Pendientes > 0 && Manifiesto != null;
@@ -109,9 +111,18 @@ public sealed record EjecucionDeshacer(string Id, DateTime Fecha, TipoEjecucion 
 
 /// <summary>Un cambio que no se puede deshacer ahora sin dejar el historial incoherente.</summary>
 /// <param name="Posterior">La ejecución posterior que lo impide.</param>
-/// <param name="RutaActual">Dónde está ahora el archivo, siguiendo los renombrados posteriores.</param>
-/// <param name="OtroArchivo">true si otro archivo ocupa ahora el nombre que dejó esta ejecución.</param>
-public sealed record BloqueoDeshacer(CambioDeshacer Cambio, EjecucionDeshacer Posterior, string RutaActual, bool OtroArchivo);
+/// <param name="RutaActual">Dónde está ahora el archivo, siguiendo los renombrados posteriores (o el nombre ocupado).</param>
+/// <param name="OtroArchivo">true si otro archivo ocupa ahora el nombre que dejó esta ejecución (o, con <paramref name="NombreAnterior"/>, el que tenía antes).</param>
+/// <param name="Perdido">
+/// El cambio posterior que lo impide se dio por perdido: ya no se puede deshacer, así que este
+/// tampoco se podrá nunca y solo cabe darlo por perdido también.
+/// </param>
+/// <param name="NombreAnterior">
+/// Lo ocupado es el nombre ANTERIOR del archivo, al que volvería al deshacer: una ejecución posterior
+/// llevó ahí otro archivo.
+/// </param>
+public sealed record BloqueoDeshacer(CambioDeshacer Cambio, EjecucionDeshacer Posterior, string RutaActual, bool OtroArchivo,
+                                     bool Perdido = false, bool NombreAnterior = false);
 
 /// <summary>Un cambio cuyo archivo volvieron a tocar ejecuciones posteriores que siguen pendientes.</summary>
 /// <param name="CamposCompartidos">Campos que cambiaron esta ejecución y alguna posterior: se queda el valor posterior.</param>
@@ -119,8 +130,9 @@ public sealed record BloqueoDeshacer(CambioDeshacer Cambio, EjecucionDeshacer Po
 /// Esta ejecución lo renombró: al deshacerla vuelve a su nombre original, y las posteriores ya no lo
 /// encontrarán donde lo dejaron (sus cambios en él no se podrán deshacer desde la aplicación).
 /// </param>
+/// <param name="VolumenPosterior">Una posterior pendiente le cambió el volumen (la ganancia del audio).</param>
 public sealed record SolapeDeshacer(CambioDeshacer Cambio, IReadOnlyList<EjecucionDeshacer> Posteriores,
-                                    IReadOnlyList<string> CamposCompartidos, bool PierdeDeshacer);
+                                    IReadOnlyList<string> CamposCompartidos, bool PierdeDeshacer, bool VolumenPosterior = false);
 
 /// <summary>Lo que pasaría al deshacer unos cambios de una ejecución, antes de hacerlo.</summary>
 /// <param name="ADeshacer">Lo que se puede deshacer (todo lo elegido menos lo bloqueado).</param>
@@ -129,6 +141,14 @@ public sealed record AnalisisDeshacer(EjecucionDeshacer Ejecucion, IReadOnlyList
                                       IReadOnlyList<BloqueoDeshacer> Bloqueados, IReadOnlyList<SolapeDeshacer> Solapes,
                                       IReadOnlyList<CambioDeshacer> NoEncontrados)
 {
+    /// <summary>
+    /// Lo que no puede volver a su nombre anterior porque en el disco ya hay otro archivo con ese
+    /// nombre, sin que el historial explique cómo llegó (una descarga repetida, una copia a mano).
+    /// No se deshace: <c>File.Move</c> no sobrescribe, así que fallaría y se quedaría pendiente de
+    /// todos modos, y la confirmación prometería un nombre que no va a recuperar.
+    /// </summary>
+    public IReadOnlyList<CambioDeshacer> NombreOcupado { get; init; } = Array.Empty<CambioDeshacer>();
+
     /// <summary>Huellas de lo que se va a deshacer, para <see cref="UndoEngine.DeshacerCambios"/>.</summary>
     public IReadOnlyCollection<string> Huellas => ADeshacer.Select(c => c.Huella).ToHashSet(StringComparer.Ordinal);
 
@@ -267,10 +287,27 @@ public sealed class HistorialDeshacer
         }
     }
 
-    /// <summary>Las líneas con contenido. Un archivo que no se deja leer (bloqueado) cuenta como vacío.</summary>
+    /// <summary>
+    /// Las líneas con contenido. Un archivo que no se deja leer (bloqueado) cuenta como vacío.
+    ///
+    /// Se abre dejando que otro lo renombre, lo sustituya o lo reescriba mientras se lee
+    /// (FileShare.ReadWrite | Delete). POR QUÉ: el historial solo mira, y no debe estorbar a quien
+    /// escribe. Visto en revisión: con File.ReadAllLines (que solo comparte lectura), la carga del
+    /// detalle de una ejecución coincidía con «Dar por perdidos» sobre el mismo manifiesto, y el
+    /// File.Move y el File.Replace de UndoEngine fallaban por uso compartido; deshaciendo, el
+    /// manifiesto no se habría podido reescribir tras revertir.
+    /// </summary>
     private static List<string> LeerLineas(string archivo)
     {
-        try { return File.ReadAllLines(archivo, Encoding.UTF8).Where(l => l.Trim().Length > 0).ToList(); }
+        try
+        {
+            using var fs = new FileStream(archivo, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var lector = new StreamReader(fs, Encoding.UTF8);
+            var lineas = new List<string>();
+            for (var l = lector.ReadLine(); l != null; l = lector.ReadLine())
+                if (l.Trim().Length > 0) lineas.Add(l);
+            return lineas;
+        }
         catch { return new List<string>(); }
     }
 
@@ -433,14 +470,28 @@ public sealed class HistorialDeshacer
     ///     cambiaron las dos se quedan como los dejó la posterior (deshacer solo devuelve un campo si
     ///     sigue como lo escribió esta ejecución), y si esta ejecución lo había renombrado, al volver
     ///     a su nombre original la posterior ya no podrá deshacer lo suyo en él.
-    /// Lo ya deshecho de las posteriores no cuenta: su efecto ya no está.
+    ///   · Si esta ejecución lo renombró y su nombre ANTERIOR lo ocupa ahora otro archivo, deshacer
+    ///     fallaría (File.Move no sobrescribe). Si lo llevó ahí una posterior, se BLOQUEA como arriba;
+    ///     si el historial no lo explica (está en el disco y nada más), se aparta en
+    ///     <see cref="AnalisisDeshacer.NombreOcupado"/>.
+    /// Lo ya deshecho de las posteriores no cuenta: su efecto ya no está. Lo dado por perdido sí, y
+    /// el bloqueo lo dice (<see cref="BloqueoDeshacer.Perdido"/>): eso ya no se puede deshacer antes.
     /// </summary>
     public AnalisisDeshacer Analizar(EjecucionDeshacer ejecucion, IReadOnlyCollection<string>? huellas,
                                      IReadOnlyList<EjecucionDeshacer>? todas = null)
     {
+        // A conjunto: desde «Deshacer las marcadas» llega una lista, y con «Marcar todas» en la
+        // importación de rekordbox MEDIDA en una biblioteca real (14.948 registros), buscar en ella
+        // por cada cambio eran unos 2·10^8 comparaciones, segundos de espera.
+        var elegidas = huellas == null ? null : new HashSet<string>(huellas, StringComparer.Ordinal);
         var elegidos = Cambios(ejecucion)
-            .Where(c => c.Estado == EstadoCambio.Pendiente && c.Legible && (huellas == null || huellas.Contains(c.Huella)))
+            .Where(c => c.Estado == EstadoCambio.Pendiente && c.Legible && (elegidas == null || elegidas.Contains(c.Huella)))
             .ToList();
+        // Nombres que dejan libres los renombrados elegidos de esta misma ejecución al deshacerse.
+        // Por ejemplo, al aplicar: «tema.mp3» pasa a «Artista - Tema.mp3» y, en la misma
+        // ejecución, «tema (1).mp3» pasa a «tema.mp3». Deshacer va del último registro al primero,
+        // así que el segundo deja libre «tema.mp3» antes de que el primero vuelva a él.
+        var liberados = new HashSet<string>(elegidos.Where(c => c.Renombra).Select(c => c.Despues), StringComparer.OrdinalIgnoreCase);
 
         todas ??= Listar();
         var grupos = Agrupar();
@@ -470,6 +521,7 @@ public sealed class HistorialDeshacer
         var bloqueados = new List<BloqueoDeshacer>();
         var solapes = new List<SolapeDeshacer>();
         var noEncontrados = new List<CambioDeshacer>();
+        var nombreOcupado = new List<CambioDeshacer>();
         foreach (var cambio in elegidos)
         {
             var actual = cambio.Despues;
@@ -477,6 +529,7 @@ public sealed class HistorialDeshacer
             BloqueoDeshacer? bloqueo = null;
             var tocan = new List<EjecucionDeshacer>();
             var compartidos = new HashSet<string>(StringComparer.Ordinal);
+            var volumen = false;
             while (true)
             {
                 var iParte = Siguiente(porAntes, actual, desde);
@@ -485,7 +538,8 @@ public sealed class HistorialDeshacer
                 if (iLlega >= 0 && (iParte < 0 || iLlega < iParte))
                 {
                     // Otro archivo pasó a llamarse como este: el que hay ahí ya no es el nuestro.
-                    bloqueo ??= new BloqueoDeshacer(cambio, pasos[iLlega].Ejecucion, actual, OtroArchivo: true);
+                    bloqueo ??= new BloqueoDeshacer(cambio, pasos[iLlega].Ejecucion, actual, OtroArchivo: true,
+                                                    Perdido: pasos[iLlega].Cambio.Estado == EstadoCambio.Perdido);
                     break;
                 }
                 var (posterior, suyo) = pasos[iParte];
@@ -495,24 +549,68 @@ public sealed class HistorialDeshacer
                     if (!tocan.Any(t => t.Id == posterior.Id)) tocan.Add(posterior);
                     foreach (var campo in suyo.Campos.Intersect(cambio.Campos, StringComparer.Ordinal))
                         if (campo != UndoEngine.VolumeField) compartidos.Add(campo);   // el volumen es relativo: se suman
+                    volumen |= suyo.Campos.Contains(UndoEngine.VolumeField);
                 }
                 if (suyo.Renombra)
                 {
-                    bloqueo ??= new BloqueoDeshacer(cambio, posterior, suyo.Despues, OtroArchivo: false);
+                    bloqueo ??= new BloqueoDeshacer(cambio, posterior, suyo.Despues, OtroArchivo: false,
+                                                    Perdido: suyo.Estado == EstadoCambio.Perdido);
                     actual = suyo.Despues;
                 }
             }
+
+            if (bloqueo == null && cambio.Renombra && !MismoNombre(cambio))
+                bloqueo = OcupaElNombreAnterior(cambio, pasos, porAntes, porLlegada);
 
             if (bloqueo != null)
             {
                 bloqueados.Add(bloqueo with { RutaActual = bloqueo.OtroArchivo ? bloqueo.RutaActual : actual });
                 continue;
             }
+            // El historial no explica que su nombre anterior esté ocupado, pero el disco sí lo dice.
+            // Solo si sigue donde lo dejó la ejecución: si ya no está ahí y sí en el nombre anterior,
+            // es que se devolvió a mano, y deshacer trabaja sobre él allí.
+            if (cambio.Renombra && !MismoNombre(cambio) && !liberados.Contains(cambio.Antes)
+                && File.Exists(cambio.Despues) && File.Exists(cambio.Antes))
+            {
+                nombreOcupado.Add(cambio);
+                continue;
+            }
             aDeshacer.Add(cambio);
-            if (tocan.Count > 0) solapes.Add(new SolapeDeshacer(cambio, tocan, compartidos.ToList(), cambio.Renombra));
+            if (tocan.Count > 0) solapes.Add(new SolapeDeshacer(cambio, tocan, compartidos.ToList(), cambio.Renombra, volumen));
             if (!File.Exists(cambio.Despues) && !File.Exists(cambio.Antes)) noEncontrados.Add(cambio);
         }
-        return new AnalisisDeshacer(ejecucion, aDeshacer, bloqueados, solapes, noEncontrados);
+        return new AnalisisDeshacer(ejecucion, aDeshacer, bloqueados, solapes, noEncontrados) { NombreOcupado = nombreOcupado };
+    }
+
+    /// <summary>
+    /// Un cambio solo de mayúsculas («tema» → «Tema»): las dos rutas son el mismo archivo en Windows y
+    /// macOS, así que el nombre anterior no está «ocupado» por otro.
+    /// </summary>
+    private static bool MismoNombre(CambioDeshacer c) => string.Equals(c.Antes, c.Despues, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// ¿Hay ahora otro archivo con el nombre ANTERIOR de <paramref name="cambio"/>, llevado ahí por
+    /// una ejecución posterior que sigue vigente? Mira la última llegada a ese nombre y la última
+    /// salida de él: si la llegada es posterior, sigue ocupado. null si está libre.
+    ///
+    /// Por ejemplo: Enriquecer renombra «tema.mp3» y, días después, la Bandeja de
+    /// entrada trae a la misma carpeta otra descarga llamada «tema.mp3». Deshacer el renombrado
+    /// fallaría, y la confirmación habría prometido que recupera su nombre.
+    /// </summary>
+    private static BloqueoDeshacer? OcupaElNombreAnterior(CambioDeshacer cambio,
+        List<(EjecucionDeshacer Ejecucion, CambioDeshacer Cambio)> pasos,
+        Dictionary<string, List<int>> porAntes, Dictionary<string, List<int>> porLlegada)
+    {
+        if (!porLlegada.TryGetValue(cambio.Antes, out var llegadas) || llegadas.Count == 0) return null;
+        var llegada = llegadas[^1];
+        var salida = porAntes.TryGetValue(cambio.Antes, out var salidas)
+            ? salidas.Where(i => pasos[i].Cambio.Renombra).DefaultIfEmpty(-1).Max()
+            : -1;
+        if (salida > llegada) return null;
+        var (posterior, suyo) = pasos[llegada];
+        return new BloqueoDeshacer(cambio, posterior, cambio.Antes, OtroArchivo: true,
+                                   Perdido: suyo.Estado == EstadoCambio.Perdido, NombreAnterior: true);
     }
 
     private static void Anotar(Dictionary<string, List<int>> indice, string ruta, int i)

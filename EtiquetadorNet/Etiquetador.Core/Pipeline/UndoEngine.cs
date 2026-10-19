@@ -294,6 +294,13 @@ public sealed class UndoEngine
             var errVaciar = errCopia.Length == 0 ? ArchivoDatos.Escribir(mf, "") : errCopia;
             if (errVaciar.Length > 0)
             {
+                // La copia sobra si el manifiesto sigue pendiente: visto en revisión, se quedaba al
+                // lado, el historial contaba esas líneas dos veces («Deshecha en parte…» con todo
+                // pendiente), la reparación de rekordbox daba por vigentes renombrados que luego se
+                // podían deshacer, y un reintento creaba «.perdidos-2».
+                if (errCopia.Length == 0)
+                    try { File.Delete(destino); }
+                    catch (Exception b) { _log?.Log($"  deshacer: no se pudo borrar la copia {Path.GetFileName(destino)}: {b.Message}", LogKind.Err); }
                 _log?.Log($"  deshacer: no se pudo dar por perdido {Path.GetFileName(mf)}: {e.Message}", LogKind.Err);
                 return new PendientesDescartados(Path.GetFileName(mf), 0, e.Message);
             }

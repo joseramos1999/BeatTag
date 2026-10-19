@@ -99,10 +99,103 @@ public class HistorialDeshacerVistaTests : IDisposable
         Assert.Contains("Se quedan pendientes.", p.Cuerpo);
         Assert.Contains("1 de estos archivos se volvió a cambiar después en «Edición de etiquetas» del 10/10/2026 18:02.", p.Cuerpo);
         Assert.Contains("Lo que cambiaron las dos (título) se queda como lo dejó la posterior en 1 archivo.", p.Cuerpo);
-        Assert.Contains("1 archivo vuelve a su nombre anterior, y la ejecución posterior ya no podrá deshacer sus cambios en él.", p.Cuerpo);
+        Assert.Contains("1 archivo vuelve a su nombre anterior, así que la ejecución posterior ya no lo encontrará donde lo dejó: "
+                        + "lo que cambió en él se queda y no se podrá deshacer desde la aplicación.", p.Cuerpo);
+        Assert.Contains("Cuando «Deshacer última» llegue a esa ejecución, se detendrá en ella hasta que la des por perdida en este historial.", p.Cuerpo);
+        Assert.DoesNotContain("volumen", p.Cuerpo);
         Assert.Contains("empieza por la más reciente", p.Cuerpo);
         Assert.Contains("1 archivo no aparece en el disco", p.Cuerpo);
         Assert.Equal("Deshacer (2)", p.Aceptar);
+    }
+
+    // Visto en revisión: si lo que bloquea se dio por perdido, «deshaz antes esa ejecución» no tiene
+    // salida, porque una ejecución dada por perdida ya no se puede deshacer.
+    [Fact]
+    public void Si_lo_que_bloquea_se_dio_por_perdido_se_dice_que_solo_queda_darlo_por_perdido()
+    {
+        var a = new AnalisisDeshacer(Lote, Array.Empty<CambioDeshacer>(),
+                                     new[] { new BloqueoDeshacer(Cambio("a.mp3", true, "Title"), Ia, Rutas.Archivo("x.mp3"), false, Perdido: true) },
+                                     Array.Empty<SolapeDeshacer>(), Array.Empty<CambioDeshacer>());
+
+        var p = HistorialDeshacerViewModel.Planificar(a, soloMarcadas: false);
+
+        Assert.False(p.Posible);
+        Assert.Equal("1 archivo no se puede deshacer: después lo renombró o lo movió «Renombrado» del 11/10/2026 09:00, "
+                     + "pero ese cambio se dio por perdido y ya no se puede deshacer. Este archivo solo se puede dar por perdido también: "
+                     + "usa «Dar por perdidos…» cuando no quede nada más que deshacer en esta ejecución.", p.Motivo);
+        Assert.DoesNotContain("deshaz antes", p.Motivo);
+    }
+
+    [Fact]
+    public void Lo_perdido_y_lo_que_aun_se_puede_deshacer_antes_se_explican_por_separado()
+    {
+        var bloqueos = new[]
+        {
+            new BloqueoDeshacer(Cambio("a.mp3", true), Ia, Rutas.Archivo("x.mp3"), false),
+            new BloqueoDeshacer(Cambio("b.mp3", true), Ia, Rutas.Archivo("y.mp3"), false, Perdido: true),
+            new BloqueoDeshacer(Cambio("c.mp3", true), Ia, Rutas.Archivo("z.mp3"), false, Perdido: true),
+        };
+
+        var texto = HistorialDeshacerViewModel.TextoBloqueados(bloqueos);
+
+        Assert.StartsWith("1 archivo no se puede deshacer todavía: después lo renombró o lo movió «Renombrado» del 11/10/2026 09:00. "
+                          + "Para deshacerlo, deshaz antes esa ejecución. ", texto);
+        Assert.Contains("2 archivos no se pueden deshacer: después los renombró o los movió «Renombrado» del 11/10/2026 09:00, "
+                        + "pero esos cambios se dieron por perdidos y ya no se pueden deshacer. Estos archivos solo se pueden dar por perdidos también", texto);
+    }
+
+    // Visto en revisión: la confirmación prometía que «recupera su nombre anterior» aunque ese nombre
+    // lo ocupaba ya otro archivo; deshacer fallaba (sin perder nada) y el registro seguía pendiente.
+    [Fact]
+    public void Un_nombre_anterior_ocupado_se_explica_y_no_se_promete()
+    {
+        var libre = Cambio("b.mp3", false, "Genre");
+        var traido = new BloqueoDeshacer(Cambio("a.mp3", true), Ia, Rutas.Archivo("antes-a.mp3"), true, NombreAnterior: true);
+        var enDisco = Cambio("c.mp3", true, "Title");
+        var a = new AnalisisDeshacer(Lote, new[] { libre }, new[] { traido }, Array.Empty<SolapeDeshacer>(), Array.Empty<CambioDeshacer>())
+        {
+            NombreOcupado = new[] { enDisco },
+        };
+
+        var p = HistorialDeshacerViewModel.Planificar(a, soloMarcadas: false);
+
+        Assert.True(p.Posible);
+        Assert.Equal(new[] { "b.mp3" }, p.Huellas);   // ni lo bloqueado ni lo ocupado se pasan
+        Assert.StartsWith("1 archivo volverá a como estaba antes de esa ejecución.", p.Cuerpo);   // sin prometer nombres
+        Assert.Contains("1 archivo no se puede deshacer todavía: otro archivo ocupa ahora el nombre que tenía antes, al que volvería "
+                        + "(lo llevó ahí «Renombrado» del 11/10/2026 09:00). Para deshacerlo, deshaz antes esa ejecución.", p.Cuerpo);
+        Assert.Contains("1 archivo no puede volver a su nombre anterior porque ya hay otro archivo con ese nombre en su carpeta: se queda pendiente. "
+                        + "Cambia de nombre o aparta ese otro archivo y vuelve a intentarlo.", p.Cuerpo);
+
+        // Si no queda nada más, es el motivo para no preguntar.
+        var solo = new AnalisisDeshacer(Lote, Array.Empty<CambioDeshacer>(), Array.Empty<BloqueoDeshacer>(),
+                                        Array.Empty<SolapeDeshacer>(), Array.Empty<CambioDeshacer>()) { NombreOcupado = new[] { enDisco, Cambio("d.mp3", true) } };
+        var q = HistorialDeshacerViewModel.Planificar(solo, soloMarcadas: false);
+        Assert.False(q.Posible);
+        Assert.StartsWith("2 archivos no pueden volver a su nombre anterior porque ya hay otros archivos con esos nombres en sus carpetas: se quedan pendientes.", q.Motivo);
+    }
+
+    // Visto en revisión: el aviso no decía la consecuencia práctica de dejar a una posterior sin
+    // su archivo, y con un ajuste de volumen esa ganancia ya no se puede devolver.
+    [Fact]
+    public void Si_la_posterior_que_pierde_su_deshacer_es_de_volumen_se_dice()
+    {
+        var volumen = Ejecucion("run_20261012_120000", TipoEjecucion.Volumen, 2);
+        var x = Cambio("x.mp3", true, "Title");
+        var y = Cambio("y.mp3", true, "Title");
+        var pierden = new[]
+        {
+            new SolapeDeshacer(x, new[] { volumen }, Array.Empty<string>(), PierdeDeshacer: true, VolumenPosterior: true),
+            new SolapeDeshacer(y, new[] { Editor, volumen }, Array.Empty<string>(), PierdeDeshacer: true, VolumenPosterior: true),
+        };
+
+        var texto = HistorialDeshacerViewModel.TextoPierdeDeshacer(pierden);
+
+        Assert.Equal(" 2 archivos vuelven a su nombre anterior, así que las ejecuciones posteriores ya no los encontrarán donde los dejaron: "
+                     + "lo que cambiaron en ellos se queda y no se podrá deshacer desde la aplicación. "
+                     + "Eso incluye el ajuste de volumen de 2 archivos: el audio se queda con la ganancia que se le aplicó. "
+                     + "Cuando «Deshacer última» llegue a esas ejecuciones, se detendrá en ellas hasta que las des por perdidas en este historial.", texto);
+        Assert.Equal("", HistorialDeshacerViewModel.TextoPierdeDeshacer(Array.Empty<SolapeDeshacer>()));
     }
 
     [Fact]
@@ -202,6 +295,57 @@ public class HistorialDeshacerVistaTests : IDisposable
         Assert.True(undo.UndoLastRun().None);
         vm.MostrarDeshechas = true;
         Assert.Equal(EstadoEjecucion.Perdida, Assert.Single(vm.Ejecuciones).E.Estado);
+    }
+
+    // Visto en revisión (1 de cada 11 pasadas de la suite): elegir una ejecución lanza la lectura de
+    // su manifiesto sin esperarla, y «Dar por perdidos» justo después fallaba por uso compartido del
+    // archivo. Se comprueba el orden (el detalle ya está leído cuando se da por perdido), que es lo
+    // que lo evita, en vez de fiarse de que las dos lecturas coincidan en el tiempo.
+    [Fact]
+    public async Task Dar_por_perdidos_nada_mas_abrir_espera_a_que_termine_la_lectura()
+    {
+        Escribir("run_20261009_160301.jsonl", Enumerable.Range(0, 4000).Select(i => Genero(Rutas.Archivo($"tema {i}.mp3"))).ToArray());
+        var undo = new UndoEngine(_paths);
+        HistorialDeshacerViewModel? vm = null;
+        var cargadosAlDarPorPerdidos = -1;
+        vm = new HistorialDeshacerViewModel(new HistorialDeshacer(_paths.UndoDir), (_, _) => Task.FromResult<string?>(""), m =>
+        {
+            cargadosAlDarPorPerdidos = vm!.Cambios.Count;
+            return undo.DarPorPerdidos(m);
+        });
+        await vm.CargarAsync();
+
+        await vm.DarPorPerdidosAsync();   // sin esperar a que salga el detalle, como un clic muy rápido
+
+        Assert.Equal(4000, cargadosAlDarPorPerdidos);
+        Assert.StartsWith("4000 cambios pendientes de «Géneros»", vm.Estado);
+        Assert.True(File.Exists(Path.Combine(_paths.UndoDir, "run_20261009_160301.perdidos.jsonl")));
+        Assert.False(File.Exists(Path.Combine(_paths.UndoDir, "run_20261009_160301.jsonl")));
+    }
+
+    [Fact]
+    public async Task Preparar_y_deshacer_esperan_a_que_termine_la_lectura_del_detalle()
+    {
+        Escribir("run_20261009_160301.jsonl", Enumerable.Range(0, 4000).Select(i => Genero(Rutas.Archivo($"tema {i}.mp3"))).ToArray());
+        HistorialDeshacerViewModel? vm = null;
+        var cargadosAlDeshacer = -1;
+        vm = new HistorialDeshacerViewModel(new HistorialDeshacer(_paths.UndoDir), (_, _) =>
+        {
+            cargadosAlDeshacer = vm!.Cambios.Count;
+            return Task.FromResult<string?>("hecho");
+        });
+        await vm.CargarAsync();
+
+        var plan = await vm.PrepararAsync(soloMarcadas: false);
+
+        Assert.Equal(4000, vm.Cambios.Count);   // la lectura ya terminó al preparar
+        Assert.True(plan!.Posible);
+        // Elegir otra vez lanza otra lectura, como al pulsar en la lista: deshacer también la espera.
+        var fila = vm.Seleccionada;
+        vm.Seleccionada = null;
+        vm.Seleccionada = fila;
+        await vm.EjecutarAsync(plan);
+        Assert.Equal(4000, cargadosAlDeshacer);
     }
 
     [Fact]
