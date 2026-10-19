@@ -289,6 +289,106 @@ public class CatalogoIsrcLetraTests : IDisposable
         Assert.Equal((a, Explicitness.Explicit), (ruta, letra));
     }
 
+    // ---------------------------------------------------------------- revisión: el dato llega a la columna
+
+    // Aplicar casi siempre renombra («Artista - Título»), y la caché va por ruta: tras reiniciar, la
+    // marca se quedaba en la ruta antigua y la columna volvía a «sin indicar». Vale también para el
+    // nombre propuesto, sin pisar el dato propio de esa ruta.
+    [Fact]
+    public void La_letra_vale_tambien_para_el_nombre_que_tendra_al_aplicar()
+    {
+        var a = Path.Combine(_dir, "bad bunny safaera.mp3");
+        var b = Path.Combine(_dir, "Otro - Tema.mp3");
+        Mp3Fixture.WriteMinMp3(a);
+        Mp3Fixture.WriteMinMp3(b);
+        var cache = new AnalysisCache(Path.Combine(_dir, "analysis-cache.json"));
+        cache.Set(a, "sig", new ProcessResult { FilePath = a, Found = true, Explicit = Explicitness.Explicit,
+                                                Old = "bad bunny safaera.mp3", New = "Bad Bunny - Safaera.mp3" });
+        // Una propuesta que apunta al nombre de un archivo que ya tiene su propio dato no lo pisa.
+        cache.Set(b, "sig", new ProcessResult { FilePath = b, Found = true, Explicit = Explicitness.Clean });
+        var c = Path.Combine(_dir, "otro tema.mp3");
+        Mp3Fixture.WriteMinMp3(c);
+        cache.Set(c, "sig", new ProcessResult { FilePath = c, Found = true, Explicit = Explicitness.Explicit,
+                                                Old = "otro tema.mp3", New = "Otro - Tema.mp3" });
+
+        var letras = cache.LetraDelCatalogo().ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+
+        Assert.Equal(Explicitness.Explicit, letras[a]);
+        Assert.Equal(Explicitness.Explicit, letras[Path.Combine(_dir, "Bad Bunny - Safaera.mp3")]);
+        Assert.Equal(Explicitness.Clean, letras[b]);
+        Assert.Equal(4, letras.Count);
+    }
+
+    [Fact]
+    public void Las_rutas_de_la_letra_siguen_las_reglas_del_renombrado()
+    {
+        var ruta = Path.Combine(_dir, "x.MP3");
+        Assert.Equal(new[] { ruta }, AnalysisCache.RutasDeLaLetra(ruta, new ProcessResult { Old = "x.MP3", New = "x.MP3" }));
+        Assert.Equal(new[] { ruta }, AnalysisCache.RutasDeLaLetra(ruta, new ProcessResult { Old = "x.MP3", New = "" }));
+        Assert.Equal(new[] { ruta }, AnalysisCache.RutasDeLaLetra(ruta, new ProcessResult { Old = "x.MP3", New = "..\\y.mp3" }));
+        // La extensión es la del archivo, como al renombrar de verdad.
+        Assert.Equal(new[] { ruta, Path.Combine(_dir, "Fisher - Losing It.MP3") },
+                     AnalysisCache.RutasDeLaLetra(ruta, new ProcessResult { Old = "x.MP3", New = "Fisher - Losing It.mp3" }));
+    }
+
+    // Una entrada sin resultado («"R": null» en el JSON) no impide leer las demás.
+    [Fact]
+    public void Una_entrada_sin_resultado_no_rompe_la_lectura()
+    {
+        var a = Path.Combine(_dir, "a.mp3");
+        File.WriteAllText(Path.Combine(_dir, "analysis-cache.json"),
+            "{" + JsonSerializer.Serialize(a) + """:{"M":1,"S":2,"Sig":"x","R":null},"b.mp3":{"M":1,"S":2,"Sig":"x","R":{"Explicit":"Explicit"}}}""");
+
+        var letras = new AnalysisCache(Path.Combine(_dir, "analysis-cache.json")).LetraDelCatalogo();
+
+        var (ruta, letra) = Assert.Single(letras);
+        Assert.Equal(("b.mp3", Explicitness.Explicit), (ruta, letra));
+    }
+
+    // Lo anota el motor con cada canción analizada: un análisis nuevo manda sobre el anterior, y el
+    // nombre propuesto no pisa lo que se sepa de otro archivo.
+    [Fact]
+    public void Cada_analisis_pone_al_dia_el_dato_de_la_columna()
+    {
+        var ruta = Path.Combine(_dir, "Bad Bunny - Safaera.mp3");
+        var otra = Path.Combine(_dir, "otra.mp3");
+        try
+        {
+            ExplicitDetector.PonerCatalogo(new[] { new KeyValuePair<string, Explicitness>(otra, Explicitness.Clean) });
+
+            ExplicitDetector.AnotarCatalogo(ruta, Explicitness.Explicit);
+            Assert.Equal(Explicitness.Explicit, ExplicitDetector.DelCatalogo(ruta.ToUpperInvariant()));
+            ExplicitDetector.AnotarCatalogo(ruta, Explicitness.Unknown);   // el análisis nuevo no tiene dato
+            Assert.Equal(Explicitness.Unknown, ExplicitDetector.DelCatalogo(ruta));
+
+            ExplicitDetector.AnotarCatalogo(otra, Explicitness.Explicit, sustituir: false);
+            Assert.Equal(Explicitness.Clean, ExplicitDetector.DelCatalogo(otra));
+            ExplicitDetector.AnotarCatalogo(ruta, Explicitness.Explicit, sustituir: false);
+            Assert.Equal(Explicitness.Explicit, ExplicitDetector.DelCatalogo(ruta));
+            ExplicitDetector.AnotarCatalogo(ruta, Explicitness.Unknown, sustituir: false);   // sin dato, no quita nada
+            Assert.Equal(Explicitness.Explicit, ExplicitDetector.DelCatalogo(ruta));
+        }
+        finally { ExplicitDetector.PonerCatalogo(null); }
+        Assert.Equal(Explicitness.Unknown, ExplicitDetector.DelCatalogo(ruta));
+    }
+
+    // La letra decide entre dos candidatas, pero no cambia la confianza que se devuelve: un archivo
+    // «(Clean)» del que Deezer solo tiene la explícita (lo habitual) no pierde un punto por eso.
+    [Fact]
+    public void La_letra_no_cambia_la_confianza_devuelta()
+    {
+        var solo = Datos(PistaDz(1, "Losing It", 200, true, 1));
+        DeezerProvider.SelectBest(solo, "Fisher", "Losing It", false, false, 200, false, out var sin, letra: Explicitness.Unknown);
+        DeezerProvider.SelectBest(solo, "Fisher", "Losing It", false, false, 200, false, out var clean, out var why, letra: Explicitness.Clean);
+        Assert.Equal(sin, clean);
+        Assert.Contains("letra contraria a la del archivo (desempate)", why);
+
+        var dos = Datos(PistaDz(1, "Losing It", 200, true, 1), PistaDz(2, "Losing It", 200, false, 3));
+        var pick = DeezerProvider.SelectBest(dos, "Fisher", "Losing It", false, false, 200, false, out var conLetra, letra: Explicitness.Clean);
+        Assert.Equal(2, Id(pick));
+        Assert.Equal(sin, conLetra);
+    }
+
     // ---------------------------------------------------------------- escribir y deshacer
 
     private ProcessResult ConIsrc(string ruta, string isrc = "USUYG1017706") => new()

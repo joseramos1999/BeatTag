@@ -93,21 +93,25 @@ public partial class BandejaView : UserControl
     }
 
     // Descartar es masivo y toca archivos: se confirma diciendo cuántas, cuántas son de verdad
-    // duplicadas y si la papelera de esa unidad las va a admitir (X15).
+    // duplicadas y si la papelera de esa unidad las va a admitir (X15). De una canción repetida en
+    // la bandeja que no está en la biblioteca, con todas sus copias seleccionadas, se conserva una.
     private async void Descartar_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not BandejaViewModel vm || TopLevel.GetTopLevel(this) is not Window owner) return;
         if (vm.IsBusy) return;
-        var filas = vm.Seleccionadas;
-        if (filas.Count == 0) { vm.Status = "Selecciona antes las descargas que quieres descartar."; return; }
+        var seleccion = vm.Seleccionadas;
+        if (seleccion.Count == 0) { vm.Status = "Selecciona antes las descargas que quieres descartar."; return; }
 
+        var plan = vm.PlanearDescarte(seleccion);
+        var filas = plan.Descartar;
+        if (filas.Count == 0) return;   // no pasa: de cada canción se conserva una sola copia
         var ok = await ConfirmDialog.AskAsync(owner,
             filas.Count == 1 ? $"Descartar «{filas[0].FileName}»" : $"Descartar {filas.Count} descargas",
             Etiquetador.Core.Dj.RevisionBandeja.CuerpoDescartar(filas.Count, filas.Count(r => r.TieneAvisoDeDuplicado),
-                                                                filas.Count(r => r.PuedeSustituir)),
+                                                                filas.Count(r => r.PuedeSustituir), plan.Conservar.Count),
             Services.Papelera.NotaConfirmacion(filas.Select(r => r.FilePath)),
             "Enviar a la papelera");
-        if (ok) await vm.DescartarAsync(filas);
+        if (ok) await vm.DescartarAsync(plan);
     }
 
     // Sustituir toca dos archivos y uno de ellos es de la biblioteca: se confirma con los dos y su
@@ -116,6 +120,9 @@ public partial class BandejaView : UserControl
     {
         if (DataContext is not BandejaViewModel vm || TopLevel.GetTopLevel(this) is not Window owner) return;
         if (vm.IsBusy || vm.FilaASustituir is not { Sustitucion: { } propuesta } fila) return;
+        // Antes de preguntar: si la unidad de la copia antigua no tiene papelera, no se va a sustituir.
+        var sinPapelera = vm.MotivoParaNoSustituir(fila);
+        if (sinPapelera.Length > 0) { vm.Status = sinPapelera; return; }
 
         var (cuerpo, nota) = Etiquetador.Core.Dj.SustitucionBandeja.TextosConfirmacion(fila.Track, propuesta.Vieja);
         var ok = await ConfirmDialog.AskAsync(owner, "Sustituir la copia de la biblioteca", cuerpo, nota, "Sustituir");

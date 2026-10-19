@@ -164,9 +164,51 @@ public sealed class AnalysisCache
     /// <see cref="Analysis.ExplicitDetector.PonerCatalogo"/>. Sin mirar el disco ni la firma: es la
     /// misma canción aunque se hayan cambiado sus etiquetas, y la columna «Explícito» lo consulta por
     /// cada fila visible. Lo guardado por versiones anteriores no trae el dato y no aparece.
+    ///
+    /// Cada dato vale también para la ruta que tendrá el archivo al aplicar el nombre propuesto (ver
+    /// <see cref="RutasDeLaLetra"/>), sin pisar el dato propio de esa ruta si lo tiene.
+    ///
+    /// Recorre la caché entera: hay que llamarlo cuando nadie la esté modificando (al cargarla).
     /// </summary>
     public List<KeyValuePair<string, Analysis.Explicitness>> LetraDelCatalogo()
-        => _map.Where(kv => kv.Value.R.Explicit != Analysis.Explicitness.Unknown)
-               .Select(kv => new KeyValuePair<string, Analysis.Explicitness>(kv.Key, kv.Value.R.Explicit))
-               .ToList();
+    {
+        var porRuta = new Dictionary<string, Analysis.Explicitness>(System.StringComparer.OrdinalIgnoreCase);
+        var renombradas = new List<KeyValuePair<string, Analysis.Explicitness>>();
+        foreach (var (ruta, e) in _map)
+        {
+            // Una entrada con «"R": null» en el JSON (escrita a mano o dañada) no tiene dato.
+            if (e?.R is not { } r || r.Explicit == Analysis.Explicitness.Unknown) continue;
+            var primera = true;
+            foreach (var p in RutasDeLaLetra(ruta, r))
+            {
+                if (primera) porRuta[p] = r.Explicit;
+                else renombradas.Add(new(p, r.Explicit));
+                primera = false;
+            }
+        }
+        foreach (var (p, letra) in renombradas) porRuta.TryAdd(p, letra);
+        return porRuta.ToList();
+    }
+
+    /// <summary>
+    /// Las rutas para las que vale lo que dijo el catálogo de un archivo: la suya y, si el análisis
+    /// propone otro nombre, la que tendrá en la misma carpeta al aplicarlo (con el nombre saneado y la
+    /// extensión de siempre, como hace <see cref="RenameSafety.TryResolveTarget"/>).
+    ///
+    /// POR QUÉ. La caché va por ruta, y aplicar casi siempre renombra («Artista - Título»): sin esto,
+    /// tras reiniciar la aplicación la marca del catálogo se quedaba en la ruta antigua y la columna
+    /// «Explícito» de las canciones ya aplicadas volvía a «sin indicar». Si el nombre acaba siendo otro
+    /// (ocupado, editado a mano), simplemente no se encuentra, como antes.
+    /// </summary>
+    public static IEnumerable<string> RutasDeLaLetra(string ruta, ProcessResult r)
+    {
+        if (string.IsNullOrEmpty(ruta)) yield break;
+        yield return ruta;
+        if (string.IsNullOrWhiteSpace(r.New) || string.Equals(r.New, r.Old, System.StringComparison.Ordinal)) yield break;
+        if (r.New.IndexOfAny(new[] { '/', '\\' }) >= 0) yield break;
+        var nombre = TextUtils.Sanitize(Path.GetFileNameWithoutExtension(r.New));
+        if (nombre.Length == 0) yield break;
+        var renombrada = Path.Combine(Path.GetDirectoryName(ruta) ?? "", nombre + Path.GetExtension(ruta));
+        if (!string.Equals(renombrada, ruta, System.StringComparison.OrdinalIgnoreCase)) yield return renombrada;
+    }
 }

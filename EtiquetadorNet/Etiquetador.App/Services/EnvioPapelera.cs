@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Etiquetador.App.Services;
@@ -8,8 +9,10 @@ namespace Etiquetador.App.Services;
 /// <summary>Lo que dio enviar varios archivos a la papelera.</summary>
 /// <param name="Enviadas">Rutas que ya están en la papelera, en el orden en que se pidieron.</param>
 /// <param name="Fallos">Nombre del archivo y motivo de cada una que se quedó donde estaba.</param>
+/// <param name="Interrumpido">Se canceló antes de terminar: las que faltaban no se han tocado.</param>
 public sealed record EnvioPapeleraResultado(IReadOnlyList<string> Enviadas,
-                                            IReadOnlyList<(string Archivo, string Motivo)> Fallos);
+                                            IReadOnlyList<(string Archivo, string Motivo)> Fallos,
+                                            bool Interrumpido = false);
 
 /// <summary>
 /// Envía varios archivos a la papelera FUERA del hilo de la interfaz, con progreso. Lo usan
@@ -25,15 +28,19 @@ public static class EnvioPapelera
     /// <summary>
     /// Envía las rutas en orden con <paramref name="enviar"/> y avisa del avance (hechas, total).
     /// No se detiene en un fallo: el que no se puede enviar se anota con su motivo y se sigue, igual
-    /// que antes. Nunca lanza.
+    /// que antes. Nunca lanza: si se cancela con <paramref name="ct"/>, para entre un archivo y el
+    /// siguiente y devuelve lo hecho hasta ahí, porque quien llama tiene que quitar de la biblioteca y
+    /// de la tabla las que ya están en la papelera.
     /// </summary>
     public static EnvioPapeleraResultado Enviar(IReadOnlyList<string> rutas, Func<string, (bool Ok, string Error)> enviar,
-                                                IProgress<(int Hechas, int Total)>? progreso = null)
+                                                IProgress<(int Hechas, int Total)>? progreso = null,
+                                                CancellationToken ct = default)
     {
         var enviadas = new List<string>(rutas.Count);
         var fallos = new List<(string Archivo, string Motivo)>();
         for (var i = 0; i < rutas.Count; i++)
         {
+            if (ct.IsCancellationRequested) return new EnvioPapeleraResultado(enviadas, fallos, Interrumpido: true);
             var ruta = rutas[i];
             (bool Ok, string Error) r;
             try { r = enviar(ruta); }
@@ -52,10 +59,13 @@ public static class EnvioPapelera
     /// </summary>
     public static Task<EnvioPapeleraResultado> EnviarAsync(IReadOnlyList<string> rutas,
                                                            Func<string, (bool Ok, string Error)>? enviar = null,
-                                                           IProgress<(int Hechas, int Total)>? progreso = null)
+                                                           IProgress<(int Hechas, int Total)>? progreso = null,
+                                                           CancellationToken ct = default)
     {
         var copia = new List<string>(rutas);   // la lista de quien llama puede cambiar mientras tanto
-        return Task.Run(() => Enviar(copia, enviar ?? Papelera.Enviar, progreso));
+        // Sin pasar el token a Task.Run: cancelado antes de empezar, Enviar devuelve «nada hecho» en
+        // vez de lanzar, y quien llama trata igual los dos casos.
+        return Task.Run(() => Enviar(copia, enviar ?? Papelera.Enviar, progreso, ct));
     }
 
     /// <summary>«Enviando a la papelera: 37 de 120…», para el estado mientras dura.</summary>

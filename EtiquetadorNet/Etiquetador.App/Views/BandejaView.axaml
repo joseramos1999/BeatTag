@@ -43,7 +43,7 @@
                     ToolTip.Tip="Mueve las canciones preparadas a la carpeta de destino. Nunca sobrescribe un archivo existente y se puede deshacer." />
             <Button Content="Escribir ficha en el comentario" Click="Volcar_Click" IsEnabled="{Binding !IsBusy}" Margin="0,0,12,4" />
             <Button Content="Descartar a la papelera" Click="Descartar_Click" IsEnabled="{Binding !IsBusy}" Margin="0,0,12,4"
-                    ToolTip.Tip="Envía a la papelera del sistema las descargas seleccionadas que no quieras conservar, por ejemplo las que ya tienes. Con el filtro «Con aviso de duplicado» y Ctrl+A se descartan de una vez." />
+                    ToolTip.Tip="Envía a la papelera del sistema las descargas seleccionadas que no quieras conservar, por ejemplo las que ya tienes. Con el filtro «Con aviso de duplicado» y Ctrl+A se descartan de una vez; de una canción repetida en la bandeja que no está en la biblioteca se conserva la copia de mejor calidad." />
             <TextBox Text="{Binding Busqueda}" PlaceholderText="Buscar…" Width="160" Margin="0,0,6,4" />
             <ComboBox ItemsSource="{Binding Filtros}" SelectedItem="{Binding Filtro}" MinWidth="120" Margin="0,0,6,4" />
             <TextBlock Text="{Binding FiltroInfo}" VerticalAlignment="Center" Opacity="0.7" Margin="0,0,6,4" />

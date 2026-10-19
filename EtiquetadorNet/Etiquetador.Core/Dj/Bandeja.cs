@@ -38,6 +38,9 @@ public enum TipoAviso
 
 public sealed record AvisoBandeja(TipoAviso Tipo, string Texto);
 
+/// <summary>Lo que se descarta de una selección de la bandeja y lo que se conserva para no perder la canción (X15).</summary>
+public sealed record PlanDescarte<T>(IReadOnlyList<T> Descartar, IReadOnlyList<T> Conservar);
+
 /// <summary>Canciones agrupadas por clave, para buscar coincidencias sin recorrer la biblioteca entera cada vez.</summary>
 public sealed class IndiceCanciones
 {
@@ -174,7 +177,14 @@ public static class RevisionBandeja
     /// Ctrl+A es fácil llevarse una canción que todavía no tienes. Y que alguna sea MEJOR que la copia
     /// de la biblioteca (I14): esa conviene usarla para sustituir, no tirarla.
     /// </summary>
-    public static string CuerpoDescartar(int total, int conAvisoDeDuplicado, int mejores = 0)
+    /// <param name="total">Las que se van a descartar de verdad (ya sin las que se conservan; ver <see cref="PlanearDescarte{T}"/>).</param>
+    /// <param name="conAvisoDeDuplicado">Cuántas de ellas tienen aviso de duplicado.</param>
+    /// <param name="mejores">Cuántas mejoran su copia de la biblioteca (I14).</param>
+    /// <param name="conservadas">
+    /// Canciones repetidas en la bandeja, sin copia en la biblioteca, de las que se conserva una copia
+    /// porque estaban seleccionadas todas (ver <see cref="PlanearDescarte{T}"/>).
+    /// </param>
+    public static string CuerpoDescartar(int total, int conAvisoDeDuplicado, int mejores = 0, int conservadas = 0)
     {
         if (total <= 0) return "";
         var sinAviso = total - conAvisoDeDuplicado;
@@ -196,8 +206,83 @@ public static class RevisionBandeja
             texto += mejores == 1
                 ? " ⚠ 1 es de mejor calidad que su copia de la biblioteca: puedes sustituir esa copia por ella en lugar de descartarla."
                 : $" ⚠ {mejores} son de mejor calidad que su copia de la biblioteca: puedes sustituir esas copias por ellas en lugar de descartarlas.";
+        if (conservadas > 0) texto += " " + TextoConservadas(conservadas);
         return texto;
     }
+
+    // ---- Descartar sin quedarse sin ninguna copia (X15, revisión) ----
+    //
+    // Visto en revisión: «Tema.mp3» y «Tema (1).mp3» (la descarga doble del navegador) salen las dos
+    // con «Repetida en la bandeja», porque cada una ve a la otra. Con el filtro «Con aviso de
+    // duplicado» y Ctrl+A entraban las dos en la selección, el diálogo decía «Las 2 ya están en la
+    // biblioteca o repetidas en la bandeja» y las dos iban a la papelera: el DJ se quedaba sin
+    // ninguna copia de una canción que no tenía. Ahora se hace como «Marcar sobrantes» en
+    // Duplicados: de cada canción repetida que no está en la biblioteca se conserva una copia.
+
+    /// <summary>
+    /// Qué se descarta de verdad de una selección de la bandeja y qué se conserva.
+    ///
+    /// Una canción repetida en la bandeja (misma clave exacta que <see cref="ClaveExacta"/>, dos copias
+    /// o más) que NO está en la biblioteca, y con TODAS sus copias de la bandeja seleccionadas,
+    /// conserva la mejor (ver <see cref="MejorCopia"/>); el resto se descarta. Si alguna de sus copias
+    /// se queda fuera de la selección, la canción sigue en la bandeja y no hace falta conservar nada.
+    /// Una canción que ya está en la biblioteca no conserva ninguna: ahí ya hay una copia.
+    /// </summary>
+    /// <param name="seleccion">Lo que el usuario ha seleccionado para descartar.</param>
+    /// <param name="bandeja">Todo lo que hay en la bandeja (seleccionado o no).</param>
+    /// <param name="cancion">La canción de cada elemento.</param>
+    /// <param name="enBiblioteca">Si ese elemento ya tiene copia exacta en la biblioteca.</param>
+    public static PlanDescarte<T> PlanearDescarte<T>(IReadOnlyList<T> seleccion, IEnumerable<T> bandeja,
+                                                     Func<T, Track> cancion, Func<T, bool> enBiblioteca)
+    {
+        var elegidas = new HashSet<string>(seleccion.Select(x => cancion(x).FilePath), StringComparer.OrdinalIgnoreCase);
+        var conservar = new List<T>();
+        foreach (var grupo in bandeja.GroupBy(x => ClaveExacta(cancion(x)), StringComparer.Ordinal))
+        {
+            if (grupo.Key.Length == 0) continue;
+            var copias = grupo.ToList();
+            if (copias.Count < 2 || copias.Any(enBiblioteca)) continue;
+            if (!copias.All(x => elegidas.Contains(cancion(x).FilePath))) continue;
+            var mejor = MejorCopia(copias.Select(cancion).ToList());
+            conservar.Add(copias.First(x => ReferenceEquals(cancion(x), mejor)));
+        }
+        if (conservar.Count == 0) return new PlanDescarte<T>(seleccion.ToList(), conservar);
+
+        var quedan = new HashSet<string>(conservar.Select(x => cancion(x).FilePath), StringComparer.OrdinalIgnoreCase);
+        return new PlanDescarte<T>(seleccion.Where(x => !quedan.Contains(cancion(x).FilePath)).ToList(), conservar);
+    }
+
+    /// <summary>
+    /// La copia que se conserva de una canción repetida: la de más calidad (sin pérdida antes que con
+    /// pérdida, y después más kbps, el mismo criterio que <see cref="SustitucionBandeja.EsMejor"/>). Con la misma calidad, la
+    /// de nombre más corto: la descarga doble del navegador añade « (1)» y el sistema « - copia», así
+    /// que el nombre más corto suele ser el original. Si aún empatan, por orden alfabético, para que
+    /// la elección no dependa del orden de la tabla.
+    /// </summary>
+    public static Track MejorCopia(IReadOnlyList<Track> copias)
+        => copias.OrderByDescending(t => AudioQuality.Rate(t) == QualityTier.Lossless)
+                 .ThenByDescending(t => t.Bitrate)
+                 .ThenBy(t => t.FileName.Length)
+                 .ThenBy(t => t.FileName, StringComparer.Ordinal)
+                 .First();
+
+    /// <summary>La frase que dice qué se conserva, para el diálogo y para el estado al terminar.</summary>
+    public static string TextoConservadas(int conservadas) => conservadas switch
+    {
+        <= 0 => "",
+        1 => "De 1 canción repetida en la bandeja que no está en la biblioteca estaban seleccionadas todas las copias: "
+           + "la de mejor calidad se queda en la bandeja y se descartan las demás.",
+        _ => $"De {conservadas} canciones repetidas en la bandeja que no están en la biblioteca estaban seleccionadas todas las copias: "
+           + "de cada una se queda en la bandeja la de mejor calidad y se descartan las demás.",
+    };
+
+    /// <summary>Lo mismo para el estado, cuando ya se ha descartado.</summary>
+    public static string TextoConservadasTrasDescartar(int conservadas) => conservadas switch
+    {
+        <= 0 => "",
+        1 => "Se ha conservado en la bandeja la copia de mejor calidad de 1 canción repetida que no está en la biblioteca.",
+        _ => $"Se ha conservado en la bandeja la copia de mejor calidad de {conservadas} canciones repetidas que no están en la biblioteca.",
+    };
 
     private static string Enumerar(IReadOnlyList<Track> canciones, bool conVersion = false)
     {
@@ -452,15 +537,33 @@ public static class SustitucionBandeja
              + "por perdida. Reubícala desde rekordbox apuntando al archivo nuevo, o vuelve a importarla.";
     }
 
-    /// <summary>El cuerpo y la nota del diálogo de confirmación, con los dos archivos y su calidad.</summary>
+    /// <summary>
+    /// Lo que conviene saber sobre Serato y Traktor (revisión de I14). Serato no guarda los cue points
+    /// por ruta como rekordbox, sino DENTRO del propio archivo, en sus etiquetas: se quedan en la copia
+    /// antigua, que va a la papelera. Traktor los guarda en su colección, ligados a la ruta.
+    /// </summary>
+    public const string TextoSeratoTraktor =
+        "Serato guarda los cue points y la cuadrícula dentro del propio archivo, así que se quedan en la copia antigua: "
+        + "en la descarga habrá que volver a ponerlos. Traktor los guarda en su colección, ligados a la ruta, igual que rekordbox.";
+
+    /// <summary>
+    /// El cuerpo y la nota del diálogo de confirmación, con los dos archivos y su calidad. Dice también
+    /// lo que NO pasa a la descarga: las etiquetas del archivo antiguo (comentario, tonalidad,
+    /// puntuación, color…). Copiarlas sería decidir por el DJ qué etiquetas valen para un archivo
+    /// nuevo; la descarga conserva las suyas y Enriquecer la vuelve a proponer.
+    ///
+    /// Quien llama comprueba ANTES que la unidad de la copia antigua tiene papelera (si no, no se abre
+    /// el diálogo), así que la nota puede prometer que se recupera desde ahí.
+    /// </summary>
     public static (string Cuerpo, string Nota) TextosConfirmacion(Track nueva, Track vieja)
     {
         var destino = Destino(vieja.FilePath, nueva.FilePath);
         var carpeta = Path.GetDirectoryName(vieja.FilePath) ?? "";
         var cuerpo = $"La descarga «{nueva.FileName}» ({Calidad(nueva)}) sustituirá a «{vieja.FileName}» ({Calidad(vieja)}), "
                    + $"en «{carpeta}». La copia de la biblioteca va a la papelera y la descarga ocupa su lugar como "
-                   + $"«{Path.GetFileName(destino)}». Su ficha de DJ pasa a la descarga.";
-        var nota = TextoRekordbox(vieja.FilePath, destino)
+                   + $"«{Path.GetFileName(destino)}». Su ficha de DJ pasa a la descarga. Las etiquetas del archivo antiguo "
+                   + "(comentario, tonalidad, puntuación, color…) no pasan: la descarga conserva las suyas y Enriquecer la volverá a proponer.";
+        var nota = TextoRekordbox(vieja.FilePath, destino) + " " + TextoSeratoTraktor
                  + " La copia antigua se puede recuperar desde la papelera del sistema, y el traslado se puede deshacer desde Enriquecer.";
         return (cuerpo, nota);
     }
@@ -536,11 +639,18 @@ public static class SustitucionBandeja
     ///      de la biblioteca a la bandeja. Si anotar falla, la descarga vuelve a la bandeja y se dice
     ///      que la vieja está en la papelera.
     /// La vieja no se anota: no hay forma de devolverla desde el programa, se recupera desde la papelera.
+    ///
+    /// Con <paramref name="carpetaDiario"/>, antes del paso 1 se apunta ahí qué se va a hacer, y se
+    /// borra al terminar. Si la aplicación se cierra entre el paso 1 y el 3, la descarga se queda con
+    /// el nombre temporal (oculto para el escáner) en la carpeta de la biblioteca, y la entrada de la
+    /// bandeja se poda en el siguiente análisis: no se pierde, pero nadie la encontraría. Con lo
+    /// apuntado, <see cref="Recuperar"/> la devuelve a la bandeja. Si no se puede apuntar, no se empieza.
     /// </summary>
     /// <param name="enviarPapelera">Envía a la papelera (Services.Papelera.Enviar, que se niega en las unidades sin papelera).</param>
     /// <param name="anotar">Anota un registro en el historial para deshacer; devuelve "" o el motivo del fallo.</param>
+    /// <param name="carpetaDiario">Dónde se apunta la sustitución en curso (ver <see cref="CarpetaDiario"/>); null, sin apuntar.</param>
     public static ResultadoSustitucion Ejecutar(string nueva, string vieja, Func<string, (bool Ok, string Error)> enviarPapelera,
-                                                Func<UndoRecord, string> anotar)
+                                                Func<UndoRecord, string> anotar, string? carpetaDiario = null)
     {
         var destino = Destino(vieja, nueva);
         if (!File.Exists(nueva)) return Fallo("La descarga ya no está en la bandeja. No se ha cambiado nada.");
@@ -550,49 +660,155 @@ public static class SustitucionBandeja
             return Fallo($"En la carpeta de la biblioteca ya hay un archivo llamado «{Path.GetFileName(destino)}»; no se sobrescribe. No se ha cambiado nada.");
 
         // Extensión que el escáner no reconoce como audio: si se escanea mientras tanto, no entra.
-        var temporal = Path.Combine(Path.GetDirectoryName(vieja) ?? "", $".beattag-sustituir-{Guid.NewGuid():N}.tmp");
+        var id = Guid.NewGuid().ToString("N");
+        var temporal = Path.Combine(Path.GetDirectoryName(vieja) ?? "", $".beattag-sustituir-{id}.tmp");
 
-        // 1. A la carpeta de la biblioteca, todavía con un nombre temporal.
-        try { File.Move(nueva, temporal); }
-        catch (Exception e)
+        string? diario = null;
+        if (carpetaDiario != null)
         {
-            // Una copia entre discos que falló a medias puede dejar el temporal: el original sigue en la bandeja.
-            if (File.Exists(nueva)) try { if (File.Exists(temporal)) File.Delete(temporal); } catch { }
-            return Fallo($"No se pudo llevar la descarga a la carpeta de la biblioteca ({e.Message}). No se ha cambiado nada.");
+            diario = Path.Combine(carpetaDiario, id + ".json");
+            var errDiario = ArchivoDatos.EscribirJson(diario, new DiarioSustitucion { Temporal = temporal, Bandeja = nueva, Vieja = vieja });
+            if (errDiario.Length > 0)
+                return Fallo($"No se pudo apuntar la sustitución antes de empezar ({errDiario}). No se ha cambiado nada.");
+        }
+        try { return Pasos(); }
+        finally
+        {
+            // Mientras el temporal exista, lo apuntado sigue haciendo falta para recuperarlo.
+            if (diario != null && !File.Exists(temporal))
+                try { File.Delete(diario); } catch { /* se recoge en el siguiente análisis de la bandeja */ }
         }
 
-        // 2. La copia antigua, a la papelera.
-        (bool Ok, string Error) papelera;
-        try { papelera = enviarPapelera(vieja); }
-        catch (Exception e) { papelera = (false, e.Message); }
-        if (!papelera.Ok)
+        ResultadoSustitucion Pasos()
         {
-            var motivo = string.IsNullOrWhiteSpace(papelera.Error) ? "motivo desconocido." : papelera.Error.Trim();
-            return Fallo($"No se sustituye: la copia de la biblioteca no se pudo enviar a la papelera. {motivo} "
-                         + Devolver(temporal, nueva, "No se ha cambiado nada."));
+            // 1. A la carpeta de la biblioteca, todavía con un nombre temporal.
+            try { File.Move(nueva, temporal); }
+            catch (Exception e)
+            {
+                // Una copia entre discos que falló a medias puede dejar el temporal: el original sigue en la bandeja.
+                if (File.Exists(nueva)) try { if (File.Exists(temporal)) File.Delete(temporal); } catch { }
+                return Fallo($"No se pudo llevar la descarga a la carpeta de la biblioteca ({e.Message}). No se ha cambiado nada.");
+            }
+
+            // 2. La copia antigua, a la papelera.
+            (bool Ok, string Error) papelera;
+            try { papelera = enviarPapelera(vieja); }
+            catch (Exception e) { papelera = (false, e.Message); }
+            if (!papelera.Ok)
+            {
+                var motivo = string.IsNullOrWhiteSpace(papelera.Error) ? "motivo desconocido." : papelera.Error.Trim();
+                return Fallo($"No se sustituye: la copia de la biblioteca no se pudo enviar a la papelera. {motivo} "
+                             + Devolver(temporal, nueva, "No se ha cambiado nada."));
+            }
+
+            // 3. Ocupa el lugar de la antigua.
+            try { File.Move(temporal, destino); }
+            catch (Exception e)
+            {
+                return Fallo($"La copia antigua está en la papelera, pero la descarga no pudo ocupar su lugar ({e.Message}). "
+                             + Devolver(temporal, nueva, "La descarga sigue en la bandeja.")
+                             + " Recupera la copia antigua desde la papelera si la necesitas.", viejaEnPapelera: true);
+            }
+
+            // 4. Queda anotado para deshacer.
+            string errAnotar;
+            try { errAnotar = anotar(new UndoRecord { OrigPath = nueva, FinalPath = destino, Renamed = true }) ?? ""; }
+            catch (Exception e) { errAnotar = e.Message; }
+            if (errAnotar.Length > 0)
+                return Fallo($"El cambio no se pudo anotar para deshacer ({errAnotar}). "
+                             + Devolver(destino, nueva, "La descarga vuelve a la bandeja.")
+                             + " La copia antigua está en la papelera, desde donde puedes recuperarla.", viejaEnPapelera: true);
+
+            return new ResultadoSustitucion(destino, "", true);
         }
-
-        // 3. Ocupa el lugar de la antigua.
-        try { File.Move(temporal, destino); }
-        catch (Exception e)
-        {
-            return Fallo($"La copia antigua está en la papelera, pero la descarga no pudo ocupar su lugar ({e.Message}). "
-                         + Devolver(temporal, nueva, "La descarga sigue en la bandeja.")
-                         + " Recupera la copia antigua desde la papelera si la necesitas.", viejaEnPapelera: true);
-        }
-
-        // 4. Queda anotado para deshacer.
-        string errAnotar;
-        try { errAnotar = anotar(new UndoRecord { OrigPath = nueva, FinalPath = destino, Renamed = true }) ?? ""; }
-        catch (Exception e) { errAnotar = e.Message; }
-        if (errAnotar.Length > 0)
-            return Fallo($"El cambio no se pudo anotar para deshacer ({errAnotar}). "
-                         + Devolver(destino, nueva, "La descarga vuelve a la bandeja.")
-                         + " La copia antigua está en la papelera, desde donde puedes recuperarla.", viejaEnPapelera: true);
-
-        return new ResultadoSustitucion(destino, "", true);
 
         ResultadoSustitucion Fallo(string error, bool viejaEnPapelera = false) => new(destino, error, viejaEnPapelera);
+    }
+
+    /// <summary>La carpeta donde se apuntan las sustituciones en curso, dentro de la de datos de la aplicación.</summary>
+    public static string CarpetaDiario(string carpetaDatos) => Path.Combine(carpetaDatos, "bandeja-sustituciones");
+
+    /// <summary>Lo que se apunta antes de sustituir (ver <see cref="Ejecutar"/>).</summary>
+    public sealed class DiarioSustitucion
+    {
+        /// <summary>El nombre temporal que lleva la descarga en la carpeta de la biblioteca entre los pasos 1 y 3.</summary>
+        public string Temporal { get; set; } = "";
+        /// <summary>Dónde estaba la descarga en la bandeja.</summary>
+        public string Bandeja { get; set; } = "";
+        /// <summary>La copia de la biblioteca que se iba a sustituir.</summary>
+        public string Vieja { get; set; } = "";
+    }
+
+    /// <summary>
+    /// Recoge las sustituciones que se quedaron a medias porque la aplicación se cerró (ver
+    /// <see cref="Ejecutar"/>): la descarga que se quedó con el nombre temporal vuelve a la bandeja
+    /// con su nombre. Devuelve una frase por cada una que ha hecho falta recoger, para el estado y el
+    /// registro. No lanza: lo que no se pueda recoger ahora se intenta en el siguiente análisis.
+    /// </summary>
+    public static IReadOnlyList<string> Recuperar(string carpetaDiario)
+    {
+        var avisos = new List<string>();
+        string[] diarios;
+        try { diarios = Directory.Exists(carpetaDiario) ? Directory.GetFiles(carpetaDiario, "*.json") : Array.Empty<string>(); }
+        catch (Exception e) { return new[] { $"No se pudo revisar si quedó alguna sustitución a medias ({e.Message})." }; }
+
+        foreach (var diario in diarios)
+        {
+            var leido = ArchivoDatos.LeerJson<DiarioSustitucion>(diario);
+            var d = leido.Datos;
+            if (d == null || d.Temporal.Length == 0)
+            {
+                // Ilegible: ArchivoDatos ya lo ha apartado como «.ilegible_<fecha>» y lo dice.
+                if (leido.Aviso.Length > 0) avisos.Add(leido.Aviso);
+                continue;
+            }
+            var aviso = RecuperarUna(d);
+            if (aviso.Length > 0) avisos.Add(aviso);
+            if (!File.Exists(d.Temporal))
+                try { File.Delete(diario); } catch { /* se vuelve a intentar la próxima vez */ }
+        }
+        return avisos;
+    }
+
+    private static string RecuperarUna(DiarioSustitucion d)
+    {
+        // Terminó (el temporal ya ocupa el lugar de la antigua) o no llegó a empezar: no hay nada que recoger.
+        if (!File.Exists(d.Temporal)) return "";
+        var nombre = Path.GetFileName(d.Bandeja);
+        try
+        {
+            // El original sigue en la bandeja: el temporal es una copia que no llegó a completarse
+            // entre dos discos (File.Move solo borra el original cuando la copia está entera).
+            if (File.Exists(d.Bandeja))
+            {
+                File.Delete(d.Temporal);
+                return "";
+            }
+
+            var carpetaBandeja = Path.GetDirectoryName(d.Bandeja) ?? "";
+            string destino;
+            if (carpetaBandeja.Length > 0 && Directory.Exists(carpetaBandeja)) destino = d.Bandeja;
+            else
+            {
+                // La carpeta de la bandeja ya no existe: se le devuelve su nombre donde está, a la vista.
+                destino = Path.Combine(Path.GetDirectoryName(d.Temporal) ?? "", nombre);
+                if (File.Exists(destino) || Directory.Exists(destino))
+                    destino = Path.Combine(Path.GetDirectoryName(d.Temporal) ?? "",
+                                           $"{Path.GetFileNameWithoutExtension(nombre)} (recuperada){Path.GetExtension(nombre)}");
+            }
+            File.Move(d.Temporal, destino);
+            var texto = string.Equals(destino, d.Bandeja, StringComparison.OrdinalIgnoreCase)
+                ? $"Una sustitución se interrumpió al cerrarse la aplicación: la descarga «{nombre}» ha vuelto a la bandeja."
+                : $"Una sustitución se interrumpió al cerrarse la aplicación y la carpeta de la bandeja ya no existe: la descarga está en «{destino}».";
+            if (!File.Exists(d.Vieja))
+                texto += $" La copia de la biblioteca («{Path.GetFileName(d.Vieja)}») ya estaba en la papelera, desde donde puedes recuperarla.";
+            return texto;
+        }
+        catch (Exception e)
+        {
+            return $"Una sustitución se interrumpió al cerrarse la aplicación y la descarga «{nombre}» sigue en «{d.Temporal}»: "
+                 + $"no se pudo devolver a la bandeja ({e.Message}). Se volverá a intentar en el siguiente análisis.";
+        }
     }
 
     /// <summary>Devuelve un archivo a la bandeja tras un fallo y dice cómo ha quedado.</summary>

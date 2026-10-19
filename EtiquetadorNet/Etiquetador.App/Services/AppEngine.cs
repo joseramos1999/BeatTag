@@ -205,6 +205,7 @@ public sealed class AppEngine
         Library = new LibraryStore(Config, SaveConfig, new ScanCache(Paths.ScanCachePath)) { Log = Logger };
         Fase("Cargando lo ya analizado…");
         Analysis = new AnalysisCache(Paths.AnalysisCachePath);
+        PonerLetraDelCatalogo();   // C14 (equipo catalogo_bandeja): la columna «Explícito» con el dato de Deezer
         Ignored = new IgnoreList(Paths.IgnoredPath);
         Applied = new IgnoreList(Paths.AppliedPath);
         Marks = new ApplyMarks(Paths.ApplyMarksPath);
@@ -954,6 +955,7 @@ public sealed class AppEngine
             return r;
         }
         Analysis.Set(filePath, sig, r);
+        AnotarLetraDelCatalogo(filePath, r);   // C14 (equipo catalogo_bandeja)
         return r;
     }
 
@@ -1062,5 +1064,33 @@ public sealed class AppEngine
     {
         foreach (var p in filePaths) Ignored.Remove(p);
         Registrar("las canciones descartadas", Ignored.Save());
+    }
+
+    // --- Letra según el catálogo (C14, equipo catalogo_bandeja) ---
+    //
+    // Deezer dice si cada pista tiene letra explícita, y el análisis lo guarda en la caché. La columna
+    // «Explícito», las estadísticas y la letra de la ficha (cuando el DJ no la ha indicado) lo usan a
+    // través de ExplicitDetector, que solo mira en memoria: aquí se le da al arrancar y se le pone al
+    // día con cada canción analizada. Visto en revisión: sin esto el dato no llegaba a ninguna parte.
+
+    /// <summary>
+    /// Todo lo que dice la caché de análisis. Solo al arrancar, recién cargada: recorre la caché
+    /// entera, y no admite que se recorra mientras un análisis le añade resultados.
+    /// </summary>
+    private void PonerLetraDelCatalogo()
+    {
+        try { Etiquetador.Core.Analysis.ExplicitDetector.PonerCatalogo(Analysis.LetraDelCatalogo()); }
+        catch (Exception e) { Logger.Error("No se pudo leer la letra explícita guardada en la caché de análisis", e); }
+    }
+
+    /// <summary>Lo que acaba de decir el catálogo de una canción analizada (también para el nombre que tendrá al aplicarla).</summary>
+    private static void AnotarLetraDelCatalogo(string ruta, ProcessResult r)
+    {
+        var primera = true;
+        foreach (var p in AnalysisCache.RutasDeLaLetra(ruta, r))
+        {
+            Etiquetador.Core.Analysis.ExplicitDetector.AnotarCatalogo(p, r.Explicit, sustituir: primera);
+            primera = false;
+        }
     }
 }

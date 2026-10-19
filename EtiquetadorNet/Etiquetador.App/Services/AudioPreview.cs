@@ -108,12 +108,14 @@ public sealed class AudioPreview : IDisposable
 
     private void PlayWindows(string path)
     {
-        // AIFF (M15): Media Foundation no lo abre en Windows; el lector de NAudio sí (ver AudioSamples.EsAiff).
-        _reader = AudioSamples.EsAiff(path) ? new AiffFileReader(path) : new MediaFoundationReader(path);
+        // AIFF (M15): Media Foundation no lo abre en Windows; el lector de NAudio sí (ver AudioSamples.EsAiff),
+        // y los AIFF-C de macOS, el propio. Uno de 24 bits se pasa a 16 para WaveOut (AudioSamples.ParaReproducir).
+        var aiff = AudioSamples.EsAiff(path);
+        _reader = aiff ? AudioSamples.AbrirAiff(path) : new MediaFoundationReader(path);
         try { _reader.CurrentTime = TimeSpan.FromSeconds(_reader.TotalTime.TotalSeconds * 0.25); } catch { }
         var player = new WaveOutEvent();
         _out = player;
-        _out.Init(_reader);
+        _out.Init(aiff ? AudioSamples.ParaReproducir(_reader) : _reader);
         // Ignora el evento del reproductor ANTERIOR (podría llegar tras iniciar otro y borrar su estado).
         _out.PlaybackStopped += (s, _) => { if (ReferenceEquals(s, _out)) { CurrentPath = null; StateChanged?.Invoke(); } };
         _out.Play();

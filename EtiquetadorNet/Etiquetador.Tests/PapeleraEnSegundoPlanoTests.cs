@@ -73,6 +73,26 @@ public class PapeleraEnSegundoPlanoTests : IDisposable
                      DuplicatesViewModel.ResumenPapelera(3, fallos));
     }
 
+    // El Asistente envía con su botón Cancelar: se para entre un archivo y el siguiente y devuelve lo
+    // hecho, porque lo que ya está en la papelera hay que quitarlo de la biblioteca y de la tabla.
+    [Fact]
+    public async Task Al_cancelar_devuelve_lo_ya_enviado_sin_lanzar()
+    {
+        using var cts = new CancellationTokenSource();
+        var rutas = new[] { "a.mp3", "b.mp3", "c.mp3" };
+
+        var res = await EnvioPapelera.EnviarAsync(rutas, r => { if (r == "b.mp3") cts.Cancel(); return (true, ""); }, ct: cts.Token);
+
+        Assert.True(res.Interrumpido);
+        Assert.Equal(new[] { "a.mp3", "b.mp3" }, res.Enviadas);   // «c.mp3» no se ha tocado
+        Assert.Empty(res.Fallos);
+
+        var antes = await EnvioPapelera.EnviarAsync(rutas, _ => (true, ""), ct: cts.Token);   // cancelado antes de empezar
+        Assert.True(antes.Interrumpido);
+        Assert.Empty(antes.Enviadas);
+        Assert.False(EnvioPapelera.Enviar(rutas, _ => (true, "")).Interrumpido);
+    }
+
     [Theory]
     [InlineData(0, 1, "Enviando a la papelera…")]
     [InlineData(37, 120, "Enviando a la papelera: 37 de 120…")]

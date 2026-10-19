@@ -181,28 +181,47 @@ public static class ExplicitDetector
         return delCatalogo == Explicitness.Explicit ? Explicitness.Explicit : Explicitness.Unknown;
     }
 
-    private static IReadOnlyDictionary<string, Explicitness>? _catalogo;
+    // Concurrente: el análisis anota canción a canción fuera del hilo de la interfaz mientras la tabla
+    // de la biblioteca lo consulta por cada fila visible. Consultarlo no toca el disco.
+    private static System.Collections.Concurrent.ConcurrentDictionary<string, Explicitness> _catalogo = Nuevo();
+
+    private static System.Collections.Concurrent.ConcurrentDictionary<string, Explicitness> Nuevo()
+        => new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Fija lo que dice el catálogo de cada archivo, por ruta (null lo quita). Lo pone quien tiene los
-    /// análisis: la caché de análisis guarda la marca de cada canción que identificó Deezer (ver
-    /// <c>AnalysisCache.LetraDelCatalogo</c>). Se copia y se sustituye de una vez, así que se puede
-    /// leer desde cualquier hilo mientras se pone al día; consultarlo es una búsqueda en un
-    /// diccionario, sin tocar el disco, porque la tabla de la biblioteca lo pide por cada fila visible.
+    /// Fija lo que dice el catálogo de cada archivo, por ruta (null lo vacía). Lo pone el motor al
+    /// cargar la caché de análisis, que guarda la marca de cada canción que identificó Deezer (ver
+    /// <c>AnalysisCache.LetraDelCatalogo</c>). Se construye aparte y se sustituye de una vez.
     /// </summary>
     public static void PonerCatalogo(IEnumerable<KeyValuePair<string, Explicitness>>? porRuta)
     {
-        if (porRuta == null) { Volatile.Write(ref _catalogo, null); return; }
-        var copia = new Dictionary<string, Explicitness>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (ruta, letra) in porRuta)
-            if (letra != Explicitness.Unknown && !string.IsNullOrEmpty(ruta)) copia[ruta] = letra;
+        var copia = Nuevo();
+        if (porRuta != null)
+            foreach (var (ruta, letra) in porRuta)
+                if (letra != Explicitness.Unknown && !string.IsNullOrEmpty(ruta)) copia[ruta] = letra;
         Volatile.Write(ref _catalogo, copia);
+    }
+
+    /// <summary>
+    /// Anota lo que acaba de decir el catálogo de un archivo, tras analizarlo. Sin dato
+    /// (<see cref="Explicitness.Unknown"/>) se quita lo que hubiera: un análisis nuevo manda sobre uno
+    /// anterior. Con <paramref name="sustituir"/> a false solo se anota si no había nada, que es lo
+    /// que hace falta para la ruta que tendrá el archivo al aplicar el nombre propuesto (ver
+    /// <c>AnalysisCache.RutasDeLaLetra</c>): no puede pisar lo que dijo el análisis de ese otro archivo.
+    /// </summary>
+    public static void AnotarCatalogo(string? ruta, Explicitness letra, bool sustituir = true)
+    {
+        if (string.IsNullOrEmpty(ruta)) return;
+        var mapa = Volatile.Read(ref _catalogo);
+        if (letra == Explicitness.Unknown) { if (sustituir) mapa.TryRemove(ruta, out _); }
+        else if (sustituir) mapa[ruta] = letra;
+        else mapa.TryAdd(ruta, letra);
     }
 
     /// <summary>Lo que dice el catálogo de ese archivo, o <see cref="Explicitness.Unknown"/>.</summary>
     public static Explicitness DelCatalogo(string? ruta)
     {
         var mapa = Volatile.Read(ref _catalogo);
-        return mapa != null && !string.IsNullOrEmpty(ruta) && mapa.TryGetValue(ruta, out var e) ? e : Explicitness.Unknown;
+        return !string.IsNullOrEmpty(ruta) && mapa.TryGetValue(ruta, out var e) ? e : Explicitness.Unknown;
     }
 }

@@ -24,7 +24,8 @@ namespace Etiquetador.App.Services;
 ///   Windows        AudioFileReader, el códec del sistema. IGUAL QUE SIEMPRE, no se toca.
 ///   macOS  .mp3    NLayer, en C# puro.
 ///   macOS  .wav    WaveFileReader de NAudio, que ya era código gestionado.
-///   macOS  .aif(f) AiffFileReader de NAudio, también gestionado (M15).
+///   los dos .aif(f) AiffFileReader de NAudio, también gestionado, y el lector propio para los AIFF-C
+///                  de macOS (M15; ver <see cref="AbrirAiff"/>).
 ///   macOS  resto   no soportado, y se dice claramente.
 /// Para recortar (<see cref="AbrirComoWaveStream"/>), MP3, WAV y AIFF igual en los dos sistemas, y el
 /// resto, en Windows, con Media Foundation.
@@ -48,7 +49,10 @@ public static class AudioSamples
         // calibrado contra ellas. Medido: entre los dos decodificadores el LUFS coincide (peor
         // diferencia 0,007 en 25 canciones reales), pero el pico puede moverse medio decibelio, y
         // eso basta para cambiar una decisión al filo. Esto es un port: en Windows, todo igual.
-        if (OperatingSystem.IsWindows())
+        // El AIFF va por el lector propio también en Windows (M15): AudioFileReader lo abre con el
+        // mismo AiffFileReader de NAudio, pero rechaza los AIFF-C de macOS con un mensaje en inglés.
+        // Para un AIFF sin comprimir las muestras salen idénticas por los dos caminos.
+        if (OperatingSystem.IsWindows() && !EsAiff(path))
         {
             var win = new AudioFileReader(path);
             recurso = win;
@@ -91,7 +95,7 @@ public static class AudioSamples
         // dos sistemas. Media Foundation NO lo abre en Windows. MEDIDO con un AIFF de 16 bits:
         // 0xC00D36C4 («no se admite el tipo de secuencia de bytes»), y Comprobar audio lo daba por
         // «dañado o falta el códec».
-        if (EsAiff(path)) return new AiffFileReader(path);
+        if (EsAiff(path)) return AbrirAiff(path);
 
         if (OperatingSystem.IsWindows()) return AbrirConMediaFoundation(path, ext);
 
@@ -101,6 +105,225 @@ public static class AudioSamples
     /// <summary>¿Es un AIFF (.aif o .aiff)? Se abre con el lector de NAudio en los dos sistemas (M15).</summary>
     internal static bool EsAiff(string path)
         => Path.GetExtension(path).ToLowerInvariant() is ".aif" or ".aiff";
+
+    // ---- AIFF-C (revisión de M15, equipo catalogo_bandeja) ----
+    //
+    // El AiffFileReader de NAudio solo admite el AIFF clásico y el AIFF-C sin compresión («NONE»).
+    // Con cualquier otro tipo lanza «Compressed AIFC is not supported.», en inglés, y ese texto llegaba
+    // tal cual a «Comprobar audio» y a la vista previa. Los .aif que exporta macOS (QuickTime, Música,
+    // Core Audio) suelen ser AIFF-C «sowt»: no es compresión, es el mismo PCM con los bytes en el orden
+    // de los procesadores Intel. Se leen aquí, con los otros tipos sin pérdida de Apple; el resto
+    // (ulaw, ima4…, compresión con pérdida, raros en música para DJ) se rechaza con un texto claro.
+
+    /// <summary>Lo que dice la cabecera de un AIFF que hace falta para leer sus muestras.</summary>
+    /// <param name="Compresion">El tipo de AIFF-C («sowt», «twos»…), o «NONE» en un AIFF clásico.</param>
+    /// <param name="InicioDatos">Posición en el archivo de la primera muestra.</param>
+    /// <param name="LongitudDatos">Bytes de muestras.</param>
+    internal readonly record struct CabeceraAiff(bool EsAifc, string Compresion, int Canales, int Bits, int Frecuencia,
+                                                 long InicioDatos, long LongitudDatos);
+
+    /// <summary>
+    /// Lee la cabecera de un AIFF o AIFF-C, o null si no lo es o le falta el COMM o el SSND. Solo
+    /// recorre las cabeceras de los bloques, sin leer el audio.
+    /// </summary>
+    internal static CabeceraAiff? LeerCabeceraAiff(Stream s)
+    {
+        try
+        {
+            var b = new byte[22];
+            if (!Leer(s, b, 12) || Texto(b, 0) != "FORM") return null;
+            var tipo = Texto(b, 8);
+            if (tipo is not ("AIFF" or "AIFC")) return null;
+            var aifc = tipo == "AIFC";
+
+            string? compresion = null;
+            int canales = 0, bits = 0, frecuencia = 0;
+            long inicio = -1, longitud = 0;
+            while (Leer(s, b, 8))
+            {
+                var id = Texto(b, 0);
+                long largo = Be32(b, 4);
+                var datos = s.Position;
+                if (id == "COMM" && largo >= 18 && Leer(s, b, (int)Math.Min(22, largo)))
+                {
+                    canales = Be16(b, 0);
+                    bits = Be16(b, 6);
+                    var hz = Extendido(b, 8);
+                    frecuencia = hz is >= 1 and <= 1_000_000 ? (int)Math.Round(hz) : 0;   // fuera de eso, cabecera dañada
+                    compresion = aifc && largo >= 22 ? Texto(b, 18) : "NONE";
+                }
+                else if (id == "SSND" && largo >= 8 && Leer(s, b, 8))
+                {
+                    var desplazamiento = Be32(b, 0);
+                    inicio = datos + 8 + desplazamiento;
+                    longitud = Math.Max(0, Math.Min(largo - 8 - desplazamiento, s.Length - inicio));
+                }
+                if (compresion != null && inicio >= 0) break;
+                s.Position = datos + largo + (largo & 1);   // los bloques de longitud impar llevan un byte de relleno
+            }
+            if (compresion == null || inicio < 0 || canales <= 0 || bits <= 0 || frecuencia <= 0) return null;
+            return new CabeceraAiff(aifc, compresion, canales, bits, frecuencia, inicio, longitud);
+        }
+        catch (IOException) { return null; }
+
+        static bool Leer(Stream s, byte[] b, int n)
+        {
+            var leidos = 0;
+            while (leidos < n)
+            {
+                var r = s.Read(b, leidos, n - leidos);
+                if (r == 0) return false;
+                leidos += r;
+            }
+            return true;
+        }
+        static string Texto(byte[] b, int i) => System.Text.Encoding.ASCII.GetString(b, i, 4);
+        static int Be16(byte[] b, int i) => (short)((b[i] << 8) | b[i + 1]);
+        static long Be32(byte[] b, int i) => (uint)((b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3]);
+    }
+
+    /// <summary>La frecuencia de muestreo, que AIFF guarda como número de coma flotante de 80 bits (IEEE 754 extendido).</summary>
+    private static double Extendido(byte[] b, int i)
+    {
+        var exponente = ((b[i] & 0x7F) << 8) | b[i + 1];
+        ulong mantisa = 0;
+        for (var k = 0; k < 8; k++) mantisa = (mantisa << 8) | b[i + 2 + k];
+        if (exponente == 0 && mantisa == 0) return 0;
+        var valor = mantisa * Math.Pow(2, exponente - 16383 - 63);
+        return (b[i] & 0x80) != 0 ? -valor : valor;
+    }
+
+    /// <summary>
+    /// Abre un AIFF. El clásico y el AIFF-C sin compresión, con el lector de NAudio; los AIFF-C sin
+    /// pérdida de Apple («sowt», «twos», «in24», «in32», «fl32»), con <see cref="LectorAifc"/>. Lo que
+    /// no se puede leer se dice en un texto claro, como con Media Foundation.
+    /// </summary>
+    internal static WaveStream AbrirAiff(string path)
+    {
+        CabeceraAiff? cabecera;
+        using (var fs = File.OpenRead(path)) cabecera = LeerCabeceraAiff(fs);
+
+        if (cabecera is { EsAifc: true } c && !c.Compresion.Equals("NONE", StringComparison.OrdinalIgnoreCase))
+        {
+            var formato = FormatoAifc(c);
+            if (formato == null) throw new NotSupportedException(TextoAifcNoAdmitido(c.Compresion));
+            return new LectorAifc(path, c, formato.Value.Formato, formato.Value.Invertir);
+        }
+
+        try { return new AiffFileReader(path); }
+        catch (Exception e) when (e is not FileNotFoundException and not DirectoryNotFoundException and not UnauthorizedAccessException)
+        {
+            throw new NotSupportedException(
+                $"No se ha podido leer este archivo AIFF: está dañado o su formato no se admite ({e.Message.Trim()}).", e);
+        }
+    }
+
+    /// <summary>
+    /// El formato de las muestras de un AIFF-C que se sabe leer, y si hay que darles la vuelta a los
+    /// bytes (AIFF guarda big-endian; WAV y NAudio esperan little-endian). Null si no se sabe.
+    /// </summary>
+    internal static (WaveFormat Formato, bool Invertir)? FormatoAifc(CabeceraAiff c)
+    {
+        // El tamaño de cada muestra se redondea al byte, como lo guarda AIFF (20 bits ocupan 3 bytes,
+        // alineados a la izquierda, así que se pueden leer como 24).
+        var bits = (c.Bits + 7) / 8 * 8;
+        switch (c.Compresion)
+        {
+            case "sowt" when bits is 8 or 16 or 24 or 32:
+                return (new WaveFormat(c.Frecuencia, bits, c.Canales), false);
+            case "twos" or "in24" or "in32" when bits is 8 or 16 or 24 or 32:
+                return (new WaveFormat(c.Frecuencia, bits, c.Canales), true);
+            case "fl32" or "FL32" when bits == 32:
+                return (WaveFormat.CreateIeeeFloatWaveFormat(c.Frecuencia, c.Canales), true);
+            default:
+                return null;
+        }
+    }
+
+    internal static string TextoAifcNoAdmitido(string compresion)
+        => $"Este AIFF está comprimido con «{compresion.Trim()}», un tipo que no se puede leer. Se leen el AIFF sin comprimir y "
+         + "los AIFF-C sin pérdida de Apple; conviértelo a AIFF o WAV sin comprimir con tu programa de audio.";
+
+    /// <summary>
+    /// Lee las muestras de un AIFF-C sin pérdida directamente del bloque SSND, dando la vuelta a los
+    /// bytes cuando hace falta. Admite saltar a cualquier punto (la vista previa empieza al 25 %).
+    /// </summary>
+    internal sealed class LectorAifc : WaveStream
+    {
+        private readonly FileStream _fs;
+        private readonly long _inicio;
+        private readonly long _longitud;
+        private readonly int _bytesMuestra;
+        private readonly bool _invertir;
+        private readonly bool _ochoBits;
+        private long _posicion;
+
+        public LectorAifc(string path, CabeceraAiff c, WaveFormat formato, bool invertir)
+        {
+            _fs = File.OpenRead(path);
+            WaveFormat = formato;
+            _inicio = c.InicioDatos;
+            _bytesMuestra = Math.Max(1, formato.BitsPerSample / 8);
+            // Solo muestras enteras y tramas completas: un archivo cortado no puede desalinear los canales.
+            _longitud = c.LongitudDatos - c.LongitudDatos % Math.Max(1, formato.BlockAlign);
+            _invertir = invertir && _bytesMuestra > 1;
+            // AIFF guarda 8 bits con signo y WAV sin signo.
+            _ochoBits = formato.Encoding == WaveFormatEncoding.Pcm && formato.BitsPerSample == 8;
+        }
+
+        public override WaveFormat WaveFormat { get; }
+        public override long Length => _longitud;
+
+        public override long Position
+        {
+            get => _posicion;
+            set
+            {
+                var v = Math.Clamp(value, 0, _longitud);
+                _posicion = v - v % Math.Max(1, WaveFormat.BlockAlign);
+            }
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var n = (int)Math.Min(count - count % _bytesMuestra, _longitud - _posicion);
+            if (n <= 0) return 0;
+            _fs.Position = _inicio + _posicion;
+            var leidos = 0;
+            while (leidos < n)
+            {
+                var r = _fs.Read(buffer, offset + leidos, n - leidos);
+                if (r == 0) break;
+                leidos += r;
+            }
+            leidos -= leidos % _bytesMuestra;
+            if (_invertir)
+                for (var i = offset; i < offset + leidos; i += _bytesMuestra)
+                    Array.Reverse(buffer, i, _bytesMuestra);
+            if (_ochoBits)
+                for (var i = offset; i < offset + leidos; i++) buffer[i] ^= 0x80;
+            _posicion += leidos;
+            return leidos;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _fs.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>
+    /// Lo que se le da al reproductor de Windows (WaveOut). Un AIFF de 24 o 32 bits, o en coma
+    /// flotante, se pasa a 16 bits: WaveOut no garantiza esos formatos con todos los controladores,
+    /// y para escuchar si es la canción buena sobra con 16. Lo demás, tal cual.
+    /// </summary>
+    internal static IWaveProvider ParaReproducir(WaveStream s)
+    {
+        var f = s.WaveFormat;
+        var tal = f.Encoding == WaveFormatEncoding.Pcm && f.BitsPerSample <= 16;
+        return tal ? s : new NAudio.Wave.SampleProviders.SampleToWaveProvider16(s.ToSampleProvider());
+    }
 
     /// <summary>
     /// El decodificador del sistema de Windows (Media Foundation), con un mensaje que se entienda

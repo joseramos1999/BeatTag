@@ -144,6 +144,9 @@ public sealed class DeezerProvider
         JsonNode? pick = null;
         bestSc = -999.0;
         bestWhy = "";
+        // El desempate por la letra del candidato elegido (ver CoherenciaDeLetra): decide la elección
+        // pero no entra en la confianza que se devuelve.
+        var bestLetra = 0.0;
         // Motivo por el que gana el candidato elegido. Antes solo iba a la traza y se perdia: es
         // justo lo que hace falta para decidir sobre una propuesta dudosa sin abrir el registro.
         var razones = new List<string>();
@@ -268,9 +271,9 @@ public sealed class DeezerProvider
                 else why.Add($"dur Δ{dd}s (edit)");
             }
             else why.Add("sin duracion");
-            sc += PuntuarLetra(letra, x, why);
+            var letraP = PuntuarLetra(letra, x, why);
             trace?.Invoke($"candidato '{J.S(J.P(x, "artist", "name"))} - {rt}' = {sc:0.##}  [{string.Join(", ", why)}]");
-            if (sc > bestSc) { bestSc = sc; pick = x; razones = why; }
+            if (sc + letraP > bestSc + bestLetra) { bestSc = sc; bestLetra = letraP; pick = x; razones = why; }
         }
         if (pick != null && bestSc <= -8)
         {
@@ -286,6 +289,7 @@ public sealed class DeezerProvider
         if (pick == null && na.Length == 0 && nt.Length > 0 && J.WordCount(title) >= 2)
         {
             var best = double.NegativeInfinity;
+            var bestOrden = double.NegativeInfinity;   // con el desempate por la letra
             foreach (var x in data)
             {
                 var tnx = TextUtils.Nk(J.S(J.P(x, "title")));
@@ -315,9 +319,9 @@ public sealed class DeezerProvider
                     }
                     else why.Add($"dur Δ{dd2}s (version)");
                 }
-                sc += PuntuarLetra(letra, x, why);
+                var letraP = PuntuarLetra(letra, x, why);
                 trace?.Invoke($"respaldo '{J.S(J.P(x, "artist", "name"))} - {rt}' = {sc:0.##}  [{string.Join(", ", why)}]");
-                if (sc > best) { best = sc; pick = x; razones = why; }
+                if (sc + letraP > bestOrden) { bestOrden = sc + letraP; best = sc; pick = x; razones = why; }
             }
             if (pick != null) bestSc = best;
         }
@@ -354,11 +358,15 @@ public sealed class DeezerProvider
     // ---- ISRC y letra del catálogo (C14) ----
 
     /// <summary>
-    /// Lo que vale, en la puntuación, que la letra del candidato cuadre con la del archivo. Es un
-    /// desempate: no pasa por encima del título ni de la duración, pero decide entre dos pistas que por
-    /// lo demás puntúan igual, que es justo el caso de un tema publicado en versión explícita y en
-    /// versión editada (mismo título, misma duración). Antes ganaba la primera de la lista, y con un
-    /// archivo «(Clean)» del pool se proponían el álbum, el año y el ISRC de la explícita.
+    /// Lo que pesa, al ELEGIR, que la letra del candidato cuadre con la del archivo. Es un desempate:
+    /// no pasa por encima del título ni de la duración, pero decide entre dos pistas que por lo demás
+    /// puntúan igual, que es justo el caso de un tema publicado en versión explícita y en versión
+    /// editada (mismo título, misma duración). Antes ganaba la primera de la lista, y con un archivo
+    /// «(Clean)» del pool se proponían el álbum, el año y el ISRC de la explícita.
+    ///
+    /// No se suma a la confianza que se devuelve (visto en revisión): un archivo «(Clean)» del que
+    /// Deezer solo tiene la explícita, que es lo habitual, perdía un punto de confianza y podía pasar a
+    /// revisión por algo que no dice nada de si la coincidencia es buena.
     /// </summary>
     internal const double PuntosLetra = 1.0;
 
@@ -378,8 +386,8 @@ public sealed class DeezerProvider
     private static double PuntuarLetra(Explicitness archivo, JsonNode? candidato, List<string> why)
     {
         var p = CoherenciaDeLetra(archivo, candidato);
-        if (p > 0) why.Add($"letra como la del archivo +{p:0.##}");
-        else if (p < 0) why.Add($"letra contraria a la del archivo {p:0.##}");
+        if (p > 0) why.Add("letra como la del archivo (desempate)");
+        else if (p < 0) why.Add("letra contraria a la del archivo (desempate)");
         return p;
     }
 
