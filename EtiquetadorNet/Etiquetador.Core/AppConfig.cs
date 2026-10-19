@@ -441,4 +441,13 @@ public sealed class AppConfig
             return false;
         }
     }
+
+    // --- Asistente: «Limpiar la publicidad de los packs» (equipo «asistente», tanda 3, P8) ---
+
+    /// <summary>
+    /// Qué se hace con el pack o el usuario que se quitan del Álbum y del Artista: true = se guardan en
+    /// el comentario («[Pack: Latin Box 15 12 2025]»), false = se borran. Por defecto se guardan: para
+    /// algunos DJ la fecha del pack sirve para ordenar por pack.
+    /// </summary>
+    public bool PacksAlComentario { get; set; } = true;
 }
