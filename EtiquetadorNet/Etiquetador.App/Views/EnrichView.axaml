@@ -37,7 +37,11 @@
             <Button Content="{Binding IsPaused, Converter={x:Static vm:EnrichViewModel.PauseLabel}}"
                     Command="{Binding PauseCommand}" IsVisible="{Binding IsBusy}" Classes="act" Background="#D97706" />
             <Button Content="Cancelar" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" Classes="act" Background="#DC2626" />
-            <Button Content="Aplicar seleccionados" Command="{Binding ApplyCommand}" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#16A34A" />
+            <!-- Aplica las MARCADAS (la casilla), no las seleccionadas: el texto lo dice y cuenta cuántas. -->
+            <Button Click="Apply_Click" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#16A34A"
+                    ToolTip.Tip="Escribe los cambios de todas las canciones con la casilla «Aplicar» marcada, también las que oculte la búsqueda. Antes de empezar pide confirmación y, si hay una búsqueda activa, ofrece aplicar solo las que se ven.">
+                <TextBlock Text="{Binding Marcadas, StringFormat='Aplicar marcadas ({0})'}" />
+            </Button>
             <Button Content="Deshacer última" Command="{Binding UndoCommand}" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#D97706" Margin="0,0,12,4" />
             <Button Content="Marcar todo" Command="{Binding MarkAllCommand}" Classes="act" Background="#475569"
                     ToolTip.Tip="Marca todas las filas para aplicar." />
@@ -123,6 +127,13 @@
                 Background="{DynamicResource AvisoFondo}" BorderBrush="{DynamicResource AvisoBorde}" BorderThickness="1" CornerRadius="4">
             <TextBlock Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap" FontSize="12"
                        Text="{Binding RenombradosPendientes, StringFormat='Se van a renombrar {0} archivos. Si usas rekordbox, al cambiar el nombre pierde sus cue points y su beatgrid, porque los guarda ligados a la ruta. Puedes devolvérselos después con «Reparar colección de rekordbox», en Ajustes.'}" />
+        </Border>
+
+        <!-- La IA local puede desactivarse sola a mitad de análisis (Ollama parado, modelo sin
+             descargar…). Antes solo quedaba en el registro. -->
+        <Border DockPanel.Dock="Top" IsVisible="{Binding AvisoIa, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" Margin="0,0,0,6" Padding="8,6"
+                Background="{DynamicResource AvisoFondo}" BorderBrush="{DynamicResource AvisoBorde}" BorderThickness="1" CornerRadius="4">
+            <TextBlock Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap" FontSize="12" Text="{Binding AvisoIa}" />
         </Border>
 
         <StackPanel DockPanel.Dock="Top" Margin="0,0,0,6" Spacing="3" IsVisible="{Binding IsBusy}">

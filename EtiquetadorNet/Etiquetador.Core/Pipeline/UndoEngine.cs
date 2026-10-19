@@ -18,6 +18,13 @@ public sealed record UndoResult(string File, int Reverted, int Errors, int Missi
     /// Registros que siguen en el manifiesto: el próximo «Deshacer última» reintentará SOLO esos.
     /// </summary>
     public int Pendientes => Errors + Missing;
+
+    /// <summary>
+    /// Rutas de lo revertido (la de antes y la de después de aplicar, de cada registro), para que
+    /// quien llama olvide esas canciones como «ya aplicadas». Sin esto, una canción que solo cambió
+    /// tags seguía en aplicadas.json después de deshacerla y Analizar no la volvía a proponer nunca.
+    /// </summary>
+    public IReadOnlyList<string> Revertidas { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>
@@ -90,6 +97,7 @@ public sealed class UndoEngine
 
         // Al revés: lo último que se hizo es lo primero que se deshace.
         var pendiente = new bool[lineas.Count];
+        var revertidas = new List<string>();
         int rev = 0, err = 0, missing = 0, manual = 0;
         for (var i = lineas.Count - 1; i >= 0; i--)
         {
@@ -108,7 +116,7 @@ public sealed class UndoEngine
             }
             switch (outcome)
             {
-                case Outcome.Reverted: rev++; break;
+                case Outcome.Reverted: rev++; revertidas.AddRange(RutasDe(node)); break;
                 case Outcome.Missing: missing++; pendiente[i] = true; break;
                 case Outcome.Manual: manual++; break;
                 default: err++; pendiente[i] = true; break;
@@ -117,7 +125,17 @@ public sealed class UndoEngine
 
         var clean = err == 0 && missing == 0;
         var aviso = Archivar(mf, lineas.Select(l => l.Texto).ToList(), pendiente);
-        return new UndoResult(Path.GetFileName(mf), rev, err, missing, manual, clean, false, aviso);
+        return new UndoResult(Path.GetFileName(mf), rev, err, missing, manual, clean, false, aviso) { Revertidas = revertidas };
+    }
+
+    /// <summary>Las dos rutas de un registro (formato nuevo o antiguo); vacías las que no consten.</summary>
+    private static IEnumerable<string> RutasDe(JsonNode node)
+    {
+        var nuevo = node is JsonObject o && o.ContainsKey("OrigPath");
+        var despues = J.S(J.P(node, nuevo ? "FinalPath" : "new"));
+        var orig = J.S(J.P(node, nuevo ? "OrigPath" : "orig"));
+        var antes = nuevo || orig.Length == 0 ? orig : Path.Combine(Path.GetDirectoryName(despues) ?? "", orig);
+        return new[] { antes, despues }.Where(r => r.Length > 0);
     }
 
     /// <summary>

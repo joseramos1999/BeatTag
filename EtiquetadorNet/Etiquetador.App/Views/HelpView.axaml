@@ -37,7 +37,7 @@
                     <TextBlock Text="Flujo recomendado" FontWeight="Bold" />
                     <TextBlock Classes="p" Text="1. Biblioteca → añade tus carpetas y pulsa Escanear." />
                     <TextBlock Classes="p" Text="2. Enriquecer → Analizar. Revisa las propuestas y corrige lo que haga falta." />
-                    <TextBlock Classes="p" Text="3. Aplicar seleccionados. Si algo no te convence, Deshacer última." />
+                    <TextBlock Classes="p" Text="3. Aplicar marcadas. Si algo no te convence, Deshacer última." />
                 </StackPanel>
             </Border>
 
@@ -75,9 +75,10 @@
             <TextBlock Classes="li" Text="• «Quitar de la lista» descarta esas canciones: no volverán a aparecer en Enriquecer. No se toca ningún archivo y se recuperan desde Ajustes." />
             <TextBlock Classes="li" Text="• La columna «Por qué» explica en claro qué hizo ganar a esa coincidencia: el título exacto, la duración que cuadra, la versión que pedías, o los tags que ya traía el archivo y no concuerdan. Posa el ratón sobre la fila para verlo entero. Sirve para decidir sobre una propuesta dudosa sin abrir el registro." />
             <TextBlock Classes="li" Text="• El cuadro «Buscar…» filtra las propuestas ya analizadas por archivo, artista, título, álbum o género. Va por palabras sueltas y en cualquier orden, sin acentos ni mayúsculas: «bunny titi» encuentra «Bad Bunny - Tití Me Preguntó»." />
-            <TextBlock Classes="li" Text="• Las casillas que marcas o desmarcas se conservan aunque cierres la aplicación: una revisión larga se puede dejar a medias y seguir otro día." />
-            <TextBlock Classes="li" Text="• Aplicar seleccionados escribe los cambios de todas las canciones marcadas. Las que se aplican bien desaparecen de la lista." />
-            <TextBlock Classes="li" Text="• Deshacer última revierte la aplicación anterior, respetando lo que hayas cambiado a mano por tu cuenta." />
+            <TextBlock Classes="li" Text="• Las casillas que marcas o desmarcas se conservan aunque cierres la aplicación: una revisión larga se puede dejar a medias y seguir otro día. La casilla vale para la propuesta que tenías delante: si un análisis posterior propone otra cosa para esa canción, vuelve a decidir el análisis." />
+            <TextBlock Classes="li" Text="• «Aplicar marcadas (N)» escribe los cambios de todas las canciones con la casilla marcada, también las que oculte la búsqueda. Antes de empezar dice cuántas son y cuántas se renombran; si hay una búsqueda activa, ofrece aplicar solo las que se ven. Las que se aplican bien desaparecen de la lista." />
+            <TextBlock Classes="li" Text="• Deshacer última revierte la aplicación anterior, respetando lo que hayas cambiado a mano por tu cuenta. Las canciones revertidas vuelven a estar pendientes: pulsa Analizar para ver de nuevo sus propuestas." />
+            <TextBlock Classes="li" Text="• Si la IA local se desactiva durante un análisis (Ollama parado, modelo sin descargar…), un aviso encima de la tabla dice por qué; el resto de fuentes sigue funcionando. Cada análisis vuelve a probarla." />
 
             <TextBlock Classes="p" FontWeight="Bold" Margin="0,8,0,0" Text="Qué se salta y por qué" />
             <TextBlock Classes="li" Text="• Las mezclas y mashups no se identifican: no existen como lanzamiento, así que buscarlos en el catálogo solo puede dar una identificación equivocada. Se detectan por el nombre del archivo (mashup, bootleg, transition, blend, «X vs Y») y por la carpeta." />
@@ -110,9 +111,11 @@
             <TextBlock Classes="h" Text="📝 Editor" />
             <TextBlock Classes="p" Text="Edición manual, con el control en tus manos. Busca la canción, cambia lo que quieras y pulsa Guardar." />
             <TextBlock Classes="li" Text="• Puedes editar también el NOMBRE DEL ARCHIVO: al guardar se renombra (se conserva la extensión y nunca se pisa otro archivo)." />
-            <TextBlock Classes="li" Text="• '🔎 Reanalizar…' abre el mismo buscador que Enriquecer y RELLENA el formulario con la propuesta; no se escribe nada hasta que pulses Guardar." />
+            <TextBlock Classes="li" Text="• '🔎 Reanalizar…' abre el mismo buscador que Enriquecer y RELLENA el formulario con la propuesta; no se escribe nada hasta que pulses Guardar. Mientras busca, la lista queda bloqueada para que la propuesta no caiga en otra canción." />
+            <TextBlock Classes="li" Text="• Guardar solo escribe los campos que hayas cambiado. Si no tocas el artista, un nombre con coma como «Earth, Wind &amp; Fire» se queda como un único intérprete. Varios artistas se separan con comas; varios géneros, con punto y coma." />
+            <TextBlock Classes="li" Text="• El BPM admite decimales (128,5) y se redondea, porque la etiqueta solo guarda números enteros. Un año o un BPM que no se puedan leer no se guardan: se avisa y no se escribe nada." />
             <TextBlock Classes="li" Text="• '▶ Escuchar' reproduce un fragmento para comprobar que es la canción correcta." />
-            <TextBlock Classes="li" Text="• Lo que guardes aquí también se puede revertir con 'Deshacer última' desde Enriquecer." />
+            <TextBlock Classes="li" Text="• Lo que guardes aquí, comentario incluido, también se puede revertir con 'Deshacer última' desde Enriquecer." />
 
             <!-- BANDEJA -->
             <TextBlock Classes="h" Text="📥 Bandeja de entrada" />
@@ -249,9 +252,10 @@
             <TextBlock Classes="li" Text="• Aspecto — el tema (claro, oscuro o como el sistema) y las tablas compactas, que juntan las filas para que quepan bastantes más canciones. Ambos se aplican al instante y se recuerdan. Forzar el tema tiene sentido si pinchas de noche: así el sistema no te enciende la pantalla en blanco por la mañana." />
             <TextBlock Classes="li" Text="• Claves de API — Deezer y Apple Music funcionan sin nada. Spotify, Discogs, AcoustID y AudD necesitan tu clave. Se guardan cifradas en tu equipo, ligadas a tu usuario, y cada una viaja ÚNICAMENTE al servicio al que pertenece, que es lo que hace falta para identificarte ante él. No se envían a ningún otro sitio, ni a BeatTag: esta aplicación no tiene servidor." />
             <TextBlock Classes="li" Text="• Clave de AudD — es la única de pago, y solo la usa «Comprobar audio». Se obtiene en dashboard.audd.io; las primeras 300 comprobaciones son gratuitas. Sin ella el resto de la aplicación funciona igual." />
-            <TextBlock Classes="li" Text="• IA local — opcional y sin clave. Se ejecuta en tu propio equipo mediante Ollama, de modo que no se envía información a ningún servicio externo. Sirve para interpretar nombres de archivo muy alterados; su propuesta siempre se contrasta con el catálogo antes de aplicarse. Si no la instalas, el resto del análisis funciona igual." />
+            <TextBlock Classes="li" Text="• IA local — opcional y sin clave. Se ejecuta en tu propio equipo mediante Ollama, de modo que no se envía información a ningún servicio externo. Sirve para interpretar nombres de archivo muy alterados; su propuesta siempre se contrasta con el catálogo antes de aplicarse. Si no la instalas, el resto del análisis funciona igual. Instalar Ollama y descargar un modelo no bloquean la aplicación y se pueden cancelar; una descarga que deja de avanzar se detiene sola." />
             <TextBlock Classes="li" Text="• Probar conexión — comprueba que cada fuente responde con tus claves." />
-            <TextBlock Classes="li" Text="• Vaciar caché — borra las cachés de red, escaneo y análisis. Se regeneran solas al volver a usar la app." />
+            <TextBlock Classes="li" Text="• Vaciar caché — borra las cachés de red, escaneo y análisis, después de decirte cuánto hay. Se regeneran solas, pero el siguiente escaneo y el siguiente análisis tardan bastante más." />
+            <TextBlock Classes="li" Text="• Si la configuración no se pudo leer al arrancar, o trae credenciales cifradas en otro equipo, Ajustes lo dice arriba. Las credenciales que no se pueden descifrar se conservan tal cual hasta que las sustituyas o pulses «Olvidar credenciales ilegibles»." />
             <TextBlock Classes="li" Text="• Recuperar descartadas — abre la lista de las que quitaste de la lista en Enriquecer o en No encontradas, para elegir cuáles vuelves a tener en cuenta. Puedes buscar dentro y marcar solo las que te interesen: descartar se decide canción a canción, así que deshacerlo también. Y «Olvidar aplicadas» hace lo propio con las que ya se aplicaron." />
             <TextBlock Classes="li" Text="• Nombres de artista — dos listas ampliables: los alias agrupan nombres distintos de un mismo artista (un artista puede figurar en el catálogo con un nombre anterior) y las grafías fijan cómo debe escribirse un nombre." />
             <TextBlock Classes="li" Text="• Limpiar carpeta de datos — borra registros, informes y cachés, diciendo antes cuánto ocupa cada cosa. No toca los ajustes, ni las listas de artista, ni el historial para deshacer." />

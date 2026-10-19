@@ -10,7 +10,7 @@ using Etiquetador.Core.Analysis;
 
 namespace Etiquetador.App.ViewModels;
 
-public sealed class QualRow
+public sealed class QualRow : IFilaBuscable
 {
     public string FileName { get; init; } = "";
     public string QualityLabel { get; init; } = "";
@@ -21,6 +21,11 @@ public sealed class QualRow
     public string Folder { get; init; } = "";
     public string FilePath { get; init; } = "";
     public bool IsPoor { get; init; }
+
+    private string? _textoBusqueda;
+
+    /// <summary>Lo que encuentra el cuadro «Buscar…». Los campos no cambian: se prepara una sola vez.</summary>
+    public string TextoBusqueda => _textoBusqueda ??= ConsultaTabla.Preparar(FileName, Folder, QualityLabel);
 }
 
 /// <summary>Pestaña Calidad: clasifica el audio de la biblioteca compartida.</summary>
@@ -36,8 +41,11 @@ public partial class QualityViewModel : ScanViewModelBase
     {
         RowsView = new DataGridCollectionView(Rows);
         RowsView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(QualRow.Folder)));
+        _filtroDiferido = new BusquedaDiferida(AplicarFiltro);
         if (Store.IsScanned) Recompute();
     }
+
+    private readonly BusquedaDiferida _filtroDiferido;
 
     /// <summary>Cuadro de búsqueda de la tabla. Se combina con el filtro de «solo baja calidad».</summary>
     [ObservableProperty] private string _busqueda = "";
@@ -45,23 +53,33 @@ public partial class QualityViewModel : ScanViewModelBase
     /// <summary>Cuántas quedan a la vista mientras hay búsqueda. Vacío si no se está filtrando.</summary>
     [ObservableProperty] private string _filtroInfo = "";
 
-    partial void OnOnlyPoorChanged(bool value) => AplicarFiltro();
-    partial void OnBusquedaChanged(string value) => AplicarFiltro();
+    // La casilla filtra al momento; el cuadro de búsqueda, al dejar de teclear.
+    partial void OnOnlyPoorChanged(bool value) => _filtroDiferido.Ahora();
+
+    partial void OnBusquedaChanged(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) _filtroDiferido.Ahora();
+        else _filtroDiferido.Pedir();
+    }
 
     /// <summary>
     /// Los dos filtros a la vez. Se combinan en vez de pisarse: buscar dentro de lo que ya está
     /// acotado a baja calidad es exactamente lo que se quiere hacer.
+    ///
+    /// Es la tabla más grande (una fila por canción, unas 15.000 en una biblioteca real): por eso
+    /// la consulta se prepara una vez, cada fila guarda su texto normalizado y no se refresca dos
+    /// veces (asignar el filtro ya rehace la vista).
     /// </summary>
     private void AplicarFiltro()
     {
-        var buscando = Busqueda.Trim().Length > 0;
-        RowsView.Filter = !OnlyPoor && !buscando
+        var consulta = ConsultaTabla.De(Busqueda);
+        var soloMalas = OnlyPoor;
+        RowsView.Filter = !soloMalas && consulta.Vacia
             ? null
             : o => o is QualRow r
-                   && (!OnlyPoor || r.IsPoor)
-                   && (!buscando || BusquedaTexto.Coincide(Busqueda, r.FileName, r.Folder, r.QualityLabel));
-        RowsView.Refresh();
-        FiltroInfo = buscando ? $"{RowsView.Count} de {Rows.Count}" : "";
+                   && (!soloMalas || r.IsPoor)
+                   && (consulta.Vacia || consulta.Coincide(r));
+        FiltroInfo = consulta.Vacia ? "" : $"{RowsView.Count} de {Rows.Count}";
     }
 
     protected override void Recompute()

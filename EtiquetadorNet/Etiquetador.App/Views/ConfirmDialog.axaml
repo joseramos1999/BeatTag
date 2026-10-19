@@ -18,6 +18,8 @@
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
             <Button Content="Cancelar" Click="Cancel_Click" MinWidth="100" IsCancel="True" />
+            <!-- Segundo camino, solo cuando lo hay (p. ej. «Todas las marcadas» frente a «Solo las visibles»). -->
+            <Button x:Name="AltBtn" Click="Alt_Click" MinWidth="120" IsVisible="False" />
             <Button x:Name="OkBtn" Content="Continuar" Click="Ok_Click" MinWidth="120"
                     Background="#16A34A" Foreground="White" FontWeight="SemiBold" IsDefault="True" />
         </StackPanel>

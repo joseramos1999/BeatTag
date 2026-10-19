@@ -13,7 +13,7 @@ using Etiquetador.Core.Pipeline;
 
 namespace Etiquetador.App.ViewModels;
 
-public sealed class IncRow
+public sealed class IncRow : IFilaBuscable
 {
     public string FileName { get; init; } = "";
     public string Missing { get; init; } = "";
@@ -23,6 +23,11 @@ public sealed class IncRow
     public uint Year { get; init; }
     public string Folder { get; init; } = "";
     public string FilePath { get; init; } = "";
+
+    private string? _textoBusqueda;
+
+    /// <summary>Lo que encuentra el cuadro «Buscar…». Los campos no cambian: se prepara una sola vez.</summary>
+    public string TextoBusqueda => _textoBusqueda ??= ConsultaTabla.Preparar(FileName, Folder, Missing, Title, Artist, Genre);
 }
 
 /// <summary>Pestaña Incompletas: tracks de la biblioteca compartida a los que les falta algún tag.</summary>
@@ -43,18 +48,26 @@ public partial class IncompleteViewModel : ScanViewModelBase
 
     partial void OnBusquedaChanged(string value)
     {
-        RowsView.Filter = Busqueda.Trim().Length == 0
-            ? null
-            : o => o is IncRow r && BusquedaTexto.Coincide(Busqueda, r.FileName, r.Folder, r.Missing, r.Title, r.Artist, r.Genre);
-        RowsView.Refresh();
-        FiltroInfo = Busqueda.Trim().Length == 0 ? "" : $"{RowsView.Count} de {Rows.Count}";
+        if (string.IsNullOrWhiteSpace(value)) _filtroDiferido.Ahora();
+        else _filtroDiferido.Pedir();   // se filtra al dejar de teclear, no en cada pulsación
     }
+
+    private void AplicarFiltro()
+    {
+        var consulta = ConsultaTabla.De(Busqueda);
+        // Asignar el filtro ya rehace la vista; no hace falta otro Refresh().
+        RowsView.Filter = consulta.Vacia ? null : o => o is IncRow r && consulta.Coincide(r);
+        FiltroInfo = consulta.Vacia ? "" : $"{RowsView.Count} de {Rows.Count}";
+    }
+
+    private readonly BusquedaDiferida _filtroDiferido;
 
     public IncompleteViewModel(AppEngine engine) : base(engine.Library)
     {
         _engine = engine;
         RowsView = new DataGridCollectionView(Rows);
         RowsView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(IncRow.Folder)));
+        _filtroDiferido = new BusquedaDiferida(AplicarFiltro);
         if (Store.IsScanned) Recompute();
     }
 
@@ -129,15 +142,30 @@ public partial class IncompleteViewModel : ScanViewModelBase
                 return;
             }
             var fields = _engine.BuildFields();
-            var undo = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+            var undo = _engine.Paths.NuevoManifiesto();
             var res = await Task.Run(() => _engine.Apply.ApplyOneAsync(r, _engine.Config.Overwrite, fields, "keep", null, undo, _engine.Paths.DoneLog));
             await _engine.Library.ScanAsync();   // Recompute quitará la que ya esté completa
-            Status = !res.TagOk ? $"⚠ {res.TagErr}"
-                   : res.UndoErr.Length > 0 ? $"Actualizada: {row.FileName}  ⚠ el cambio NO quedó anotado, no se podrá deshacer ({res.UndoErr})"
-                   : $"Actualizada: {row.FileName}";
+            Status = EstadoTrasReanalizar(row.FileName, res);
         }
         catch (Exception e) { Status = "Error al reanalizar: " + e.Message; }
         finally { IsBusy = false; }
+    }
+
+    /// <summary>
+    /// Qué se dice tras reanalizar y aplicar una canción. Si el renombrado falla, se dice: antes solo
+    /// se miraban las etiquetas y salía «Actualizada» con el archivo todavía con su nombre viejo.
+    /// </summary>
+    public static string EstadoTrasReanalizar(string archivo, ApplyOneResult res)
+    {
+        var sinAnotar = res.UndoErr.Length > 0
+            ? $"  ⚠ el cambio NO quedó anotado, no se podrá deshacer ({res.UndoErr})"
+            : "";
+        return ResultadoAplicacion.Clasificar(res) switch
+        {
+            DesenlaceAplicacion.Fallida => $"⚠ No se pudo escribir en «{archivo}»: {(res.TagErr + " " + res.RenErr).Trim()}",
+            DesenlaceAplicacion.SinRenombrar => $"Etiquetas actualizadas en «{archivo}», pero no se pudo renombrar: {res.RenErr}" + sinAnotar,
+            _ => $"Actualizada: {archivo}" + sinAnotar,
+        };
     }
 
     [RelayCommand]

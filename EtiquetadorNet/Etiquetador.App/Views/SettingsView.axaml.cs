@@ -1,6 +1,7 @@
 using System.Collections.Specialized;
 using System.Linq;
 using System.Text;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
@@ -14,6 +15,67 @@ public partial class SettingsView : UserControl
         InitializeComponent();
         DataContextChanged += (_, _) => EngancharAutoScroll();
         EngancharAutoScroll();
+    }
+
+    // Cada vez que se vuelve a Ajustes se recuentan los renombrados reparables: aplicar o deshacer
+    // en Enriquecer los cambia, y la página se crea una sola vez.
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == IsVisibleProperty && IsVisible && DataContext is ViewModels.SettingsViewModel vm)
+            _ = vm.ActualizarRenombradosAsync();
+    }
+
+    // Vaciar la caché no toca la música, pero sale caro después: se dice qué se borra y cuánto.
+    private async void ClearCache_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.SettingsViewModel vm || vm.IsBusy) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+
+        vm.Status = "Mirando qué hay en la caché…";
+        var contenido = await vm.InspeccionarCacheAsync();
+        if (contenido.Vacia) { vm.Status = "La caché ya está vacía."; return; }
+        vm.Status = "";
+
+        var (cuerpo, nota) = ViewModels.SettingsViewModel.TextosVaciarCache(contenido);
+        var ok = await ConfirmDialog.AskAsync(owner, "Vaciar la caché", cuerpo, nota, "Vaciar caché");
+        if (ok) await vm.VaciarCacheAsync();
+    }
+
+    // Olvidar aplicadas no se puede deshacer y afecta a todas de golpe.
+    private async void ForgetApplied_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.SettingsViewModel vm) return;
+        if (vm.AplicadasCount == 0) { vm.Status = "No hay ninguna canción marcada como aplicada."; return; }
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+
+        var n = vm.AplicadasCount;
+        var ok = await ConfirmDialog.AskAsync(owner,
+            $"Olvidar las {n:N0} canciones aplicadas",
+            $"Las canciones que ya aplicaste no vuelven a proponerse al analizar. Si olvidas esta marca, las {n:N0} "
+            + "volverán a salir en Enriquecer en el próximo análisis, mezcladas con las pendientes.",
+            "No se toca ningún archivo, pero no se puede deshacer. Para recuperar solo las de una tirada concreta, "
+            + "es mejor usar «Deshacer última» en Enriquecer.",
+            "Olvidar aplicadas");
+        if (ok) vm.OlvidarAplicadas();
+    }
+
+    // Credenciales cifradas en otro equipo: se ofrece descartarlas, diciendo qué se pierde.
+    private async void ForgetUnreadableCredentials_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.SettingsViewModel vm) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        var nombres = vm.CredencialesIlegibles;
+        if (nombres.Length == 0) { vm.OlvidarCredencialesIlegibles(); return; }
+
+        var ok = await ConfirmDialog.AskAsync(owner,
+            "Olvidar credenciales ilegibles",
+            $"Las credenciales de {nombres} no se pueden descifrar en este equipo. Si las olvidas, se borrarán "
+            + "de la configuración y tendrás que volver a introducirlas en «Claves de API».",
+            "Mientras no las olvides, se conservan cifradas tal cual: siguen sirviendo si vuelves a abrir esta "
+            + "configuración en el equipo y con el usuario donde se guardaron.",
+            "Olvidar");
+        if (ok) vm.OlvidarCredencialesIlegibles();
     }
 
     // Sin esto hay que arrastrar la barra a mano para ver lo que va pasando, que en una tirada
@@ -108,5 +170,6 @@ public partial class SettingsView : UserControl
         if (string.IsNullOrEmpty(destino)) return;
 
         vm.RepararRekordbox(origen, destino);
+        _ = vm.ActualizarRenombradosAsync();
     }
 }
