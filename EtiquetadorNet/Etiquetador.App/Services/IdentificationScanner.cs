@@ -220,15 +220,22 @@ public sealed class IdentificationScanner
     {
         if (otraParte) force = true;   // pedir otro fragmento implica no hacer caso de lo guardado
 
+        var gratisOn = o.AcoustIdKey.Trim().Length > 0;
+        var pagoOn = o.UsarPago && o.AuddToken.Trim().Length > 0 && o.MaxPago > 0;
+
         // Filtrar lo ya respondido mira la fecha y el tamaño de cada archivo: con 13.500 canciones
         // en un disco aparte son segundos, así que va fuera del hilo de quien llama. La pestaña ya
         // pasa la lista filtrada (con force), y entonces no se repite.
+        //
+        // Con el permiso de pago que de verdad se va a usar (pagoOn), no con la casilla: sin clave
+        // de AudD o con el máximo a 0, una negativa del gratuito está cerrada, y reabrirla repetiría
+        // la consulta a AcoustID de casi toda la biblioteca en cada pasada sin poder llegar al de pago.
         List<string> pendientes;
         try
         {
             pendientes = force
                 ? paths.ToList()
-                : await Task.Run(() => paths.Where(p => !Consultado(p, o.UsarPago)).ToList(), ct).ConfigureAwait(false);
+                : await Task.Run(() => paths.Where(p => !Consultado(p, pagoOn)).ToList(), ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -240,8 +247,6 @@ public sealed class IdentificationScanner
             return new Resumen(0, 0, 0, 0, 0, "");
         }
 
-        var gratisOn = o.AcoustIdKey.Trim().Length > 0;
-        var pagoOn = o.UsarPago && o.AuddToken.Trim().Length > 0 && o.MaxPago > 0;
         if (!gratisOn && !pagoOn)
             return new Resumen(0, 0, 0, 0, 0, "no hay ningún motor disponible: falta la clave de AcoustID y la de AudD");
 

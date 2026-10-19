@@ -38,6 +38,10 @@ public partial class IdentifyView : UserControl
 
         var pendientes = await vm.PrepararComprobacionAsync(force);
         if (pendientes == null) return;   // ya había una preparación o una comprobación en marcha
+
+        // Si mientras se preparaba la lista ha empezado otra comprobación, no se pregunta: aceptar
+        // el diálogo no haría nada, y RunAsync la descartaría sin decirlo.
+        if (vm.MotivoOcupada is { Length: > 0 } ocupada) { vm.Status = ocupada; return; }
         if (pendientes.Count == 0)
         {
             await vm.RecomponerAsync();
@@ -65,7 +69,8 @@ public partial class IdentifyView : UserControl
         if (DataContext is not IdentifyViewModel vm) return;
         if (TopLevel.GetTopLevel(this) is not Window owner) return;
 
-        if (vm.IsBusy) { vm.Status = "Hay una comprobación en curso."; return; }
+        // También mientras se prepara la lista de «Comprobar», no solo durante la comprobación.
+        if (vm.MotivoOcupada is { Length: > 0 } ocupada) { vm.Status = ocupada; return; }
         if (!vm.HayAlgunMotor) { vm.Status = vm.MotoresInfo; return; }
 
         var (filas, aviso) = vm.PrepararReanalisis();

@@ -60,10 +60,13 @@ public sealed class FingerprintScanner
     private readonly object _cargaLock = new();
 
     /// <summary>
-    /// El archivo existe pero no se pudo abrir (bloqueado por otro programa, sin permiso). No se
-    /// guarda encima: pisarlo con lo poco calculado en esta sesión tiraría horas de análisis.
+    /// El archivo está dañado y no se ha podido apartar. No se guarda encima: pisarlo con lo poco
+    /// calculado en esta sesión tiraría horas de análisis.
     /// </summary>
     private volatile bool _noSobrescribir;
+
+    /// <summary>Ver <see cref="AvisoCarga"/>.</summary>
+    private volatile string _avisoCarga = "";
 
     public FingerprintScanner(string cacheFile, string fpcalcPath, Logger? log = null)
     {
@@ -78,23 +81,46 @@ public sealed class FingerprintScanner
     public bool EstaCargada => Volatile.Read(ref _cargada) == 1;
 
     /// <summary>
+    /// Por qué no se pueden usar ahora las huellas guardadas, o "" si se puede. Redactado para el
+    /// usuario. Mientras no esté vacío no se calcula ni se guarda nada, y Duplicados lo enseña en
+    /// lugar de «Sin calcular… las 15000 canciones», que sería falso: las huellas están en el disco,
+    /// solo que no se han podido leer.
+    /// </summary>
+    public string AvisoCarga => _avisoCarga;
+
+    /// <summary>
     /// Lee la caché del disco en segundo plano, una sola vez. Quien llegue mientras se está leyendo
     /// espera a esa misma lectura en vez de empezar otra o de ver la caché a medias.
+    ///
+    /// Si la última lectura no pudo abrir el archivo, se vuelve a intentar. Antes la caché quedaba
+    /// dada por leída y vacía para toda la sesión por un bloqueo pasajero (un antivirus, una copia
+    /// de seguridad que lo tenía abierto): Duplicados decía que no había nada calculado y «Analizar
+    /// audio» calculaba durante horas para luego negarse a guardar.
     /// </summary>
     public Task CargarAsync()
     {
         if (EstaCargada) return Task.CompletedTask;
         lock (_cargaLock)
+        {
+            if (_carga is { IsCompleted: true } && !EstaCargada) _carga = null;
             return _carga ??= Task.Run(LeerDelDiscoAsync);
+        }
     }
 
     /// <summary>
     /// Asegura que la caché está leída, esperando a la lectura compartida si está en marcha. Bloquea
     /// la primera vez, así que solo se usa desde hilos de fondo.
+    ///
+    /// A diferencia de <see cref="CargarAsync"/>, no reintenta una lectura fallida: se llama una vez
+    /// por canción, y con el archivo aún bloqueado serían 15.000 intentos y 15.000 líneas en el
+    /// registro. Reintenta quien empieza una operación (contar, comparar o calcular).
     /// </summary>
     private void Cargar()
     {
-        if (!EstaCargada) CargarAsync().GetAwaiter().GetResult();
+        if (EstaCargada) return;
+        Task carga;
+        lock (_cargaLock) carga = _carga ??= Task.Run(LeerDelDiscoAsync);
+        carga.GetAwaiter().GetResult();
     }
 
     /// <summary>Huella guardada de un archivo, o null si no está o el archivo ha cambiado.</summary>
@@ -126,11 +152,16 @@ public sealed class FingerprintScanner
     /// Calcula las huellas que falten. Informa del avance y se puede cancelar; lo ya calculado
     /// queda guardado, de modo que cancelar no tira por la borda el trabajo hecho.
     /// </summary>
-    public async Task ScanAsync(IReadOnlyList<string> paths, bool force,
-                                IProgress<(int Hechas, int Total, string Archivo)>? progreso,
-                                CancellationToken ct = default)
+    /// <returns>"" si se ha podido trabajar; si no, por qué no se ha calculado nada, para el usuario.</returns>
+    public async Task<string> ScanAsync(IReadOnlyList<string> paths, bool force,
+                                        IProgress<(int Hechas, int Total, string Archivo)>? progreso,
+                                        CancellationToken ct = default)
     {
-        if (!FpcalcDisponible) { _log?.Err("Huellas: falta fpcalc, no se puede calcular nada."); return; }
+        if (!FpcalcDisponible)
+        {
+            _log?.Err("Huellas: falta fpcalc, no se puede calcular nada.");
+            return "No está disponible el analizador de audio (fpcalc).";
+        }
 
         // La caché se lee SIEMPRE antes de calcular, también con «force»: si no, el guardado del
         // final escribiría solo lo calculado ahora y se perderían las huellas de las demás.
@@ -139,14 +170,23 @@ public sealed class FingerprintScanner
         // una consulta de fecha y tamaño por canción. Hecho antes del primer await, como estaba,
         // congelaba la ventana al pulsar «Analizar audio».
         await CargarAsync().ConfigureAwait(false);
+
+        // Si las huellas guardadas no se han podido leer, no se calcula nada: se tardarían horas en
+        // rehacer lo que ya está en el disco y al final no se podría guardar sin pisarlo.
+        if (AvisoCarga.Length > 0)
+        {
+            _log?.Err("Huellas: no se calcula nada. " + AvisoCarga);
+            return AvisoCarga;
+        }
+
         List<string> pendientes;
         try
         {
             pendientes = await Task.Run(
                 () => force ? paths.ToList() : paths.Where(p => Get(p) == null).ToList(), ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }   // nada calculado aún
-        if (pendientes.Count == 0) { progreso?.Report((paths.Count, paths.Count, "")); return; }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { return ""; }   // nada calculado aún
+        if (pendientes.Count == 0) { progreso?.Report((paths.Count, paths.Count, "")); return ""; }
 
         _log?.Head($"Huellas: {pendientes.Count} por calcular de {paths.Count} (el resto ya estaban).");
         var hechas = 0;
@@ -179,6 +219,7 @@ public sealed class FingerprintScanner
         await Task.Run(Save, CancellationToken.None).ConfigureAwait(false);
         _log?.Sum($"Huellas: {hechas} calculadas en {TextUtils.FormatEta(crono.Elapsed.TotalSeconds)}"
                 + (ct.IsCancellationRequested ? " (cancelado; lo hecho queda guardado)" : "") + ".");
+        return "";
     }
 
     private async Task<Entry?> CalcularAsync(string path, CancellationToken ct)
@@ -245,49 +286,60 @@ public sealed class FingerprintScanner
     /// </summary>
     private async Task LeerDelDiscoAsync()
     {
+        if (!File.Exists(_cacheFile)) { DarPorLeida(); return; }
+        var reloj = Stopwatch.StartNew();
+
+        Dictionary<string, Entry>? d;
         try
         {
-            if (!File.Exists(_cacheFile)) return;
-            var reloj = Stopwatch.StartNew();
-
-            Dictionary<string, Entry>? d;
-            FileStream fs;
-            try
-            {
-                fs = new FileStream(_cacheFile, FileMode.Open, FileAccess.Read, FileShare.Read,
+            var fs = new FileStream(_cacheFile, FileMode.Open, FileAccess.Read, FileShare.Read,
                                     bufferSize: 1 << 16, useAsync: true);
-            }
-            catch (Exception e)
+            await using (fs.ConfigureAwait(false))
+                d = await JsonSerializer.DeserializeAsync<Dictionary<string, Entry>>(fs).ConfigureAwait(false);
+        }
+        catch (JsonException e)
+        {
+            // Dañada (un corte a media escritura de una versión antigua, por ejemplo): se aparta con
+            // otro nombre en vez de dejar que el siguiente guardado la pise sin decir nada. SOLO ante
+            // un JSON que no se entiende: un fallo al leer no dice nada del contenido.
+            var apartado = ArchivoDatos.Apartar(_cacheFile);
+            if (apartado.Length > 0)
             {
-                // No se ha podido ni abrir: no hay motivo para creerlo dañado, así que no se aparta
-                // ni se deja pisar.
-                _noSobrescribir = true;
-                _log?.Err($"No se pudo leer la caché de huellas ({e.Message}); no se guardará encima mientras siga así.");
+                _log?.Err($"La caché de huellas no se pudo leer ({e.Message}); se ha apartado como {Path.GetFileName(apartado)} y se volverán a calcular.");
+                DarPorLeida();
                 return;
             }
+            _noSobrescribir = true;
+            _log?.Err($"La caché de huellas no se pudo leer ({e.Message}) ni apartar; no se guardará encima.");
+            DarPorLeida($"El archivo de huellas guardadas está dañado y no se ha podido apartar. Para no "
+                      + $"perder nada no se calcula ni se guarda; muévelo o bórralo a mano y vuelve a intentarlo: {_cacheFile}");
+            return;
+        }
+        catch (Exception e)
+        {
+            // No se ha podido abrir o leer (otro programa lo tiene abierto, sin permiso, un disco que
+            // no responde). No hay motivo para creerlo dañado: ni se aparta ni se da por leída, y la
+            // próxima operación lo vuelve a intentar (CargarAsync).
+            _avisoCarga = $"No se han podido leer las huellas ya calculadas ({e.Message}). Si otro programa "
+                        + "tiene abierto el archivo, ciérralo y vuelve a intentarlo. Mientras tanto no se calcula nada, "
+                        + "para no rehacer ni pisar lo que ya está guardado.";
+            _log?.Err($"No se pudo leer la caché de huellas ({e.Message}); se volverá a intentar en la próxima operación.");
+            return;
+        }
 
-            try
-            {
-                await using (fs.ConfigureAwait(false))
-                    d = await JsonSerializer.DeserializeAsync<Dictionary<string, Entry>>(fs).ConfigureAwait(false);
-            }
-            catch (Exception e)
-            {
-                // Dañada (un corte a media escritura de una versión antigua, por ejemplo): se aparta
-                // con otro nombre en vez de dejar que el siguiente guardado la pise sin decir nada.
-                var apartado = ArchivoDatos.Apartar(_cacheFile);
-                if (apartado.Length == 0) _noSobrescribir = true;
-                _log?.Err(apartado.Length > 0
-                    ? $"La caché de huellas no se pudo leer ({e.Message}); se ha apartado como {Path.GetFileName(apartado)} y se volverán a calcular."
-                    : $"La caché de huellas no se pudo leer ({e.Message}) ni apartar; no se guardará encima.");
-                return;
-            }
-
-            if (d == null) return;
+        if (d != null)
+        {
             foreach (var kv in d) _cache.TryAdd(kv.Key, kv.Value);   // lo calculado entretanto manda
             _log?.Detail($"Huellas de audio: {d.Count} leídas de la caché en {reloj.ElapsedMilliseconds} ms.");
         }
-        finally { Volatile.Write(ref _cargada, 1); }
+        DarPorLeida();
+    }
+
+    /// <summary>La caché ya no hay que leerla; <paramref name="aviso"/> dice si se puede usar.</summary>
+    private void DarPorLeida(string aviso = "")
+    {
+        _avisoCarga = aviso;
+        Volatile.Write(ref _cargada, 1);
     }
 
     /// <summary>
@@ -297,9 +349,10 @@ public sealed class FingerprintScanner
     public void Save()
     {
         if (Interlocked.Exchange(ref _sucio, 0) == 0) return;
-        if (_noSobrescribir)
+        // Sin haber leído lo del disco, lo que hay en memoria no es la caché entera: guardarlo la pisaría.
+        if (_noSobrescribir || !EstaCargada)
         {
-            _log?.Err("Huellas: la caché del disco no se pudo leer al empezar, así que lo calculado en esta sesión no se guarda encima.");
+            _log?.Err("Huellas: la caché del disco no se pudo leer, así que lo calculado en esta sesión no se guarda encima.");
             return;
         }
         var tmp = _cacheFile + ".tmp";
@@ -325,5 +378,7 @@ public sealed class FingerprintScanner
         Interlocked.Exchange(ref _cargada, 1);
         _cache.Clear();
         try { if (File.Exists(_cacheFile)) File.Delete(_cacheFile); } catch { }
+        // Sin archivo ya no hay nada que no se pudiera leer ni que se pudiera pisar.
+        if (!File.Exists(_cacheFile)) { _avisoCarga = ""; _noSobrescribir = false; }
     }
 }

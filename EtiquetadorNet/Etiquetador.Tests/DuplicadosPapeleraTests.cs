@@ -25,12 +25,16 @@ public class DuplicadosPapeleraTests
 
     private static (List<DupRow> Filas, int ConPrioridad) Filas(IReadOnlyList<DuplicateGroup> grupos,
                                                                  IReadOnlySet<string>? marcadas = null,
-                                                                 bool porAudio = false)
+                                                                 bool porAudio = false,
+                                                                 IReadOnlySet<string>? recomendadasMarcadas = null)
         => DuplicatesViewModel.ConstruirFilas(grupos, porAudio,
             puntuar: t => t.Bitrate * 1000.0 + t.DurationSeconds,
             motivoDe: t => $"Mejor calidad ({t.Bitrate} kbps)",
             esPrioritaria: _ => false,
-            marcadas);
+            marcadas, recomendadasMarcadas);
+
+    private static HashSet<string> Rutas(params Track[] pistas)
+        => pistas.Select(p => p.FilePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     [Fact]
     public void Quitar_las_enviadas_conserva_el_resto_de_cada_grupo()
@@ -108,6 +112,124 @@ public class DuplicadosPapeleraTests
         var (filas, _) = Filas(grupos);
         Assert.DoesNotContain(filas, f => f.Marcada);
         Assert.Single(filas, f => f.EsMejor);
+    }
+
+    // ---------- Ningún grupo se queda sin copias por repintar (revisión de E9) ----------
+    //
+    // Visto en revisión: «Marcar sobrantes» en un grupo de 3 y enviar después a la papelera, con el
+    // clic derecho, la copia recomendada. Las dos que quedaban seguían marcadas, una pasaba a ser la
+    // recomendada y «Enviar marcadas» se llevaba la canción entera.
+
+    [Fact]
+    public void Enviar_la_recomendada_desmarca_la_que_pasa_a_serlo()
+    {
+        var a1 = Pista(@"E:\Musica\Quevedo - Columbia.mp3");
+        var a2 = Pista(@"E:\Musica\Pack\Quevedo - Columbia (1).mp3", kbps: 192);
+        var a3 = Pista(@"E:\Musica\Pack\Quevedo - Columbia (2).mp3", kbps: 128);
+        var grupos = new[] { Grupo("Columbia", a1, a2, a3) };
+
+        // «Marcar sobrantes» dejó marcadas a2 y a3; luego a1 va a la papelera desde el clic derecho.
+        var (filas, _) = Filas(DuplicatesViewModel.SinBorradas(grupos, new[] { a1.FilePath }), Rutas(a2, a3));
+
+        var nueva = Assert.Single(filas, f => f.EsMejor);
+        Assert.Equal(a2.FilePath, nueva.FilePath);
+        Assert.False(nueva.Marcada);
+        Assert.Equal(new[] { a3.FilePath }, filas.Where(f => f.Marcada).Select(f => f.FilePath));
+        Assert.Equal(0, DuplicatesViewModel.SinNingunaCopia(filas));
+    }
+
+    // Si queda otra copia sin marcar, las marcas del usuario se respetan tal cual: el grupo no se
+    // queda vacío y es él quien ha decidido cuál conservar.
+    [Fact]
+    public void Si_queda_una_copia_sin_marcar_no_se_desmarca_nada()
+    {
+        var a1 = Pista(@"E:\Musica\Quevedo - Columbia.mp3");
+        var a2 = Pista(@"E:\Musica\Pack\Quevedo - Columbia (1).mp3", kbps: 256);
+        var a3 = Pista(@"E:\Musica\Pack\Quevedo - Columbia (2).mp3", kbps: 192);
+        var a4 = Pista(@"E:\Musica\Pack\Quevedo - Columbia (3).mp3", kbps: 128);
+        var grupos = new[] { Grupo("Columbia", a1, a2, a3, a4) };
+
+        var (filas, _) = Filas(DuplicatesViewModel.SinBorradas(grupos, new[] { a1.FilePath }), Rutas(a2, a4));
+
+        Assert.Equal(new[] { a2.FilePath, a4.FilePath }, filas.Where(f => f.Marcada).Select(f => f.FilePath));
+        Assert.Equal(0, DuplicatesViewModel.SinNingunaCopia(filas));
+    }
+
+    // Una recomendada que el usuario ya había marcado se marcó a sabiendas: sigue marcada, y el
+    // diálogo de la papelera avisa de que la canción desaparecería.
+    [Fact]
+    public void Una_recomendada_marcada_a_sabiendas_sigue_marcada_y_el_dialogo_lo_avisa()
+    {
+        var a1 = Pista(@"E:\Musica\Quevedo - Columbia.mp3");
+        var a2 = Pista(@"E:\Musica\Pack\Quevedo - Columbia (1).mp3", kbps: 192);
+        var b1 = Pista(@"E:\Musica\Quevedo - Punto G.mp3");
+        var b2 = Pista(@"E:\Musica\Pack\Quevedo - Punto G.mp3", kbps: 128);
+        var b3 = Pista(@"E:\Musica\Pack\Quevedo - Punto G (1).mp3", kbps: 96);
+        var grupos = new[] { Grupo("Columbia", a1, a2), Grupo("Punto G", b1, b2, b3) };
+
+        // Todo Columbia marcado, a1 incluida como recomendada; se envía b3 desde el clic derecho.
+        var (filas, _) = Filas(DuplicatesViewModel.SinBorradas(grupos, new[] { b3.FilePath }),
+                               Rutas(a1, a2), recomendadasMarcadas: Rutas(a1));
+
+        Assert.Equal(new[] { a1.FilePath, a2.FilePath }, filas.Where(f => f.Marcada).Select(f => f.FilePath));
+        Assert.Equal(1, DuplicatesViewModel.SinNingunaCopia(filas));
+        Assert.Equal("Afecta a 1 grupo(s) de duplicados. Atención: 1 de ellas es la copia recomendada de su grupo. "
+                     + "Hay 1 canción con TODAS sus copias marcadas: desaparecería de la biblioteca.",
+                     DuplicatesViewModel.CuerpoConfirmarPapelera(filas));
+    }
+
+    // Por audio, cada versión conserva su ejemplar: se protege la versión, no solo el grupo.
+    [Fact]
+    public void Por_audio_se_protege_cada_version()
+    {
+        var original = Pista(@"E:\Musica\Bad Bunny - Titi Me Pregunto.mp3");
+        var copia = Pista(@"E:\Descargas\Bad Bunny - Titi Me Pregunto.mp3", kbps: 128);
+        var intro = Pista(@"E:\Musica\Bad Bunny - Titi Me Pregunto (Hype Intro).mp3");
+        var copiaIntro = Pista(@"E:\Descargas\Bad Bunny - Titi Me Pregunto (Hype Intro).mp3", kbps: 128);
+        var grupos = new[] { Grupo("Titi Me Pregunto", original, copia, intro, copiaIntro) };
+
+        // «Marcar sobrantes» marcó una copia de cada versión; luego se envía el original.
+        var (filas, _) = Filas(DuplicatesViewModel.SinBorradas(grupos, new[] { original.FilePath }),
+                               Rutas(copia, copiaIntro), porAudio: true);
+
+        Assert.False(filas.Single(f => f.FilePath == copia.FilePath).Marcada);       // única de su versión
+        Assert.True(filas.Single(f => f.FilePath == copiaIntro.FilePath).Marcada);   // la intro sigue teniendo la suya
+        Assert.Equal(0, DuplicatesViewModel.SinNingunaCopia(filas));
+    }
+
+    // Dos grabaciones distintas con el mismo nombre dan la misma etiqueta de grupo: se cuentan por
+    // grupo, no por etiqueta.
+    [Fact]
+    public void El_dialogo_cuenta_los_grupos_aunque_tengan_la_misma_etiqueta()
+    {
+        var a1 = Pista(@"E:\Musica\Quevedo - Columbia.mp3");
+        var a2 = Pista(@"E:\Pack\Quevedo - Columbia.mp3", kbps: 128);
+        var c1 = Pista(@"E:\Directos\Quevedo - Columbia.mp3");
+        var c2 = Pista(@"E:\Directos\Pack\Quevedo - Columbia.mp3", kbps: 128);
+        var grupos = new[] { Grupo("Columbia", a1, a2), Grupo("Columbia", c1, c2) };
+        var (filas, _) = Filas(grupos, Rutas(a1, a2, c1, c2), recomendadasMarcadas: Rutas(a1, c1));
+
+        Assert.Equal(filas[0].Group, filas[2].Group);
+        Assert.Equal(2, DuplicatesViewModel.SinNingunaCopia(filas));
+        Assert.StartsWith("Afecta a 2 grupo(s) de duplicados.", DuplicatesViewModel.CuerpoConfirmarPapelera(filas));
+        Assert.Contains("Hay 2 canciones con TODAS sus copias marcadas", DuplicatesViewModel.CuerpoConfirmarPapelera(filas));
+    }
+
+    [Fact]
+    public void Sin_nada_raro_el_dialogo_solo_dice_cuantos_grupos()
+    {
+        var a1 = Pista(@"E:\Musica\Quevedo - Columbia.mp3");
+        var a2 = Pista(@"E:\Musica\Pack\Quevedo - Columbia (1).mp3", kbps: 192);
+        var (filas, _) = Filas(new[] { Grupo("Columbia", a1, a2) }, Rutas(a2));
+        Assert.Equal("Afecta a 1 grupo(s) de duplicados.", DuplicatesViewModel.CuerpoConfirmarPapelera(filas));
+    }
+
+    [Fact]
+    public void El_estado_dice_cuantas_se_han_desmarcado()
+    {
+        Assert.Equal("", DuplicatesViewModel.NotaDesmarcadas(0));
+        Assert.StartsWith(" Se ha desmarcado 1 copia:", DuplicatesViewModel.NotaDesmarcadas(1));
+        Assert.StartsWith(" Se han desmarcado 3 copias:", DuplicatesViewModel.NotaDesmarcadas(3));
     }
 
     // ---------- Lo que se le dice al usuario ----------

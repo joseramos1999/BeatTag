@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Etiquetador.App.Services;
 using Etiquetador.App.ViewModels;
+using Etiquetador.Core;
 
 namespace Etiquetador.Tests;
 
@@ -161,6 +162,130 @@ public class HuellasDuplicadosTests
             Assert.True(fp.EstaCargada);
             Assert.False(File.Exists(cache));
             Assert.Single(Directory.GetFiles(dir, "huellas.json.ilegible_*"));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // ---------- Una caché que no se puede abrir (revisión de A3) ----------
+    //
+    // Un bloqueo pasajero (un antivirus, una copia de seguridad con el archivo abierto) dejaba la
+    // caché dada por leída y VACÍA para toda la sesión: Duplicados decía «Sin calcular… las 15000
+    // canciones» y «Analizar audio» calculaba durante horas para luego negarse a guardar. Un fallo
+    // al leer tampoco es un archivo dañado: no se aparta.
+
+    /// <summary>Abre el archivo sin compartirlo, como un programa que lo tiene bloqueado.</summary>
+    private static FileStream Bloquear(string archivo)
+        => new(archivo, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+    [WindowsFact]
+    public async Task Una_cache_bloqueada_no_se_da_por_leida_ni_se_aparta_y_se_reintenta()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var a = Cancion(dir, "Quevedo - Columbia.mp3");
+            var cache = Path.Combine(dir, "huellas.json");
+            EscribirCache(cache, new[] { (a, new[] { 1, 2, 3 }) });
+            var fp = new FingerprintScanner(cache, Path.Combine(dir, "fpcalc.exe"));
+
+            using (Bloquear(cache))
+            {
+                await fp.CargarAsync();
+                Assert.False(fp.EstaCargada);
+                Assert.StartsWith("No se han podido leer las huellas ya calculadas", fp.AvisoCarga);
+            }
+            Assert.True(File.Exists(cache));
+            Assert.Empty(Directory.GetFiles(dir, "huellas.json.ilegible_*"));
+
+            // Ya libre: la siguiente operación lo vuelve a intentar y lo lee entero.
+            await fp.CargarAsync();
+            Assert.True(fp.EstaCargada);
+            Assert.Equal("", fp.AvisoCarga);
+            Assert.Equal(new[] { 1, 2, 3 }, fp.Get(a));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // El reintento lo hace quien empieza una operación, no cada consulta: contar 200 canciones con
+    // el archivo aún bloqueado no puede convertirse en 200 intentos y 200 líneas en el registro.
+    [WindowsFact]
+    public async Task Con_la_cache_bloqueada_contar_no_reintenta_por_cada_cancion()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var cache = Path.Combine(dir, "huellas.json");
+            EscribirCache(cache, new[] { (Path.Combine(dir, "a.mp3"), new[] { 1, 2, 3 }) });
+            var log = new Logger();
+            var errores = 0;
+            log.OnLog += e => { if (e.Kind == LogKind.Err) Interlocked.Increment(ref errores); };
+            var fp = new FingerprintScanner(cache, Path.Combine(dir, "fpcalc.exe"), log);
+            var rutas = Enumerable.Range(0, 200).Select(i => Path.Combine(dir, $"c{i}.mp3")).ToList();
+
+            using (Bloquear(cache))
+            {
+                await fp.CargarAsync();
+                Assert.Equal(0, fp.Contar(rutas));
+                Assert.Equal(1, errores);
+            }
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Lo que importa al usuario: con las huellas sin leer no se calcula nada (horas de trabajo que no
+    // se podrían guardar) y el archivo del disco sigue tal cual.
+    [WindowsFact]
+    public async Task Con_la_cache_bloqueada_no_se_calcula_nada_ni_se_pisa()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var a = Cancion(dir, "Quevedo - Columbia.mp3");
+            var b = Cancion(dir, "Karol G - Provenza.mp3");
+            var cache = Path.Combine(dir, "huellas.json");
+            EscribirCache(cache, new[] { (a, new[] { 1, 2, 3 }) });
+            var antes = File.ReadAllBytes(cache);
+            var marca = Path.Combine(dir, "fpcalc_llamado.txt");
+            const string json = "{\"duration\":200,\"fingerprint\":[9,9,9]}";
+            var fpcalc = ProgramaFalso(dir, "fpcalc",
+                $"echo si>> \"{marca}\"\r\necho {json}", $"echo si >> '{marca}'; echo '{json}'");
+            var fp = new FingerprintScanner(cache, fpcalc);
+
+            string motivo;
+            using (Bloquear(cache))
+                motivo = await fp.ScanAsync(new[] { a, b }, force: false, progreso: null);
+
+            Assert.Equal(fp.AvisoCarga, motivo);
+            Assert.NotEqual("", motivo);
+            Assert.False(File.Exists(marca), "se llamó a fpcalc con las huellas guardadas sin leer");
+            Assert.Equal(antes, File.ReadAllBytes(cache));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Y Duplicados lo dice en lugar de «Sin calcular. Hay que analizar el audio de las N canciones».
+    [WindowsFact]
+    public async Task El_resumen_dice_que_no_se_pueden_leer_las_huellas_en_vez_de_sin_calcular()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var a = Cancion(dir, "a.mp3");
+            var cache = Path.Combine(dir, "huellas.json");
+            EscribirCache(cache, new[] { (a, new[] { 1, 2, 3 }) });
+            var fpcalc = Path.Combine(dir, "fpcalc.exe");
+            File.WriteAllText(fpcalc, "");   // basta con que exista
+            var fp = new FingerprintScanner(cache, fpcalc);
+
+            string texto;
+            using (Bloquear(cache))
+                texto = await DuplicatesViewModel.CalcularResumenHuellasAsync(fp, new[] { a });
+
+            Assert.DoesNotContain("Sin calcular", texto);
+            Assert.StartsWith("No se han podido leer las huellas ya calculadas", texto);
+
+            // Cuando se libera, el siguiente recuento ya es el de verdad.
+            Assert.Equal("Las 1 analizadas.", await DuplicatesViewModel.CalcularResumenHuellasAsync(fp, new[] { a }));
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }

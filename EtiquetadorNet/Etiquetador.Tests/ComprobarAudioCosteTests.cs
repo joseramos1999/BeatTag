@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Net.Http;
+using System.Text.Json;
 using Etiquetador.App.Services;
 using Etiquetador.App.ViewModels;
 using Etiquetador.Core;
@@ -264,5 +265,130 @@ public class ComprobarAudioCosteTests
 
         Assert.Equal(new[] { nueva }, await IdentifyViewModel.FiltrarPorConsultarAsync(todas, consultado, force: false));
         Assert.Equal(new[] { respondida, nueva }, await IdentifyViewModel.FiltrarPorConsultarAsync(todas, consultado, force: true));
+    }
+
+    // ---------- X3 (revisión): qué negativas del gratuito siguen abiertas ----------
+    //
+    // Visto en revisión: con «Usar también AudD» marcada pero SIN clave de AudD, la lista se filtraba
+    // con la casilla tal cual. Las canciones a las que AcoustID ya había dicho «no» (el 97 % de la
+    // biblioteca, si reconoce el 2,8 %) volvían a la lista, y como la pasada ya no vuelve a filtrar,
+    // cada «Comprobar» repetía unas 13.000 consultas a AcoustID y las guardaba otra vez sin cerrar.
+
+    /// <summary>Caché de identificación con un «no lo reconozco» de AcoustID, sin pasar por AudD.</summary>
+    private static void CacheConNegativaDelGratuito(string cache, string ruta)
+    {
+        var fi = new FileInfo(ruta);
+        var d = new Dictionary<string, object>
+        {
+            [ruta] = new { M = fi.LastWriteTimeUtc.Ticks, S = fi.Length, A = "", T = "", L = "", F = "",
+                           Sin = true, P = false, O = 0.30 },
+        };
+        File.WriteAllText(cache, JsonSerializer.Serialize(d));
+    }
+
+    [Fact]
+    public async Task Sin_clave_de_AudD_las_negativas_del_gratuito_no_vuelven_a_la_lista()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var respondida = Path.Combine(dir, "Quevedo - Columbia.mp3");
+            var nueva = Path.Combine(dir, "Karol G - Provenza.mp3");
+            Mp3Fixture.WriteMinMp3(respondida, frames: 20);
+            Mp3Fixture.WriteMinMp3(nueva, frames: 20);
+            CacheConNegativaDelGratuito(Path.Combine(dir, "identificacion.json"), respondida);
+            using var http = new HttpClient(new AuddFalso());
+            var escaner = Escaner(dir, http);
+            var rutas = new[] { respondida, nueva };
+
+            // Casilla marcada sin clave de AudD: el de pago no va a consultar, así que esa negativa
+            // está respondida. Lo mismo con el máximo de pago a 0.
+            var sinClave = IdentifyViewModel.PagoEfectivoPara(usarPago: true, hayPago: false, maxConsultasPago: 300);
+            var sinMaximo = IdentifyViewModel.PagoEfectivoPara(usarPago: true, hayPago: true, maxConsultasPago: 0);
+            Assert.Equal(new[] { nueva }, await IdentifyViewModel.PendientesAsync(rutas, escaner, sinClave, force: false));
+            Assert.Equal(new[] { nueva }, await IdentifyViewModel.PendientesAsync(rutas, escaner, sinMaximo, force: false));
+
+            // Con AudD de verdad, la negativa sí se reabre: es justo la que el de pago podría reconocer.
+            var conPago = IdentifyViewModel.PagoEfectivoPara(usarPago: true, hayPago: true, maxConsultasPago: 300);
+            Assert.Equal(rutas, await IdentifyViewModel.PendientesAsync(rutas, escaner, conPago, force: false));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // El escáner, si filtra él (sin «force»), sigue la misma regla con sus opciones: no basta la
+    // casilla, hace falta la clave y un máximo mayor que 0. Antes, con la casilla y sin clave, esta
+    // canción volvía a AcoustID en cada pasada.
+    [Theory]
+    [InlineData("", 300)]
+    [InlineData("token-de-prueba", 0)]
+    public async Task El_escaner_no_reabre_una_negativa_si_el_pago_no_puede_consultar(string token, int maxPago)
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var respondida = Path.Combine(dir, "Quevedo - Columbia.mp3");
+            Mp3Fixture.WriteMinMp3(respondida, frames: 20);
+            CacheConNegativaDelGratuito(Path.Combine(dir, "identificacion.json"), respondida);
+            var audd = new AuddFalso();
+            using var http = new HttpClient(audd);
+
+            var o = new IdentificationScanner.Opciones(AcoustIdKey: "clave-de-prueba", AuddToken: token,
+                                                       UsarPago: true, MaxPago: maxPago);
+            var r = await Escaner(dir, http).ScanAsync(new[] { respondida }, o, force: false, progreso: null);
+
+            Assert.Equal(0, r.Consultadas);
+            Assert.Equal("", r.Error);
+            Assert.Equal(0, audd.Peticiones);   // ni AudD ni la descarga de fpcalc
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void El_pago_solo_es_efectivo_con_casilla_clave_y_maximo()
+    {
+        Assert.True(IdentifyViewModel.PagoEfectivoPara(true, true, 300));
+        Assert.False(IdentifyViewModel.PagoEfectivoPara(false, true, 300));
+        Assert.False(IdentifyViewModel.PagoEfectivoPara(true, false, 300));
+        Assert.False(IdentifyViewModel.PagoEfectivoPara(true, true, 0));
+    }
+
+    // ---------- X2 (revisión): reanalizar mientras se prepara «Comprobar» ----------
+    //
+    // El reanálisis solo miraba si había una comprobación en curso, no si se estaba preparando la
+    // lista de «Comprobar»; y el aviso que tapa la tabla lo quitaba el primero que terminaba. Si se
+    // lanzaba un reanálisis entonces, la comprobación aceptada después se descartaba sin decir nada.
+
+    [Fact]
+    public void Mientras_se_prepara_la_lista_no_se_puede_empezar_otra_cosa()
+    {
+        Assert.Equal("", IdentifyViewModel.MotivoParaNoEmpezar(comprobando: false, preparando: false));
+        Assert.Contains("«Comprobar»", IdentifyViewModel.MotivoParaNoEmpezar(comprobando: false, preparando: true));
+        Assert.Contains("en curso", IdentifyViewModel.MotivoParaNoEmpezar(comprobando: true, preparando: false));
+        Assert.Contains("en curso", IdentifyViewModel.MotivoParaNoEmpezar(comprobando: true, preparando: true));
+    }
+
+    // Preparar la lista y recomponer la tabla piden el aviso a la vez: si termina antes el recálculo,
+    // el aviso sigue hasta que acabe la preparación.
+    [Fact]
+    public void El_aviso_de_cargando_sigue_mientras_quede_alguna_tarea()
+    {
+        var cambios = new List<bool>();
+        var aviso = new AvisoCompartido(cambios.Add);
+
+        var preparar = aviso.Mostrar();
+        var recomponer = aviso.Mostrar();
+        recomponer.Dispose();
+        Assert.True(aviso.Visible);
+
+        preparar.Dispose();
+        Assert.False(aviso.Visible);
+        Assert.Equal(new[] { true, false }, cambios);
+
+        // Soltar dos veces la misma petición no quita la de otra tarea.
+        var otra = aviso.Mostrar();
+        preparar.Dispose();
+        Assert.True(aviso.Visible);
+        otra.Dispose();
+        Assert.Equal(new[] { true, false, true, false }, cambios);
     }
 }

@@ -148,6 +148,7 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
     public IdentifyViewModel(AppEngine engine)
     {
         _engine = engine;
+        _avisoCargando = new AvisoCompartido(v => Cargando = v);
         // Solo se rehace sola si YA se está usando esta pestaña. Recorrer la biblioteca entera cada
         // vez que otra pestaña la reescanea es trabajo tirado: mientras la tabla esté vacía no hay
         // nada que refrescar, y se rellena al entrar aquí (lo hace el shell).
@@ -197,14 +198,50 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
     /// sacado ese mismo trabajo del hilo de la interfaz por el mismo motivo.
     /// </summary>
     public Task<List<string>> PorConsultarAsync(bool force)
-    {
-        var rutas = _engine.Library.Tracks.Select(t => t.FilePath).ToList();
-        var pago = UsarPago;
-        var escaner = _engine.Identificacion;
-        return FiltrarPorConsultarAsync(rutas, p => escaner.Consultado(p, pago), force);
-    }
+        => PendientesAsync(_engine.Library.Tracks.Select(t => t.FilePath).ToList(),
+                           _engine.Identificacion, PagoEfectivo, force);
+
+    /// <summary>
+    /// Lo que queda por consultar de <paramref name="rutas"/>, decidiendo qué está ya respondido con
+    /// el permiso de pago que de verdad va a usar la pasada.
+    ///
+    /// Tiene que ser <see cref="PagoEfectivo"/> y no la casilla tal cual. Visto en revisión: con
+    /// «Usar también AudD» marcada pero sin clave de AudD, la lista se filtraba como si el de pago
+    /// fuera a consultar, así que todas las canciones a las que AcoustID ya había dicho «no» -el
+    /// 97 % de la biblioteca, si reconoce el 2,8 %- volvían a la lista. Como la pasada ya no vuelve
+    /// a filtrar, cada «Comprobar» repetía unas 13.000 consultas a AcoustID (más de hora y media) y
+    /// las guardaba otra vez como no cerradas, de modo que la siguiente las repetía de nuevo. El
+    /// número del diálogo también salía inflado. Lo mismo con el máximo de pago a 0.
+    /// </summary>
+    internal static Task<List<string>> PendientesAsync(IReadOnlyList<string> rutas, IdentificationScanner escaner,
+                                                       bool pagoEfectivo, bool force)
+        => FiltrarPorConsultarAsync(rutas, p => escaner.Consultado(p, pagoEfectivo), force);
 
     private bool _preparando;
+
+    /// <summary>
+    /// El aviso que tapa la tabla. Lo piden a la vez la preparación de «Comprobar» y el recálculo de
+    /// la tabla, y antes era un único sí/no: el primero que terminaba lo quitaba aunque el otro
+    /// siguiera, y con la tabla otra vez a la vista se podía lanzar un reanálisis en plena
+    /// preparación.
+    /// </summary>
+    private readonly AvisoCompartido _avisoCargando;
+
+    /// <summary>
+    /// Por qué no se puede empezar ahora otra comprobación ni un reanálisis, o "" si se puede. Puro,
+    /// para probarlo.
+    ///
+    /// Visto en revisión: el reanálisis solo miraba si había una comprobación en curso, no si se
+    /// estaba preparando la lista de «Comprobar». Si se lanzaba entonces, la comprobación que el
+    /// usuario aceptaba después en el diálogo se descartaba sin decir nada.
+    /// </summary>
+    internal static string MotivoParaNoEmpezar(bool comprobando, bool preparando)
+        => comprobando ? "Hay una comprobación en curso: espera a que termine o cancélala."
+         : preparando ? "Se está preparando la lista de «Comprobar»: espera a que aparezca el aviso."
+         : "";
+
+    /// <summary>Lo que impide empezar ahora (ver <see cref="MotivoParaNoEmpezar"/>), o "".</summary>
+    public string MotivoOcupada => MotivoParaNoEmpezar(IsBusy, _preparando);
 
     /// <summary>
     /// Calcula, para el diálogo de confirmación, lo que se va a consultar. Mientras tanto se ve el
@@ -213,11 +250,14 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
     /// </summary>
     public async Task<List<string>?> PrepararComprobacionAsync(bool force)
     {
-        if (IsBusy || _preparando) return null;
+        if (MotivoOcupada.Length > 0) return null;
         _preparando = true;
-        Cargando = true;
-        try { return await PorConsultarAsync(force); }
-        finally { _preparando = false; Cargando = false; }
+        try
+        {
+            using (_avisoCargando.Mostrar())
+                return await PorConsultarAsync(force);
+        }
+        finally { _preparando = false; }
     }
 
     /// <summary>
@@ -316,19 +356,43 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
     /// gastar ni una consulta, así que no cuenta: dejarlo contar permitía confirmar una pasada que
     /// el escáner rechazaba después por no tener ningún motor con el que trabajar.
     /// </summary>
-    public bool PagoEfectivo => HayPago && UsarPago && MaxConsultasPago > 0;
+    public bool PagoEfectivo => PagoEfectivoPara(UsarPago, HayPago, MaxConsultasPago);
+
+    /// <summary>
+    /// La regla de <see cref="PagoEfectivo"/>, pura para probarla: casilla marcada, clave de AudD y
+    /// un máximo mayor que cero. Es la que decide también qué negativas del gratuito siguen
+    /// abiertas (<see cref="PendientesAsync"/>), igual que hace el escáner con sus opciones.
+    /// </summary>
+    internal static bool PagoEfectivoPara(bool usarPago, bool hayPago, int maxConsultasPago)
+        => usarPago && hayPago && maxConsultasPago > 0;
 
     /// <summary>Se puede comprobar algo. Sin ninguna de las dos claves no hay nada que hacer aquí.</summary>
     public bool HayAlgunMotor => HayGratuito || PagoEfectivo;
 
+    /// <summary>Con qué permiso de pago se compuso la tabla (ver <see cref="Fila"/>).</summary>
+    private bool _pagoDeLaTabla;
+
     partial void OnUsarPagoChanged(bool value)
     {
         Avisar();
-        // Activar el de pago abre de nuevo las que el gratuito había dado por perdidas.
-        if (_filas.Count > 0) _ = RecomponerAsync();
+        RecomponerSiCambiaElPago();
     }
 
-    partial void OnMaxConsultasPagoChanged(int value) => Avisar();
+    partial void OnMaxConsultasPagoChanged(int value)
+    {
+        Avisar();
+        RecomponerSiCambiaElPago();
+    }
+
+    /// <summary>
+    /// Activar el de pago abre de nuevo las que el gratuito había dado por perdidas, y desactivarlo
+    /// (o dejar el máximo en 0) las vuelve a cerrar. Solo se rehace la tabla cuando eso cambia: el
+    /// máximo se edita cifra a cifra, y marcar la casilla sin clave de AudD no cambia nada.
+    /// </summary>
+    private void RecomponerSiCambiaElPago()
+    {
+        if (_filas.Count > 0 && PagoEfectivo != _pagoDeLaTabla) _ = RecomponerAsync();
+    }
 
     private void Avisar()
     {
@@ -464,11 +528,14 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
     public async Task RecomponerAsync()
     {
         await _turnoRecomponer.WaitAsync().ConfigureAwait(true);
-        Cargando = true;
+        var aviso = _avisoCargando.Mostrar();
         try
         {
             var tracks = _engine.Library.Tracks.ToList();
-            var pago = UsarPago;
+            // El mismo permiso que usará la pasada: con la casilla marcada pero sin clave de AudD,
+            // una negativa del gratuito no está «pendiente del de pago», está respondida.
+            var pago = PagoEfectivo;
+            _pagoDeLaTabla = pago;
 
             // FUERA del hilo de la interfaz. Son catorce mil archivos y a cada uno se le parte el
             // nombre y se le pasan varias expresiones regulares: segundos de trabajo. Hacerlo aquí
@@ -488,10 +555,11 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
             Resumir();
             AplicarFiltro();
         }
-        finally { Cargando = false; _turnoRecomponer.Release(); }
+        finally { aviso.Dispose(); _turnoRecomponer.Release(); }
     }
 
     /// <summary>Veredicto de una canción a partir de lo guardado. Puro: no toca red ni interfaz.</summary>
+    /// <param name="usarPago">El permiso de pago efectivo (<see cref="PagoEfectivo"/>).</param>
     private IdentifyRow Fila(Track t, bool usarPago)
     {
         if (Identificacion.SeExcluye(t.FilePath, out var motivoExcluida))
@@ -736,5 +804,46 @@ public partial class IdentifyViewModel : ViewModelBase, IEstadoPagina, IProgreso
     {
         if (filas.Count == 0) { Status = "Selecciona antes alguna canción de la lista."; return; }
         await RunAsync(force: true, soloEstas: filas.Select(f => f.FilePath).ToList(), otraParte: true);
+    }
+}
+
+/// <summary>
+/// Un aviso en pantalla que pueden pedir varias tareas a la vez y que solo se quita cuando termina
+/// la última. Cada tarea pide el suyo con <see cref="Mostrar"/> y lo suelta al desecharlo.
+///
+/// Con un simple sí/no compartido, la primera tarea en terminar lo quitaba aunque la otra siguiera
+/// trabajando. Se usa siempre desde el hilo de la interfaz, así que no necesita cerrojos.
+/// </summary>
+internal sealed class AvisoCompartido
+{
+    private readonly Action<bool> _cambio;
+    private int _peticiones;
+
+    /// <param name="cambio">Se llama al aparecer (true) y al desaparecer (false), una vez cada uno.</param>
+    public AvisoCompartido(Action<bool> cambio) => _cambio = cambio;
+
+    public bool Visible => _peticiones > 0;
+
+    public IDisposable Mostrar()
+    {
+        if (_peticiones++ == 0) _cambio(true);
+        return new Peticion(this);
+    }
+
+    private void Soltar()
+    {
+        if (--_peticiones == 0) _cambio(false);
+    }
+
+    private sealed class Peticion(AvisoCompartido aviso) : IDisposable
+    {
+        private AvisoCompartido? _aviso = aviso;
+
+        // Soltar dos veces la misma petición no puede quitar la de otra tarea.
+        public void Dispose()
+        {
+            _aviso?.Soltar();
+            _aviso = null;
+        }
     }
 }
