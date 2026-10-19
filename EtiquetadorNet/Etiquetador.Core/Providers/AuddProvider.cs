@@ -87,7 +87,14 @@ public sealed class AuddProvider
 
             return Interpretar(cuerpo);
         }
-        catch (OperationCanceledException) { throw; }
+        // Solo es «cancelar» si lo pidió el usuario. Un tiempo de espera agotado también llega como
+        // TaskCanceledException, y relanzarlo acababa la pasada en silencio, como si nada.
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException)
+        {
+            _log?.Detail($"      identificación: tiempo de espera agotado ({_http.Timeout.TotalSeconds:0} s)");
+            return new RespuestaId(null, "el servicio no respondió a tiempo");
+        }
         catch (Exception e)
         {
             _log?.Detail($"      identificación: fallo de red · {e.Message}");

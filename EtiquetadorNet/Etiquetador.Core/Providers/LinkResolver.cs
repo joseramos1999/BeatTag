@@ -9,10 +9,16 @@ namespace Etiquetador.Core.Providers;
 /// </summary>
 public sealed class LinkResolver
 {
+    /// <summary>Dónde buscar el enlace de la canción en la página de un enlace corto que redirige por script.</summary>
+    private const string PatronCancion =
+        @"(?:deezer\.com/(?:[a-z]{2}/)?track/\d+|open\.spotify\.com/(?:[a-z\-]+/)*?track/[A-Za-z0-9]{22})";
+
     private readonly ApiClient _api;
     private readonly SpotifyProvider _sp;
+    private readonly HttpClient _http;
 
-    public LinkResolver(ApiClient api, SpotifyProvider sp) { _api = api; _sp = sp; }
+    /// <param name="http">Para seguir los enlaces cortos; por defecto, el del propio <paramref name="api"/>.</param>
+    public LinkResolver(ApiClient api, SpotifyProvider sp, HttpClient? http = null) { _api = api; _sp = sp; _http = http ?? api.Http; }
 
     /// <summary>Resultado de resolver: la coincidencia, o el motivo por el que no se pudo.</summary>
     public sealed record Result(Candidate? Candidate, string Error);
@@ -21,6 +27,17 @@ public sealed class LinkResolver
         CancellationToken ct = default)
     {
         var link = TrackLinkParser.Parse(url);
+
+        // El botón «Compartir» del móvil da un enlace corto (link.deezer.com/s/…, spotify.link/…)
+        // que no dice qué canción es hasta seguirlo. Antes daba «Enlace no reconocido», justo con
+        // el enlace más exacto que puede dar el usuario. Se sigue igual que en las listas.
+        if (link == null && EnlaceCorto.Es(url))
+        {
+            link = await EnlaceCorto.SeguirAsync(_http, url, TrackLinkParser.Parse, PatronCancion, ct).ConfigureAwait(false);
+            if (link == null)
+                return new Result(null, "Ese enlace corto no lleva a una canción de Deezer ni de Spotify. Si es de una lista, ábrelo en la pestaña Playlists.");
+        }
+
         if (link == null)
         {
             return new Result(null, TrackLinkParser.LooksLikeUrl(url)
@@ -39,12 +56,13 @@ public sealed class LinkResolver
                 _ => new Result(null, "Fuente no soportada."),
             };
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception e) { return new Result(null, "No se pudo leer el enlace: " + e.Message); }
     }
 
     private async Task<Result> DeezerAsync(string id, CancellationToken ct)
     {
-        var r = await _api.GetAsync("https://api.deezer.com/track/" + id, null, 350, ct).ConfigureAwait(false);
+        var r = await _api.GetAsync("https://api.deezer.com/track/" + id, ct: ct).ConfigureAwait(false);
         var title = J.S(J.P(r, "title"));
         if (title.Length == 0) return new Result(null, "Deezer no devolvió esa canción.");
         var year = Regex.Match(J.S(J.P(r, "release_date")), @"^(\d{4})");
@@ -57,7 +75,7 @@ public sealed class LinkResolver
 
     private async Task<Result> ItunesAsync(string id, CancellationToken ct)
     {
-        var r = await _api.GetAsync($"https://itunes.apple.com/lookup?id={id}&entity=song", null, 200, ct).ConfigureAwait(false);
+        var r = await _api.GetAsync($"https://itunes.apple.com/lookup?id={id}&entity=song", ct: ct).ConfigureAwait(false);
         var first = (J.A(J.P(r, "results")) ?? new()).FirstOrDefault();
         var title = J.S(J.P(first, "trackName"));
         if (title.Length == 0) return new Result(null, "Apple Music no devolvió esa canción.");
@@ -82,7 +100,7 @@ public sealed class LinkResolver
             ["Authorization"] = "Bearer " + tok,
             ["User-Agent"] = AppInfo.UserAgent,
         };
-        var r = await _api.GetAsync($"https://api.spotify.com/v1/tracks/{id}", headers, 200, ct).ConfigureAwait(false);
+        var r = await _api.GetAsync($"https://api.spotify.com/v1/tracks/{id}", headers, ct: ct).ConfigureAwait(false);
         var title = J.S(J.P(r, "name"));
         if (title.Length == 0) return new Result(null, "Spotify no devolvió esa canción.");
 

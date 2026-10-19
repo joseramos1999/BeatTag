@@ -53,6 +53,15 @@ public sealed class ChartsProvider
     /// <summary>Índice de países del chart de Spotify.</summary>
     private const string SpotifyIndice = "https://kworb.net/spotify/";
 
+    /// <summary>
+    /// Cuánto vale una lista de éxitos guardada antes de volver a pedirla. Las listas son
+    /// DIARIAS y antes se servían con la caducidad general de la caché, 30 días: en los registros,
+    /// el Top 50 de España salió «de caché» el 11, 15, 16, 22 y 25 de septiembre y el 2 de octubre,
+    /// y no volvió a pedirse hasta el 9 de octubre. Durante un mes «Faltan» no enseñaba lo nuevo.
+    /// El índice de países, que no cambia, sigue con los 30 días.
+    /// </summary>
+    public static readonly TimeSpan VigenciaLista = TimeSpan.FromHours(6);
+
     private readonly ApiClient _api;
     public ChartsProvider(ApiClient api) => _api = api;
 
@@ -61,17 +70,40 @@ public sealed class ChartsProvider
         => fuente == ChartSource.Spotify ? SpotifyCountriesAsync(ct) : GetCountriesAsync(ct);
 
     /// <summary>Canciones del chart de un país en la fuente indicada, en orden de posición.</summary>
+    /// <param name="forzarRed">Pedirla aunque la guardada sea reciente (botón «Actualizar»).</param>
     public Task<IReadOnlyList<ChartTrack>> GetChartAsync(ChartSource fuente, ChartCountry pais, int limit = 50,
-        CancellationToken ct = default)
+        CancellationToken ct = default, bool forzarRed = false)
         => fuente == ChartSource.Spotify
-            ? SpotifyChartAsync(pais.Code, limit, ct)
-            : GetChartAsync(pais.PlaylistId, limit, ct);
+            ? SpotifyChartAsync(pais.Code, limit, ct, forzarRed)
+            : GetChartAsync(pais.PlaylistId, limit, ct, forzarRed);
+
+    /// <summary>
+    /// Cuándo se descargó la lista que se está enseñando de ese país (null si no hay ninguna
+    /// guardada). Sirve para poner en pantalla de qué hora es la lista.
+    /// </summary>
+    public DateTime? FechaDeLaLista(ChartSource fuente, ChartCountry pais, int limit = 50)
+        => _api.FechaEnCache(fuente == ChartSource.Spotify ? UrlSpotify(pais.Code) : UrlDeezer(pais.PlaylistId, limit));
+
+    private static string UrlSpotify(string code) => $"https://kworb.net/spotify/country/{code}_daily.html";
+    private static string UrlDeezer(long playlistId, int limit) => $"https://api.deezer.com/playlist/{playlistId}/tracks?limit={limit}";
+
+    /// <summary>
+    /// Pide una lista diaria: de la caché si tiene menos de <see cref="VigenciaLista"/>, si no de
+    /// la red. Si la red falla, se conforma con la última guardada (hasta 30 días): la de ayer es
+    /// mejor que una pantalla vacía, y <see cref="FechaDeLaLista"/> dice de cuándo es.
+    /// </summary>
+    private async Task<string?> LeerListaAsync(string url, bool forzarRed, CancellationToken ct)
+    {
+        var fresca = await _api.GetTextAsync(url, null, -1, ct, useCache: true,
+                                             maxAge: forzarRed ? TimeSpan.Zero : VigenciaLista).ConfigureAwait(false);
+        return !string.IsNullOrEmpty(fresca) ? fresca : _api.ReadCache(url);
+    }
 
     // ---------- Spotify (vía kworb) ----------
 
     private async Task<IReadOnlyList<ChartCountry>> SpotifyCountriesAsync(CancellationToken ct)
     {
-        var html = await _api.GetTextAsync(SpotifyIndice, null, 300, ct).ConfigureAwait(false);
+        var html = await _api.GetTextAsync(SpotifyIndice, ct: ct).ConfigureAwait(false);
         if (string.IsNullOrEmpty(html)) return Array.Empty<ChartCountry>();
 
         // PlaylistId no aplica aquí: Spotify va por código de país, no por número de lista.
@@ -80,11 +112,10 @@ public sealed class ChartsProvider
                                   .ToList();
     }
 
-    private async Task<IReadOnlyList<ChartTrack>> SpotifyChartAsync(string code, int limit, CancellationToken ct)
+    private async Task<IReadOnlyList<ChartTrack>> SpotifyChartAsync(string code, int limit, CancellationToken ct, bool forzarRed = false)
     {
         if (string.IsNullOrWhiteSpace(code)) return Array.Empty<ChartTrack>();
-        var html = await _api.GetTextAsync($"https://kworb.net/spotify/country/{code}_daily.html", null, 300, ct)
-                             .ConfigureAwait(false);
+        var html = await LeerListaAsync(UrlSpotify(code), forzarRed, ct).ConfigureAwait(false);
         if (string.IsNullOrEmpty(html)) return Array.Empty<ChartTrack>();
         return SpotifyChartsParser.ParseTracks(html, limit);
     }
@@ -95,7 +126,7 @@ public sealed class ChartsProvider
     public async Task<IReadOnlyList<ChartCountry>> GetCountriesAsync(CancellationToken ct = default)
     {
         var salida = new List<ChartCountry>();
-        var r = await _api.GetAsync($"https://api.deezer.com/user/{EditorialUser}/playlists?limit=200", null, 300, ct)
+        var r = await _api.GetAsync($"https://api.deezer.com/user/{EditorialUser}/playlists?limit=200", ct: ct)
                           .ConfigureAwait(false);
         foreach (var x in J.A(J.P(r, "data")) ?? new())
         {
@@ -117,11 +148,10 @@ public sealed class ChartsProvider
 
     /// <summary>Canciones de la lista de un país, en orden de posición.</summary>
     public async Task<IReadOnlyList<ChartTrack>> GetChartAsync(long playlistId, int limit = 50,
-        CancellationToken ct = default)
+        CancellationToken ct = default, bool forzarRed = false)
     {
         var salida = new List<ChartTrack>();
-        var r = await _api.GetAsync($"https://api.deezer.com/playlist/{playlistId}/tracks?limit={limit}", null, 300, ct)
-                          .ConfigureAwait(false);
+        var r = ApiClient.ParseJson(await LeerListaAsync(UrlDeezer(playlistId, limit), forzarRed, ct).ConfigureAwait(false));
         var pos = 0;
         foreach (var x in J.A(J.P(r, "data")) ?? new())
         {

@@ -9,6 +9,13 @@ public sealed record PlaylistLeida(
 {
     public bool Ok => Error.Length == 0;
 
+    /// <summary>
+    /// Por qué la lista está incompleta, en palabras para la pantalla (vacío si está entera). Cada
+    /// plataforma se corta por un motivo distinto: Spotify no da más de 100 canciones; Deezer las
+    /// da todas, pero puede dejar de responder a mitad.
+    /// </summary>
+    public string Aviso { get; init; } = "";
+
     public static PlaylistLeida Fallo(PlataformaLista p, string error) => new("", p, Array.Empty<ChartTrack>(), false, error);
 }
 
@@ -30,8 +37,6 @@ public sealed record PlaylistLeida(
 /// </summary>
 public sealed class PlaylistProvider
 {
-    private const RegexOptions IC = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
-
     /// <summary>Lo que da la página embed de Spotify como mucho.</summary>
     public const int LimiteSpotify = 100;
 
@@ -60,24 +65,56 @@ public sealed class PlaylistProvider
 
     private async Task<PlaylistLeida> DeezerAsync(PlaylistLink l, CancellationToken ct)
     {
-        var ficha = await _api.GetAsync($"https://api.deezer.com/{l.Tipo}/{l.Id}", null, 0, ct, useCache: false).ConfigureAwait(false);
+        // Sin pausa propia: el ritmo lo pone el limitador de ApiClient (50 peticiones cada 5 s).
+        var ficha = await _api.GetAsync($"https://api.deezer.com/{l.Tipo}/{l.Id}", ct: ct, useCache: false).ConfigureAwait(false);
         if (ficha == null) return PlaylistLeida.Fallo(PlataformaLista.Deezer, "Deezer no responde. ¿Hay conexión a internet?");
         if (ficha["error"] != null)
             return PlaylistLeida.Fallo(PlataformaLista.Deezer, l.EsAlbum ? "Ese álbum no existe en Deezer." : "Esa lista no existe en Deezer o es privada.");
 
         var nombre = ficha["title"]?.ToString() ?? "";
+        var total = J.I(ficha["nb_tracks"]);
         var pistas = new List<ChartTrack>();
+        var aviso = "";
         string? url = $"https://api.deezer.com/{l.Tipo}/{l.Id}/tracks?limit=100&index=0";
-        for (var pagina = 0; url != null && pagina < 100; pagina++)   // 10.000 canciones: el máximo de Deezer
+        for (var pagina = 1; url != null && pagina <= 100; pagina++)   // 10.000 canciones: el máximo de Deezer
         {
             ct.ThrowIfCancellationRequested();
-            var p = await _api.GetAsync(url, null, 0, ct, useCache: false).ConfigureAwait(false);
-            if (p == null) break;
+            var p = await PaginaDeezerAsync(url, ct).ConfigureAwait(false);
+            if (p == null)
+            {
+                // Antes se paraba aquí sin decir nada y la lista se daba por completa: con un fallo
+                // en la página 3 de una de 456, «tienes X de 200» parecía la lista entera.
+                if (pistas.Count == 0)
+                    return PlaylistLeida.Fallo(PlataformaLista.Deezer, "Deezer no ha devuelto las canciones de la lista. Inténtalo de nuevo en un momento.");
+                aviso = AvisoCorteDeezer(pagina, pistas.Count, total);
+                break;
+            }
             pistas.AddRange(PistasDeezer(p, pistas.Count));
             url = p["next"]?.ToString();
         }
-        return new PlaylistLeida(nombre, PlataformaLista.Deezer, pistas, false, "");
+        return new PlaylistLeida(nombre, PlataformaLista.Deezer, pistas, aviso.Length > 0, "") { Aviso = aviso };
     }
+
+    /// <summary>
+    /// Una página de canciones de Deezer, con un segundo intento si falla o trae su JSON de error
+    /// (la cuota llega como HTTP 200 con «error»). Null si tampoco a la segunda.
+    /// </summary>
+    private async Task<JsonNode?> PaginaDeezerAsync(string url, CancellationToken ct)
+    {
+        for (var intento = 1; intento <= 2; intento++)
+        {
+            var p = await _api.GetAsync(url, ct: ct, useCache: false).ConfigureAwait(false);
+            if (p != null && p["error"] == null) return p;
+            if (intento == 1) await _api.Limitador.EsperarAsync(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
+        }
+        return null;
+    }
+
+    /// <summary>El aviso de una lista de Deezer que se quedó a medias.</summary>
+    public static string AvisoCorteDeezer(int pagina, int leidas, int total)
+        => total > leidas
+            ? $"Deezer dejó de responder en la página {pagina}: faltan {total - leidas} de las {total} canciones de la lista. Vuelve a cargarla en un momento."
+            : $"Deezer dejó de responder en la página {pagina}: puede que falten canciones. Vuelve a cargarla en un momento.";
 
     /// <summary>Las canciones de una página de «/playlist/{id}/tracks» de Deezer, numeradas desde <paramref name="desde"/>+1.</summary>
     public static List<ChartTrack> PistasDeezer(JsonNode pagina, int desde = 0)
@@ -109,7 +146,11 @@ public sealed class PlaylistProvider
                 ? "Spotify no ha devuelto ese álbum. Comprueba el enlace."
                 : "Spotify no ha devuelto la lista. ¿Es privada? Solo se pueden leer las listas públicas.");
 
-        return new PlaylistLeida(nombre, PlataformaLista.Spotify, pistas, !l.EsAlbum && pistas.Count >= LimiteSpotify, "");
+        var recortada = !l.EsAlbum && pistas.Count >= LimiteSpotify;
+        return new PlaylistLeida(nombre, PlataformaLista.Spotify, pistas, recortada, "")
+        {
+            Aviso = recortada ? $"Spotify solo deja leer las {LimiteSpotify} primeras canciones de una lista: si tiene más, las demás no aparecen." : "",
+        };
     }
 
     /// <summary>
@@ -147,26 +188,11 @@ public sealed class PlaylistProvider
 
     /// <summary>
     /// Sigue un enlace corto («link.deezer.com/s/…», «spotify.link/…») hasta la lista a la que
-    /// apunta. Primero por la dirección final tras las redirecciones; si la página redirige por
-    /// script, buscando el enlace dentro de ella.
+    /// apunta. La forma de seguirlo es la común con las canciones (<see cref="EnlaceCorto"/>).
     /// </summary>
-    private async Task<PlaylistLink?> ResolverCortoAsync(string url, CancellationToken ct)
-    {
-        try
-        {
-            if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) url = "https://" + url;
-            using var req = new HttpRequestMessage(HttpMethod.Get, url);
-            req.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0");
-            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
-            if (PlaylistLinkParser.Parse(resp.RequestMessage?.RequestUri?.ToString()) is { } final) return final;
-
-            var cuerpo = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            var m = Regex.Match(cuerpo, @"(?:deezer\.com/(?:[a-z]{2}/)?(?:playlist|album)/\d+|open\.spotify\.com/(?:[a-z\-]+/)*?(?:playlist|album)/[A-Za-z0-9]{22})", IC);
-            return m.Success ? PlaylistLinkParser.Parse(m.Value) : null;
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch { return null; }
-    }
+    private Task<PlaylistLink?> ResolverCortoAsync(string url, CancellationToken ct)
+        => EnlaceCorto.SeguirAsync(_http, url, PlaylistLinkParser.Parse,
+            @"(?:deezer\.com/(?:[a-z]{2}/)?(?:playlist|album)/\d+|open\.spotify\.com/(?:[a-z\-]+/)*?(?:playlist|album)/[A-Za-z0-9]{22})", ct);
 
     private static bool PareceEnlace(string? s)
     {

@@ -13,17 +13,21 @@ public sealed class ItunesProvider
     private readonly ApiClient _api;
     public ItunesProvider(ApiClient api) => _api = api;
 
-    public async Task<ProviderResult?> SearchAsync(string artist, string title, int localDur = 0, bool isEdit = false, CancellationToken ct = default, bool verbatim = false)
+    /// <param name="wantRemix">El archivo es un remix: sin esto, un remix del catálogo no entra por el respaldo aproximado.</param>
+    /// <param name="wantTool">El archivo es una instrumental o una acapella (ver <see cref="DeezerProvider.SearchAsync"/>).</param>
+    public async Task<ProviderResult?> SearchAsync(string artist, string title, int localDur = 0, bool isEdit = false, CancellationToken ct = default, bool verbatim = false,
+        bool wantRemix = false, bool wantTool = false)
     {
         var kw = verbatim ? Descriptors.BuildKwVerbatim(artist, title) : Descriptors.BuildKw(artist, title);
         if (kw.Length == 0) kw = Descriptors.CleanKeywords(title);
         if (kw.Length == 0) return null;
 
-        var r = await _api.GetAsync($"https://itunes.apple.com/search?term={TextUtils.UrlEnc(kw)}&entity=song&limit=8", null, 200, ct).ConfigureAwait(false);
+        // El ritmo lo pone el limitador de ApiClient: Apple publica «unas 20 peticiones por minuto».
+        var r = await _api.GetAsync($"https://itunes.apple.com/search?term={TextUtils.UrlEnc(kw)}&entity=song&limit=8", ct: ct).ConfigureAwait(false);
         var results = J.A(J.P(r, "results"));
         if (results == null || results.Count == 0) return null;
 
-        var pick = SelectBest(results, artist, title, localDur, isEdit, out var bestSc);
+        var pick = SelectBest(results, artist, title, localDur, isEdit, out var bestSc, wantRemix, wantTool);
         if (pick == null) return null;
 
         var rd = J.S(J.P(pick, "releaseDate"));
@@ -43,13 +47,16 @@ public sealed class ItunesProvider
         };
     }
 
-    public static JsonNode? SelectBest(JsonArray results, string artist, string title, int localDur, bool isEdit, out int bestSc)
+    public static JsonNode? SelectBest(JsonArray results, string artist, string title, int localDur, bool isEdit, out int bestSc,
+        bool wantRemix = false, bool wantTool = false)
     {
         var na = TextUtils.Nk(artist);
         var nt = TextUtils.Nk(Descriptors.CleanKeywords(title));
         JsonNode? pick = null;
         bestSc = -999;
         var wantVer = Regex.IsMatch(title, WantVerRe, IC);
+        // Misma regla que Deezer: la instrumental o la acapella no es la canción (ver DeezerProvider).
+        var pideHerramienta = wantTool || ReglasCatalogo.EsHerramienta(title);
 
         foreach (var x in results)
         {
@@ -63,6 +70,7 @@ public sealed class ItunesProvider
             int sc = 0;
             if (rn == nt) sc += 10;
             if (!wantVer && (Regex.IsMatch(J.S(J.P(x, "trackName")), BadRe, IC) || Regex.IsMatch(J.S(J.P(x, "collectionName")), BadRe, IC))) sc -= 8;
+            else if (!pideHerramienta && ReglasCatalogo.EsHerramienta(J.S(J.P(x, "trackName")))) sc -= 9;
             var ms = J.I(J.P(x, "trackTimeMillis"));
             if (localDur > 0 && ms > 0)
             {
@@ -79,32 +87,25 @@ public sealed class ItunesProvider
             foreach (var x in results)
                 if (TextUtils.Nk(J.S(J.P(x, "trackName"))) == nt) { pick = x; break; }
 
-        // Último recurso FUZZY (typos)
+        // Último recurso FUZZY (typos). Mismas reglas y umbrales que Deezer, en un solo sitio
+        // (ReglasCatalogo). Aquí estaban en 0,90 y 0,88 -los valores que Deezer abandonó tras
+        // medirlos- y colaban canciones distintas del mismo artista con confianza 4-7. Vistos en
+        // una biblioteca real: «Fisher x Snow The Product - Just Feel Right» -> «FISHER - Just Feels
+        // Tight» (0,92), «Amaral… - Sin ti no soy Reload» -> «Amaral - Sin Ti No Soy Nada» (0,92) y
+        // «Stromae… - Alors Danse B» -> «Stromae - Alors on danse» (0,92).
         if (pick == null && na.Length > 0 && nt.Length > 0)
         {
-            JsonNode? bestFz = null;
-            double bestFzJw = 0.0;
-            foreach (var x in results)
+            var candidatos = results.Where(x => x != null).Select(x =>
             {
-                var anx = TextUtils.Nk(J.S(J.P(x, "artistName")));
-                var rn = TextUtils.Nk(J.S(J.P(x, "trackName")));
-                if (anx.Length == 0 || rn.Length == 0) continue;
-                if (!wantVer && (Regex.IsMatch(J.S(J.P(x, "trackName")), BadRe, IC) || Regex.IsMatch(J.S(J.P(x, "collectionName")), BadRe, IC))) continue;
-                var aStrict = Matching.ArtistMatch(na, anx);
-                var tStrict = rn.Contains(nt) || nt.Contains(rn);
-                var aFuzzy = na.Length >= 5 && anx.Length >= 5 && Matching.JaroWinkler(na, anx) >= 0.90;
-                var tFuzzy = nt.Length >= 5 && rn.Length >= 5 && Matching.JaroWinkler(nt, rn) >= 0.90;
+                var tr = J.S(J.P(x, "trackName"));
+                var noPedida = (!wantVer && (Regex.IsMatch(tr, BadRe, IC) || Regex.IsMatch(J.S(J.P(x, "collectionName")), BadRe, IC)))
+                            || (!wantRemix && Regex.IsMatch(tr, DeezerProvider.RemixRe, IC))
+                            || (!pideHerramienta && ReglasCatalogo.EsHerramienta(tr));
                 var ms = J.I(J.P(x, "trackTimeMillis"));
-                var cd = ms > 0 ? ms / 1000 : 0;
-                var durOk = localDur > 0 && cd > 0 && Math.Abs(cd - localDur) <= 4;
-                if ((aFuzzy && tStrict) || (aStrict && tFuzzy && durOk && !isEdit)) { pick = x; bestSc = 5; break; }
-                if (aStrict && !tStrict && nt.Length >= 6 && rn.Length >= 6)
-                {
-                    var jw = Matching.JaroWinkler(nt, rn);
-                    if (jw >= 0.88 && jw > bestFzJw) { bestFzJw = jw; bestFz = x; }
-                }
-            }
-            if (pick == null && bestFz != null) { pick = bestFz; bestSc = 4; }
+                return new ReglasCatalogo.CandidatoAproximado(x!, J.S(J.P(x, "artistName")), tr, ms > 0 ? ms / 1000 : 0, noPedida);
+            });
+            var fz = ReglasCatalogo.RespaldoAproximado(candidatos, na, nt, localDur, isEdit, out var fzSc, out _);
+            if (fz != null) { pick = fz; bestSc = (int)fzSc; }
         }
         return pick;
     }

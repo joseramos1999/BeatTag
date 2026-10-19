@@ -103,14 +103,20 @@ public static class Identificacion
     /// pedía ninguna acción, y un aviso falso sí gasta el tiempo de quien lo revisa.
     /// </summary>
     public static bool EsAcapella(string filePath)
-    {
-        var texto = Path.GetFileNameWithoutExtension(filePath) + " " + (Path.GetDirectoryName(filePath) ?? "");
+        => MencionaAcapella(Path.GetFileNameWithoutExtension(filePath) + " " + (Path.GetDirectoryName(filePath) ?? ""));
+
+    /// <summary>
+    /// ¿El texto nombra una acapella, se escriba como se escriba? Es la misma regla que
+    /// <see cref="EsAcapella"/>, pero sobre un texto suelto: los catálogos la usan con el TÍTULO que
+    /// devuelven («Mal De Amores (Acapella)»), que no es una ruta y no debe pasar por
+    /// Path.GetFileNameWithoutExtension, que cortaría en el primer punto («Mr. Brightside»).
+    /// </summary>
+    public static bool MencionaAcapella(string? texto)
         // Se escribe de muchas maneras y todas aparecen en una biblioteca real: acapella, accapella,
         // acappella, acapela, «a capella», percapella. La expresión admite las dobles consonantes
         // sueltas en vez de listar cada grafía, que siempre se queda corta.
-        return Regex.IsMatch(texto, @"\b(?:a\s*c{1,2}a+|perc?a)p{1,2}e+l{1,2}a+s?\b|\baca\s*(?:in|out)\b",
-                             RegexOptions.IgnoreCase);
-    }
+        => Regex.IsMatch(texto ?? "", @"\b(?:a\s*c{1,2}a+|perc?a)p{1,2}e+l{1,2}a+s?\b|\baca\s*(?:in|out)\b",
+                         RegexOptions.IgnoreCase);
 
     /// <summary>
     /// Veredicto de una canción. <paramref name="id"/> a null significa que el servicio no la

@@ -61,10 +61,12 @@ public class ProviderScoringTests2
             },
         };
 
+    // PickBest recibe ahora también el TÍTULO del archivo: antes solo comprobaba el artista y
+    // aceptaba otra canción del mismo intérprete (ver CatalogosPuntuacionTests, hallazgo C1).
     [Fact]
     public void Mb_acepta_score_alto_y_artista_coincide()
     {
-        var pick = MusicBrainzProvider.PickBest(Mb(96, "Gasolina", "Daddy Yankee", "2004-06-01"), "Daddy Yankee");
+        var pick = MusicBrainzProvider.PickBest(Mb(96, "Gasolina", "Daddy Yankee", "2004-06-01"), "Daddy Yankee", "Gasolina");
         Assert.NotNull(pick);
         Assert.Equal("Gasolina", pick!.Title);
         Assert.Equal("2004", pick.Year);
@@ -73,11 +75,11 @@ public class ProviderScoringTests2
 
     [Fact]
     public void Mb_rechaza_score_bajo()
-        => Assert.Null(MusicBrainzProvider.PickBest(Mb(70, "Gasolina", "Daddy Yankee", "2004"), "Daddy Yankee"));
+        => Assert.Null(MusicBrainzProvider.PickBest(Mb(70, "Gasolina", "Daddy Yankee", "2004"), "Daddy Yankee", "Gasolina"));
 
     [Fact]
     public void Mb_rechaza_artista_distinto()
-        => Assert.Null(MusicBrainzProvider.PickBest(Mb(96, "Gasolina", "Otro Artista", "2004"), "Daddy Yankee"));
+        => Assert.Null(MusicBrainzProvider.PickBest(Mb(96, "Gasolina", "Otro Artista", "2004"), "Daddy Yankee", "Gasolina"));
 
     // MusicBrainz trae su propia puntuación: si no se traslada, sus coincidencias (que ya exigen
     // score >= 85) se quedaban en 0 y se marcaban como dudosas sin motivo.
@@ -88,7 +90,7 @@ public class ProviderScoringTests2
     [InlineData(85, 2.5)]
     public void Mb_traslada_su_puntuacion(int mbScore, double esperado)
     {
-        var pick = MusicBrainzProvider.PickBest(Mb(mbScore, "Gasolina", "Daddy Yankee", "2004"), "Daddy Yankee");
+        var pick = MusicBrainzProvider.PickBest(Mb(mbScore, "Gasolina", "Daddy Yankee", "2004"), "Daddy Yankee", "Gasolina");
         Assert.NotNull(pick);
         Assert.Equal(esperado, pick!.Score, 1);
         Assert.True(pick.Score >= 2, "no debería quedar por debajo del umbral de revisión");

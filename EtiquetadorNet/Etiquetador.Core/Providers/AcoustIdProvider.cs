@@ -15,13 +15,17 @@ public sealed class AcoustIdProvider
 
         var cacheKey = "acoustid|" + fp;
         var raw = _api.ReadCache(cacheKey);
+        // Una entrada ilegible (escritura cortada) cuenta como ausente: se vuelve a preguntar en
+        // vez de dar la huella por «no encontrada» durante un mes.
+        if (raw != null && ApiClient.ParseJson(raw) == null) raw = null;
         if (raw == null)
         {
             var body = $"client={TextUtils.UrlEnc(key)}&duration={(int)Math.Round(dur)}&fingerprint={TextUtils.UrlEnc(fp)}&meta=recordings";
-            raw = await _api.PostFormAsync("https://api.acoustid.org/v2/lookup", body, null, 350, ct).ConfigureAwait(false);
+            // El ritmo (3 por segundo, lo que publica AcoustID) lo pone ApiClient, también con varios hilos.
+            raw = await _api.PostFormAsync("https://api.acoustid.org/v2/lookup", body, null, ct: ct).ConfigureAwait(false);
             if (raw == null) return null;
             var cp = _api.CachePath(cacheKey);
-            if (cp != null) _api.CacheStore(cp, raw);
+            if (cp != null && ApiClient.ParseJson(raw) != null) _api.CacheStore(cp, raw);
         }
 
         JsonNode? r;

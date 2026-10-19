@@ -22,26 +22,33 @@ public sealed class DeezerProvider
 
     public DeezerProvider(ApiClient api) => _api = api;
 
+    /// <param name="wantTool">
+    /// El archivo ES una versión instrumental o acapella (lo dice su nombre). Sin esto, esas
+    /// versiones del catálogo se tratan como no pedidas. Si el título que llega aún la nombra, se
+    /// deduce solo.
+    /// </param>
     public async Task<ProviderResult?> SearchAsync(string artist, string title, bool wantRemix, bool wantLive,
-        int localDur = 0, bool isEdit = false, CancellationToken ct = default, string expectedRemixer = "", bool verbatim = false)
+        int localDur = 0, bool isEdit = false, CancellationToken ct = default, string expectedRemixer = "", bool verbatim = false,
+        bool wantTool = false)
     {
         var kw = verbatim ? Descriptors.BuildKwVerbatim(artist, title) : Descriptors.BuildKw(artist, title);
         if (kw.Length == 0) kw = Descriptors.CleanKeywords(title);
         if (kw.Length == 0) { Log?.Detail("      dz: query vacía tras limpiar -> no se busca"); return null; }
 
         Log?.Detail($"      dz: query='{kw}' (de '{artist}' / '{title}') remix={wantRemix} live={wantLive} dur={localDur}s");
-        var r = await _api.GetAsync($"https://api.deezer.com/search?q={TextUtils.UrlEnc(kw)}&limit=8", null, 350, ct).ConfigureAwait(false);
+        // El ritmo lo pone el limitador por servidor de ApiClient (50 peticiones cada 5 s en Deezer).
+        var r = await _api.GetAsync($"https://api.deezer.com/search?q={TextUtils.UrlEnc(kw)}&limit=8", ct: ct).ConfigureAwait(false);
         var data = J.A(J.P(r, "data"));
         if (data == null || data.Count == 0) { Log?.Detail("      dz: 0 resultados"); return null; }
 
         var pick = SelectBest(data, artist, title, wantRemix, wantLive, localDur, isEdit, out var bestSc, out var bestWhy,
-            Log == null ? null : m => Log.Detail("      dz: " + m), expectedRemixer);
+            Log == null ? null : m => Log.Detail("      dz: " + m), expectedRemixer, wantTool);
         if (pick == null) { Log?.Detail($"      dz: {data.Count} resultados, ninguno aceptado"); return null; }
 
         // Enriquecido: BPM, año y contribuidores completos vía track/{id}
         string bpm = "", year = "";
         string artistFull = J.S(J.P(pick, "artist", "name"));
-        var tk = await _api.GetAsync("https://api.deezer.com/track/" + J.S(J.P(pick, "id")), null, 350, ct).ConfigureAwait(false);
+        var tk = await _api.GetAsync("https://api.deezer.com/track/" + J.S(J.P(pick, "id")), ct: ct).ConfigureAwait(false);
         if (tk != null)
         {
             var b = J.D(J.P(tk, "bpm"));
@@ -82,7 +89,7 @@ public sealed class DeezerProvider
     public async Task<string> AlbumGenreAsync(string albumId, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(albumId)) return "";
-        var al = await _api.GetAsync("https://api.deezer.com/album/" + albumId, null, 350, ct).ConfigureAwait(false);
+        var al = await _api.GetAsync("https://api.deezer.com/album/" + albumId, ct: ct).ConfigureAwait(false);
         var data = J.A(J.P(J.P(al, "genres"), "data"));
         if (data is { Count: > 0 })
         {
@@ -99,16 +106,22 @@ public sealed class DeezerProvider
     /// descarte en las decenas de pruebas de scoring, a las que el motivo no les aporta nada.
     /// </summary>
     public static JsonNode? SelectBest(JsonArray data, string artist, string title, bool wantRemix, bool wantLive,
-        int localDur, bool isEdit, out double bestSc, Action<string>? trace = null, string expectedRemixer = "")
-        => SelectBest(data, artist, title, wantRemix, wantLive, localDur, isEdit, out bestSc, out _, trace, expectedRemixer);
+        int localDur, bool isEdit, out double bestSc, Action<string>? trace = null, string expectedRemixer = "", bool wantTool = false)
+        => SelectBest(data, artist, title, wantRemix, wantLive, localDur, isEdit, out bestSc, out _, trace, expectedRemixer, wantTool);
 
     /// <summary>Selección + scoring pura sobre los items de Deezer (data). Devuelve el item elegido o null.</summary>
     public static JsonNode? SelectBest(JsonArray data, string artist, string title, bool wantRemix, bool wantLive,
-        int localDur, bool isEdit, out double bestSc, out string bestWhy, Action<string>? trace = null, string expectedRemixer = "")
+        int localDur, bool isEdit, out double bestSc, out string bestWhy, Action<string>? trace = null, string expectedRemixer = "",
+        bool wantTool = false)
     {
         var nRemixer = TextUtils.Nk(expectedRemixer);
         var na = TextUtils.Nk(artist);
         var nt = TextUtils.Nk(Descriptors.CleanKeywords(title));
+        // Instrumental y acapella son OTRO archivo para un DJ, no la canción. Visto en una
+        // biblioteca real: «Black Eyed Peas - Shut Up» (vocal) perdía contra «Shut Up
+        // (Instrumental)» por 12,64 a 8 -la regla del título sin sufijo le daba +8 y la duración
+        // cuadraba-, y se renombraba como la instrumental con confianza 17,6, sin revisión.
+        var pideHerramienta = wantTool || ReglasCatalogo.EsHerramienta(title);
         JsonNode? pick = null;
         bestSc = -999.0;
         bestWhy = "";
@@ -156,13 +169,22 @@ public sealed class DeezerProvider
                 {
                     sc += 6; esLaVersionPedida = true; why.Add("live pedido +6");
                 }
+                else if (pideHerramienta && ReglasCatalogo.EsHerramienta(rt))
+                {
+                    sc += 6; esLaVersionPedida = true; why.Add("instrumental/acapella pedida +6");
+                }
             }
 
             var tituloPuntuo = sc > 0.0;
 
             // Estas descartan la pista a propósito: el catálogo trae una versión que NO se pedía.
             var esVersionNoPedida = false;
-            if (Regex.IsMatch(rt, BadRe, IC)) { sc -= 9; esVersionNoPedida = true; why.Add("basura -9"); }
+            var esBasura = Regex.IsMatch(rt, BadRe, IC);
+            if (esBasura) { sc -= 9; esVersionNoPedida = true; why.Add("basura -9"); }
+            if (!pideHerramienta && !esBasura && ReglasCatalogo.EsHerramienta(rt))
+            {
+                sc -= 9; esVersionNoPedida = true; why.Add("instrumental/acapella no pedida -9");
+            }
             if (!wantLive && Regex.IsMatch(rt, LiveRe, IC)) { sc -= 9; esVersionNoPedida = true; why.Add("live no pedido -9"); }
             if (!wantRemix && Regex.IsMatch(rt, RemixRe, IC)) { sc -= 6; esVersionNoPedida = true; why.Add("remix no pedido -6"); }
             if (!wantRemix && !wantLive && Regex.IsMatch(rt, VerRe, IC)) { sc -= 2; why.Add("otra version -2"); }
@@ -252,6 +274,7 @@ public sealed class DeezerProvider
                 var conRemixer = nRemixer.Length > 2 && tnx.Contains(nt) && tnx.Contains(nRemixer);
                 if (!exacto && !conRemixer) continue;
                 if (Regex.IsMatch(rt, BadRe, IC)) continue;
+                if (!pideHerramienta && ReglasCatalogo.EsHerramienta(rt)) continue;
 
                 var why = new List<string>();
                 double sc;
@@ -278,58 +301,29 @@ public sealed class DeezerProvider
             if (pick != null) bestSc = best;
         }
 
-        // Último recurso FUZZY (typos)
+        // Último recurso FUZZY (typos). Las reglas, umbrales incluidos, son las comunes con iTunes
+        // (ReglasCatalogo.RespaldoAproximado). Aquí solo se decide qué es una versión no pedida, con
+        // los mismos criterios que la vía normal: antes este respaldo solo miraba BadRe y LiveRe, y
+        // recuperaba con confianza 5 el remix que la vía normal acababa de RECHAZAR.
         if (pick == null && na.Length > 0 && nt.Length > 0)
         {
-            JsonNode? bestFz = null;
-            double bestFzJw = 0.0;
-            foreach (var x in data)
+            var candidatos = data.Where(x => x != null).Select(x =>
             {
-                var an = TextUtils.Nk(J.S(J.P(x, "artist", "name")));
-                var tn = TextUtils.Nk(J.S(J.P(x, "title")));
-                if (an.Length == 0 || tn.Length == 0) continue;
                 var rt = J.S(J.P(x, "title"));
-                if (Regex.IsMatch(rt, BadRe, IC)) continue;
-                if (!wantLive && Regex.IsMatch(rt, LiveRe, IC)) continue;
-                var aStrict = Matching.ArtistMatch(na, an);
-                var tStrict = tn.Contains(nt) || nt.Contains(tn);
-                // El artista puede ir algo más suelto porque esta vía exige además que el título
-                // coincida por inclusión, que ya es una guarda fuerte.
-                var aFuzzy = na.Length >= 5 && an.Length >= 5 && Matching.JaroWinkler(na, an) >= 0.90;
-                // El título, no: aquí el artista casa siempre (es el mismo intérprete con varios
-                // temas), así que el parecido del título es lo único que decide. A 0,90 entraban
-                // canciones distintas del mismo artista que empiezan igual.
-                var tFuzzy = nt.Length >= 5 && tn.Length >= 5 && Matching.JaroWinkler(nt, tn) >= 0.95;
-                var dur = J.I(J.P(x, "duration"));
-                var durOk = localDur > 0 && dur > 0 && Math.Abs(dur - localDur) <= 4;
-                if ((aFuzzy && tStrict) || (aStrict && tFuzzy && durOk && !isEdit))
-                {
-                    pick = x; bestSc = 5;
-                    razones = new List<string> { "coincidencia aproximada: tolera erratas del nombre" };
-                    break;
-                }
-                // Mismo artista y un título PARECIDO pero no incluido: erratas del nombre del
-                // archivo ("Prrum" por "Prrrum", "CUENTA REGREVISA" por "Cuenta Regresiva").
-                //
-                // El umbral estaba en 0,88 y era demasiado laxo. Medido sobre una tirada real de
-                // 12.428 canciones, en la franja 0,88-0,95 lo que entra son temas DISTINTOS que
-                // empiezan igual: "Carnavalito Style" contra "Carnavalito Soleado" (0,93), "Dodo
-                // Suga" contra "Dodo Siya" (0,90). Y como este camino asigna confianza 4, por
-                // encima del umbral de revisión, esos errores se aplicaban sin que nadie los mirara.
-                //
-                // A 0,95 entran las erratas de verdad y ninguno de esos. Se pierde algún acierto
-                // aislado, pero equivocar una etiqueta es peor que dejar una canción sin
-                // identificar: lo segundo se ve en la lista, lo primero no.
-                if (aStrict && !tStrict && nt.Length >= 6 && tn.Length >= 6)
-                {
-                    var jw = Matching.JaroWinkler(nt, tn);
-                    if (jw >= 0.95 && jw > bestFzJw) { bestFzJw = jw; bestFz = x; }
-                }
-            }
-            if (pick == null && bestFz != null)
+                var tn = TextUtils.Nk(rt);
+                var noPedida = Regex.IsMatch(rt, BadRe, IC)
+                            || (!wantLive && Regex.IsMatch(rt, LiveRe, IC))
+                            || (!wantRemix && Regex.IsMatch(rt, RemixRe, IC) && !(nRemixer.Length > 2 && tn.Contains(nRemixer)))
+                            || (!pideHerramienta && ReglasCatalogo.EsHerramienta(rt));
+                return new ReglasCatalogo.CandidatoAproximado(x!, J.S(J.P(x, "artist", "name")), rt,
+                                                              J.I(J.P(x, "duration")), noPedida);
+            });
+            var fz = ReglasCatalogo.RespaldoAproximado(candidatos, na, nt, localDur, isEdit, out var fzSc, out var fzWhy);
+            if (fz != null)
             {
-                pick = bestFz; bestSc = 4;
-                razones = new List<string> { $"mismo artista y título casi igual ({bestFzJw:0.00} de parecido)" };
+                pick = fz; bestSc = fzSc;
+                razones = new List<string> { fzWhy };
+                trace?.Invoke($"respaldo aproximado '{J.S(J.P(fz, "artist", "name"))} - {J.S(J.P(fz, "title"))}' = {fzSc:0.##}  [{fzWhy}]");
             }
         }
         bestWhy = pick == null ? "" : string.Join(", ", razones);
