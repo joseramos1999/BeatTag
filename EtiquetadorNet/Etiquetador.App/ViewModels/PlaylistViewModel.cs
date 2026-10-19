@@ -1,9 +1,12 @@
 using System;
+using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Etiquetador.App.Services;
+using Etiquetador.Core.Dj;
 using Etiquetador.Core.Providers;
 
 namespace Etiquetador.App.ViewModels;
@@ -25,6 +28,8 @@ public partial class PlaylistViewModel : ListaFrenteBibliotecaViewModel
     {
         _enlace = engine.Config.UltimaPlaylist;
         Status = "Pega el enlace de una playlist de Spotify o Deezer y pulsa Ver lista.";
+        Seguimiento.SeguidasCambiadas += RellenarSeguidas;
+        RellenarSeguidas();
     }
 
     /// <summary>
@@ -72,13 +77,60 @@ public partial class PlaylistViewModel : ListaFrenteBibliotecaViewModel
             _engine.SaveConfig();
 
             var tengo = await CruzarAsync(lista.Pistas, _cts.Token);
+            _enlaceCargado = enlace;
+            AnotarLectura(lista.Pistas, DateTime.Now, SeguimientoListas.LecturaCompleta(lista), SeguimientoListas.AvisoLectura(lista));
             Status = $"«{lista.Nombre}» ({lista.Plataforma}): {Rows.Count} canciones. {Resumen}. Faltan {Rows.Count - tengo}."
-                   + (lista.Recortada ? " " + lista.Aviso : "");
+                   + (lista.Recortada ? " " + lista.Aviso : "")
+                   + (Novedades.Length > 0 ? " " + Novedades : "");
             _engine.Logger.Sum($"Playlists «{lista.Nombre}» ({lista.Plataforma}): tienes {tengo} de {Rows.Count}"
                              + (lista.Recortada ? $" (incompleta: {lista.Aviso})" : ""));
         }
         catch (OperationCanceledException) { Status = "Consulta cancelada."; }
         catch (Exception e) { Status = "No se pudo leer la lista: " + e.Message; }
         finally { IsBusy = false; _cts?.Dispose(); _cts = null; }
+    }
+
+    // --- Seguir la lista (P7) ---
+
+    /// <summary>El enlace de la lista que se está viendo (el que se cargó, no lo que haya ahora en el cuadro).</summary>
+    private string _enlaceCargado = "";
+
+    protected override ListaSeguida? DescribirLista()
+        => _enlaceCargado.Length == 0 ? null : DescribirPlaylist(_enlaceCargado, NombreLista);
+
+    /// <summary>Una playlist como lista seguida: la identifica su enlace, se pegue como se pegue.</summary>
+    internal static ListaSeguida DescribirPlaylist(string enlace, string nombre) => new()
+    {
+        Tipo = TipoListaSeguida.Playlist,
+        Clave = ListasSeguidas.ClavePlaylist(enlace),
+        Nombre = string.IsNullOrWhiteSpace(nombre) ? "Playlist" : nombre.Trim(),
+        Enlace = enlace.Trim(),
+    };
+
+    /// <summary>Las playlists que sigues, para volver a abrirlas sin pegar el enlace.</summary>
+    public ObservableCollection<ListaSeguida> Seguidas { get; } = new();
+
+    public bool HaySeguidas => Seguidas.Count > 0;
+
+    /// <summary>Elegir una lista seguida la abre. Después el selector se vacía, para poder volver a elegirla.</summary>
+    [ObservableProperty] private ListaSeguida? _seguidaElegida;
+
+    partial void OnSeguidaElegidaChanged(ListaSeguida? value)
+    {
+        if (value == null) return;
+        // Se vacía después, no aquí dentro: cambiar la selección mientras el selector la está poniendo
+        // le llega a medias.
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => SeguidaElegida = null);
+        if (IsBusy) { Status = "Espera a que termine el proceso en curso."; return; }
+        Enlace = value.Enlace;
+        if (LoadCommand.CanExecute(null)) LoadCommand.Execute(null);
+    }
+
+    private void RellenarSeguidas()
+    {
+        Seguidas.Clear();
+        foreach (var l in Seguimiento.Seguidas.Todas().Where(l => l.Tipo == TipoListaSeguida.Playlist && l.Enlace.Length > 0))
+            Seguidas.Add(l);
+        OnPropertyChanged(nameof(HaySeguidas));
     }
 }

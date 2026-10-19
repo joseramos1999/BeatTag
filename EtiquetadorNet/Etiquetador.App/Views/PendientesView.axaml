@@ -1,0 +1,118 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="600"
+             x:Class="Etiquetador.App.Views.PendientesView"
+             x:CompileBindings="False">
+
+    <DockPanel Margin="8">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="6">
+            <TextBlock Classes="titulo" Text="Pendientes" />
+            <TextBlock Classes="desc"
+                       Text="Las canciones que te faltan y quieres conseguir. Se añaden desde Tendencias y Playlists con «Añadir a pendientes» y se tachan solas cuando aparecen en la biblioteca: al escanear, al pasar canciones desde la Bandeja de entrada o al cambiar las carpetas. Una acapella o un mashup no cuentan como tener la canción." />
+        </StackPanel>
+
+        <!-- ============================ LISTAS QUE SIGUES ============================ -->
+        <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BordeSuave}" BorderThickness="1" CornerRadius="4"
+                Padding="8" Margin="0,8,0,0">
+            <StackPanel Spacing="6">
+                <TextBlock Text="Listas que sigues" FontWeight="SemiBold" FontSize="14" />
+                <TextBlock Classes="desc"
+                           Text="Playlists y charts que sigues desde Tendencias o Playlists. «Actualizar todas» los vuelve a leer y cuenta las canciones que han entrado desde la última revisión de un día anterior. No bloquea la aplicación mientras tanto." />
+                <WrapPanel ItemSpacing="8" LineSpacing="6">
+                    <Button Content="Actualizar todas" Command="{Binding ActualizarTodasCommand}" IsEnabled="{Binding NoActualizando}"
+                            Background="#7C3AED" Foreground="White" FontWeight="SemiBold"
+                            ToolTip.Tip="Lee de nuevo cada lista seguida. Los charts se toman de la copia guardada si tiene menos de unas horas; las playlists se leen siempre de la red." />
+                    <Button Content="Cancelar" Command="{Binding CancelarActualizacionCommand}" IsVisible="{Binding Actualizando}" />
+                    <Button Content="Añadir a pendientes las nuevas que faltan" Click="AnadirNuevas_Click" IsEnabled="{Binding NoActualizando}"
+                            Background="#0D9488" Foreground="White" FontWeight="SemiBold"
+                            ToolTip.Tip="Las canciones nuevas que no tienes, de las listas elegidas en la tabla (o de todas, si no hay ninguna elegida). Antes se vuelve a mirar la biblioteca." />
+                    <Button Content="Dejar de seguir" Click="DejarDeSeguir_Click" IsEnabled="{Binding NoActualizando}"
+                            ToolTip.Tip="Deja de seguir las listas elegidas. No toca las canciones que ya estén en pendientes." />
+                    <TextBlock Text="{Binding ResumenListas}" VerticalAlignment="Center" Opacity="0.8" />
+                </WrapPanel>
+                <DataGrid Name="TablaListas" ItemsSource="{Binding Listas}" SelectedItem="{Binding ListaSeleccionada}"
+                          IsVisible="{Binding HayListas}" Height="150"
+                          AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Extended"
+                          CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                          DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Lista" Binding="{Binding Nombre}" Width="240" MinWidth="120" />
+                        <DataGridTextColumn Header="Tipo" Binding="{Binding Tipo}" Width="140" MinWidth="90" />
+                        <DataGridTextColumn Header="Revisada" Binding="{Binding Revisada}" Width="130" MinWidth="90" />
+                        <DataGridTextColumn Header="Nuevas" Binding="{Binding Nuevas}" Width="130" MinWidth="80" />
+                        <DataGridTextColumn Header="Te faltan" Binding="{Binding TeFaltan}" Width="80" MinWidth="60" />
+                        <DataGridTextColumn Header="Aviso" Binding="{Binding Aviso}" Width="*" MinWidth="120" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </StackPanel>
+        </Border>
+
+        <!-- ============================ CANCIONES PENDIENTES ============================ -->
+        <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,12,0,6">
+            <TextBlock Text="Canciones pendientes" FontWeight="SemiBold" FontSize="14" />
+            <WrapPanel ItemSpacing="8" LineSpacing="6">
+                <CheckBox Content="Mostrar solo las pendientes" IsChecked="{Binding SoloPendientes}" VerticalAlignment="Center" />
+                <Button Content="Buscar en mi pool" Click="BuscarEnPool_Click"
+                        Background="#2563EB" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Abre en el navegador la búsqueda de la canción elegida en tu pool de descargas. La dirección del pool se configura en Ajustes → Pendientes." />
+                <Button Content="Abrir enlace" Click="AbrirEnlace_Click"
+                        ToolTip.Tip="Abre la canción elegida en la plataforma de la que salió (Spotify o Deezer)." />
+                <Button Content="Exportar…" Click="Exportar_Click"
+                        ToolTip.Tip="Guarda las canciones que se ven ahora (con el filtro aplicado) en texto, una «Artista - Título» por línea, o en CSV con todas las columnas." />
+                <Button Content="Volver a pendiente" Click="VolverAPendiente_Click"
+                        ToolTip.Tip="Para una conseguida que no es la canción (un remix con otro nombre, otra canción con el mismo título): vuelve a pendiente y ese archivo ya no la tachará." />
+                <Button Content="Quitar" Click="Quitar_Click"
+                        ToolTip.Tip="Quita de la lista las canciones elegidas. No toca ningún archivo." />
+                <Button Content="Quitar las conseguidas" Click="QuitarConseguidas_Click"
+                        ToolTip.Tip="Quita de la lista todas las canciones ya conseguidas. No toca ningún archivo." />
+                <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Opacity="0.8" Margin="8,0,0,0" />
+            </WrapPanel>
+        </StackPanel>
+
+        <DataGrid Name="TablaPendientes" ItemsSource="{Binding FilasView}" SelectedItem="{Binding Seleccionada}"
+                  AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Extended"
+                  CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                  DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
+            <DataGrid.Styles>
+                <Style Selector="DataGridRow">
+                    <Setter Property="Background" Value="{Binding FondoBrush}" />
+                </Style>
+            </DataGrid.Styles>
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Buscar en mi pool" Click="BuscarEnPool_Click" />
+                    <MenuItem Header="Abrir enlace" Click="AbrirEnlace_Click" />
+                    <MenuItem Header="Abrir carpeta contenedora" Click="AbrirCarpeta_Click" />
+                    <Separator />
+                    <MenuItem Header="Volver a pendiente" Click="VolverAPendiente_Click" />
+                    <MenuItem Header="Quitar" Click="Quitar_Click" />
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Estado" Binding="{Binding Estado}" SortMemberPath="EstadoOrden" Width="160" MinWidth="100" />
+                <DataGridTemplateColumn Header="Artista" SortMemberPath="Artista" Width="180" MinWidth="100">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Artista}" TextDecorations="{Binding Tachado}"
+                                       VerticalAlignment="Center" Margin="12,0" TextTrimming="CharacterEllipsis" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Título" SortMemberPath="Titulo" Width="220" MinWidth="120">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Titulo}" TextDecorations="{Binding Tachado}"
+                                       VerticalAlignment="Center" Margin="12,0" TextTrimming="CharacterEllipsis" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Origen" Binding="{Binding Origen}" Width="200" MinWidth="100" />
+                <DataGridTextColumn Header="Añadida" Binding="{Binding Alta}" SortMemberPath="AltaFecha" Width="100" MinWidth="80" />
+                <DataGridTextColumn Header="Archivo en la biblioteca" Binding="{Binding Archivo}" Width="*" MinWidth="140" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>

@@ -165,6 +165,21 @@
                             ToolTip.Tip="Borra registros, informes y cachés. No toca los ajustes, las listas de artista ni el historial para deshacer." />
                 </WrapPanel>
 
+                <!-- ================= PENDIENTES (equipo «listas», tanda 3) ================= -->
+                <TextBlock Classes="sec" Text="Pendientes" />
+                <TextBlock Classes="ayuda"
+                           Text="«Buscar en mi pool» abre en el navegador la búsqueda de la canción en el pool de música donde descargas. Escribe la dirección de búsqueda de tu pool poniendo {q} donde va lo que se busca: BeatTag lo sustituye por el artista principal y el título. Para encontrarla, busca cualquier canción en la web del pool, copia la dirección de la página de resultados y cambia lo que buscaste por {q}. BeatTag no inicia sesión en el pool ni lee nada de él: el navegador usa tu sesión." />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Búsqueda" VerticalAlignment="Center" Width="60" />
+                    <TextBox Text="{Binding PoolBusquedaUrl}" Width="320" PlaceholderText="{Binding EjemploPoolBusqueda}"
+                             LostFocus="PoolBusqueda_LostFocus"
+                             ToolTip.Tip="Por ejemplo, https://www.mipool.com/search?q={q}. Se guarda al salir de la casilla." />
+                    <Button Content="Probar" Command="{Binding ProbarPoolBusquedaCommand}" Classes="gris"
+                            ToolTip.Tip="Abre en el navegador la búsqueda de una canción de ejemplo, para comprobar que la dirección lleva a los resultados de tu pool." />
+                </StackPanel>
+                <TextBlock Text="{Binding AvisoPoolBusqueda}" Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap" FontSize="12"
+                           IsVisible="{Binding AvisoPoolBusqueda, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
                 <!-- ================= ACCIONES ================= -->
                 <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,14,0,0">
                     <Button Content="Guardar" Command="{Binding SaveCommand}"

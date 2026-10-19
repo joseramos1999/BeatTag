@@ -1,0 +1,52 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="400"
+             x:Class="Etiquetador.App.Views.OrdenMezclaPanel"
+             x:CompileBindings="False">
+
+    <!--
+        El orden para mezclar de una lista de Tendencias o Playlists. Sustituye a la tabla de la lista
+        mientras se ve, con la misma idea que «Ordenar para mezclar» del Asistente: cada canción con
+        cómo entra desde la anterior. Las transiciones que chocan de tono se resaltan.
+    -->
+    <DockPanel>
+        <WrapPanel DockPanel.Dock="Top" ItemSpacing="8" LineSpacing="6" Margin="0,6,0,6">
+            <Button Content="← Volver a la lista" Command="{Binding VolverALaListaCommand}" />
+            <Button Content="Guardar en este orden (M3U8)" Click="ExportarOrden_Click"
+                    Background="#0D9488" Foreground="White" FontWeight="SemiBold"
+                    ToolTip.Tip="Guarda las canciones en el orden para mezclar como una lista M3U8, con su duración. Se abre en rekordbox, Engine DJ o Serato sin copiar archivos." />
+        </WrapPanel>
+        <TextBlock DockPanel.Dock="Top" Text="{Binding ResumenMezcla}" TextWrapping="Wrap" Margin="0,0,0,6"
+                   Foreground="{DynamicResource TextoSecundario}" />
+
+        <DataGrid Name="TablaMezcla" ItemsSource="{Binding PasosMezcla}" SelectedItem="{Binding SelectedPaso}"
+                  AutoGenerateColumns="False" IsReadOnly="True"
+                  CanUserResizeColumns="True" CanUserSortColumns="False" GridLinesVisibility="Horizontal"
+                  DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
+            <DataGrid.Styles>
+                <Style Selector="DataGridRow">
+                    <Setter Property="Background" Value="{Binding FondoBrush}" />
+                </Style>
+            </DataGrid.Styles>
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
+                    <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Orden" Binding="{Binding Posicion}" Width="60" MinWidth="50" />
+                <DataGridTextColumn Header="# en la lista" Binding="{Binding EnLista}" Width="90" MinWidth="60" />
+                <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="170" MinWidth="100" />
+                <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="200" MinWidth="120" />
+                <DataGridTextColumn Header="BPM" Binding="{Binding Bpm}" Width="60" MinWidth="50" />
+                <DataGridTextColumn Header="Tono" Binding="{Binding Camelot}" Width="60" MinWidth="50" />
+                <DataGridTextColumn Header="Energía" Binding="{Binding Energia}" Width="70" MinWidth="60" />
+                <DataGridTextColumn Header="Entrada desde la anterior" Binding="{Binding Transicion}" Width="200" MinWidth="140" />
+                <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="*" MinWidth="120" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>

@@ -11,6 +11,7 @@ using CommunityToolkit.Mvvm.Input;
 using Etiquetador.App.Services;
 using Etiquetador.Core;
 using Etiquetador.Core.Analysis;
+using Etiquetador.Core.Dj;
 using Etiquetador.Core.Providers;
 
 namespace Etiquetador.App.ViewModels;
@@ -46,6 +47,19 @@ public sealed partial class TrendRow : ObservableObject
     public string Version => Tengo ? PrioridadVersion.Nombre(PrioridadVersion.De(FileName)) : "";
 
     public IBrush StateBrush => Tengo ? TengoBrush : Brushes.Transparent;
+
+    /// <summary>Enlace a la canción en su plataforma (Spotify, Deezer), si lo trae la lista. Va a Pendientes.</summary>
+    public string Enlace { get; init; } = "";
+
+    /// <summary>
+    /// «Nueva desde 12/10» si la lista se sigue y la canción no estaba la última vez que se revisó en
+    /// un día anterior (ver <see cref="ListasSeguidas.Registrar"/>). Vacío si no.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(EsNueva))]
+    private string _novedad = "";
+
+    public bool EsNueva => Novedad.Length > 0;
 }
 
 /// <summary>
@@ -92,7 +106,8 @@ public partial class TrendsViewModel : ListaFrenteBibliotecaViewModel
     partial void OnFuenteChanged(string value)
     {
         Countries.Clear();
-        Rows.Clear();
+        OlvidarListaAnterior();
+        _cargado = null;
         RowsView.Refresh();
         Resumen = "";
         FechaLista = "";
@@ -178,8 +193,11 @@ public partial class TrendsViewModel : ListaFrenteBibliotecaViewModel
             // La fecha se pone a la vez que la tabla. Antes se ponía antes del cruce, y si se cancelaba
             // durante el cruce quedaba la fecha de la lista nueva junto a la tabla anterior.
             FechaLista = fecha;
+            _cargado = (fuente, pais, ListSize);
+            AnotarLectura(chart, descargada ?? DateTime.Now, completa: true, aviso: "");
             Status = (sinActualizar ? "No se ha podido descargar de nuevo: se enseña la lista guardada. " : "")
-                   + $"Top {Rows.Count} de {pais.Name}. {Resumen}. Faltan {Rows.Count - tengo}.";
+                   + $"Top {Rows.Count} de {pais.Name}. {Resumen}. Faltan {Rows.Count - tengo}."
+                   + (Novedades.Length > 0 ? " " + Novedades : "");
             _engine.Logger.Sum($"Tendencias {pais.Name}: tienes {tengo} de {Rows.Count}");
         }
         catch (OperationCanceledException) { Status = "Consulta cancelada."; }
@@ -224,4 +242,21 @@ public partial class TrendsViewModel : ListaFrenteBibliotecaViewModel
     /// </summary>
     internal static bool NoSeActualizo(DateTime? descargada, DateTime pedidaEn)
         => descargada is not { } f || f < pedidaEn - MargenReloj;
+
+    // --- Seguir el chart (P7) ---
+
+    /// <summary>El chart que se está viendo: el que se cargó, no lo que haya ahora en los selectores.</summary>
+    private (ChartSource Fuente, ChartCountry Pais, int Tamano)? _cargado;
+
+    protected override ListaSeguida? DescribirLista()
+        => _cargado is { } c ? DescribirChart(c.Fuente, c.Pais, c.Tamano) : null;
+
+    /// <summary>Un chart como lista seguida: su fuente, su país y su tamaño son la lista.</summary>
+    internal static ListaSeguida DescribirChart(ChartSource fuente, ChartCountry pais, int tamano) => new()
+    {
+        Tipo = TipoListaSeguida.Chart,
+        Clave = ListasSeguidas.ClaveChart(fuente, pais.Code, pais.PlaylistId, tamano),
+        Nombre = $"Top {tamano} de {pais.Name} ({fuente})",
+        Fuente = fuente.ToString(), Pais = pais.Name, CodigoPais = pais.Code, ListaPais = pais.PlaylistId, Tamano = tamano,
+    };
 }

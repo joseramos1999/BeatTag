@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:views="using:Etiquetador.App.Views"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="560"
@@ -18,12 +19,19 @@
                 <Button DockPanel.Dock="Right" Content="Cancelar" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" Margin="6,0,0,0" />
                 <Button DockPanel.Dock="Right" Content="Ver lista" Command="{Binding LoadCommand}" IsEnabled="{Binding !IsBusy}"
                         Background="#7C3AED" Foreground="White" FontWeight="SemiBold" Margin="6,0,0,0" />
+                <!-- Las playlists que sigues, para abrirlas sin volver a pegar el enlace. -->
+                <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding Seguidas}" SelectedItem="{Binding SeguidaElegida}"
+                          DisplayMemberBinding="{Binding Nombre}" PlaceholderText="Listas que sigues…"
+                          IsVisible="{Binding HaySeguidas}" IsEnabled="{Binding !IsBusy}" MinWidth="180" MaxWidth="260" Margin="6,0,0,0"
+                          ToolTip.Tip="Abre una de las playlists que sigues." />
                 <TextBox Text="{Binding Enlace}" IsEnabled="{Binding !IsBusy}" KeyDown="Enlace_KeyDown"
                          PlaceholderText="https://open.spotify.com/playlist/…   o   https://www.deezer.com/playlist/…" />
             </DockPanel>
 
-            <StackPanel Orientation="Horizontal" Spacing="8">
+            <WrapPanel ItemSpacing="8" LineSpacing="6">
                 <CheckBox Content="Mostrar solo las disponibles" IsChecked="{Binding SoloLasQueTengo}" VerticalAlignment="Center" />
+                <CheckBox Content="Solo nuevas" IsChecked="{Binding SoloNuevas}" VerticalAlignment="Center" IsEnabled="{Binding EstaSeguida}"
+                          ToolTip.Tip="Solo las canciones que han entrado desde la última vez que se revisó la lista en un día anterior. Hace falta seguirla." />
                 <Button Content="Guardar como lista (M3U8)" Click="ExportM3u_Click"
                         Background="#0D9488" Foreground="White" FontWeight="SemiBold"
                         ToolTip.Tip="Guarda las canciones que ya tienes como una lista M3U8, en el orden de la playlist. Se abre directamente en rekordbox, Engine DJ o Serato, sin copiar archivos." />
@@ -31,34 +39,60 @@
                         IsEnabled="{Binding !IsBusy}"
                         Background="#16A34A" Foreground="White" FontWeight="SemiBold"
                         ToolTip.Tip="Copia (no mueve) a una carpeta nueva las grabaciones de la playlist que ya están en la biblioteca, numeradas por su posición." />
+                <Button Content="Ordenar para mezclar" Command="{Binding OrdenarParaMezclarCommand}" IsEnabled="{Binding !IsBusy}"
+                        Background="#2563EB" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Ordena las canciones que tienes para pincharlas seguidas: tonos compatibles en la rueda Camelot, tempo (contando doble y mitad) y, si tienen ficha de DJ, energía que no baja. Usa el BPM y la tonalidad de las etiquetas." />
+                <Button Content="Añadir a pendientes ▾" IsEnabled="{Binding !IsBusy}"
+                        ToolTip.Tip="Guarda en la lista de Pendientes las canciones que te faltan. Se tachan solas cuando aparecen en la biblioteca.">
+                    <Button.Flyout>
+                        <MenuFlyout>
+                            <MenuItem Header="Las seleccionadas que faltan" Click="AnadirSeleccionadas_Click" />
+                            <MenuItem Header="Todas las que faltan" Click="AnadirTodas_Click" />
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
+                <Button Content="{Binding TextoSeguir}" Command="{Binding SeguirListaCommand}" IsEnabled="{Binding !IsBusy}"
+                        ToolTip.Tip="Guarda lo que tiene hoy la lista. A partir de mañana, al volver a abrirla o con «Actualizar todas» en Pendientes, se marcan las canciones que hayan entrado. De Spotify solo se ven las 100 primeras: si la lista crece por el final, las nuevas no aparecen." />
                 <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Opacity="0.8" Margin="8,0,0,0" />
-            </StackPanel>
+            </WrapPanel>
+
+            <!-- Si se sigue: qué ha entrado desde la última revisión. -->
+            <TextBlock Classes="desc" Text="{Binding Novedades}"
+                       IsVisible="{Binding Novedades, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
         </StackPanel>
 
-        <DataGrid Name="RowsGrid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
-                  AutoGenerateColumns="False" IsReadOnly="True" Margin="0,6,0,0"
-                  CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
-                  DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
-            <DataGrid.Styles>
-                <Style Selector="DataGridRow">
-                    <Setter Property="Background" Value="{Binding StateBrush}" />
-                </Style>
-            </DataGrid.Styles>
-            <DataGrid.ContextMenu>
-                <ContextMenu>
-                    <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
-                    <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
-                </ContextMenu>
-            </DataGrid.ContextMenu>
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="#" Binding="{Binding Position}" Width="45" MinWidth="40" />
-                <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="180" MinWidth="100" />
-                <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="220" MinWidth="120" />
-                <DataGridTextColumn Header="Dur." Binding="{Binding DurText}" Width="60" MinWidth="50" />
-                <DataGridTextColumn Header="Disponibilidad" Binding="{Binding Estado}" Width="110" MinWidth="90" />
-                <DataGridTextColumn Header="Versión" Binding="{Binding Version}" Width="120" MinWidth="90" />
-                <DataGridTextColumn Header="Archivo en la biblioteca" Binding="{Binding FileName}" Width="*" MinWidth="140" />
-            </DataGrid.Columns>
-        </DataGrid>
+        <Grid Margin="0,6,0,0">
+            <DataGrid Name="RowsGrid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
+                      AutoGenerateColumns="False" IsReadOnly="True" IsVisible="{Binding !VerOrdenMezcla}"
+                      CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                      DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
+                <DataGrid.Styles>
+                    <Style Selector="DataGridRow">
+                        <Setter Property="Background" Value="{Binding StateBrush}" />
+                    </Style>
+                </DataGrid.Styles>
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
+                        <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                        <Separator />
+                        <MenuItem Header="Añadir a pendientes" Click="AnadirSeleccionadas_Click" />
+                        <MenuItem Header="Buscar en mi pool" Command="{Binding BuscarEnPoolCommand}" />
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="#" Binding="{Binding Position}" Width="45" MinWidth="40" />
+                    <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="180" MinWidth="100" />
+                    <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="220" MinWidth="120" />
+                    <DataGridTextColumn Header="Dur." Binding="{Binding DurText}" Width="60" MinWidth="50" />
+                    <DataGridTextColumn Header="Disponibilidad" Binding="{Binding Estado}" Width="110" MinWidth="90" />
+                    <DataGridTextColumn Header="Novedad" Binding="{Binding Novedad}" Width="130" MinWidth="80" />
+                    <DataGridTextColumn Header="Versión" Binding="{Binding Version}" Width="120" MinWidth="90" />
+                    <DataGridTextColumn Header="Archivo en la biblioteca" Binding="{Binding FileName}" Width="*" MinWidth="140" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <views:OrdenMezclaPanel IsVisible="{Binding VerOrdenMezcla}" />
+        </Grid>
     </DockPanel>
 </UserControl>

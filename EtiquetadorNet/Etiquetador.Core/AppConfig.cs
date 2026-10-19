@@ -441,4 +441,13 @@ public sealed class AppConfig
             return false;
         }
     }
+
+    // --- Pendientes: «Buscar en mi pool» (equipo «listas», tanda 3) ---
+
+    /// <summary>
+    /// Dirección de búsqueda del pool de descargas del usuario, con «{q}» donde va lo que se busca
+    /// («https://…/search?q={q}»). Vacía mientras no se configure. BeatTag solo abre esa dirección en
+    /// el navegador: no inicia sesión en el pool ni lee nada de él.
+    /// </summary>
+    public string PoolBusquedaUrl { get; set; } = "";
 }
