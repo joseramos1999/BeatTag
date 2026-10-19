@@ -51,7 +51,8 @@ public sealed partial class MezclaSeleccionViewModel : ObservableObject
     /// abrir el diálogo, en su barra de estado.
     /// </summary>
     internal static string MotivoParaNoOrdenar(int seleccionadas)
-        => seleccionadas < 2 ? "Selecciona al menos dos canciones para ordenarlas (Ctrl o Mayús + clic)."
+        // Sin nombrar teclas: para seleccionar varias se usa Ctrl en Windows y Cmd en macOS.
+        => seleccionadas < 2 ? "Selecciona al menos dos canciones para ordenarlas."
          : seleccionadas > MezclaViewModel.Maximo
             ? $"Has seleccionado {seleccionadas} canciones; para ordenar una sesión el máximo es {MezclaViewModel.Maximo}."
          : "";
