@@ -1,0 +1,63 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Etiquetador.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="960" d:DesignHeight="600"
+        x:Class="Etiquetador.App.Views.MezclaDialog"
+        x:DataType="vm:MezclaSeleccionViewModel"
+        Title="Ordenar para mezclar"
+        Width="960" Height="620" MinWidth="640" MinHeight="400"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+
+    <DockPanel Margin="18" LastChildFill="True">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,8">
+            <TextBlock Text="Ordenar para mezclar la selección" FontSize="16" FontWeight="Bold" />
+            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextoSecundario}" FontSize="12"
+                       Text="Empieza por lo más tranquilo y encadena cada canción con la que mejor entra: primero tonos compatibles en la rueda Camelot, después el tempo (contando doble y mitad) y, si las canciones tienen ficha, que la energía no baje y que se respete el momento de la sesión. Con clic derecho puedes elegir la canción de arranque. No usa la IA: son reglas de mezcla y sale igual cada vez." />
+            <TextBlock Text="{Binding Resumen}" TextWrapping="Wrap" FontWeight="SemiBold" />
+        </StackPanel>
+
+        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="0,12,0,0">
+            <TextBlock Grid.Column="0" Text="{Binding Status}" VerticalAlignment="Center" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextoSecundario}" Margin="0,0,12,0" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                <Button Content="Escuchar / Parar" Command="{Binding EscucharCommand}" />
+                <Button Content="Empezar por esta" Command="{Binding EmpezarPorEstaCommand}" IsEnabled="{Binding !Ocupado}"
+                        ToolTip.Tip="Rehace el orden abriendo con la canción seleccionada." />
+                <Button Content="Guardar como lista (M3U8)" Click="Exportar_Click" IsEnabled="{Binding !Ocupado}"
+                        Background="#0D9488" Foreground="White" FontWeight="SemiBold"
+                        ToolTip.Tip="Guarda la selección en este orden como lista M3U8, para abrirla en rekordbox, Serato o Engine DJ. No copia ni mueve archivos." />
+                <Button Content="Cerrar" Click="Cerrar_Click" MinWidth="90" IsCancel="True" />
+            </StackPanel>
+        </Grid>
+
+        <Panel>
+            <DataGrid Name="Tabla" ItemsSource="{Binding Pasos}" SelectedItem="{Binding Seleccionada}"
+                      x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
+                      CanUserResizeColumns="True" CanUserSortColumns="False" GridLinesVisibility="Horizontal"
+                      DoubleTapped="Tabla_DoubleTapped">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Escuchar / Parar" Command="{Binding EscucharCommand}" />
+                        <MenuItem Header="Empezar por esta" Command="{Binding EmpezarPorEstaCommand}" />
+                        <Separator />
+                        <MenuItem Header="Abrir carpeta contenedora" Command="{Binding AbrirCarpetaCommand}" />
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="#" Binding="{Binding Posicion}" Width="50" />
+                    <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="*" />
+                    <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="*" />
+                    <DataGridTextColumn Header="BPM" Binding="{Binding Bpm}" Width="70" />
+                    <DataGridTextColumn Header="Tono" Binding="{Binding Camelot}" Width="70" />
+                    <DataGridTextColumn Header="Energía" Binding="{Binding Energia}" Width="90" />
+                    <DataGridTextColumn Header="Entrada desde la anterior" Binding="{Binding Transicion}" Width="260" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <ProgressBar IsIndeterminate="True" IsVisible="{Binding Ocupado}" Height="4" VerticalAlignment="Top" />
+        </Panel>
+    </DockPanel>
+</Window>

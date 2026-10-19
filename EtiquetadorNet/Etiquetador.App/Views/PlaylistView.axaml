@@ -75,6 +75,8 @@
                     <ContextMenu>
                         <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
                         <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                        <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding SelectedRow}" />
+                        <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding SelectedRow}" />
                         <Separator />
                         <MenuItem Header="Añadir a pendientes" Click="AnadirSeleccionadas_Click" />
                         <MenuItem Header="Buscar en mi pool" Command="{Binding BuscarEnPoolCommand}" />

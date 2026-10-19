@@ -257,7 +257,7 @@
             <TabItem Header="Ordenar para mezclar">
                 <DockPanel DataContext="{Binding Mezcla}" x:DataType="vm:MezclaViewModel" Margin="0,8,0,0">
                     <TextBlock DockPanel.Dock="Top" Classes="desc" Margin="0,0,0,6"
-                               Text="Ordena una colección para pincharla seguida: empieza por lo más tranquilo y encadena cada canción con la que mejor entra, priorizando tonos compatibles en la rueda Camelot, después el tempo (contando doble y mitad) y después que la energía no baje. No usa la IA: son reglas de mezcla y sale igual cada vez. Necesita la tonalidad en las etiquetas." />
+                               Text="Ordena una colección para pincharla seguida: empieza por lo más tranquilo y encadena cada canción con la que mejor entra, priorizando tonos compatibles en la rueda Camelot, después el tempo (contando doble y mitad) y, si las canciones tienen ficha, que se respete el momento de la sesión (Apertura, Subida, Pico, Cierre, After) y que la energía no baje. Con clic derecho sobre una canción puedes empezar por ella, buscar sus compatibles o ver sus versiones. No usa la IA: son reglas de mezcla y sale igual cada vez. Necesita la tonalidad en las etiquetas." />
                     <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                         <TextBlock Text="Colección" VerticalAlignment="Center" Margin="0,0,6,4" />
                         <ComboBox ItemsSource="{Binding Colecciones}" SelectedItem="{Binding Coleccion}" MinWidth="220" Margin="0,0,12,4" />
@@ -269,7 +269,8 @@
                         <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" TextWrapping="Wrap" />
                     </WrapPanel>
                     <DataGrid Name="TablaMezcla" ItemsSource="{Binding Pasos}" x:CompileBindings="False" AutoGenerateColumns="False" IsReadOnly="True"
-                              CanUserResizeColumns="True" CanUserSortColumns="False" GridLinesVisibility="Horizontal">
+                              CanUserResizeColumns="True" CanUserSortColumns="False" GridLinesVisibility="Horizontal"
+                              Loaded="TablaMezcla_Loaded">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="#" Binding="{Binding Posicion}" Width="50" />
                             <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="*" />
