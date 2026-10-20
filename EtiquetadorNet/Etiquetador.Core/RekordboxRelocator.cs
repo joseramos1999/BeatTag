@@ -251,9 +251,16 @@ public static class RekordboxRelocator
     /// Con <paramref name="conLista"/>, la copia lleva además una lista «Rutas reparadas por BeatTag»
     /// con las pistas reparadas: en rekordbox se importan desde ella, sin tener que buscarlas una a una
     /// entre todas las de la colección.
+    ///
+    /// <paramref name="tituloDe"/> da el título de la etiqueta del archivo nuevo, si se conoce (de la
+    /// biblioteca). Name, en rekordbox, es el TÍTULO de la pista, no el nombre del archivo: al reparar
+    /// un renombrado se ponía el nombre del archivo («Artista - Título (Extended Mix)») y la pista
+    /// entraba en rekordbox con el artista repetido en el título. Sin título conocido se sigue usando
+    /// el nombre del archivo, como antes.
     /// </summary>
     public static RelocateResult Repair(string xmlOrigen, string destino, IReadOnlyDictionary<string, string> mapa,
-                                        bool conLista = false, CancellationToken ct = default)
+                                        bool conLista = false, CancellationToken ct = default,
+                                        Func<string, string?>? tituloDe = null)
     {
         if (mapa.Count == 0) return new RelocateResult(0, 0, 0, "No hay ningún renombrado que reparar.");
         if (ComparadorRutas.Instancia.Equals(Path.GetFullPath(xmlOrigen), Path.GetFullPath(destino)))
@@ -279,7 +286,7 @@ public static class RekordboxRelocator
                        NewLineHandling = NewLineHandling.None,
                    }))
             {
-                copia = new Copia(porRuta, conLista);
+                copia = new Copia(porRuta, conLista, tituloDe);
                 copia.Copiar(lector, escritor, ct);
             }
             File.Move(tmp, destino, overwrite: true);
@@ -314,13 +321,15 @@ public static class RekordboxRelocator
     {
         private readonly Dictionary<string, string> _mapa;
         private readonly bool _conLista;
+        private readonly Func<string, string?>? _tituloDe;
         private readonly List<(string Id, string Location)> _reparadas = new();
         public int Reparadas, SinCambio, NoEncontradas;
 
-        public Copia(Dictionary<string, string> mapa, bool conLista)
+        public Copia(Dictionary<string, string> mapa, bool conLista, Func<string, string?>? tituloDe)
         {
             _mapa = mapa;
             _conLista = conLista;
+            _tituloDe = tituloDe;
         }
 
         public void Copiar(XmlReader r, XmlWriter w, CancellationToken ct)
@@ -447,8 +456,10 @@ public static class RekordboxRelocator
                     // El nombre visible también cambia al renombrar; si no se actualiza, la colección
                     // apunta bien pero se sigue leyendo el nombre viejo. Si el archivo solo se movió
                     // de carpeta (mismo nombre), el Name es el título que puso rekordbox y se respeta.
-                    var nombreNuevo = Path.GetFileNameWithoutExtension(nueva);
-                    var renombrado = !ComparadorRutas.Instancia.Equals(Path.GetFileNameWithoutExtension(actual), nombreNuevo);
+                    var renombrado = !ComparadorRutas.Instancia.Equals(Path.GetFileNameWithoutExtension(actual),
+                                                                      Path.GetFileNameWithoutExtension(nueva));
+                    var titulo = (_tituloDe?.Invoke(nueva) ?? "").Trim();
+                    var nombreNuevo = titulo.Length > 0 ? titulo : Path.GetFileNameWithoutExtension(nueva);
                     CopiarAtributos(r, w, (n, v) => n == "Location" ? nuevaLocation
                                                   : n == "Name" && renombrado && nombreNuevo.Length > 0 ? nombreNuevo
                                                   : v);

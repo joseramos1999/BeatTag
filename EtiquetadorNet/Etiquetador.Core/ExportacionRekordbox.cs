@@ -22,20 +22,26 @@ public sealed record ResultadoExportacionRekordbox(int Listas, int Pistas, int V
     public bool Ok => Error.Length == 0;
 }
 
+/// <summary>Lo que hay en el archivo donde se va a exportar (ver <see cref="ExportadorRekordbox.QueHayEn"/>).</summary>
+public enum DestinoExportacion { NoExiste, DeBeatTag, Otro }
+
 /// <summary>
 /// Escribe un XML de rekordbox (DJ_PLAYLISTS) con una carpeta «BeatTag» de listas, para importarlas
 /// todas de una vez en lugar de un M3U8 tras otro.
 ///
-/// QUÉ SE ESCRIBE DE CADA PISTA, Y POR QUÉ TAN POCO. Solo Location, Name (el título) y Artist. Según
-/// el formato publicado por rekordbox, la Location identifica la pista y es lo único obligatorio; Name
-/// y Artist son las etiquetas del propio archivo y sirven para que una pista que rekordbox aún no tiene
-/// no entre sin nombre. No se escriben BPM, tonalidad, valoración, comentarios, cues ni beatgrid: al
-/// importar, una pista que ya está en la colección conserva lo suyo en las versiones actuales
-/// (5.6.1 y posteriores, según lo documentado por terceros), pero hay versiones y operaciones
-/// («Importar a la colección» sobre pistas sueltas) que la sustituyen por lo del XML, y en ese caso lo
-/// que no va en el XML no se puede pisar con nada inventado aquí. Por la misma razón, la Location se
-/// escribe exactamente como la escribe rekordbox (<see cref="RekordboxRelocator.PathToLocation"/>) o,
-/// si se conoce la que ya tiene la pista en su colección, esa misma.
+/// QUÉ SE ESCRIBE DE CADA PISTA, Y POR QUÉ TAN POCO. Solo Location, Name (el título) y Artist.
+/// COMPROBADO en la especificación que publica rekordbox (xml_format_list.pdf, «XML file format for
+/// playlists sharing»): de cada TRACK solo la Location es imprescindible, la colección solo necesita
+/// las pistas que están en alguna lista, y una lista puede nombrar sus pistas por TrackID (KeyType 0).
+/// La especificación no dice qué pasa con una pista que rekordbox ya tiene; lo documentado por
+/// terceros es que importar una lista NO la toca (se queda con sus cue points, su beatgrid, su
+/// valoración y sus comentarios) y que «Importar a la colección» sobre pistas elegidas SÍ la sustituye
+/// por lo del XML. Por eso no se escriben BPM, tonalidad, valoración, comentarios, cues ni beatgrid:
+/// lo que no va en el XML no se puede pisar con nada inventado aquí, y la página explica que hay que
+/// importar la carpeta, no las pistas. Name y Artist son las etiquetas del propio archivo y sirven
+/// para que una pista que rekordbox aún no tiene no entre sin nombre. La Location se escribe
+/// exactamente como la escribe rekordbox (<see cref="RekordboxRelocator.PathToLocation"/>) o, si se
+/// conoce la que ya tiene la pista en su colección, esa misma: es lo que la identifica.
 /// </summary>
 public static class ExportadorRekordbox
 {
@@ -176,6 +182,33 @@ public static class ExportadorRekordbox
             }
             w.WriteEndElement();
         }
+    }
+
+    /// <summary>
+    /// Qué hay en un archivo donde se va a exportar: no existe, lo escribió BeatTag (una exportación
+    /// anterior, que se puede sustituir sin más) u OTRA cosa, casi siempre la colección exportada de
+    /// rekordbox. El cuadro de guardar solo pregunta «¿reemplazar?», y elegir por error la colección
+    /// exportada la sustituiría por unas pocas listas: en ese caso se pide confirmación aparte.
+    /// Solo lee el principio del archivo.
+    /// </summary>
+    public static DestinoExportacion QueHayEn(string ruta)
+    {
+        if (string.IsNullOrWhiteSpace(ruta) || !File.Exists(ruta)) return DestinoExportacion.NoExiste;
+        try
+        {
+            using var r = XmlReader.Create(new FileStream(ruta, FileMode.Open, FileAccess.Read, FileShare.ReadWrite),
+                                           new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, CloseInput = true });
+            if (r.MoveToContent() != XmlNodeType.Element || r.LocalName != "DJ_PLAYLISTS") return DestinoExportacion.Otro;
+            while (r.Read())
+            {
+                if (r.NodeType != XmlNodeType.Element) continue;
+                // PRODUCT va lo primero; si lo que llega es la colección, no lo escribió BeatTag.
+                return r.LocalName == "PRODUCT" && r.GetAttribute("Name") == CarpetaRaiz
+                    ? DestinoExportacion.DeBeatTag : DestinoExportacion.Otro;
+            }
+            return DestinoExportacion.Otro;
+        }
+        catch { return DestinoExportacion.Otro; }
     }
 
     private static string Num(int n) => n.ToString(CultureInfo.InvariantCulture);

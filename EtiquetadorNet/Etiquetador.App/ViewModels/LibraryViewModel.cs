@@ -119,9 +119,10 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
         {
             var overwrite = Engine.Config.Overwrite;
             var undoFile = System.IO.Path.Combine(Engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
-            var (matched, updated, failures) = await Task.Run(() =>
+            var (entradas, matched, updated, failures) = await Task.Run(() =>
             {
-                var byPath = new Dictionary<string, RekordboxEntry>(StringComparer.OrdinalIgnoreCase);
+                // Las rutas de un Mac pueden llegar con los acentos en otra forma Unicode (ComparadorRutas).
+                var byPath = new Dictionary<string, RekordboxEntry>(ComparadorRutas.Instancia);
                 foreach (var e in RekordboxImporter.Parse(xmlPath)) byPath[e.FilePath] = e;
                 int m = 0, u = 0;
                 var lines = new List<string>();
@@ -143,17 +144,34 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
                         catch (Exception ex) { fails.Add(t.FileName + ": " + ex.Message); }
                     }
                 if (lines.Count > 0) System.IO.File.WriteAllLines(undoFile, lines);
-                return (m, u, fails);
+                return (byPath.Count, m, u, fails);
             });
 
             foreach (var f in failures) Engine.Logger.Log("rekordbox: " + f, LogKind.Err);
             await _store.ScanAsync();
-            Status = matched == 0
-                ? "Rekordbox: 0 coincidencias (¿las rutas del XML no apuntan a estas carpetas?)."
-                : $"Rekordbox: {matched} coincidencias · {updated} actualizadas · {failures.Count} fallos. Deshacer disponible en Enriquecer.";
+            Status = TextoImportacionRekordbox(entradas, matched, updated, failures.Count);
         }
+        // Un XML cortado o que no es la colección se dice tal cual (antes salía «0 coincidencias»).
+        catch (RekordboxXmlException e) { Status = "No se ha importado nada de rekordbox: " + e.Message; }
         catch (Exception e) { Status = "Error importando rekordbox: " + e.Message; }
         finally { IsBusy = false; }
+    }
+
+    /// <summary>
+    /// Lo que se dice tras importar BPM y tonalidad de rekordbox (equipo «rekordbox», tanda 4). Con 0
+    /// coincidencias se distingue una colección sin pistas de una cuyas rutas no son las de estas
+    /// carpetas, y se remite a la página rekordbox, que enseña cuáles faltan y cuáles están rotas.
+    /// </summary>
+    internal static string TextoImportacionRekordbox(int entradas, int coincidencias, int actualizadas, int fallos)
+    {
+        if (entradas == 0) return "La colección de rekordbox no trae ninguna pista con archivo en el disco: no hay nada que importar.";
+        if (coincidencias == 0)
+            return $"Ninguna de las {entradas:N0} pistas de la colección de rekordbox está en las carpetas de la biblioteca. "
+                 + "En la página rekordbox se ve qué falta en cada lado y qué rutas están rotas.";
+        var texto = $"rekordbox: {coincidencias:N0} " + (coincidencias == 1 ? "canción encontrada" : "canciones encontradas")
+                  + $" · {actualizadas:N0} " + (actualizadas == 1 ? "actualizada" : "actualizadas");
+        if (fallos > 0) texto += $" · {fallos:N0} " + (fallos == 1 ? "fallo" : "fallos") + " (el detalle está en el registro)";
+        return texto + (actualizadas > 0 ? ". Se puede deshacer desde Enriquecer." : ".");
     }
 
     // =================================================================================================

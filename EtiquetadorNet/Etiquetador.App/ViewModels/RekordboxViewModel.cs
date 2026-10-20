@@ -123,6 +123,12 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
     [ObservableProperty] private string _resumenRotas = "";
     [ObservableProperty] private bool _hayReparables;
 
+    // La fila elegida en cada tabla: sobre ella actúan las opciones del menú del botón derecho.
+    [ObservableProperty] private FilaRekordbox? _faltaElegida;
+    [ObservableProperty] private FilaRota? _rotaElegida;
+    [ObservableProperty] private FilaRekordbox? _sinPrepararElegida;
+    [ObservableProperty] private FilaRekordbox? _nuncaElegida;
+
     // --- Filtros de «sin preparar» y «nunca pinchadas» ---
     [ObservableProperty] private bool _sinHotCues = true;
     [ObservableProperty] private bool _sinBeatgrid = true;
@@ -186,8 +192,23 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
     public bool Visible
     {
         get => _recalculo.Visible;
-        set => _recalculo.CambiarVisible(value);
+        set
+        {
+            var antes = _recalculo.Visible;
+            _recalculo.CambiarVisible(value);
+            if (!value || antes) return;
+            // Lo que se exportaría depende de otras páginas (la lista abierta en Tendencias, las
+            // colecciones): se recuenta cada vez que se vuelve aquí, sin leer nada de la red.
+            ActualizarResumenExportacion();
+            // Si se ha vuelto a exportar la colección desde rekordbox al mismo archivo, se lee la nueva.
+            var ruta = _engine.Config.RekordboxXml ?? "";
+            if (_coleccion != null && !IsBusy && ruta.Length > 0 && File.Exists(ruta) && File.GetLastWriteTimeUtc(ruta) != _leidaEn)
+                _ = AbrirAsync(ruta);
+        }
     }
+
+    /// <summary>Fecha de modificación del XML cuando se leyó, para notar que se ha vuelto a exportar.</summary>
+    private DateTime _leidaEn;
 
     /// <summary>
     /// Al abrir la página: la primera vez se vuelve a leer la última colección abierta; después, si la
@@ -195,7 +216,6 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
     /// </summary>
     private void AlMostrarse()
     {
-        ActualizarResumenExportacion();
         if (_coleccion != null) { _ = CruzarAsync(); return; }
         if (_intentoInicial) return;
         _intentoInicial = true;
@@ -216,8 +236,16 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         var reloj = System.Diagnostics.Stopwatch.StartNew();
         try
         {
+            var modificada = File.GetLastWriteTimeUtc(ruta);
             var coleccion = await Task.Run(() => LectorRekordbox.Leer(ruta));
+            if (EsExportacionDeBeatTag(coleccion))
+            {
+                Status = $"«{Path.GetFileName(ruta)}» es una exportación de listas hecha por BeatTag, no la colección de rekordbox. "
+                       + LectorRekordbox.ComoExportar;
+                return;
+            }
             _coleccion = coleccion;
+            _leidaEn = modificada;
             _engine.Config.RekordboxXml = ruta;
             _engine.SaveConfig();
             InfoColeccion = TextoColeccion(ruta, coleccion, File.GetLastWriteTime(ruta));
@@ -241,7 +269,15 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         await CruzarAsync();
     }
 
-    /// <summary>«rekordbox 7.2.17 · exportada el 15/08/2026 (hace 66 días) · 19.690 pistas · 66 listas».</summary>
+    /// <summary>
+    /// Lo que escribe «Llevar listas a rekordbox» también es un DJ_PLAYLISTS con colección, pero solo
+    /// trae las canciones de esas listas: cruzarlo daría casi toda la biblioteca como «no está en
+    /// rekordbox».
+    /// </summary>
+    internal static bool EsExportacionDeBeatTag(ColeccionRekordbox c)
+        => c.Producto.StartsWith(ExportadorRekordbox.CarpetaRaiz + " ", StringComparison.Ordinal) || c.Producto == ExportadorRekordbox.CarpetaRaiz;
+
+    /// <summary>«musica.xml» · rekordbox 7.2.17 · exportada el 15/08/2026 (hace 66 días) · 19.690 pistas».</summary>
     internal static string TextoColeccion(string ruta, ColeccionRekordbox c, DateTime exportada, DateTime? hoy = null)
     {
         var dias = (int)((hoy ?? DateTime.Today).Date - exportada.Date).TotalDays;
@@ -316,13 +352,24 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         FaltanView = VistaTabla.Nueva(faltan, FaltanView);
         TituloFaltan = $"No están en rekordbox ({faltan.Count:N0})";
 
-        var rotas = cruce.Rotas.Select(r => new FilaRota(r)).ToList();
-        RotasView = VistaTabla.Nueva(rotas, RotasView);
-        TituloRotas = $"Rutas rotas ({rotas.Count:N0})";
+        TituloRotas = $"Rutas rotas ({cruce.Rotas.Count:N0})";
         ResumenRotas = TextoRotas(cruce.Rotas);
         HayReparables = cruce.Reparables > 0;
+        MostrarRotas();
 
         AplicarFiltros();
+    }
+
+    /// <summary>Ver solo las entradas rotas que se pueden reparar (las demás se explican en el resumen).</summary>
+    [ObservableProperty] private bool _soloReparables;
+
+    partial void OnSoloReparablesChanged(bool value) => MostrarRotas();
+
+    private void MostrarRotas()
+    {
+        if (_cruce == null) return;
+        var rotas = _cruce.Rotas.Where(r => !SoloReparables || r.Reparable).Select(r => new FilaRota(r)).ToList();
+        RotasView = VistaTabla.Nueva(rotas, RotasView);
     }
 
     partial void OnSinHotCuesChanged(bool value) => AplicarFiltros();
@@ -442,6 +489,25 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         return err;
     }
 
+    // --- Menú de las tablas ---
+
+    /// <summary>Escucha (o para) el archivo de la fila. En las rutas rotas, el archivo encontrado.</summary>
+    public void Escuchar(IFilaConArchivo? fila)
+    {
+        var ruta = fila?.RutaArchivo ?? "";
+        if (ruta.Length == 0) { Status = fila is FilaRota ? "No se ha encontrado ningún archivo para esa entrada." : "Elige antes una canción de la tabla."; return; }
+        try { _engine.Preview.Toggle(ruta); }
+        catch (Exception e) { Status = "No se pudo reproducir: " + e.Message; }
+    }
+
+    /// <summary>Abre la carpeta del archivo de la fila. En las rutas rotas, la del archivo encontrado.</summary>
+    public async Task AbrirCarpetaAsync(IFilaConArchivo? fila)
+    {
+        var ruta = fila?.RutaArchivo ?? "";
+        if (ruta.Length == 0) { Status = fila is FilaRota ? "No se ha encontrado ningún archivo para esa entrada." : "Elige antes una canción de la tabla."; return; }
+        await Shell.OpenContainingFolderAsync(ruta);
+    }
+
     // --- Reparar (b) ---
 
     public int Reparables => _cruce?.Reparables ?? 0;
@@ -459,9 +525,14 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         if (IsBusy) return;
         IsBusy = true;
         Status = "Escribiendo la colección reparada…";
+        // El título de cada archivo nuevo, de la biblioteca (ver RekordboxRelocator.Repair).
+        var titulos = new Dictionary<string, string>(ComparadorRutas.Instancia);
+        foreach (var t in _engine.Library.Tracks)
+            if (!string.IsNullOrWhiteSpace(t.Title)) titulos.TryAdd(t.FilePath, t.Title!);
         try
         {
-            var r = await Task.Run(() => RekordboxRelocator.Repair(origen, destino, mapa, conLista: true));
+            var r = await Task.Run(() => RekordboxRelocator.Repair(origen, destino, mapa, conLista: true,
+                                                                   tituloDe: ruta => titulos.GetValueOrDefault(ruta)));
             if (!r.Ok) { Status = "No se pudo reparar: " + r.Error; return; }
             Status = TextoReparada(r.Reparadas, Path.GetFileName(destino));
             _engine.Logger.Sum($"rekordbox: colección reparada en «{destino}»: {r.Reparadas} reparadas · {r.SinCambio} sin cambio · {r.NoEncontradas} no encontradas.");
@@ -476,7 +547,8 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
             : (reparadas == 1 ? $"1 ruta reparada en «{archivo}». " : $"{reparadas:N0} rutas reparadas en «{archivo}». ")
               + "Para llevarla a rekordbox: en Preferencias → Avanzado → rekordbox xml, elige ese archivo; después, en el apartado "
               + $"«rekordbox xml» de la izquierda, abre la lista «{RekordboxRelocator.ListaReparadas}», selecciona sus pistas e impórtalas a la colección. "
-              + "Llegan con sus cue points, su beatgrid, su valoración y sus comentarios.";
+              + "Llegan con sus cue points, su beatgrid, su valoración y sus comentarios. Las entradas antiguas siguen en la colección como "
+              + "archivos no encontrados: cuando compruebes que las reparadas están bien, puedes quitarlas.";
 
     // =============================================================================================
     // P11: exportar las listas de BeatTag
@@ -501,7 +573,8 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
     {
         var partes = new List<string>();
         if (colecciones > 0) partes.Add(Cuenta(colecciones, "colección", "colecciones"));
-        if (abiertas > 0) partes.Add(abiertas == 1 ? "1 lista abierta en Tendencias o Playlists" : $"{abiertas} listas y órdenes abiertos en Tendencias, Playlists o el Asistente");
+        // Un orden para mezclar también es una lista para rekordbox: se cuentan juntos.
+        if (abiertas > 0) partes.Add(abiertas == 1 ? "1 lista abierta en Tendencias, Playlists o el Asistente" : $"{abiertas} listas abiertas en Tendencias, Playlists o el Asistente");
         if (seguidas > 0) partes.Add(seguidas == 1 ? "1 lista que sigues (se vuelve a leer de internet)" : $"{seguidas} listas que sigues (se vuelven a leer de internet)");
         if (conseguidas > 0) partes.Add(conseguidas == 1 ? "la canción pendiente ya conseguida" : $"las {conseguidas} canciones pendientes ya conseguidas");
         if (partes.Count == 0) return "Con lo marcado no hay nada que exportar.";
@@ -521,6 +594,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
     {
         if (Exportando) return;
         if (PendientesViewModel.MotivoSinBiblioteca(_engine.Library) is { Length: > 0 } motivo) { Status = motivo; return; }
+        if (MotivoDestinoNoValido(destino, _engine.Config.RekordboxXml ?? "") is { Length: > 0 } malo) { Status = malo; return; }
         Exportando = true;
         _ctsExportar = new CancellationTokenSource();
         var ct = _ctsExportar.Token;
@@ -575,6 +649,37 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         }
     }
 
+    /// <summary>
+    /// La colección exportada de rekordbox que se ha abierto aquí no se sustituye nunca por las listas:
+    /// se perdería la base del cruce y de la reparación. "" si el destino vale.
+    /// </summary>
+    internal static string MotivoDestinoNoValido(string destino, string coleccionAbierta)
+        => coleccionAbierta.Length > 0 && ComparadorRutas.Instancia.Equals(Path.GetFullPath(destino), Path.GetFullPath(coleccionAbierta))
+            ? "Ese archivo es la colección exportada de rekordbox que se ha abierto aquí: elige otro nombre para no sustituirla."
+            : "";
+
+    /// <summary>
+    /// La lista abierta en Tendencias o Playlists (las canciones que están en la biblioteca, en el
+    /// orden de la lista) y, si se ordenó para mezclar, ese orden como otra lista. El nombre, sin la
+    /// fecha que lleva el del M3U8: rekordbox ve la exportación siempre en el mismo archivo y una
+    /// lista con la fecha en el nombre cambiaría de nombre cada día.
+    /// </summary>
+    internal static IEnumerable<ListaParaRekordbox> DeListaAbierta(string nombreSugerido, IReadOnlyList<TrendRow> filas,
+                                                                   IReadOnlyList<string> ordenMezcla)
+    {
+        var nombre = SinFecha(nombreSugerido);
+        var rutas = filas.Where(f => f.Tengo).OrderBy(f => f.Position).Select(f => f.FilePath).ToList();
+        if (rutas.Count > 0) yield return new ListaParaRekordbox(CarpetaListas, nombre, rutas);
+        if (ordenMezcla.Count > 0) yield return new ListaParaRekordbox(CarpetaOrdenes, nombre, ordenMezcla);
+    }
+
+    /// <summary>Subcarpetas de «BeatTag» en rekordbox.</summary>
+    internal const string CarpetaColecciones = "Colecciones", CarpetaListas = "Listas", CarpetaOrdenes = "Órdenes para mezclar";
+
+    /// <summary>«Tendencias Spain 2026-10-20» → «Tendencias Spain».</summary>
+    internal static string SinFecha(string nombre)
+        => System.Text.RegularExpressions.Regex.Replace(nombre ?? "", @"\s+\d{4}-\d{2}-\d{2}\s*$", "").Trim();
+
     private static string Errores(IReadOnlyList<string> errores)
         => errores.Count == 0 ? ""
          : errores.Count == 1 ? " No se pudo leer una de las listas que sigues: " + errores[0]
@@ -626,7 +731,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
                 .ThenBy(x => x.t.Artist, StringComparer.CurrentCultureIgnoreCase)
                 .Select(x => x.t.FilePath)
                 .ToList();
-            listas.Add(new ListaParaRekordbox("Colecciones", c.Nombre, rutas));
+            listas.Add(new ListaParaRekordbox(CarpetaColecciones, c.Nombre, rutas));
         }
         return listas;
     }
@@ -690,7 +795,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
                     if (pistas.Count == 0) { errores.Add($"«{l.Nombre}»: no se ha podido descargar el chart."); continue; }
                 }
                 var rutas = await Task.Run(() => pistas.Select(t => indice.Buscar(t.Artist, t.Title)).Where(r => r.Length > 0).ToList(), ct);
-                res.Add(new ListaParaRekordbox("Listas", l.Nombre, rutas));
+                res.Add(new ListaParaRekordbox(CarpetaListas, l.Nombre, rutas));
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception e) { errores.Add($"«{l.Nombre}»: {e.Message}"); }
