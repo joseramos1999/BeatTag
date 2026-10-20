@@ -371,6 +371,7 @@ public sealed class AppEngine
             Fingerprints.Save();
             Identificacion.Save();
             Loudness.Save();
+            EspectroCargado?.Save();   // sigue al archivo como la sonoridad (SeguirArchivo)
             return e;
         }).ConfigureAwait(true);
         Registrar("la caché de análisis", errorAnalisis);
@@ -414,6 +415,9 @@ public sealed class AppEngine
         Fingerprints.Save();
         Identificacion.Save();
         Loudness.Save();
+        // La calidad real también sigue al archivo (SeguirArchivo): se guarda con la sonoridad, y no
+        // solo con el reloj de 30 s, para que un cierre forzado tras un lote no la deje atrás.
+        EspectroCargado?.Save();
         Registrar("los avisos aceptados de Comprobar audio", AudioAceptadas.Save());
     }
 
@@ -434,6 +438,7 @@ public sealed class AppEngine
     {
         var mueve = !string.Equals(origen, destino, StringComparison.Ordinal);
         if (mueve) SeguirSustituciones(origen, destino);
+        if (mueve) SeguirExclusionDeVolumen(origen, destino);
         try
         {
             if (mueve)
@@ -461,6 +466,47 @@ public sealed class AppEngine
             if (mueve) Fingerprints.Mover(origen, destino);
             if (antes.Existe) Fingerprints.Retocar(destino, antes.M, antes.S);
         });
+    }
+
+    /// <summary>
+    /// Cómo se lleva un cambio de la configuración al hilo de la interfaz, que es donde se lee y se toca
+    /// (Volumen añade y quita exclusiones ahí). SeguirArchivo llega también desde hilos de fondo.
+    /// </summary>
+    internal Action<Action> EnLaInterfaz { get; set; } = a => Avalonia.Threading.Dispatcher.UIThread.Post(a);
+
+    /// <summary>
+    /// Una canción excluida del ajuste de volumen sigue excluida al renombrarla o moverla. La exclusión
+    /// va por ruta exacta: sin esto, tras renombrarla (Enriquecer, el Editor, la Bandeja…) su medida de
+    /// sonoridad pasaba a la ruta nueva, la fila volvía a salir sin excluir y con «Ajustar» marcada, y
+    /// el siguiente «Ajustar volumen» la cambiaba en contra de lo que pidió el DJ.
+    /// </summary>
+    private void SeguirExclusionDeVolumen(string origen, string destino)
+    {
+        // Sin exclusiones (lo normal) no se molesta a la interfaz por cada renombrado de un lote.
+        if (Config is not { VolumenCancionesExcluidas.Count: > 0 }) return;
+        EnLaInterfaz(() =>
+        {
+            if (!CambiarRutaExcluida(Config.VolumenCancionesExcluidas, origen, destino)) return;
+            SaveConfig();
+            Logger.Detail($"Volumen: «{Path.GetFileName(destino)}» sigue excluida del ajuste con su nombre nuevo.");
+        });
+    }
+
+    /// <summary>
+    /// Cambia <paramref name="origen"/> por <paramref name="destino"/> en una lista de rutas excluidas
+    /// (sin distinguir mayúsculas, como la compara Volumen). Si el destino ya estaba, solo se quita el
+    /// origen. Devuelve si cambió algo.
+    /// </summary>
+    internal static bool CambiarRutaExcluida(List<string> lista, string origen, string destino)
+    {
+        var i = lista.FindIndex(r => string.Equals(r, origen, StringComparison.OrdinalIgnoreCase));
+        if (i < 0) return false;
+        // Un cambio solo de mayúsculas encuentra el origen como destino: entonces se sustituye.
+        var j = lista.FindIndex(r => string.Equals(r, destino, StringComparison.OrdinalIgnoreCase));
+        if (j >= 0 && j != i) lista.RemoveAt(i);
+        else if (string.Equals(lista[i], destino, StringComparison.Ordinal)) return false;
+        else lista[i] = destino;
+        return true;
     }
 
     /// <summary>
@@ -521,14 +567,30 @@ public sealed class AppEngine
     private UndoResult TrasDeshacer(UndoResult res)
     {
         if (res.None || res.Tocadas.Count == 0) return res;
+        GuardarCachesLigeras();
+        return res;
+    }
+
+    /// <summary>
+    /// Guarda las cachés de audio que pesan poco (identificación, que puede llevar respuestas pagadas,
+    /// sonoridad y calidad real) y los avisos aceptados, tras una escritura por lotes que las ha hecho
+    /// seguir al archivo: deshacer, o importar BPM y tonalidad de rekordbox. Las huellas las guardan el
+    /// reloj y el cierre. Fuera del hilo de la interfaz.
+    /// </summary>
+    public void GuardarCachesLigeras()
+    {
         try
         {
             Identificacion.Save();
             Loudness.Save();
+            // Los seguimientos del espectro pueden esperar aún en la cola de las huellas (SeguirEspectro).
+            bool enCola;
+            lock (_cerrojoEspectro) enCola = _espectroEnCola > 0;
+            if (enCola) EsperarColaDeHuellas();
+            EspectroCargado?.Save();
             Registrar("los avisos aceptados de Comprobar audio", AudioAceptadas.Save());
         }
-        catch (Exception e) { Logger.Error("Guardar las cachés de audio tras deshacer", e); }
-        return res;
+        catch (Exception e) { Logger.Error("Guardar las cachés de audio tras escribir por lotes", e); }
     }
 
     private readonly object _cerrojoHuellas = new();
@@ -1354,24 +1416,44 @@ public sealed class AppEngine
     /// <summary>La caché del espectro si ya se cargó; null si nadie la ha pedido aún (no hay nada que guardar).</summary>
     private EspectroScanner? EspectroCargado { get { lock (_cerrojoEspectro) return _espectro; } }
 
+    /// <summary>Seguimientos del espectro que esperan en la cola de las huellas (bajo <see cref="_cerrojoEspectro"/>).</summary>
+    private int _espectroEnCola;
+
     /// <summary>
     /// La medida del espectro acompaña al archivo que la aplicación acaba de renombrar, etiquetar o
     /// ajustar de volumen: nada de eso cambia hasta dónde llega el audio. Se carga la caché si existe
     /// en disco, aunque nadie la haya pedido en esta sesión: si no, una medida guardada ayer se quedaría
     /// apuntando al nombre antiguo.
+    ///
+    /// Con la caché ya en memoria se sigue al momento. Sin cargar, cargarla es leer y deserializar de
+    /// 1,5 a 3 MB, y el Editor y Volumen llaman desde el hilo de la interfaz: eso va a la cola serie de
+    /// las huellas, que conserva el orden de los traslados y que GuardarTodo espera antes de guardar.
+    /// Mientras quede alguno en esa cola, los siguientes van detrás para no adelantarlo (un A→B en
+    /// cola y un B→C directo dejarían la medida en B).
     /// </summary>
     private void SeguirEspectro(string origen, string destino, SelloArchivo antes)
     {
-        try
+        EspectroScanner? cache;
+        lock (_cerrojoEspectro)
         {
-            var cache = EspectroCargado;
-            if (cache == null)
-            {
-                if (!File.Exists(EspectroScanner.RutaCache(Paths))) return;
-                cache = Espectro;
-            }
-            cache.Seguir(origen, destino, antes);
+            cache = _espectroEnCola == 0 ? _espectro : null;
+            if (cache == null) _espectroEnCola++;
         }
-        catch (Exception e) { Logger.Error($"No se pudo poner al día la calidad real de «{Path.GetFileName(destino)}»", e); }
+        if (cache != null)
+        {
+            try { cache.Seguir(origen, destino, antes); }
+            catch (Exception e) { Logger.Error($"No se pudo poner al día la calidad real de «{Path.GetFileName(destino)}»", e); }
+            return;
+        }
+        EnColaDeHuellas(() =>
+        {
+            try
+            {
+                if (EspectroCargado != null || File.Exists(EspectroScanner.RutaCache(Paths)))
+                    Espectro.Seguir(origen, destino, antes);
+            }
+            catch (Exception e) { Logger.Error($"No se pudo poner al día la calidad real de «{Path.GetFileName(destino)}»", e); }
+            finally { lock (_cerrojoEspectro) _espectroEnCola--; }
+        });
     }
 }

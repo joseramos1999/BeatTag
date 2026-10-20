@@ -1,0 +1,252 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using Etiquetador.App.Services;
+using Etiquetador.App.ViewModels;
+using Etiquetador.Core;
+using Etiquetador.Core.Analysis;
+using Etiquetador.Core.Dj;
+using Etiquetador.Core.Pipeline;
+using Etiquetador.Core.Providers;
+
+namespace Etiquetador.Tests;
+
+/// <summary>
+/// Revisión de la unión de la tanda 4: las cachés de audio y las exclusiones de Volumen siguen al
+/// archivo por todos los caminos que escriben en él, y la caché de la calidad real (P4) se carga y se
+/// guarda como las demás.
+/// </summary>
+public class RevisionTanda4Tests : IDisposable
+{
+    private readonly string _dir = Mp3Fixture.NewTempDir();
+    public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
+
+    private string Ruta(params string[] partes)
+    {
+        var r = Path.Combine(new[] { _dir }.Concat(partes).ToArray());
+        Directory.CreateDirectory(Path.GetDirectoryName(r)!);
+        return r;
+    }
+
+    /// <summary>
+    /// El motor real sin su constructor (que solo trabaja sobre la carpeta de datos de Documentos), con
+    /// las cachés de audio, la configuración y las colas que usan SeguirArchivo y los guardados.
+    /// </summary>
+    private AppEngine Motor(Logger log)
+    {
+        var motor = (AppEngine)RuntimeHelpers.GetUninitializedObject(typeof(AppEngine));
+        void Poner(string campo, object valor)
+        {
+            var f = typeof(AppEngine).GetField(campo, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.True(f != null, $"AppEngine ya no tiene el campo {campo}: actualiza Motor");
+            f!.SetValue(motor, valor);
+        }
+        var datos = Ruta("datos", "x");
+        var paths = new AppPaths(Path.GetDirectoryName(datos)!);
+        var api = new ApiClient(paths);
+        var huellas = new Fingerprint(paths, log);
+        Poner("<Paths>k__BackingField", paths);
+        Poner("<Logger>k__BackingField", log);
+        Poner("<Avisos>k__BackingField", new AvisosApp());
+        Poner("<Config>k__BackingField", new AppConfig());
+        Poner("<Api>k__BackingField", api);
+        Poner("<AudioAceptadas>k__BackingField", new IgnoreList(paths.AudioAceptadasPath));
+        Poner("<Loudness>k__BackingField", new LoudnessScanner(paths.LoudnessCachePath, log));
+        Poner("<Fingerprints>k__BackingField", new FingerprintScanner(paths.FingerprintCachePath, huellas.FpcalcPath, log));
+        Poner("<Identificacion>k__BackingField", new IdentificationScanner(paths.IdentificacionCachePath, huellas, new AcoustIdProvider(api),
+                                                                          new AuddProvider(new HttpClient(), log), new HttpClient(), log));
+        Poner("<Analysis>k__BackingField", new AnalysisCache(paths.AnalysisCachePath));
+        Poner("<Marks>k__BackingField", new ApplyMarks(paths.ApplyMarksPath));
+        Poner("<Applied>k__BackingField", new IgnoreList(paths.AppliedPath));
+        Poner("<Ignored>k__BackingField", new IgnoreList(paths.IgnoredPath));
+        Poner("_cerrojoSustituciones", new object());
+        Poner("_sustituciones", new AlmacenSustituciones(AlmacenSustituciones.RutaEn(paths.DataDir)));
+        Poner("_cerrojoHuellas", new object());
+        Poner("_colaHuellas", Task.CompletedTask);
+        Poner("_cerrojoEspectro", new object());
+        Poner("_relojPunto", System.Diagnostics.Stopwatch.StartNew());
+        motor.EnLaInterfaz = a => a();   // en la aplicación, Dispatcher.UIThread.Post
+        return motor;
+    }
+
+    private static object? Privado(AppEngine motor, string metodo, params object[] args)
+    {
+        var m = typeof(AppEngine).GetMethod(metodo, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.True(m != null, $"AppEngine ya no tiene el método {metodo}");
+        return m!.Invoke(motor, args);
+    }
+
+    private static object? Campo(AppEngine motor, string campo)
+        => typeof(AppEngine).GetField(campo, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(motor);
+
+    /// <summary>Deja en espectro.json una medida válida para cada archivo (con su fecha y tamaño de ahora).</summary>
+    private static void MedidasGuardadas(AppPaths paths, params string[] archivos)
+    {
+        var mapa = archivos.ToDictionary(a => a, a =>
+        {
+            var s = SelloArchivo.De(a);
+            return new Dictionary<string, long>
+            {
+                ["M"] = s.M, ["S"] = s.S, ["E"] = (int)EstadoCorte.SinCorte, ["C"] = 0, ["T"] = 21_000, ["V"] = EspectroScanner.VersionMetodo,
+            };
+        });
+        File.WriteAllText(paths.EspectroCachePath, JsonSerializer.Serialize(mapa));
+    }
+
+    private static MedidaEspectro? MedidaEnDisco(AppPaths paths, string archivo)
+        => new EspectroScanner(paths.EspectroCachePath).Get(archivo);
+
+    // ---------------------------------------------------------------------------------------------
+    // datos-2: importar BPM y tonalidad de rekordbox
+    // ---------------------------------------------------------------------------------------------
+
+    // Importar escribe etiquetas, y la calidad real (como las huellas, la sonoridad y las
+    // identificaciones de pago) caducaba por la fecha: importar 9.213 canciones obligaba a medirlas otra
+    // vez. Ahora la medida sigue al archivo, queda guardada y el manifiesto deshace la importación.
+    [Fact]
+    public void Importar_de_rekordbox_conserva_la_calidad_real_y_se_puede_deshacer()
+    {
+        var log = new Logger();
+        var motor = Motor(log);
+        var tema = Ruta("Musica", "Tema uno.mp3");
+        var otra = Ruta("Musica", "Otra.mp3");
+        Mp3Fixture.WriteMinMp3(tema);
+        Mp3Fixture.WriteMinMp3(otra);
+        File.SetLastWriteTimeUtc(tema, DateTime.UtcNow.AddDays(-3));   // para que escribir cambie la fecha
+        MedidasGuardadas(motor.Paths, tema, otra);
+        var antes = SelloArchivo.De(tema);
+        var xml = Ruta("coleccion.xml");
+        File.WriteAllText(xml, $"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <DJ_PLAYLISTS Version="1.0.0">
+              <COLLECTION Entries="1">
+                <TRACK TrackID="1" Name="Tema uno" AverageBpm="124.00" Tonality="8A" Location="{RekordboxRelocator.PathToLocation(tema)}"/>
+              </COLLECTION>
+            </DJ_PLAYLISTS>
+            """);
+        var manifiesto = motor.Paths.NuevoManifiesto();
+
+        var r = LibraryViewModel.ImportarBpmYTonalidad(xml, new[] { (tema, "Tema uno.mp3"), (otra, "Otra.mp3") }, overwrite: true,
+                                                       manifiesto, (ruta, sello) => motor.SeguirArchivo(ruta, ruta, sello));
+        motor.GuardarCachesLigeras();
+
+        Assert.Equal((1, 1, 1), (r.Entradas, r.Coincidencias, r.Actualizadas));
+        Assert.Empty(r.Fallos);
+        Assert.NotEqual(antes, SelloArchivo.De(tema));             // el archivo sí cambió
+        Assert.NotNull(MedidaEnDisco(motor.Paths, tema));          // y su medida sigue valiendo, ya guardada
+        Assert.NotNull(MedidaEnDisco(motor.Paths, otra));
+
+        // El manifiesto lleva el nombre que reconoce el historial y deshace la importación.
+        Assert.Matches(@"^run_\d{8}_\d{6}(_\d+)?\.jsonl$", Path.GetFileName(manifiesto));
+        Assert.Equal(1, new UndoEngine(motor.Paths).UndoLastRun(manifiesto).Reverted);
+        using var f = TagLib.File.Create(tema);
+        Assert.Equal(0u, f.Tag.BeatsPerMinute);
+    }
+
+    // interfaz-11: el texto concuerda en número también con una sola pista.
+    [Fact]
+    public void La_importacion_con_una_sola_pista_que_no_esta_lo_dice_en_singular()
+    {
+        Assert.Equal("La única pista de la colección de rekordbox no está en las carpetas de la biblioteca. "
+                   + "En la página rekordbox se ve qué falta en cada lado y qué rutas están rotas.",
+                     LibraryViewModel.TextoImportacionRekordbox(1, 0, 0, 0));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // menor-volumen_copias-1: las exclusiones de Volumen siguen al archivo
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Una_cancion_excluida_del_ajuste_de_volumen_sigue_excluida_al_renombrarla()
+    {
+        var motor = Motor(new Logger());
+        var acapella = Ruta("Musica", "acapella.mp3");
+        var renombrada = Ruta("Musica", "Artista - Acapella (Intro).mp3");
+        motor.Config.VolumenCancionesExcluidas = new List<string> { Ruta("Musica", "otra.mp3"), acapella };
+
+        motor.SeguirArchivo(acapella, renombrada, default);
+
+        Assert.Equal(new[] { Ruta("Musica", "otra.mp3"), renombrada }, motor.Config.VolumenCancionesExcluidas);
+        // Queda guardado: al volver a abrir BeatTag sigue excluida.
+        Assert.Contains(renombrada, AppConfig.Load(motor.Paths, out _).VolumenCancionesExcluidas);
+
+        // Lo que no está excluido no toca la configuración.
+        var guardada = File.GetLastWriteTimeUtc(motor.Paths.ConfigPath);
+        motor.SeguirArchivo(Ruta("Musica", "x.mp3"), Ruta("Musica", "y.mp3"), default);
+        Assert.Equal(guardada, File.GetLastWriteTimeUtc(motor.Paths.ConfigPath));
+    }
+
+    [Fact]
+    public void Cambiar_una_ruta_excluida_respeta_mayusculas_y_duplicados()
+    {
+        var lista = new List<string> { @"D:\M\a.mp3", @"D:\M\b.mp3" };
+        Assert.True(AppEngine.CambiarRutaExcluida(lista, @"D:\M\A.MP3", @"D:\M\A.mp3"));   // solo cambian las mayúsculas
+        Assert.Equal(new[] { @"D:\M\A.mp3", @"D:\M\b.mp3" }, lista);
+        Assert.True(AppEngine.CambiarRutaExcluida(lista, @"D:\M\A.mp3", @"D:\M\B.mp3"));   // el destino ya estaba
+        Assert.Equal(new[] { @"D:\M\b.mp3" }, lista);
+        Assert.False(AppEngine.CambiarRutaExcluida(lista, @"D:\M\z.mp3", @"D:\M\w.mp3"));
+        Assert.False(AppEngine.CambiarRutaExcluida(lista, @"D:\M\b.mp3", @"D:\M\b.mp3"));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // rendimiento-4 y rendimiento-5: la caché del espectro, fuera del hilo que llama y guardada
+    // ---------------------------------------------------------------------------------------------
+
+    // El Editor y Volumen llaman a SeguirArchivo desde el hilo de la interfaz: si la caché no estaba
+    // cargada, se leía allí (1,5-3 MB). Ahora la carga va a la cola de las huellas, en orden.
+    [Fact]
+    public void Sin_la_cache_cargada_el_espectro_se_sigue_en_segundo_plano_y_en_orden()
+    {
+        var motor = Motor(new Logger());
+        var a = Ruta("Musica", "a.mp3");
+        Mp3Fixture.WriteMinMp3(a);
+        MedidasGuardadas(motor.Paths, a);
+        var b = Ruta("Musica", "b.mp3");
+        var c = Ruta("Musica", "c.mp3");
+
+        using var suelta = new ManualResetEventSlim();
+        Privado(motor, "EnColaDeHuellas", (Action)(() => suelta.Wait(TimeSpan.FromSeconds(30))));   // la cola, ocupada
+        File.Move(a, b);
+        motor.SeguirArchivo(a, b, default);
+
+        Assert.Null(Campo(motor, "_espectro"));   // no se ha leído en este hilo
+
+        // Alguien carga la caché mientras tanto (la página Calidad) y llega otro renombrado: va detrás
+        // del primero, no se le adelanta.
+        _ = motor.Espectro;
+        File.Move(b, c);
+        motor.SeguirArchivo(b, c, default);
+        suelta.Set();
+        motor.GuardarCachesLigeras();
+
+        Assert.Null(motor.Espectro.Get(b));
+        Assert.NotNull(motor.Espectro.Get(c));
+        Assert.NotNull(MedidaEnDisco(motor.Paths, c));
+        Assert.Equal(0, (int)Campo(motor, "_espectroEnCola")!);
+    }
+
+    // AplicarGeneros, el renombrado con IA y el volcado de fichas guardan sus cachés con
+    // GuardarCachesDeAudio, y Enriquecer con el punto de control: la calidad real se guarda con ellas.
+    [Fact]
+    public async Task Los_guardados_tras_un_lote_incluyen_la_calidad_real()
+    {
+        var motor = Motor(new Logger());
+        var a = Ruta("Musica", "a.mp3");
+        var b = Ruta("Musica", "b.mp3");
+        var c = Ruta("Musica", "c.mp3");
+        Mp3Fixture.WriteMinMp3(a);
+        MedidasGuardadas(motor.Paths, a);
+        _ = motor.Espectro;   // ya cargada: se sigue al momento
+
+        File.Move(a, b);
+        motor.SeguirArchivo(a, b, default);
+        Privado(motor, "GuardarCachesDeAudio");
+        Assert.NotNull(MedidaEnDisco(motor.Paths, b));
+
+        File.Move(b, c);
+        motor.SeguirArchivo(b, c, default);
+        typeof(AppEngine).GetField("_desdeElUltimoPunto", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(motor, 10_000);
+        Assert.True(await motor.PuntoDeControlAsync());
+        Assert.NotNull(MedidaEnDisco(motor.Paths, c));
+    }
+}
