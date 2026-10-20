@@ -32,7 +32,7 @@ public class RevisionTanda4Tests : IDisposable
     /// El motor real sin su constructor (que solo trabaja sobre la carpeta de datos de Documentos), con
     /// las cachés de audio, la configuración y las colas que usan SeguirArchivo y los guardados.
     /// </summary>
-    private AppEngine Motor(Logger log)
+    private AppEngine Motor(Logger log, LibraryStore? biblioteca = null)
     {
         var motor = (AppEngine)RuntimeHelpers.GetUninitializedObject(typeof(AppEngine));
         void Poner(string campo, object valor)
@@ -65,6 +65,7 @@ public class RevisionTanda4Tests : IDisposable
         Poner("_colaHuellas", Task.CompletedTask);
         Poner("_cerrojoEspectro", new object());
         Poner("_relojPunto", System.Diagnostics.Stopwatch.StartNew());
+        if (biblioteca != null) Poner("<Library>k__BackingField", biblioteca);
         motor.EnLaInterfaz = a => a();   // en la aplicación, Dispatcher.UIThread.Post
         return motor;
     }
@@ -248,5 +249,68 @@ public class RevisionTanda4Tests : IDisposable
         typeof(AppEngine).GetField("_desdeElUltimoPunto", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(motor, 10_000);
         Assert.True(await motor.PuntoDeControlAsync());
         Assert.NotNull(MedidaEnDisco(motor.Paths, c));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // menor-audio_medido-2 y -4: la página Calidad
+    // ---------------------------------------------------------------------------------------------
+
+    private sealed class Pagina : IEstadoPagina, IProgresoPagina
+    {
+        public string Status => "";
+        public bool IsBusy { get; init; }
+        public double Progress => 0;
+    }
+
+    private sealed class PaginaConTrabajosSinAvance : IEstadoPagina, IProgresoPagina
+    {
+        public string Status => "";
+        public bool IsBusy { get; init; }
+        public double Progress => 0;
+        public bool ConAvance { get; init; }
+    }
+
+    [Fact]
+    public void La_barra_del_pie_sale_solo_si_lo_que_se_hace_tiene_avance()
+    {
+        Assert.True(MainViewModel.HayBarra(new Pagina { IsBusy = true }));   // lo de siempre
+        Assert.False(MainViewModel.HayBarra(new Pagina { IsBusy = false }));
+        Assert.False(MainViewModel.HayBarra(new PaginaConTrabajosSinAvance { IsBusy = true, ConAvance = false }));
+        Assert.True(MainViewModel.HayBarra(new PaginaConTrabajosSinAvance { IsBusy = true, ConAvance = true }));
+        Assert.False(MainViewModel.HayBarra(null));
+    }
+
+    // «Analizar calidad real» con la biblioteca sin escanear: mientras escanea, la barra sin avance de
+    // la página y ninguna en el pie (antes, la de avance parada en 0 y la del pie con el valor viejo).
+    [Fact]
+    public async Task Calidad_no_ensena_una_barra_de_avance_parada_mientras_escanea()
+    {
+        var musica = Directory.CreateDirectory(Path.Combine(_dir, "Musica")).FullName;
+        var store = new LibraryStore(new AppConfig { Folders = new() { musica } }, () => { }, new ScanCache(Ruta("scan.json")));
+        var vm = new QualityViewModel(Motor(new Logger(), store));
+        var alEscanear = new List<(bool Analizando, bool SinAvance, bool Pie)>();
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(vm.Status) && vm.Status == "Escaneando biblioteca…")
+                alEscanear.Add((vm.AnalizandoEspectro, vm.OcupadaSinAvance, MainViewModel.HayBarra(vm)));
+        };
+        var conAvance = new List<bool>();
+        vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(vm.ConAvance)) conAvance.Add(vm.ConAvance); };
+
+        await vm.AnalizarEspectroCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { (false, true, false) }, alEscanear);
+        Assert.Equal(new[] { true, false }, conAvance);   // la barra de avance, solo mientras analiza
+        Assert.StartsWith("Análisis de la calidad real terminado", vm.Status);
+    }
+
+    [Fact]
+    public void Solo_sospechosos_sin_nada_medido_dice_que_hay_que_analizar()
+    {
+        Assert.Equal("0 de 15000 · Pulsa «Analizar calidad real» para medir los archivos.",
+                     QualityViewModel.TextoFiltro(hayBusqueda: false, soloSospechosos: true, 0, 15000, hayMedidas: false));
+        Assert.Equal("12 de 15000", QualityViewModel.TextoFiltro(false, true, 12, 15000, hayMedidas: true));
+        Assert.Equal("3 de 15000", QualityViewModel.TextoFiltro(true, false, 3, 15000, hayMedidas: false));
+        Assert.Equal("", QualityViewModel.TextoFiltro(false, false, 15000, 15000, hayMedidas: false));
     }
 }

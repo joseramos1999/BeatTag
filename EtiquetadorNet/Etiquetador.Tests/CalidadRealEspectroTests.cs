@@ -241,8 +241,13 @@ public class CalidadRealEspectroTests
     [InlineData(false, 256, 18600, ValoracionCalidad.Coherente)]
     // 192: un corte de 128 solo es dudoso; un 128 que corta en 16 kHz es lo esperado.
     [InlineData(false, 192, 16000, ValoracionCalidad.Dudosa)]
+    [InlineData(false, 192, 17100, ValoracionCalidad.Dudosa)]
     [InlineData(false, 192, 18600, ValoracionCalidad.Coherente)]
     [InlineData(false, 128, 16000, ValoracionCalidad.Coherente)]
+    // 160: un LAME de 160 legítimo acaba hacia 17,1 kHz con este método y es coherente; con el corte
+    // de un 128 (hasta 16,8 kHz) sí es dudoso.
+    [InlineData(false, 160, 17100, ValoracionCalidad.Coherente)]
+    [InlineData(false, 160, 16600, ValoracionCalidad.Dudosa)]
     public void La_valoracion_compara_el_corte_con_lo_declarado(bool sinPerdida, int kbps, double corte, ValoracionCalidad esperada)
         => Assert.Equal(esperada, CorteEspectral.Valorar(Corte(corte), sinPerdida, kbps));
 
@@ -253,6 +258,28 @@ public class CalidadRealEspectroTests
         Assert.Equal(ValoracionCalidad.Coherente, CorteEspectral.Valorar(SinCorte, sinPerdida: false, 320));
         Assert.Equal(ValoracionCalidad.SinValorar, CorteEspectral.Valorar(new(EstadoCorte.NoConcluyente, 0, 21800), false, 320));
         Assert.Equal(ValoracionCalidad.SinValorar, CorteEspectral.Valorar(default, false, 320));
+    }
+
+    // A 32 kHz el techo de lo medido es 15,8 kHz, y a 22,05 kHz, 10,8: «sin corte» no dice nada del
+    // origen. Antes la tabla decía a la vez «Sin corte» y «≈ 128 kbps o menos · Sospechoso».
+    [Fact]
+    public void Sin_corte_con_un_muestreo_bajo_no_se_valora_y_lo_explica()
+    {
+        var a32 = new MedidaEspectro(EstadoCorte.SinCorte, 0, 15800);
+        var a22 = new MedidaEspectro(EstadoCorte.SinCorte, 0, 10800);
+
+        Assert.Equal(ValoracionCalidad.SinValorar, CorteEspectral.Valorar(a32, sinPerdida: false, 320));
+        Assert.Equal(ValoracionCalidad.SinValorar, CorteEspectral.Valorar(a22, sinPerdida: true, 0));
+        Assert.Equal("Sin corte", CorteEspectral.TextoCorte(a32));
+        Assert.Equal("Limitado por el muestreo", CorteEspectral.TextoCalidadReal(a32, sinPerdida: false));
+
+        var fila = new QualRow { FilePath = @"C:\m\a.wav", Bitrate = 1411, SinPerdida = true };
+        fila.PonerMedida(a22);
+        Assert.Equal("Limitado por el muestreo", fila.CalidadReal);
+        Assert.Equal(ValoracionCalidad.SinValorar, fila.Valoracion);
+
+        // A 44,1 o 48 kHz, sin corte sigue siendo coherente.
+        Assert.Equal(ValoracionCalidad.Coherente, CorteEspectral.Valorar(SinCorte, sinPerdida: false, 320));
     }
 
     // La frecuencia, con coma decimal, aunque el sistema esté en inglés.
@@ -272,6 +299,8 @@ public class CalidadRealEspectroTests
 
     [Theory]
     [InlineData(16000, false, "≈ 128 kbps o menos")]
+    [InlineData(16800, false, "≈ 128 kbps o menos")]
+    [InlineData(17100, false, "≈ 160 kbps")]   // un MP3 de 160 legítimo (antes, «≈ 128 kbps o menos»)
     [InlineData(18600, false, "≈ 192 kbps")]
     [InlineData(19200, false, "≈ 256 kbps")]
     [InlineData(19900, false, "≈ 320 kbps")]

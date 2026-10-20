@@ -32,4 +32,11 @@ public interface IEstadoPagina
 public interface IProgresoPagina
 {
     double Progress { get; }
+
+    /// <summary>
+    /// Lo que la ocupa ahora tiene avance que dar. Casi siempre, pero una página puede tener además
+    /// trabajos sin avance (Calidad: escanear la biblioteca), y una barra parada en 0 o en el 100 de la
+    /// vez anterior es peor que no tener barra. Quien cambie su valor avisa con PropertyChanged.
+    /// </summary>
+    bool ConAvance => true;
 }

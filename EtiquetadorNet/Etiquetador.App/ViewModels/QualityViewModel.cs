@@ -156,7 +156,19 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible, IProg
     }
 
     private void ContarFiltradas()
-        => FiltroInfo = ConsultaTabla.De(Busqueda).Vacia && !SoloSospechosos ? "" : $"{RowsView.Count} de {Rows.Count}";
+        => FiltroInfo = TextoFiltro(!ConsultaTabla.De(Busqueda).Vacia, SoloSospechosos, RowsView.Count, Rows.Count, _medidas.Count > 0);
+
+    /// <summary>
+    /// «N de M» mientras hay búsqueda o filtro de sospechosos. Con «Solo sospechosos» y nada medido,
+    /// la tabla vacía no quiere decir que no haya sospechosos: se dice que hay que analizar antes
+    /// («0 de 15000» se leía como «ninguno»).
+    /// </summary>
+    internal static string TextoFiltro(bool hayBusqueda, bool soloSospechosos, int vistas, int total, bool hayMedidas)
+    {
+        if (!hayBusqueda && !soloSospechosos) return "";
+        var texto = $"{vistas} de {total}";
+        return soloSospechosos && !hayMedidas ? texto + " · Pulsa «Analizar calidad real» para medir los archivos." : texto;
+    }
 
     protected override void Recompute()
     {
@@ -212,7 +224,15 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible, IProg
     /// <summary>Hay un análisis del espectro en marcha (para el botón «Cancelar» y la barra).</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(OcupadaSinAvance))]
+    [NotifyPropertyChangedFor(nameof(ConAvance))]
     private bool _analizandoEspectro;
+
+    /// <summary>
+    /// Solo el análisis del espectro dice por dónde va. Escanear la biblioteca («Analizar», o el
+    /// escaneo previo al análisis) no toca <see cref="Progress"/>, y la barra del pie quedaba parada
+    /// en 0 o en el 100 de la vez anterior.
+    /// </summary>
+    public bool ConAvance => AnalizandoEspectro;
 
     /// <summary>Avance del análisis del espectro, de 0 a 100. También lo enseña la barra del pie.</summary>
     [ObservableProperty] private double _progress;
@@ -284,13 +304,15 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible, IProg
         if (IsBusy) return;
         if (Store.Folders.Count == 0) { Status = "No hay carpetas configuradas. Añádelas en la pestaña Biblioteca."; return; }
         IsBusy = true;
-        AnalizandoEspectro = true;
-        Progress = 0;
         var cts = _ctsEspectro = new CancellationTokenSource();
         _engine.ReleaseAudio();   // no conviene leer mientras suena algo
         try
         {
+            // Mientras se escanea, la barra sin avance (OcupadaSinAvance): el escaneo no dice por dónde
+            // va, y la del análisis se quedaba parada en 0. La del análisis sale después.
             if (!Store.IsScanned) { Status = "Escaneando biblioteca…"; await Store.ScanAsync(); }
+            Progress = 0;
+            AnalizandoEspectro = true;
             var todas = Store.Tracks.Select(t => t.FilePath).ToList();
             var analizables = todas.Where(EspectroScanner.Analizable).ToList();
             _engine.Logger.Head($"Calidad: analizando el espectro de {analizables.Count} {Sustantivo.Archivo.De(analizables.Count)}");

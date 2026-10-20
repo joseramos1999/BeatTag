@@ -425,13 +425,15 @@ public static class FingerprintDuplicates
     /// audio reúne el tema con sus intros, acapellas y mashups, y titularlo «MUCHACHA x El Farsante
     /// (Borja Solla Mashup)» o «Bailando por Ahi (F3LY Melodic Intro) [130BPM] [INTRO LIMPIA]», como
     /// pasaba en una biblioteca real, no dice de qué tema es. Después, una con el título etiquetado:
-    /// si una copia está sin etiquetar y otra no, conviene enseñar la que dice algo. Entre esas, la
-    /// de título más corto, que es el menos adornado («Columbia» antes que «Columbia x High Hopes»),
-    /// y a igualdad la que más artistas acredita.
+    /// si una copia está sin etiquetar y otra no, conviene enseñar la que dice algo, y eso incluye el
+    /// artista: «TUSA» sin artista ganaba por título corto a «Tusa (feat. Nicki Minaj)» de Karol G, y el
+    /// grupo salía como «¿? - TUSA». Entre esas, la de título más corto, que es el menos adornado
+    /// («Columbia» antes que «Columbia x High Hopes»), y a igualdad la que más artistas acredita.
     /// </summary>
     internal static Track MuestraParaElTitulo(IReadOnlyList<Track> tracks)
         => tracks.OrderBy(t => EdicionDj.Es(t.FilePath))
                  .ThenBy(t => string.IsNullOrWhiteSpace(t.Title))
+                 .ThenBy(t => string.IsNullOrWhiteSpace(t.Artist))
                  .ThenBy(t => (t.Title ?? "").Trim().Length)
                  .ThenByDescending(t => (t.Artist ?? "").Length)
                  .First();

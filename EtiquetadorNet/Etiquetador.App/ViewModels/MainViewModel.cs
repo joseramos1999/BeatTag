@@ -552,20 +552,23 @@ public partial class MainViewModel : ViewModelBase
 
     private void OnEstadoPaginaCambiado(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is "Status" or "Progress" or "IsBusy") RefrescarEstadoPagina();
+        if (e.PropertyName is "Status" or "Progress" or "IsBusy" or nameof(IProgresoPagina.ConAvance)) RefrescarEstadoPagina();
     }
 
     private void RefrescarEstadoPagina()
     {
         var vm = VmActual;
         EstadoPagina = vm is IEstadoPagina estado ? estado.Status : "";
-
-        // La barra solo aparece si la página está trabajando Y sabe decir por dónde va. Una barra
-        // parada en cero mientras algo ocurre es peor que no tener barra.
-        var trabajando = vm is IEstadoPagina e2 && e2.IsBusy;
-        HayBarraProgreso = trabajando && vm is IProgresoPagina;
+        HayBarraProgreso = HayBarra(vm);
         ProgresoPagina = vm is IProgresoPagina p ? p.Progress : 0;
     }
+
+    /// <summary>
+    /// La barra solo aparece si la página está trabajando Y lo que hace sabe decir por dónde va. Una
+    /// barra parada en cero mientras algo ocurre es peor que no tener barra.
+    /// </summary>
+    internal static bool HayBarra(object? vm)
+        => vm is IEstadoPagina { IsBusy: true } && vm is IProgresoPagina { ConAvance: true };
 
     partial void OnBusyTabIndexChanged(int value)
     {

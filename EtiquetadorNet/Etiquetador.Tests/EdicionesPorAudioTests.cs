@@ -350,6 +350,11 @@ public class EdicionesPorAudioTests
         var pelada = Cancion("a.mp3", 200);
         Assert.Same(original, FingerprintDuplicates.MuestraParaElTitulo(new[] { extended, intro, original, pelada }));
         Assert.Same(extended, FingerprintDuplicates.MuestraParaElTitulo(new[] { pelada, extended }));
+
+        // Una copia sin artista no gana por tener el título más corto: el grupo saldría como «¿? - TUSA».
+        var sinArtista = Etiquetada("TUSA.mp3", 200, "", "TUSA");
+        var bien = Etiquetada("Karol G - Tusa.mp3", 200, "Karol G", "Tusa (feat. Nicki Minaj)");
+        Assert.Same(bien, FingerprintDuplicates.MuestraParaElTitulo(new[] { sinArtista, bien }));
     }
 
     // ---------- Comparar en un desfase ----------
