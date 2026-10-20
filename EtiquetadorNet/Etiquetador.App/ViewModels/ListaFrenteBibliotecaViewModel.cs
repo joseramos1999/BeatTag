@@ -360,6 +360,13 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
     {
         if (IsBusy) { Status = "Espera a que termine el proceso en curso."; return; }
         if (Rows.Count == 0) { Status = "Carga antes una lista."; return; }
+        // Con la biblioteca sin escanear (se canceló o falló el escaneo) todas salen como que faltan, y
+        // al escanear se tacharían de golpe con la fecha de hoy. Lo mismo que en la página Pendientes.
+        if (PendientesViewModel.MotivoSinBiblioteca(_engine.Library.IsScanned, _engine.Library.Tracks.Count) is { Length: > 0 } motivo)
+        {
+            Status = motivo;
+            return;
+        }
         var faltan = (todasLasQueFaltan ? Rows : elegidas).Where(r => !r.Tengo).ToList();
         if (faltan.Count == 0)
         {

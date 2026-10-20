@@ -305,6 +305,30 @@ public sealed class AlmacenPendientes
         return n;
     }
 
+    /// <summary>
+    /// Los archivos descartados que BeatTag ha renombrado o movido pasan a su ruta nueva, en el mismo
+    /// puesto de la lista (el último sigue siendo el que deshace «Volver a contar el archivo
+    /// descartado»). Solo si la pendiente sigue descartando la ruta vieja. Devuelve cuántos.
+    /// </summary>
+    public int CambiarDescartados(IEnumerable<(string Id, string Antes, string Ahora)> cambios)
+    {
+        var n = 0;
+        lock (_cerrojo)
+        {
+            foreach (var (id, antes, ahora) in cambios)
+            {
+                var p = _todas.FirstOrDefault(x => x.Id == id);
+                if (p == null || string.IsNullOrWhiteSpace(ahora)) continue;
+                var i = p.Descartados.FindIndex(d => string.Equals(d, antes, StringComparison.OrdinalIgnoreCase));
+                if (i < 0) continue;
+                if (p.Descartados.Contains(ahora, StringComparer.OrdinalIgnoreCase)) p.Descartados.RemoveAt(i);
+                else p.Descartados[i] = ahora;
+                n++;
+            }
+        }
+        return n;
+    }
+
     /// <summary>Devuelve "" si fue bien, o el motivo del fallo. En solo lectura no escribe nada.</summary>
     public string Guardar()
     {
@@ -366,6 +390,33 @@ public static class CrucePendientes
             else conseguidas.Add((p.Id, ruta));
         }
         return new CambiosPendientes(conseguidas, movidas, perdidas);
+    }
+
+    /// <summary>
+    /// Los descartados que han salido de la biblioteca: puede que BeatTag los haya renombrado. Solo por
+    /// ellos hace falta leer los manifiestos de deshacer, que es lo caro.
+    /// </summary>
+    public static HashSet<string> DescartadosFuera(IReadOnlyList<Pendiente> pendientes, Func<string, bool> enBiblioteca)
+        => new(pendientes.SelectMany(p => p.Descartados).Where(d => !enBiblioteca(d)), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A dónde fueron los archivos descartados que BeatTag renombró o movió, según los manifiestos de
+    /// deshacer (<paramref name="renombres"/>: ruta antigua → ruta actual, ya encadenados). Se compara
+    /// por ruta, así que sin esto un remix descartado y renombrado después por Enriquecer volvía a
+    /// tachar la canción con su nombre nuevo, y la corrección del usuario se perdía.
+    ///
+    /// Solo cuenta si la ruta nueva está en la biblioteca: es lo único que puede volver a tacharla.
+    /// </summary>
+    public static IReadOnlyList<(string Id, string Antes, string Ahora)> SeguirDescartados(
+        IReadOnlyList<Pendiente> pendientes, IReadOnlyDictionary<string, string> renombres, Func<string, bool> enBiblioteca)
+    {
+        var cambios = new List<(string, string, string)>();
+        if (renombres.Count == 0) return cambios;
+        foreach (var p in pendientes)
+            foreach (var d in p.Descartados)
+                if (!enBiblioteca(d) && renombres.TryGetValue(d, out var ahora) && enBiblioteca(ahora))
+                    cambios.Add((p.Id, d, ahora));
+        return cambios;
     }
 
     /// <summary>

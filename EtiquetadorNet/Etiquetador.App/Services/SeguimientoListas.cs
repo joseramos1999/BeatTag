@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Etiquetador.App.ViewModels;
+using Etiquetador.Core;
 using Etiquetador.Core.Dj;
 using Etiquetador.Core.Providers;
 
@@ -197,23 +198,67 @@ public sealed class SeguimientoListas
         // Nada que buscar: todas conseguidas y con su archivo en su sitio.
         if (!lista.Any(p => !p.EstaConseguida || (p.Archivo.Length > 0 && !rutas.Contains(p.Archivo)))) return;
 
+        // Antes de cruzar, los descartes siguen a los archivos que BeatTag ha renombrado: si no, el
+        // remix descartado volvería a tachar la canción con su nombre nuevo.
+        var descartesMovidos = await SeguirDescartadosAsync(lista, rutas);
+        if (descartesMovidos > 0) lista = Pendientes.Todas();
+
         var indice = (await IndiceBibliotecaCompartido.De(_engine.Library).ObtenerAsync(canciones)).Indice;
         // Mirar si existe el archivo de una conseguida que ha salido de la biblioteca toca el disco:
         // va dentro del Task.Run, y solo para esas, que son pocas.
         var cambios = await Task.Run(() => CrucePendientes.Calcular(lista, indice.Buscar, rutas.Contains,
                                                                     CrucePendientes.ArchivoDesaparecido));
         Cruces++;
-        if (cambios.Vacio) return;
 
         var tachadas = Pendientes.MarcarConseguidas(cambios.Conseguidas, DateTime.Now);
         var movidas = Pendientes.CambiarArchivos(cambios.Movidas);
         var reabiertas = Pendientes.Reabrir(cambios.SinArchivo);
-        if (tachadas + movidas + reabiertas == 0) return;
+        if (tachadas + movidas + reabiertas + descartesMovidos == 0) return;
         GuardarPendientes();
         if (tachadas > 0) _engine.Logger.Sum($"Pendientes: {tachadas} conseguida(s) al aparecer en la biblioteca.");
         if (movidas > 0) _engine.Logger.Detail($"Pendientes: {movidas} conseguida(s) siguen a su archivo, que cambió de nombre o de carpeta.");
-        if (reabiertas > 0) _engine.Logger.Sum($"Pendientes: {reabiertas} vuelve(n) a pendiente porque su archivo ya no existe (papelera o borrado) y no hay otra copia.");
+        if (reabiertas > 0) _engine.Logger.Sum($"Pendientes: {reabiertas} conseguida(s) vuelven a pendiente porque su archivo ya no existe (papelera o borrado) y no hay otra copia.");
+        if (descartesMovidos > 0) _engine.Logger.Detail($"Pendientes: {descartesMovidos} archivo(s) descartado(s) siguen descartados con su nombre nuevo.");
         PendientesCambiadas?.Invoke();
+    }
+
+    /// <summary>
+    /// Descartados que ya se buscaron en los manifiestos de deshacer sin encontrar adónde fueron. Un
+    /// archivo fuera de la biblioteca no lo renombra BeatTag, así que mientras sigan fuera no hace
+    /// falta volver a leer los manifiestos por ellos (ver AppEngine.ReubicarFichas, que hace lo mismo).
+    /// </summary>
+    private IReadOnlySet<string> _descartadosBuscados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Lleva los descartes de <see cref="Pendiente.Descartados"/> a la ruta nueva de los archivos que
+    /// BeatTag ha renombrado o movido (<see cref="CrucePendientes.SeguirDescartados"/>). Leer los
+    /// manifiestos va fuera del hilo de la interfaz, y solo cuando hay un descartado fuera de la
+    /// biblioteca que no se haya buscado ya. Devuelve cuántos ha cambiado (sin guardar).
+    /// </summary>
+    private async Task<int> SeguirDescartadosAsync(IReadOnlyList<Pendiente> lista, HashSet<string> rutas)
+    {
+        var fuera = CrucePendientes.DescartadosFuera(lista, rutas.Contains);
+        if (fuera.All(_descartadosBuscados.Contains))
+        {
+            // Los que han vuelto a la biblioteca salen de los ya buscados: si se renombran, hay que buscarlos.
+            _descartadosBuscados = fuera;
+            return 0;
+        }
+        var carpeta = _engine.Paths.UndoDir;
+        try
+        {
+            var cambios = await Task.Run(() => CrucePendientes.SeguirDescartados(lista, RekordboxRelocator.ReadRenames(carpeta), rutas.Contains));
+            var n = Pendientes.CambiarDescartados(cambios);
+            _descartadosBuscados = n == 0 ? fuera : CrucePendientes.DescartadosFuera(Pendientes.Todas(), rutas.Contains);
+            return n;
+        }
+        catch (Exception e)
+        {
+            // Sin los manifiestos se cruza igual: lo peor es que un descartado renombrado vuelva a tachar.
+            _engine.Logger.Error("Pendientes: no se pudieron leer los renombrados para seguir los archivos descartados", e);
+            _descartadosBuscados = fuera;
+            return 0;
+        }
     }
 
     // --- Listas seguidas ---
@@ -299,7 +344,8 @@ public sealed class SeguimientoListas
                         continue;
                     }
                     var pistas = await Task.Run(() => PistasDe(lectura.Pistas, k => indice.Buscar(lectura.Pistas[k].Artist, lectura.Pistas[k].Title).Length > 0), ct);
-                    var nov = Seguidas.Registrar(l.Clave, pistas, lectura.Fecha, lectura.Completa, DateTime.Now, lectura.Nombre, lectura.Aviso);
+                    var clave = ClaveTrasLeer(l, lectura.Lista);
+                    var nov = Seguidas.Registrar(clave, pistas, lectura.Fecha, lectura.Completa, DateTime.Now, lectura.Nombre, lectura.Aviso);
                     // Lista a lista: si se cierra la aplicación a mitad, lo revisado no se pierde.
                     GuardarSeguidas();
                     var faltan = nov.Nuevas.Count(k => !pistas[k].LaTienes);
@@ -325,7 +371,24 @@ public sealed class SeguimientoListas
         return res;
     }
 
-    private sealed record Lectura(IReadOnlyList<ChartTrack> Pistas, DateTime Fecha, bool Completa, string Nombre, string Aviso, string Error);
+    /// <summary>
+    /// La clave con la que apuntar la lectura de una playlist seguida. Si se siguió pegando un enlace
+    /// corto, al leerla se sabe a qué lista apuntaba y pasa a la clave (y al enlace) del largo, igual
+    /// que al abrirla en Playlists: así se reconoce se pegue como se pegue, y el enlace corto, que
+    /// caduca, no hace falta seguirlo en cada revisión.
+    /// </summary>
+    private string ClaveTrasLeer(ListaSeguida l, PlaylistLink? leida)
+    {
+        if (leida is not { } lk) return l.Clave;
+        var nueva = ListasSeguidas.ClavePlaylist(lk);
+        if (nueva == l.Clave || !Seguidas.CambiarClave(l.Clave, nueva, ListasSeguidas.EnlaceCanonico(lk))) return l.Clave;
+        _engine.Logger.Detail($"Listas seguidas: «{l.Clave}» pasa a identificarse como «{nueva}».");
+        return nueva;
+    }
+
+    /// <param name="Lista">La playlist leída, ya reconocida (null en un chart o si no se pudo leer).</param>
+    private sealed record Lectura(IReadOnlyList<ChartTrack> Pistas, DateTime Fecha, bool Completa, string Nombre, string Aviso, string Error,
+                                  PlaylistLink? Lista = null);
 
     /// <summary>
     /// Lo que hay que saber de una playlist leída a medias, pensando en seguirla. El tope de Spotify
@@ -352,7 +415,7 @@ public sealed class SeguimientoListas
         {
             var p = await _engine.Playlists.LeerAsync(l.Enlace, ct);
             if (!p.Ok) return new Lectura(Array.Empty<ChartTrack>(), DateTime.Now, false, "", "", p.Error);
-            return new Lectura(p.Pistas, DateTime.Now, LecturaCompleta(p), p.Nombre, AvisoLectura(p), "");
+            return new Lectura(p.Pistas, DateTime.Now, LecturaCompleta(p), p.Nombre, AvisoLectura(p), "", p.Lista);
         }
 
         var fuente = Enum.TryParse<ChartSource>(l.Fuente, out var f) ? f : ChartSource.Spotify;
