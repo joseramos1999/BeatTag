@@ -396,6 +396,33 @@ public class AiffBibliotecaTests : IDisposable
         Assert.Equal((1, 44100), (t.DurationSeconds, t.SampleRate));
     }
 
+    // Uno dañado (o que no es AIFF) sigue sin frecuencia después de leerlo: antes se releía en cada
+    // escaneo y obligaba a reescribir entera la caché de escaneo. Ahora se relee una sola vez.
+    [Fact]
+    public void Un_aiff_ilegible_no_se_relee_en_cada_escaneo()
+    {
+        var ruta = Path.Combine(_dir, "roto.aiff");
+        File.WriteAllBytes(ruta, Encoding.ASCII.GetBytes("esto no es un AIFF, aunque lo diga la extensión"));
+        var fi = new FileInfo(ruta);
+        var cacheFile = Path.Combine(_dir, "scan-cache.json");
+        // Como lo dejó una versión anterior: sin frecuencia y sin la marca del lector de cabecera.
+        File.WriteAllText(cacheFile, JsonSerializer.Serialize(new Dictionary<string, ScanCache.Entry>
+        {
+            [ruta] = new() { M = fi.LastWriteTimeUtc.Ticks, S = fi.Length },
+        }));
+
+        var primera = new ScanCache(cacheFile);
+        Assert.Equal(0, primera.Read(ruta).SampleRate);   // se relee esa vez…
+        Assert.Equal("", primera.Save());
+        Assert.Contains("\"La\":true", File.ReadAllText(cacheFile));
+
+        var segunda = new ScanCache(cacheFile);
+        File.Delete(cacheFile);
+        Assert.Equal(0, segunda.Read(ruta).SampleRate);
+        Assert.Equal("", segunda.Save());
+        Assert.False(File.Exists(cacheFile));              // …y ya no: sin cambios, no se reescribe la caché
+    }
+
     // Aplicar una propuesta a un AIFF-C decía «File form type is not AIFF». Ahora, en español y con
     // qué hacer, sin tocar el archivo.
     [Fact]
@@ -417,6 +444,42 @@ public class AiffBibliotecaTests : IDisposable
         Assert.Equal(ruta, res.FinalPath);   // tampoco se renombra
         Assert.Equal(antes, File.ReadAllBytes(ruta));
         Assert.False(File.Exists(Path.Combine(_dir, "run.jsonl")));
+    }
+
+    /// <summary>Un historial para deshacer que solo apunta lo que le llega.</summary>
+    private sealed class Historial : IHistorialDeshacer
+    {
+        public readonly List<Etiquetador.Core.Pipeline.UndoRecord> Anotados = new();
+        public string Anotar(Etiquetador.Core.Pipeline.UndoRecord registro) { Anotados.Add(registro); return ""; }
+    }
+
+    // Los demás escritores (el Editor, rekordbox, Unificar géneros, la ficha al comentario y las
+    // herramientas de reglas del Asistente) daban con un AIFF-C el «File form type is not AIFF» de
+    // TagLib, en inglés. Ahora dicen lo mismo que Aplicar, y no tocan el archivo ni el historial.
+    [Fact]
+    public void Los_demas_escritores_tambien_lo_dicen_con_un_texto_claro()
+    {
+        var ruta = Path.Combine(_dir, "mac.aif");
+        WriteAifc(ruta, "sowt", 16, 2, Rampa(44100 * 4));
+        var antes = File.ReadAllBytes(ruta);
+
+        Assert.Equal(LectorAiff.TextoNoSeEscribe, Assert.Throws<NotSupportedException>(() => TagEditor.Write(ruta, "Stop It", "Fisher", "", "", 0, 0, "")).Message);
+        Assert.Equal(LectorAiff.TextoNoSeEscribe, Assert.Throws<NotSupportedException>(() => TagEditor.ImportBpmKey(ruta, 124, "8A", true)).Message);
+        Assert.Equal(LectorAiff.TextoNoSeEscribe, Assert.Throws<NotSupportedException>(() =>
+            Etiquetador.App.ViewModels.EdicionManual.EscribirCambios(ruta, new TagValues("", "", "", "", 0, 0, ""),
+                new Etiquetador.App.ViewModels.FormularioEditor("mac.aif", "Stop It", "Fisher", "", "", "", "", ""), 0, 0)).Message);
+
+        var historial = new Historial();
+        var generos = AppEngine.EscribirGeneros(new[] { (ruta, "House") }, historial, "", null, null, null, CancellationToken.None);
+        Assert.EndsWith(LectorAiff.TextoNoSeEscribe, Assert.Single(generos.Fallos));
+        var volcado = AppEngine.VolcarComentarios(new[] { ruta }, _ => new Etiquetador.Core.Dj.FichaDj { Energia = 7 }, historial, "", null, null);
+        Assert.EndsWith(LectorAiff.TextoNoSeEscribe, Assert.Single(volcado.Fallos));
+        var reglas = Etiquetador.App.ViewModels.EscrituraPorReglas.Escribir(
+            new[] { new Etiquetador.Core.Dj.CambioEtiquetas(ruta) { GeneroNuevo = "House" } }, historial, "", null, null, null, CancellationToken.None, "prueba");
+        Assert.EndsWith(LectorAiff.TextoNoSeEscribe, Assert.Single(reglas.Fallos));
+
+        Assert.Empty(historial.Anotados);
+        Assert.Equal(antes, File.ReadAllBytes(ruta));
     }
 
     // Sustituir con una descarga AIFF-C no ofrece copiar las etiquetas de DJ (no se pueden leer ni

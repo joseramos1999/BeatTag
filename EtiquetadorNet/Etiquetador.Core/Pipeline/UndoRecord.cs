@@ -81,8 +81,11 @@ public sealed class UndoRecord
     ///
     /// Lo pone cada escritor con <c>nameof(TipoEjecucion.X)</c>: aplicar propuestas (ApplyEngine, según
     /// quien llama), el Editor, Volumen, Unificar géneros, Renombrar con IA y Completar nombres, las
-    /// fichas al comentario y la importación de rekordbox. Un escritor nuevo debe ponerlo también:
-    /// sin él, el historial deduce el tipo por los campos y puede confundirlo con otra herramienta.
+    /// fichas al comentario, la importación de rekordbox, «Pasar a la biblioteca» de la Bandeja
+    /// (Traslado), las dos herramientas de reglas del Asistente (EscrituraPorReglas: LimpiezaPacks y
+    /// GeneroPorReglas) y «Sustituir» de la Bandeja (Sustitucion: el traslado y las etiquetas
+    /// copiadas). Un escritor nuevo debe ponerlo también: sin él, el historial deduce el tipo por los
+    /// campos y puede confundirlo con otra herramienta.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? Origen { get; set; }

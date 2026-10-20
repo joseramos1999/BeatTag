@@ -39,12 +39,16 @@
             </DataGrid.Styles>
             <DataGrid.ContextMenu>
                 <ContextMenu>
+                    <!-- El orden común de las tablas con canciones (AccionesCancion.Puesto), el mismo que la tabla de mezcla del Asistente. -->
                     <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
-                    <MenuItem Header="Empezar por esta" Command="{Binding EmpezarPorEstaCommand}"
-                              ToolTip.Tip="Rehace el orden abriendo con esta canción." />
+                    <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding SelectedPaso}"
+                              ToolTip.Tip="Abre la canción en el Editor. Sale desactivada si la canción no está en la biblioteca o mientras haya un proceso en marcha (espera a que termine)."
+                              ToolTip.ShowOnDisabled="True" />
                     <Separator />
                     <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding SelectedPaso}" />
                     <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding SelectedPaso}" />
+                    <MenuItem Header="Empezar por esta" Command="{Binding EmpezarPorEstaCommand}"
+                              ToolTip.Tip="Rehace el orden abriendo con esta canción." />
                     <Separator />
                     <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
                 </ContextMenu>

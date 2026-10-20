@@ -124,7 +124,7 @@
                     <ContextMenu>
                         <!-- El orden común de las tablas con canciones: ver AccionesCancion.Puesto. -->
                         <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
-                        <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding SelectedRow}" />
+                        <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding SelectedRow}" ToolTip.Tip="Abre la canción en el Editor. Sale desactivada si la canción no está en la biblioteca o mientras haya un proceso en marcha (espera a que termine)." ToolTip.ShowOnDisabled="True" />
                         <Separator />
                         <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding SelectedRow}" />
                         <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding SelectedRow}" />

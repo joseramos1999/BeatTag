@@ -1,3 +1,4 @@
+using Etiquetador.App.Services;
 using Etiquetador.App.ViewModels;
 using Etiquetador.Core;
 using Etiquetador.Core.Analysis;
@@ -234,10 +235,14 @@ public class DuplicadosPapeleraTests
 
     // ---------- Lo que se le dice al usuario ----------
 
+    /// <summary>El estado tras enviar las copias: el texto común de todas las páginas, con «copias».</summary>
+    private static string Resumen(int enviadas, IReadOnlyList<(string Archivo, string Motivo)> fallos)
+        => EnvioPapelera.Resumen(new EnvioPapeleraResultado(Enumerable.Range(0, enviadas).Select(i => $"e{i}.mp3").ToList(), fallos),
+                                 enviadas + fallos.Count, Sustantivo.Copia);
+
     [Fact]
     public void Todas_enviadas_lo_dice_sin_mas()
-        => Assert.Equal("120 copias enviadas a la papelera.",
-                        DuplicatesViewModel.ResumenPapelera(120, Array.Empty<(string, string)>()));
+        => Assert.Equal($"{120:N0} copias enviadas a la papelera.", Resumen(120, Array.Empty<(string, string)>()));
 
     // Si la papelera se niega por un motivo común (por ejemplo, una unidad sin papelera, donde
     // «enviar» sería borrar para siempre), ese motivo es lo que hay que leer, no un recuento.
@@ -247,10 +252,8 @@ public class DuplicadosPapeleraTests
         const string motivo = "La unidad E: no tiene papelera; enviarlo ahí lo borraría para siempre.";
         var fallos = Enumerable.Range(0, 120).Select(i => ($"copia {i}.mp3", motivo)).ToList();
 
-        Assert.Equal("No se ha enviado ninguna copia a la papelera: " + motivo,
-                     DuplicatesViewModel.ResumenPapelera(0, fallos));
-        Assert.Equal("3 copias enviadas a la papelera · 120 no se han enviado: " + motivo,
-                     DuplicatesViewModel.ResumenPapelera(3, fallos));
+        Assert.Equal("No se ha enviado ninguna copia a la papelera: " + motivo, Resumen(0, fallos));
+        Assert.Equal($"3 copias enviadas a la papelera. {120:N0} no se han enviado: " + motivo, Resumen(3, fallos));
     }
 
     [Fact]
@@ -261,12 +264,11 @@ public class DuplicadosPapeleraTests
             ("a.mp3", "El archivo está en uso por otro programa."),
             ("b.mp3", "Acceso denegado."),
         };
-        Assert.Equal("5 enviadas, 2 con problemas. La primera: a.mp3: El archivo está en uso por otro programa.",
-                     DuplicatesViewModel.ResumenPapelera(5, fallos));
+        Assert.Equal("5 copias enviadas a la papelera. 2 no se han enviado. La primera, a.mp3: El archivo está en uso por otro programa.",
+                     Resumen(5, fallos));
     }
 
     [Fact]
     public void Un_fallo_sin_motivo_no_deja_el_mensaje_cortado()
-        => Assert.EndsWith("motivo desconocido.",
-                           DuplicatesViewModel.ResumenPapelera(0, new List<(string, string)> { ("a.mp3", "") }));
+        => Assert.EndsWith("motivo desconocido.", Resumen(0, new List<(string, string)> { ("a.mp3", "") }));
 }

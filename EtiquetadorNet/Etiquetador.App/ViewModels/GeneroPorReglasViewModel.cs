@@ -348,9 +348,35 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
     /// crea otra variante que luego haya que unificar.
     /// </summary>
     internal static List<CambioEtiquetas> Cambios(IEnumerable<GeneroReglaFila> marcadas, IReadOnlyList<string> generosBiblioteca)
-        => marcadas.Select(f => new CambioEtiquetas(f.Ruta) { GeneroNuevo = GeneroPorReglas.ComoEnLaBiblioteca(f.Genero, generosBiblioteca) })
-                   .Where(c => c.GeneroNuevo!.Length > 0)
-                   .ToList();
+        => CambiosDe(marcadas.Select(f => (f.Ruta, f.Genero)).ToList(), generosBiblioteca);
+
+    /// <summary>
+    /// Lo mismo a partir de una instantánea (ruta, género) tomada en el hilo de la interfaz, para
+    /// calcularlo FUERA de él: <see cref="GeneroPorReglas.ComoEnLaBiblioteca"/> recorre todos los
+    /// géneros de la biblioteca (dos veces si el género es nuevo), y por fila eran 566 ms con 2.600
+    /// filas y 183 géneros. Además cada género distinto se calcula UNA vez: miles de propuestas suelen
+    /// repetir unos pocos géneros.
+    /// </summary>
+    internal static List<CambioEtiquetas> CambiosDe(IReadOnlyList<(string Ruta, string Genero)> filas, IReadOnlyList<string> generosBiblioteca)
+    {
+        var comoQueda = new Dictionary<string, string>(StringComparer.Ordinal);
+        var cambios = new List<CambioEtiquetas>(filas.Count);
+        foreach (var (ruta, genero) in filas)
+        {
+            var tecleado = genero ?? "";
+            if (!comoQueda.TryGetValue(tecleado, out var queda))
+                comoQueda[tecleado] = queda = GeneroPorReglas.ComoEnLaBiblioteca(tecleado, generosBiblioteca);
+            if (queda.Length > 0) cambios.Add(new CambioEtiquetas(ruta) { GeneroNuevo = queda });
+        }
+        return cambios;
+    }
+
+    /// <summary>
+    /// Con qué nombre sale en el historial de cambios («Género por carpeta y artista»). Solo escribe el
+    /// género, como «Unificar géneros» o una edición del Editor, y sin su propio tipo no se distinguiría
+    /// de ellos. En una constante para que una prueba lo compruebe.
+    /// </summary>
+    internal const Etiquetador.Core.Pipeline.TipoEjecucion TipoEnElHistorial = Etiquetador.Core.Pipeline.TipoEjecucion.GeneroPorReglas;
 
     /// <summary>
     /// Las propuestas que siguen en la tabla tras aplicar: salen las aplicadas cuyo archivo se escribió
@@ -371,12 +397,13 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
         if (marcadas.Count == 0) { _p.Status = "No hay ninguna propuesta marcada."; return; }
 
         _p.Engine.ReleaseAudio();
-        var cambios = Cambios(marcadas, GenerosDisponibles);
+        // En el hilo de la interfaz solo la instantánea (la columna «Género» es editable); pasar cada
+        // género por los de la biblioteca va dentro del Task.Run, con miles de filas tarda.
+        var filas = marcadas.Select(f => (f.Ruta, f.Genero)).ToList();
+        var generos = GenerosDisponibles.ToList();
         var progreso = new Progress<double>(v => _p.Progress = v);
-        // Con su propio tipo en el historial («Género por carpeta y artista»): solo escribe el género,
-        // como «Unificar géneros» o una edición del Editor, y sin el Origen no se distinguirían.
-        var res = await Task.Run(() => EscrituraPorReglas.EscribirConHistorial(_p.Engine, cambios, progreso, ct, "Género por reglas",
-                                                                                Etiquetador.Core.Pipeline.TipoEjecucion.GeneroPorReglas));
+        var res = await Task.Run(() => EscrituraPorReglas.EscribirConHistorial(_p.Engine, CambiosDe(filas, generos), progreso, ct,
+                                                                                "Género por reglas", TipoEnElHistorial));
 
         var quedan = QuedanTrasAplicar(Propuestas, marcadas, res);
         if (quedan.Count != Propuestas.Count) Propuestas = new ObservableCollection<GeneroReglaFila>(quedan);

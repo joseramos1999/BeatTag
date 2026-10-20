@@ -35,8 +35,12 @@ public sealed record PropuestaPublicidad(string Ruta, CampoPublicidad Campo, str
 ///
 /// Solo reglas, sin IA:
 ///   · Álbum que es un record pool (<see cref="Descriptors.PoolRe"/>) o un usuario («@…»): se vacía.
-///     Fuerte: sale marcado. «Try It» NO está en PoolRe a propósito (es un editor que firma sus
-///     ediciones, no un pool), así que un álbum «Try It Mashups» no se toca.
+///     El de un usuario sale marcado. El de un pool sale marcado solo si el álbum es esencialmente
+///     el pool, es decir, si al quitar el pool y lo que acompaña a una entrega de pack (fechas,
+///     números, volumen…) no queda nada (ver <see cref="RestoDelPool"/>); con más texto («FIFA World
+///     Cup Qatar 2022») sale DESMARCADO y «Por qué» dice qué más lleva. «Try It» NO está en PoolRe a
+///     propósito (es un editor que firma sus ediciones, no un pool), así que un álbum «Try It
+///     Mashups» no se toca.
 ///   · Álbum que parece una web: se propone DESMARCADO. Visto en la misma biblioteca: «El Cangri.com»
 ///     (Daddy Yankee) y «souljaboytellem.com» (Soulja Boy) son álbumes de verdad.
 ///   · Artista «@usuario» o un pool: se propone el artista que dice el nombre del archivo, la misma

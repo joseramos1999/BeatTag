@@ -28,8 +28,18 @@ public sealed class SustitucionHecha
     /// <summary>Dónde estaba la descarga en la bandeja (adonde vuelve al deshacer).</summary>
     public string Bandeja { get; set; } = "";
 
-    /// <summary>Dónde quedó la descarga: la carpeta y el nombre de la copia antigua.</summary>
+    /// <summary>
+    /// Dónde está la descarga en la biblioteca: al sustituir, la carpeta y el nombre de la copia
+    /// antigua; después sigue a los renombrados que haga BeatTag (<see cref="AlmacenSustituciones.Seguir"/>).
+    /// </summary>
     public string Destino { get; set; } = "";
+
+    /// <summary>
+    /// El historial de deshacer ha devuelto la descarga a la bandeja (lo ha visto
+    /// <see cref="AlmacenSustituciones.Seguir"/>): la sustitución está deshecha, tenga la descarga el
+    /// tamaño que tenga. Opcional: un archivo anterior se lee igual.
+    /// </summary>
+    public bool VueltaALaBandeja { get; set; }
 
     /// <summary>La copia de la biblioteca que fue a la papelera.</summary>
     public string Vieja { get; set; } = "";
@@ -40,7 +50,10 @@ public sealed class SustitucionHecha
     /// </summary>
     public long ViejaBytes { get; set; }
 
-    /// <summary>Tamaño de la descarga, para reconocerla cuando deshacer la devuelve a la bandeja.</summary>
+    /// <summary>
+    /// Tamaño de la descarga. Solo sirve de respaldo para reconocer el deshacer de las sustituciones
+    /// apuntadas antes de <see cref="VueltaALaBandeja"/>; 0 si se le copiaron etiquetas (cambia).
+    /// </summary>
     public long NuevaBytes { get; set; }
 
     /// <summary>La ficha de la copia antigua antes de fusionarla.</summary>
@@ -137,11 +150,55 @@ public sealed class AlmacenSustituciones
     }
 
     /// <summary>
+    /// BeatTag ha movido o renombrado un archivo (aplicar una propuesta, renombrar, deshacer…; lo
+    /// avisa AppEngine.SeguirArchivo). El destino de las sustituciones hechas lo sigue y, si lo que se
+    /// mueve es la descarga de vuelta a su sitio en la bandeja, es que se ha deshecho la sustitución.
+    ///
+    /// POR QUÉ. Antes el deshacer se reconocía por el TAMAÑO de lo que hubiera en la bandeja: tras
+    /// sustituir y aplicar la propuesta de Enriquecer (con carátula), deshacer las dos devolvía la
+    /// descarga con otro tamaño y no se reconocía; y con etiquetas copiadas (tamaño 0) bastaba con que
+    /// llegara otra descarga con ese nombre. Además, como el destino no seguía al renombrado que suele
+    /// hacer Enriquecer después de sustituir, salía de la biblioteca y cada cambio de ella miraba el
+    /// disco por esa entrada, en el hilo de la interfaz y para siempre. Devuelve si ha cambiado algo.
+    /// </summary>
+    public bool Seguir(string origen, string destino)
+    {
+        if (string.IsNullOrEmpty(origen) || string.IsNullOrEmpty(destino)
+            || string.Equals(origen, destino, StringComparison.Ordinal)) return false;
+        var cambio = false;
+        lock (_cerrojo)
+        {
+            foreach (var s in _lista)
+            {
+                if (s.Deshecha != null || s.VueltaALaBandeja
+                    || !string.Equals(s.Destino, origen, StringComparison.OrdinalIgnoreCase)) continue;
+                // El destino se queda donde estaba la ficha fusionada: DevolverFichaALaDescarga la quita de ahí.
+                if (string.Equals(destino, s.Bandeja, StringComparison.OrdinalIgnoreCase)) s.VueltaALaBandeja = true;
+                else s.Destino = destino;
+                cambio = true;
+            }
+        }
+        return cambio;
+    }
+
+    /// <summary>
+    /// Las hechas cuyo destino estaba fuera de la biblioteca y ya se miraron en disco en esta sesión
+    /// sin encontrar nada: no se vuelven a mirar con cada cambio de la biblioteca (ver
+    /// <see cref="Conciliar"/>). Si después se deshacen, lo dice <see cref="Seguir"/>.
+    /// </summary>
+    private readonly HashSet<SustitucionHecha> _miradasSinNovedad = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
     /// Mira si alguna sustitución se ha deshecho o si ha vuelto la copia antigua de alguna deshecha, y
-    /// coloca las fichas en consecuencia. No mira el disco salvo para las pocas cuyo archivo ha dejado
-    /// de estar (o ha vuelto a estar) en la biblioteca: se llama con cada cambio de la biblioteca, en
-    /// el hilo de la interfaz, y ANTES de la recolocación de fichas huérfanas, que si no seguiría la
-    /// vuelta deshecha y se llevaría la ficha fusionada a la descarga.
+    /// coloca las fichas en consecuencia. Se llama con cada cambio de la biblioteca, en el hilo de la
+    /// interfaz, y ANTES de la recolocación de fichas huérfanas, que si no seguiría la vuelta deshecha
+    /// y se llevaría la ficha fusionada a la descarga.
+    ///
+    /// Apenas mira el disco: el deshacer lo dice el historial (<see cref="Seguir"/>) y el destino sigue
+    /// a los renombrados, así que una sustitución hecha suele seguir en la biblioteca. Solo una cuyo
+    /// destino ha salido de la biblioteca por otra vía (o apuntada por una versión anterior) se mira en
+    /// disco, UNA vez por sesión, por si se deshizo antes de seguirla; y se olvida cuando pasa el mismo
+    /// plazo que se espera a la copia antigua.
     ///
     /// Lo decidido sobre los archivos (aplicadas, casillas…) lo devuelve quien llama, con lo que se
     /// devuelve aquí: el formato de esas listas es cosa de la aplicación.
@@ -160,13 +217,29 @@ public sealed class AlmacenSustituciones
             {
                 if (s.Deshecha == null)
                 {
-                    // Sigue en su sitio, o se ha movido a otra parte (un renombrado posterior): nada que hacer.
-                    if (enBiblioteca(s.Destino) || tamano(s.Destino) != null) continue;
-                    var enBandeja = tamano(s.Bandeja);
-                    if (enBandeja == null || (s.NuevaBytes > 0 && enBandeja != s.NuevaBytes)) continue;
+                    if (!s.VueltaALaBandeja)
+                    {
+                        // Sigue en la biblioteca (el destino sigue a los renombrados): nada que hacer.
+                        if (enBiblioteca(s.Destino)) continue;
+                        // Fuera de ella y hecha hace más de lo que se espera a una copia antigua: ya no se
+                        // deshará. (Sin fecha, que no debería pasar, no caduca.)
+                        if (s.Fecha != default && ahora - s.Fecha > EsperaCopiaAntigua)
+                        {
+                            _lista.Remove(s);
+                            _miradasSinNovedad.Remove(s);
+                            olvidadas++;
+                            continue;
+                        }
+                        if (!_miradasSinNovedad.Add(s)) continue;   // ya mirada en esta sesión
+                        // El respaldo de antes, para las apuntadas sin seguir sus renombrados: la descarga en
+                        // la bandeja con SU tamaño. Sin tamaño fiable (etiquetas copiadas) solo vale el historial.
+                        if (tamano(s.Destino) != null || s.NuevaBytes <= 0) continue;
+                        if (tamano(s.Bandeja) != s.NuevaBytes) continue;
+                    }
 
                     DevolverFichaALaDescarga(fichas, s);
                     s.Deshecha = ahora;
+                    _miradasSinNovedad.Remove(s);
                     deshechas.Add(s);
                 }
 

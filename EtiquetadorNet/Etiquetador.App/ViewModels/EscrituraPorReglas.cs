@@ -68,7 +68,7 @@ internal static class EscrituraPorReglas
 
                 SelloArchivo? sello = null;
                 Dictionary<string, FieldChange>? escrito = null, anotadoTalCual = null;
-                using (var f = TagLib.File.Create(ruta))
+                using (var f = Tagging.AbrirParaEscribir(ruta))   // TagLib no escribe AIFF-C: así el motivo sale en español
                 {
                     var calculo = EtiquetasPorReglas.Calcular(f.Tag, c);
                     if (calculo.Respetados > 0) respetados.Add(ruta);
@@ -128,7 +128,7 @@ internal static class EscrituraPorReglas
         return new Resultado(escritos, respetados, fallos, "", false);
     }
 
-    internal const string YaNoEsta = "ya no está en su carpeta (se ha movido, renombrado o enviado a la papelera)";
+    internal const string YaNoEsta = "ya no está en su carpeta: se ha movido, renombrado o enviado a la papelera";
 
     // Origen va con el nombre del tipo, como lo lee HistorialDeshacer.DeducirTipo; sin él, el
     // historial lo deduce de los campos, como en los manifiestos anteriores.

@@ -48,6 +48,13 @@ public abstract partial class ScanViewModelBase : ViewModelBase, IEstadoPagina
             if (!Store.IsScanned) { Status = "Escaneando biblioteca…"; await Store.ScanAsync(); } // Changed -> Recompute
             else Recompute();
         }
-        finally { IsBusy = false; }
+        finally { SoltarOcupacion(); }
     }
+
+    /// <summary>
+    /// Deja la página libre al terminar «Analizar». Para casi todas, IsBusy a false. Duplicados lo
+    /// cambia: en el modo por audio, Recompute lanza la comparación de huellas aparte y vuelve en el
+    /// acto, y la página tiene que seguir ocupada mientras esa comparación siga en marcha.
+    /// </summary>
+    protected virtual void SoltarOcupacion() => IsBusy = false;
 }

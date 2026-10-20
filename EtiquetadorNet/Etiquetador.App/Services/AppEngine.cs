@@ -425,6 +425,7 @@ public sealed class AppEngine
     public void SeguirArchivo(string origen, string destino, SelloArchivo antes)
     {
         var mueve = !string.Equals(origen, destino, StringComparison.Ordinal);
+        if (mueve) SeguirSustituciones(origen, destino);
         try
         {
             if (mueve)
@@ -733,7 +734,7 @@ public sealed class AppEngine
             {
                 SelloArchivo? sello = null;
                 string[] antes = Array.Empty<string>(), despues = Array.Empty<string>(), previstos = Array.Empty<string>();
-                using (var f = TagLib.File.Create(ruta))
+                using (var f = Tagging.AbrirParaEscribir(ruta))   // TagLib no escribe AIFF-C: así el motivo sale en español
                 {
                     antes = f.Tag.Genres ?? Array.Empty<string>();
                     despues = GenerosAEscribir(genero);
@@ -956,7 +957,7 @@ public sealed class AppEngine
             {
                 SelloArchivo? sello = null;
                 var ficha = fichaDe(ruta) ?? new FichaDj();
-                using (var f = TagLib.File.Create(ruta))
+                using (var f = Tagging.AbrirParaEscribir(ruta))   // TagLib no escribe AIFF-C: así el motivo sale en español
                 {
                     var antes = f.Tag.Comment ?? "";
                     var despues = Etiquetador.Core.Dj.Fichas.ComentarioCombinado(antes, ficha);
@@ -1215,25 +1216,48 @@ public sealed class AppEngine
     }
 
     private AlmacenSustituciones? _sustituciones;
+    private readonly object _cerrojoSustituciones = new();
 
     /// <summary>
     /// Las sustituciones hechas desde la Bandeja, con lo que había de la copia antigua (ver
     /// <see cref="AlmacenSustituciones"/>). Se lee la primera vez que hace falta: casi siempre está
-    /// vacío y no merece la pena retrasar el arranque.
+    /// vacío y no merece la pena retrasar el arranque. Con cerrojo: también lo usa
+    /// <see cref="SeguirArchivo"/>, que llega desde los hilos de fondo de aplicar y deshacer.
     /// </summary>
     public AlmacenSustituciones Sustituciones
     {
         get
         {
-            if (_sustituciones != null) return _sustituciones;
-            _sustituciones = new AlmacenSustituciones(AlmacenSustituciones.RutaEn(Paths.DataDir));
-            if (_sustituciones.AvisoCarga.Length > 0)
+            if (Volatile.Read(ref _sustituciones) is { } ya) return ya;
+            lock (_cerrojoSustituciones)
             {
-                Logger.Err(_sustituciones.AvisoCarga);
-                Avisos.Poner("carga:sustituciones", _sustituciones.AvisoCarga);
+                if (_sustituciones != null) return _sustituciones;
+                var leido = new AlmacenSustituciones(AlmacenSustituciones.RutaEn(Paths.DataDir));
+                if (leido.AvisoCarga.Length > 0)
+                {
+                    Logger.Err(leido.AvisoCarga);
+                    Avisos.Poner("carga:sustituciones", leido.AvisoCarga);
+                }
+                Volatile.Write(ref _sustituciones, leido);
+                return leido;
             }
-            return _sustituciones;
         }
+    }
+
+    /// <summary>
+    /// Un archivo que BeatTag acaba de mover o renombrar: el destino de las sustituciones hechas lo
+    /// sigue, y si es la descarga que deshacer devuelve a la bandeja, la sustitución queda deshecha
+    /// (<see cref="AlmacenSustituciones.Seguir"/>). Solo se guarda si cambia algo, que es raro.
+    /// </summary>
+    private void SeguirSustituciones(string origen, string destino)
+    {
+        try
+        {
+            var almacen = Sustituciones;
+            if (almacen.Count > 0 && almacen.Seguir(origen, destino))
+                Registrar("las sustituciones de la bandeja", almacen.Guardar());
+        }
+        catch (Exception e) { Logger.Error("No se pudo poner al día una sustitución de la bandeja tras mover su archivo", e); }
     }
 
     /// <summary>

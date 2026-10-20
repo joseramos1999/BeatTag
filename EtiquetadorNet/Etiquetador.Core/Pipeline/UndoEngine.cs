@@ -1075,7 +1075,7 @@ public sealed class UndoEngine
         {
             try
             {
-                using var tf = TagLib.File.Create(path);
+                using var tf = Tagging.AbrirParaEscribir(path);   // TagLib no escribe AIFF-C: así el motivo sale en español
                 var tocado = false;
                 foreach (var (name, fc) in r.Fields)
                 {
@@ -1129,7 +1129,7 @@ public sealed class UndoEngine
         var tags = J.P(r, "tags");
         if (tags is JsonObject to)
         {
-            var tf = TagLib.File.Create(path);
+            var tf = Tagging.AbrirParaEscribir(path);
             if (to.ContainsKey("Title")) tf.Tag.Title = J.S(J.P(tags, "Title"));
             if (to.ContainsKey("Album")) tf.Tag.Album = J.S(J.P(tags, "Album"));
             if (to.ContainsKey("Artist")) tf.Tag.Performers = StrArray(J.P(tags, "Artist"));

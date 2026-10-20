@@ -89,10 +89,12 @@ internal static class SustitucionesBandeja
                        + "con su ficha de DJ; la de la copia antigua se guarda hasta que la recuperes de la papelera.";
         foreach (var s in c.Recuperadas)
             yield return $"Bandeja: «{Path.GetFileName(s.Vieja)}» ha vuelto de la papelera y recupera su ficha de DJ y lo decidido en Enriquecer.";
+        // Caducadas (la copia antigua de una deshecha que no vuelve, o una hecha cuyo destino lleva
+        // meses fuera de la biblioteca) o con la ruta de la copia antigua ocupada por otro archivo.
         if (c.Olvidadas > 0)
             yield return c.Olvidadas == 1
-                ? "Bandeja: se deja de esperar a la copia antigua de 1 sustitución deshecha (caducada, o su ruta la ocupa otro archivo)."
-                : $"Bandeja: se deja de esperar a la copia antigua de {c.Olvidadas} sustituciones deshechas (caducadas, o su ruta la ocupa otro archivo).";
+                ? "Bandeja: se deja de vigilar 1 sustitución (caducada, o la ruta de su copia antigua la ocupa otro archivo)."
+                : $"Bandeja: se dejan de vigilar {c.Olvidadas} sustituciones (caducadas, o la ruta de su copia antigua la ocupa otro archivo).";
     }
 
     /// <summary>El tamaño de un archivo, o null si no existe o no se puede mirar.</summary>

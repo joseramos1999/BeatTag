@@ -241,21 +241,46 @@ public static class GeneroPorReglas
         }
 
         var res = new List<CarpetaSinGenero>();
+        var mezcladas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (carpeta, c) in cuentas)
         {
             if (c.SinGenero == 0 || (!propias.Contains(carpeta) && c.Fuentes.Count < 2)) continue;
             var (dominante, con, total) = Dominante(c.Generos);
-            // Una carpeta de la biblioteca que solo agrupa otras (sin canciones sin género propias)
-            // suele ser TODA la música, de muchos estilos: saldría la primera de la lista, y darle un
-            // género lo pondría en todo lo que no cubra otra regla. Solo sale si las canciones que
-            // tienen género coinciden como lo exige la regla del artista (al menos 3 y 7 de cada 10),
-            // como cuando la carpeta añadida a la biblioteca es la de un género.
-            if (!propias.Contains(carpeta) && listaRaices.Any(r => Rutas.MismaCarpeta(carpeta, r)) && !Fuerza(con, total).Propone)
+            // Le llegan canciones sin género de alguna subcarpeta: su regla se aplicaría también a ellas.
+            var agrupa = c.Fuentes.Any(f => f != ".");
+            var mezcla = Mezcla(con, total);
+
+            // Una carpeta de la biblioteca que agrupa otras suele ser TODA la música, de muchos estilos:
+            // saldría la primera de la lista, y darle un género lo pondría en todo lo que no cubra otra
+            // regla. Solo sale si las canciones que tienen género coinciden como lo exige la regla del
+            // artista (al menos 3 y 7 de cada 10), como cuando la carpeta añadida a la biblioteca es la
+            // de un género. Vale también si tiene canciones sueltas propias: sus cifras siguen siendo
+            // las de toda la biblioteca.
+            if (agrupa && listaRaices.Any(r => Rutas.MismaCarpeta(carpeta, r)) && !Fuerza(con, total).Propone)
                 continue;
+
+            // Lo mismo con una carpeta intermedia que solo agrupa otras («COMERCIAL», con un pack de
+            // cada estilo debajo) cuando sus canciones con género muestran varios estilos: también
+            // salía la primera, justo debajo de «Empieza por las carpetas de arriba». Si no hay con qué
+            // juzgarla (casi nada tiene género), sí sale: es el caso de la carpeta de un género con
+            // packs sin etiquetar, para el que existe esta lista. No depende de cómo esté organizada
+            // la biblioteca: se mira lo que dicen sus canciones. Se puede añadir a mano igualmente.
+            if (agrupa && !propias.Contains(carpeta) && mezcla) continue;
+
+            // Con canciones propias y subcarpetas de varios estilos, sale (sus canciones sueltas
+            // necesitan regla), pero detrás de las demás: no es por donde conviene empezar.
+            if (agrupa && mezcla) mezcladas.Add(carpeta);
             res.Add(new CarpetaSinGenero(carpeta, c.SinGenero, c.Total, dominante, con, total, c.Subcarpetas));
         }
-        return res.OrderByDescending(c => c.SinGenero).ThenBy(c => c.Ruta, StringComparer.CurrentCultureIgnoreCase).ToList();
+        return res.OrderBy(c => mezcladas.Contains(c.Ruta))
+                  .ThenByDescending(c => c.SinGenero).ThenBy(c => c.Ruta, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
+
+    /// <summary>
+    /// Las canciones con género de una carpeta muestran varios estilos: hay bastantes para juzgar
+    /// (las mismas que pide la regla del artista) y ninguno llega a dominar como ella exige.
+    /// </summary>
+    private static bool Mezcla(int con, int total) => total >= MinimoCanciones && !Fuerza(con, total).Propone;
 
     /// <summary>
     /// Una carpeta elegida a mano (por ejemplo, la que agrupa varias): cuenta también lo que hay en sus

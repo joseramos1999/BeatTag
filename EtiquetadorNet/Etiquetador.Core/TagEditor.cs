@@ -29,7 +29,7 @@ public static class TagEditor
     public static void Write(string path, string? title, string? artist, string? album,
         string? genre, uint year, uint bpm, string? comment)
     {
-        using var f = TagLib.File.Create(path);
+        using var f = Pipeline.Tagging.AbrirParaEscribir(path);   // TagLib no escribe AIFF-C: así el motivo sale en español
         f.Tag.Title = string.IsNullOrEmpty(title) ? null : title;
         f.Tag.Performers = SplitArtists(artist);
         f.Tag.Album = string.IsNullOrEmpty(album) ? null : album;
@@ -53,7 +53,7 @@ public static class TagEditor
     /// </summary>
     public static Dictionary<string, Pipeline.FieldChange> ImportBpmKey(string path, uint bpm, string? key, bool overwrite)
     {
-        using var f = TagLib.File.Create(path);
+        using var f = Pipeline.Tagging.AbrirParaEscribir(path);
         var log = new Dictionary<string, Pipeline.FieldChange>();
         if (bpm > 0 && (overwrite || f.Tag.BeatsPerMinute == 0))
         {

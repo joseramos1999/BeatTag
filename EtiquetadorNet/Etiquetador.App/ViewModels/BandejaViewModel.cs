@@ -489,6 +489,22 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
     /// <summary>«1 canción» o «3 canciones»: los textos de la bandeja decían «canción(es)».</summary>
     internal static string Canciones(int n) => n == 1 ? "1 canción" : $"{n} canciones";
 
+    /// <summary>
+    /// La nota del diálogo de «Pasar a la biblioteca», en singular con una sola canción (antes decía
+    /// «Los archivos se mueven…» aunque se pasara una) y con el aviso de las que tienen avisos.
+    /// </summary>
+    internal static string NotaPasar(int preparadas, int conAvisos)
+    {
+        var nota = preparadas == 1
+            ? "El archivo se mueve conservando su nombre. Si en el destino ya hay uno con el mismo nombre, la canción se queda en la bandeja: nunca se sobrescribe nada. Se puede deshacer desde Enriquecer."
+            : "Los archivos se mueven conservando su nombre. Si en el destino ya hay uno con el mismo nombre, esa canción se queda en la bandeja: nunca se sobrescribe nada. Se puede deshacer desde Enriquecer.";
+        if (conAvisos == 0) return nota;
+        return (preparadas == 1 ? "⚠ Tiene avisos sin resolver"
+                : conAvisos == 1 ? "⚠ 1 de ellas tiene avisos sin resolver"
+                : $"⚠ {conAvisos} de ellas tienen avisos sin resolver")
+             + " (duplicados, calidad baja o etiquetas incompletas). " + nota;
+    }
+
     /// <summary>«1 canción marcada como revisada», «3 canciones marcadas como preparadas».</summary>
     internal static string TextoMarcadas(int n, EstadoBandeja estado)
     {
@@ -694,8 +710,9 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
             // la bandeja» puede haber dejado de estarlo. Interrumpido es que la ventana se cierra: no
             // hace falta.
             if (res.Enviadas.Count > 0 && !res.Interrumpido) await RevisarAsync();
-            Status = (res.Interrumpido ? "Descarte detenido. " : "")
-                   + EnvioPapelera.Resumen(res.Enviadas.Count, res.Fallos, Sustantivo.Descarga)
+            // El mismo texto que las demás páginas que envían a la papelera; si se ha detenido al
+            // cerrar, dice cuántas llegaron de cuántas y que el resto no se ha tocado.
+            Status = EnvioPapelera.Resumen(res, filas.Count, Sustantivo.Descarga)
                    + (plan.Conservar.Count > 0 ? " " + RevisionBandeja.TextoConservadasTrasDescartar(plan.Conservar.Count) : "");
         }
         catch (Exception e)

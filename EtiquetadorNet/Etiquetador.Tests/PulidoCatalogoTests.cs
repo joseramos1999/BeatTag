@@ -20,22 +20,29 @@ public class PulidoCatalogoTests : IDisposable
 
     private static readonly IReadOnlyList<(string, string)> SinFallos = Array.Empty<(string, string)>();
 
+    /// <summary>Un resultado con <paramref name="enviadas"/> archivos enviados y esos fallos.</summary>
+    private static EnvioPapeleraResultado Res(int enviadas, IReadOnlyList<(string, string)> fallos, bool cancelado = false)
+        => new(Enumerable.Range(0, enviadas).Select(i => $"e{i}.mp3").ToList(), fallos, cancelado);
+
     [Fact]
     public void El_resumen_de_la_papelera_concuerda_en_numero_y_genero()
     {
-        Assert.Equal("1 descarga enviada a la papelera.", EnvioPapelera.Resumen(1, SinFallos, Sustantivo.Descarga));
-        Assert.Equal("1 copia enviada a la papelera.", EnvioPapelera.Resumen(1, SinFallos, Sustantivo.Copia));
-        Assert.Equal("1 archivo enviado a la papelera.", EnvioPapelera.Resumen(1, SinFallos, Sustantivo.Archivo));
-        Assert.Equal("4 archivos enviados a la papelera.", EnvioPapelera.Resumen(4, SinFallos, Sustantivo.Archivo));
-        Assert.Equal("No se ha enviado ningún archivo a la papelera.", EnvioPapelera.Resumen(0, SinFallos, Sustantivo.Archivo));
+        Assert.Equal("Enviado a la papelera: e0.mp3.", EnvioPapelera.Resumen(Res(1, SinFallos), 1, Sustantivo.Descarga));
+        Assert.Equal("4 archivos enviados a la papelera.", EnvioPapelera.Resumen(Res(4, SinFallos), 4, Sustantivo.Archivo));
+        Assert.Equal("4 descargas enviadas a la papelera.", EnvioPapelera.Resumen(Res(4, SinFallos), 4, Sustantivo.Descarga));
+        Assert.Equal("No se ha enviado ningún archivo a la papelera.", EnvioPapelera.Resumen(Res(0, SinFallos), 0, Sustantivo.Archivo));
 
         var uno = new List<(string, string)> { ("b.mp3", "La unidad no tiene papelera.") };
-        Assert.Equal("1 copia enviada a la papelera · 1 no se ha enviado: La unidad no tiene papelera.",
-                     EnvioPapelera.Resumen(1, uno, Sustantivo.Copia));
+        Assert.Equal("1 copia enviada a la papelera. No se ha enviado b.mp3: La unidad no tiene papelera.",
+                     EnvioPapelera.Resumen(Res(1, uno), 2, Sustantivo.Copia));
+        Assert.Equal("1 archivo enviado a la papelera. No se ha enviado b.mp3: La unidad no tiene papelera.",
+                     EnvioPapelera.Resumen(Res(1, uno), 2, Sustantivo.Archivo));
 
         var distintos = new List<(string, string)> { ("b.mp3", "En uso."), ("c.mp3", "Sin permiso.") };
-        Assert.Equal("1 enviado, 2 con problemas. El primero: b.mp3: En uso.", EnvioPapelera.Resumen(1, distintos, Sustantivo.Archivo));
-        Assert.Equal("3 enviadas, 2 con problemas. La primera: b.mp3: En uso.", EnvioPapelera.Resumen(3, distintos, Sustantivo.Descarga));
+        Assert.Equal("1 archivo enviado a la papelera. 2 no se han enviado. El primero, b.mp3: En uso.",
+                     EnvioPapelera.Resumen(Res(1, distintos), 3, Sustantivo.Archivo));
+        Assert.Equal("3 descargas enviadas a la papelera. 2 no se han enviado. La primera, b.mp3: En uso.",
+                     EnvioPapelera.Resumen(Res(3, distintos), 5, Sustantivo.Descarga));
     }
 
     [Fact]
@@ -84,18 +91,18 @@ public class PulidoCatalogoTests : IDisposable
     public void Cancelar_el_envio_dice_cuantas_llegaron_a_la_papelera()
     {
         var cancelado = new EnvioPapeleraResultado(new[] { "a.mp3" }, Array.Empty<(string, string)>(), Interrumpido: true);
-        Assert.Equal("Cancelado: se ha enviado a la papelera 1 de las 5 copias; el resto no se ha tocado.",
-                     DuplicatesViewModel.ResumenEnvio(cancelado, 5));
+        Assert.Equal("Cancelado: se ha enviado 1 de las 5 copias a la papelera; el resto no se ha tocado.",
+                     EnvioPapelera.Resumen(cancelado, 5, Sustantivo.Copia));
 
         var conFallo = new EnvioPapeleraResultado(new[] { "a.mp3", "b.mp3" }, new[] { ("c.mp3", "En uso.") }, Interrumpido: true);
-        Assert.Equal("Cancelado: se han enviado a la papelera 2 de las 5 copias; el resto no se ha tocado. 1 con problemas. La primera: c.mp3: En uso.",
-                     DuplicatesViewModel.ResumenEnvio(conFallo, 5));
+        Assert.Equal("Cancelado: se han enviado 2 de las 5 copias a la papelera; el resto no se ha tocado. No se ha enviado c.mp3: En uso.",
+                     EnvioPapelera.Resumen(conFallo, 5, Sustantivo.Copia));
 
         var nada = new EnvioPapeleraResultado(Array.Empty<string>(), Array.Empty<(string, string)>(), Interrumpido: true);
-        Assert.Equal("Cancelado: no se ha enviado ninguna copia a la papelera.", DuplicatesViewModel.ResumenEnvio(nada, 5));
+        Assert.Equal("Cancelado: no se ha enviado ninguna copia a la papelera.", EnvioPapelera.Resumen(nada, 5, Sustantivo.Copia));
 
         var entero = new EnvioPapeleraResultado(new[] { "a.mp3" }, Array.Empty<(string, string)>());
-        Assert.Equal("1 copia enviada a la papelera.", DuplicatesViewModel.ResumenEnvio(entero, 1));
+        Assert.Equal("Enviado a la papelera: a.mp3.", EnvioPapelera.Resumen(entero, 1, Sustantivo.Copia));
     }
 
     // El envío se para entre un archivo y el siguiente, y lo enviado se devuelve para quitarlo de la tabla.

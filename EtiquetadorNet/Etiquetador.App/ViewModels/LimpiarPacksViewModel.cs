@@ -179,6 +179,13 @@ public sealed partial class LimpiarPacksViewModel : ObservableObject
             return c;
         }).ToList();
 
+    /// <summary>
+    /// Con qué nombre sale en el historial de cambios («Limpieza de publicidad de packs»): con los
+    /// campos solos (álbum, artista, comentario) se confundiría con el Editor. En una constante para
+    /// que una prueba lo compruebe.
+    /// </summary>
+    internal const Etiquetador.Core.Pipeline.TipoEjecucion TipoEnElHistorial = Etiquetador.Core.Pipeline.TipoEjecucion.LimpiezaPacks;
+
     /// <summary>Escribe las marcadas. La confirmación la pide la vista.</summary>
     public Task AplicarAsync() => _p.EscribirArchivosAsync("Limpiando la publicidad de los packs…", async ct =>
     {
@@ -189,7 +196,7 @@ public sealed partial class LimpiarPacksViewModel : ObservableObject
         var cambios = Cambios(marcadas, AlComentario);
         var progreso = new Progress<double>(v => _p.Progress = v);
         var res = await Task.Run(() => EscrituraPorReglas.EscribirConHistorial(_p.Engine, cambios, progreso, ct, "Limpiar packs",
-                                                                                Etiquetador.Core.Pipeline.TipoEjecucion.LimpiezaPacks));
+                                                                                TipoEnElHistorial));
 
         var quedan = QuedanTrasAplicar(Filas, marcadas, res);
         if (quedan.Count != Filas.Count) Filas = new ObservableCollection<PublicidadFila>(quedan);

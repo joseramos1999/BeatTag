@@ -475,8 +475,63 @@ public class PendientesTests : IDisposable
         var p = new Pendiente { Descartados = Enumerable.Range(0, descartados).Select(i => $"x{i}.mp3").ToList() };
         Assert.Equal(esperado, PendienteFila.TextoEstado(p));
         Assert.Equal(descartados > 0, new PendienteFila(p).TieneDescartados);
+        // Conseguida con otra copia: también dice sus descartados, sobre los que se puede usar
+        // «Volver a contar el archivo descartado».
         p.Conseguida = Lunes;
-        Assert.Equal("Conseguida el 19/10/2026", PendienteFila.TextoEstado(p));
+        Assert.Equal("Conseguida el 19/10/2026" + esperado["Pendiente".Length..], PendienteFila.TextoEstado(p));
+    }
+
+    // «Volver a contar el archivo descartado» sobre una canción ya conseguida con otra copia: el
+    // descartado vuelve a contar, pero la canción ya estaba tachada. Antes decía «tachará su canción».
+    [Fact]
+    public void Recuperar_el_descartado_de_una_ya_conseguida_lo_dice()
+    {
+        Assert.Equal("El archivo descartado vuelve a contar. La canción sigue conseguida con otro archivo.",
+                     PendientesViewModel.TextoRecuperados(1, 0, yaConseguidas: 1));
+        Assert.Equal("3 archivos descartados vuelven a contar; 1 canción vuelve a estar conseguida; 2 siguen conseguidas con otro archivo.",
+                     PendientesViewModel.TextoRecuperados(3, 1, yaConseguidas: 2));
+        Assert.Equal("2 archivos descartados vuelven a contar; 1 sigue conseguida con otro archivo.",
+                     PendientesViewModel.TextoRecuperados(2, 0, yaConseguidas: 1));
+
+        // En el almacén: la recuperación no la destacha ni cambia su archivo.
+        var a = Almacen();
+        var falsa = Cancion("Karol G - Provenza (Remix).mp3");
+        var buena = Cancion("Karol G - Provenza.mp3");
+        var id = Tachada(a, falsa);
+        a.VolverAPendiente(id);
+        a.MarcarConseguidas(new[] { (id, buena.FilePath) }, Lunes.AddDays(1));
+
+        var (archivo, tachada) = a.RecuperarDescartado(id, _ => true);
+        Assert.Equal(falsa.FilePath, archivo);
+        Assert.False(tachada);
+        var p = a.Todas()[0];
+        Assert.Equal(buena.FilePath, p.Archivo);
+        Assert.Equal(Lunes.AddDays(1), p.Conseguida);
+    }
+
+    // interfaz-10: si el archivo con que se tachó vuelve de la papelera, se tacha otra vez con la fecha
+    // en que se consiguió, no como «Conseguida el» día de hoy.
+    [Fact]
+    public void Si_el_archivo_vuelve_de_la_papelera_conserva_la_fecha_de_entonces()
+    {
+        var a = Almacen();
+        var tema = Cancion("Karol G - Provenza.mp3");
+        var id = Tachada(a, tema);                       // conseguida el lunes
+        Assert.Equal(1, a.Reabrir(new[] { (id, tema.FilePath) }));
+        Assert.Equal("", a.Guardar());
+
+        var b = Almacen();                                // también tras cerrar y abrir
+        Assert.Equal(1, b.MarcarConseguidas(new[] { (id, tema.FilePath) }, Lunes.AddDays(5)));
+        var p = b.Todas()[0];
+        Assert.Equal(Lunes, p.Conseguida);
+        Assert.Equal("", p.ArchivoDesaparecido);
+        Assert.Null(p.ConseguidaConElDesaparecido);
+
+        // Con otra copia distinta, la fecha es la de esa copia.
+        Assert.Equal(1, b.Reabrir(new[] { (id, tema.FilePath) }));
+        var otra = Cancion("Karol G - Provenza.aiff");
+        Assert.Equal(1, b.MarcarConseguidas(new[] { (id, otra.FilePath) }, Lunes.AddDays(5)));
+        Assert.Equal(Lunes.AddDays(5), b.Todas()[0].Conseguida);
     }
 
     [Fact]

@@ -23,6 +23,16 @@ public sealed class ScanCache
         public int Br { get; set; }
         public int Sr { get; set; }
         public int Ch { get; set; }
+
+        /// <summary>
+        /// Un AIFF ya leído con el lector de cabecera (<see cref="LectorAiff"/>), saliera o no su
+        /// frecuencia. Uno dañado, o que no es AIFF de verdad, sigue con frecuencia 0: sin esta marca
+        /// se releía en cada escaneo y obligaba a reescribir entera la caché (15-20k entradas). Las
+        /// guardadas antes de ese lector no la llevan, y esas sí se releen, una vez. Solo se escribe
+        /// en los AIFF, para no engordar el archivo.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool La { get; set; }
     }
 
     private readonly string _file;
@@ -41,9 +51,10 @@ public sealed class ScanCache
         long m = 0, s = 0;
         try { var fi = new FileInfo(path); m = fi.LastWriteTimeUtc.Ticks; s = fi.Length; } catch { }
 
-        // Un AIFF guardado sin frecuencia es uno que TagLib no pudo abrir (un AIFF-C de macOS) antes
-        // de que el escáner supiera leer su cabecera: se vuelve a leer en lugar de seguir vacío.
-        if (_map.TryGetValue(path, out var e) && e.M == m && e.S == s && !(e.Sr == 0 && LectorAiff.EsAiff(path)))
+        // Un AIFF guardado sin frecuencia y sin la marca del lector de cabecera es uno que TagLib no pudo
+        // abrir (un AIFF-C de macOS) antes de que el escáner supiera leer su cabecera: se vuelve a leer
+        // en lugar de seguir vacío. Con la marca ya se intentó, y releerlo no daría otra cosa.
+        if (_map.TryGetValue(path, out var e) && e.M == m && e.S == s && !(e.Sr == 0 && !e.La && LectorAiff.EsAiff(path)))
             return new Track
             {
                 FilePath = path,
@@ -57,6 +68,7 @@ public sealed class ScanCache
         {
             M = m, S = s, Ti = t.Title, Ar = t.Artist, Al = t.Album, Ge = t.Genre,
             Yr = t.Year, Bp = t.Bpm, Ke = t.Key, Du = t.DurationSeconds, Br = t.Bitrate, Sr = t.SampleRate, Ch = t.Channels,
+            La = LectorAiff.EsAiff(path),   // ReadTrack ya prueba el lector de cabecera con los AIFF
         };
         _dirty = true;
         return t;

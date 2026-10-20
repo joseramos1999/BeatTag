@@ -83,9 +83,11 @@
             </DataGrid.Styles>
             <DataGrid.ContextMenu>
                 <ContextMenu>
+                    <!-- El orden común de las tablas con canciones (AccionesCancion.Puesto): lo que toca el archivo antes que lo propio de las listas. -->
+                    <MenuItem Header="Abrir carpeta contenedora" Click="AbrirCarpeta_Click" />
+                    <Separator />
                     <MenuItem Header="Buscar en mi pool" Click="BuscarEnPool_Click" />
                     <MenuItem Header="Abrir enlace" Click="AbrirEnlace_Click" />
-                    <MenuItem Header="Abrir carpeta contenedora" Click="AbrirCarpeta_Click" />
                     <Separator />
                     <MenuItem Header="Volver a pendiente" Click="VolverAPendiente_Click" />
                     <MenuItem Header="Volver a contar el archivo descartado" Click="RecuperarDescartado_Click"

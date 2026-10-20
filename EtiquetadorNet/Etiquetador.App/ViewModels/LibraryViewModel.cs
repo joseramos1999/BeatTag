@@ -16,8 +16,11 @@ namespace Etiquetador.App.ViewModels;
 /// <summary>Pestaña Biblioteca: gestiona las carpetas, escanea la biblioteca compartida e importa rekordbox.</summary>
 public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
 {
-    private readonly AppEngine _engine;
+    /// <summary>El motor. Solo falta en las pruebas, que montan la página sobre una biblioteca suelta.</summary>
+    private readonly AppEngine? _engine;
     private readonly LibraryStore _store;
+
+    private AppEngine Engine => _engine ?? throw new InvalidOperationException("La página Biblioteca se ha montado sin el motor (solo en las pruebas).");
 
     public ObservableCollection<FolderItem> Folders => _store.Folders;
     public DataGridCollectionView TracksView { get; }
@@ -26,10 +29,17 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private string? _selectedFolder;
 
-    public LibraryViewModel(AppEngine engine)
+    public LibraryViewModel(AppEngine engine) : this(engine.Library, engine) { }
+
+    /// <summary>
+    /// La página sobre una biblioteca suelta, sin el motor: así las pruebas recorren el envío a la
+    /// papelera de verdad (con <see cref="EnviarUno"/> de mentira), su cancelación con
+    /// <see cref="CancelarPapelera"/> y la ocupación de la página mientras dura.
+    /// </summary>
+    internal LibraryViewModel(LibraryStore store, AppEngine? engine = null)
     {
         _engine = engine;
-        _store = engine.Library;
+        _store = store;
         TracksView = new DataGridCollectionView(_store.Tracks);
         TracksView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(Track.Folder)));
         _store.Changed += OnLibraryChanged;
@@ -46,23 +56,26 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
 
     private void UpdateStatus()
     {
-        if (_store.Folders.Count == 0)
-        {
-            Status = "Añade una o varias carpetas y pulsa Escanear.";
-            return;
-        }
+        Status = TextoEstado(_store.Folders.Count, _store.Tracks.Count, _store.Tracks.Count(t => t.IsIncomplete), _store.IsScanned);
+    }
+
+    /// <summary>
+    /// El estado de la página con las carpetas y canciones que hay, concordando en número («1 carpeta
+    /// sin escanear», no «1 carpeta(s)»). Puro, para probarlo.
+    /// </summary>
+    internal static string TextoEstado(int carpetas, int canciones, int incompletas, bool escaneada)
+    {
+        if (carpetas == 0) return "Añade una o varias carpetas y pulsa Escanear.";
 
         // Que la lista esté vacía teniendo carpetas no es lo mismo que no tener ninguna, y hasta
         // ahora se decía igual: quien acababa de añadir una carpeta leía «añade una carpeta».
-        if (_store.Tracks.Count == 0)
-        {
-            Status = $"{_store.Folders.Count} carpeta(s) sin escanear. Pulsa Escanear.";
-            return;
-        }
+        if (canciones == 0)
+            return (carpetas == 1 ? "1 carpeta sin escanear" : $"{carpetas:N0} carpetas sin escanear") + ". Pulsa Escanear.";
 
-        var incompletas = _store.Tracks.Count(t => t.IsIncomplete);
-        Status = $"{_store.Tracks.Count} canciones · {incompletas} incompletas · {_store.Folders.Count} carpeta(s)"
-               + (_store.IsScanned ? "" : " · hay carpetas por escanear, pulsa Escanear");
+        return $"{Cuenta(canciones, "canción", "canciones")} · {Cuenta(incompletas, "incompleta", "incompletas")} · {Cuenta(carpetas, "carpeta", "carpetas")}"
+               + (escaneada ? "" : " · hay carpetas por escanear, pulsa Escanear");
+
+        static string Cuenta(int n, string singular, string plural) => n == 1 ? "1 " + singular : $"{n:N0} {plural}";
     }
 
     /// <summary>
@@ -104,8 +117,8 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
         Status = "Importando de rekordbox…";
         try
         {
-            var overwrite = _engine.Config.Overwrite;
-            var undoFile = System.IO.Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+            var overwrite = Engine.Config.Overwrite;
+            var undoFile = System.IO.Path.Combine(Engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
             var (matched, updated, failures) = await Task.Run(() =>
             {
                 var byPath = new Dictionary<string, RekordboxEntry>(StringComparer.OrdinalIgnoreCase);
@@ -133,7 +146,7 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
                 return (m, u, fails);
             });
 
-            foreach (var f in failures) _engine.Logger.Log("rekordbox: " + f, LogKind.Err);
+            foreach (var f in failures) Engine.Logger.Log("rekordbox: " + f, LogKind.Err);
             await _store.ScanAsync();
             Status = matched == 0
                 ? "Rekordbox: 0 coincidencias (¿las rutas del XML no apuntan a estas carpetas?)."
@@ -189,14 +202,14 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
     public void Escuchar(string ruta)
     {
         if (Ocupada) { Status = "Espera a que termine el proceso en curso."; return; }
-        try { _engine.Preview.Toggle(ruta); }
+        try { Engine.Preview.Toggle(ruta); }
         catch (Exception e) { Status = "No se pudo reproducir: " + e.Message; }
     }
 
     public void Editar(string ruta)
     {
         if (Ocupada) { Status = "Espera a que termine el proceso en curso."; return; }
-        _engine.RequestEdit(ruta);
+        Engine.RequestEdit(ruta);
     }
 
     /// <summary>Si se puede ordenar la selección; si no, dice por qué en la barra de estado.</summary>
@@ -218,6 +231,12 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
     // archivos, la única salida era esperar o cerrar la aplicación.
 
     private CancellationTokenSource? _ctsPapelera;
+
+    /// <summary>
+    /// Cómo se envía cada archivo: la papelera del sistema. Las pruebas ponen uno de mentira para
+    /// recorrer el envío entero, con su ocupación y su cancelación, sin tocar el disco.
+    /// </summary>
+    internal Func<string, (bool Ok, string Error)> EnviarUno { get; init; } = Papelera.Enviar;
 
     /// <summary>Se están enviando canciones a la papelera: se enseña «Cancelar el envío».</summary>
     [ObservableProperty] private bool _enviandoPapelera;
@@ -247,7 +266,7 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
     public async Task EnviarAPapeleraAsync(IReadOnlyList<string> rutas)
     {
         if (Ocupada) { Status = "Espera a que termine el proceso en curso."; return; }
-        _engine.ReleaseAudio();
+        _engine?.ReleaseAudio();
         using var cts = new CancellationTokenSource();
         _ctsPapelera = cts;
         IsBusy = true;
@@ -258,7 +277,7 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
         Status = EnvioPapelera.TextoAvance(0, rutas.Count);
         try
         {
-            var resultado = await PapeleraYQuitarAsync(_store, rutas, Papelera.Enviar, avance, cts.Token);
+            var resultado = await PapeleraYQuitarAsync(_store, rutas, EnviarUno, avance, cts.Token);
             terminado = true;
             Status = resultado;
         }
@@ -300,7 +319,7 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
 
         // De una sola vez: la biblioteca avisa a todas las pestañas en cada cambio.
         if (res.Enviadas.Count > 0) store.RemoveTracks(res.Enviadas);
-        return TextoPapelera(res, rutas.Count);
+        return EnvioPapelera.Resumen(res, rutas.Count, Sustantivo.Archivo);   // el mismo texto en todas las páginas
     }
 
     /// <summary>El título y el cuerpo del diálogo de confirmación: cuántos archivos y los primeros nombres.</summary>
@@ -312,36 +331,5 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
             : string.Join("\n", rutas.Take(5).Select(System.IO.Path.GetFileName))
               + (rutas.Count > 5 ? $"\n… y {rutas.Count - 5:N0} más" : "");
         return (titulo, cuerpo);
-    }
-
-    /// <summary>
-    /// El estado al terminar, igual en Biblioteca y en el Asistente. Cuando varias fallan por el MISMO
-    /// motivo (una unidad sin papelera, donde enviar sería borrar para siempre), el motivo se dice una
-    /// vez. Si se canceló, cuántas se enviaron de cuántas.
-    /// </summary>
-    internal static string TextoPapelera(EnvioPapeleraResultado res, int total)
-    {
-        static string Motivo(string m) => string.IsNullOrWhiteSpace(m) ? "motivo desconocido." : m;
-        var enviadas = res.Enviadas.Count;
-        var fallos = res.Fallos;
-        var deFallos = fallos.Count == 0 ? ""
-            : fallos.Count == 1 ? $"1 no se ha enviado. {fallos[0].Archivo}: {Motivo(fallos[0].Motivo)}"
-            : fallos.Select(f => f.Motivo).Distinct(StringComparer.Ordinal).Count() == 1
-                ? $"{fallos.Count:N0} no se han enviado: {Motivo(fallos[0].Motivo)}"
-                : $"{fallos.Count:N0} no se han enviado. El primero, {fallos[0].Archivo}: {Motivo(fallos[0].Motivo)}";
-
-        if (res.Interrumpido)
-            return $"Cancelado: {enviadas:N0} de {total:N0} enviados a la papelera; el resto no se ha tocado."
-                   + (deFallos.Length > 0 ? " " + deFallos : "");
-        if (fallos.Count == 0)
-            return enviadas == 1 ? $"Enviado a la papelera: {System.IO.Path.GetFileName(res.Enviadas[0])}."
-                                 : $"{enviadas:N0} archivos enviados a la papelera.";
-        if (enviadas == 0)
-            return fallos.Count == 1
-                ? $"No se ha podido enviar a la papelera. {fallos[0].Archivo}: {Motivo(fallos[0].Motivo)}"
-                : fallos.Select(f => f.Motivo).Distinct(StringComparer.Ordinal).Count() == 1
-                ? $"No se ha enviado ningún archivo a la papelera: {Motivo(fallos[0].Motivo)}"
-                : $"No se ha enviado ningún archivo a la papelera. El primero, {fallos[0].Archivo}: {Motivo(fallos[0].Motivo)}";
-        return (enviadas == 1 ? "1 archivo enviado a la papelera · " : $"{enviadas:N0} archivos enviados a la papelera · ") + deFallos;
     }
 }
