@@ -1,5 +1,10 @@
-using System.Threading.Tasks;
+using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 using Avalonia.Collections;
 using Etiquetador.Core;
@@ -10,7 +15,7 @@ using Etiquetador.Core.Analysis;
 
 namespace Etiquetador.App.ViewModels;
 
-public sealed class QualRow : IFilaBuscable
+public sealed partial class QualRow : ObservableObject, IFilaBuscable
 {
     public string FileName { get; init; } = "";
     public string QualityLabel { get; init; } = "";
@@ -22,28 +27,92 @@ public sealed class QualRow : IFilaBuscable
     public string FilePath { get; init; } = "";
     public bool IsPoor { get; init; }
 
+    /// <summary>El formato es sin pérdida (FLAC, WAV, AIFF…): cambia lo que se espera del espectro.</summary>
+    public bool SinPerdida { get; init; }
+
     private string? _textoBusqueda;
 
     /// <summary>Lo que encuentra el cuadro «Buscar…». Los campos no cambian: se prepara una sola vez.</summary>
     public string TextoBusqueda => _textoBusqueda ??= ConsultaTabla.Preparar(FileName, Folder, QualityLabel);
+
+    // --- Calidad real por espectro (P4, equipo audio_medido) ---
+
+    /// <summary>Columna «Corte medido»: la frecuencia, «Sin corte», «No concluyente» o vacío si no se ha analizado.</summary>
+    [ObservableProperty] private string _corteMedido = "";
+
+    /// <summary>Columna «Calidad real (estimada)», con la valoración si es dudosa o sospechosa.</summary>
+    [ObservableProperty] private string _calidadReal = "";
+
+    /// <summary>Para ordenar por «Corte medido» de forma numérica (−1 sin medida; 0 no concluyente).</summary>
+    [ObservableProperty] private double _corteOrden = -1;
+
+    [ObservableProperty] private ValoracionCalidad _valoracion;
+
+    /// <summary>Pone (o quita, con null) la medida del espectro.</summary>
+    public void PonerMedida(MedidaEspectro? medida)
+    {
+        if (medida is not { } m)
+        {
+            CorteMedido = "";
+            CalidadReal = "";
+            CorteOrden = -1;
+            Valoracion = ValoracionCalidad.SinValorar;
+            return;
+        }
+        var v = CorteEspectral.Valorar(m, SinPerdida, Bitrate);
+        var estimada = CorteEspectral.TextoCalidadReal(m, SinPerdida);
+        CorteMedido = CorteEspectral.TextoCorte(m);
+        CalidadReal = v is ValoracionCalidad.Sospechosa or ValoracionCalidad.Dudosa
+            ? $"{estimada} · {CorteEspectral.TextoValoracion(v)}"
+            : estimada;
+        CorteOrden = m.Estado switch
+        {
+            EstadoCorte.Corte => m.CorteHz,
+            EstadoCorte.SinCorte => m.TechoHz + AnchoSinCorte,   // por encima de cualquier corte medido
+            EstadoCorte.NoConcluyente => 0,
+            _ => -1,
+        };
+        Valoracion = v;
+    }
+
+    private const double AnchoSinCorte = 50;
 }
 
 /// <summary>Pestaña Calidad: clasifica el audio de la biblioteca compartida.</summary>
-public partial class QualityViewModel : ScanViewModelBase
+public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
 {
+    private readonly AppEngine _engine;
+
     public ObservableCollection<QualRow> Rows { get; } = new();
     public DataGridCollectionView RowsView { get; }
 
     [ObservableProperty] private QualRow? _selectedRow;
     [ObservableProperty] private bool _onlyPoor;
 
+    /// <summary>
+    /// La tabla tiene una fila por canción (15.000 en una biblioteca grande): solo se rehace con la
+    /// página a la vista, y si no, al volver a ella. Antes se rehacía con cada cambio de la biblioteca
+    /// aunque nadie la mirase, y desde el arranque.
+    /// </summary>
+    private readonly RecalculoDiferido _recalculo;
+
     public QualityViewModel(AppEngine engine) : base(engine.Library)
     {
+        _engine = engine;
         RowsView = new DataGridCollectionView(Rows);
         RowsView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(QualRow.Folder)));
         _filtroDiferido = new BusquedaDiferida(AplicarFiltro);
-        if (Store.IsScanned) Recompute();
+        _recalculo = new RecalculoDiferido(Recompute);
     }
+
+    /// <summary>Lo avisa la vista.</summary>
+    public bool Visible
+    {
+        get => _recalculo.Visible;
+        set => _recalculo.CambiarVisible(value);
+    }
+
+    protected override void RecomputeReactive() => _recalculo.Pedir();
 
     private readonly BusquedaDiferida _filtroDiferido;
 
@@ -63,8 +132,8 @@ public partial class QualityViewModel : ScanViewModelBase
     }
 
     /// <summary>
-    /// Los dos filtros a la vez. Se combinan en vez de pisarse: buscar dentro de lo que ya está
-    /// acotado a baja calidad es exactamente lo que se quiere hacer.
+    /// Los filtros a la vez. Se combinan en vez de pisarse: buscar dentro de lo que ya está acotado a
+    /// baja calidad o a sospechosos es exactamente lo que se quiere hacer.
     ///
     /// Es la tabla más grande (una fila por canción, unas 15.000 en una biblioteca real): por eso
     /// la consulta se prepara una vez, cada fila guarda su texto normalizado y no se refresca dos
@@ -74,24 +143,23 @@ public partial class QualityViewModel : ScanViewModelBase
     {
         var consulta = ConsultaTabla.De(Busqueda);
         var soloMalas = OnlyPoor;
-        RowsView.Filter = !soloMalas && consulta.Vacia
+        var soloSospechosos = SoloSospechosos;
+        RowsView.Filter = !soloMalas && !soloSospechosos && consulta.Vacia
             ? null
             : o => o is QualRow r
                    && (!soloMalas || r.IsPoor)
+                   && (!soloSospechosos || r.Valoracion == ValoracionCalidad.Sospechosa)
                    && (consulta.Vacia || consulta.Coincide(r));
-        FiltroInfo = consulta.Vacia ? "" : $"{RowsView.Count} de {Rows.Count}";
+        FiltroInfo = consulta.Vacia && !soloSospechosos ? "" : $"{RowsView.Count} de {Rows.Count}";
     }
 
     protected override void Recompute()
     {
         Rows.Clear();
-        int poor = 0;
         foreach (var t in Store.Tracks)
         {
             var tier = AudioQuality.Rate(t);
-            var isPoor = AudioQuality.IsPoor(t);
-            if (isPoor) poor++;
-            Rows.Add(new QualRow
+            var fila = new QualRow
             {
                 FileName = t.FileName,
                 QualityLabel = AudioQuality.Label(tier),
@@ -101,11 +169,19 @@ public partial class QualityViewModel : ScanViewModelBase
                 Duration = t.Duration,
                 Folder = t.Folder,
                 FilePath = t.FilePath,
-                IsPoor = isPoor,
-            });
+                IsPoor = AudioQuality.IsPoor(t),
+                SinPerdida = tier == QualityTier.Lossless,
+            };
+            // Lo último leído de la caché, para no dejar las columnas vacías mientras se relee.
+            if (_medidas.TryGetValue(t.FilePath, out var m)) fila.PonerMedida(m);
+            Rows.Add(fila);
         }
         RowsView.Refresh();
-        Status = $"{Rows.Count} archivos · {poor} de baja calidad (< 192 kbps).";
+        AplicarFiltro();
+        ActualizarEstado();
+        // Las medidas guardadas se validan contra el disco (fecha y tamaño de cada archivo) fuera del
+        // hilo de la interfaz.
+        _ = SinEsperar.Lanzar(CargarMedidasAsync, e => _engine.Logger.Error("Calidad: no se pudieron leer las medidas del espectro", e));
     }
 
     [RelayCommand]
@@ -114,5 +190,156 @@ public partial class QualityViewModel : ScanViewModelBase
         var path = SelectedRow?.FilePath;
         if (string.IsNullOrEmpty(path)) return;
         await Shell.OpenContainingFolderAsync(path);
+    }
+
+    // --- Calidad real por espectro (P4, equipo audio_medido) ---
+    //
+    // El bitrate declarado no distingue casi nada: en una biblioteca real, el 88 % de los archivos
+    // declara 320 kbps. Lo que delata un «320» hecho de un 128 es el espectro: el audio se acaba en el
+    // corte del 128 (hacia 16 kHz). Esto lo mide en segundo plano, lo guarda en caché y lo enseña en
+    // dos columnas, siempre como SOSPECHA y con la frecuencia medida a la vista. No borra nada.
+
+    /// <summary>Filtro «Solo sospechosos»: los que declaran mucha más calidad de la que tiene su audio.</summary>
+    [ObservableProperty] private bool _soloSospechosos;
+
+    /// <summary>Hay un análisis del espectro en marcha (para el botón «Cancelar» y la barra).</summary>
+    [ObservableProperty] private bool _analizandoEspectro;
+
+    /// <summary>Avance del análisis del espectro, de 0 a 100.</summary>
+    [ObservableProperty] private double _progresoEspectro;
+
+    partial void OnSoloSospechososChanged(bool value) => _filtroDiferido.Ahora();
+
+    /// <summary>Las medidas válidas leídas la última vez, por ruta.</summary>
+    private Dictionary<string, MedidaEspectro> _medidas = new(StringComparer.OrdinalIgnoreCase);
+
+    private CancellationTokenSource? _ctsEspectro;
+    private CancellationTokenSource? _ctsCarga;
+
+    /// <summary>
+    /// Lee de la caché las medidas que siguen valiendo para las filas de ahora y las pone en la tabla.
+    /// Si nunca se ha analizado nada (no hay caché en disco ni cargada), no hace nada: ni siquiera
+    /// crea la caché.
+    /// </summary>
+    private async Task CargarMedidasAsync()
+    {
+        if (!File.Exists(EspectroScanner.RutaCache(_engine.Paths)) && _medidas.Count == 0 && !AnalizandoEspectro) return;
+        _ctsCarga?.Cancel();
+        var cts = _ctsCarga = new CancellationTokenSource();
+        var ct = cts.Token;
+        var rutas = Rows.Select(r => r.FilePath).ToList();
+        var medidas = await Task.Run(() =>
+        {
+            var cache = _engine.Espectro;
+            var d = new Dictionary<string, MedidaEspectro>(StringComparer.OrdinalIgnoreCase);
+            foreach (var ruta in rutas)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (cache.Get(ruta) is { } m) d[ruta] = m;
+            }
+            return d;
+        }, ct);
+        if (ct.IsCancellationRequested) return;
+        _medidas = medidas;
+        foreach (var r in Rows) r.PonerMedida(medidas.TryGetValue(r.FilePath, out var m) ? m : null);
+        AplicarFiltro();
+        ActualizarEstado();
+    }
+
+    /// <summary>
+    /// Analiza el espectro de toda la biblioteca. Lo ya analizado (y sin cambios desde entonces) no
+    /// se vuelve a leer, así que la segunda vez solo se miran las canciones nuevas o modificadas.
+    /// </summary>
+    [RelayCommand]
+    private async Task AnalizarEspectroAsync()
+    {
+        if (IsBusy) return;
+        if (Store.Folders.Count == 0) { Status = "No hay carpetas configuradas. Añádelas en la pestaña Biblioteca."; return; }
+        IsBusy = true;
+        AnalizandoEspectro = true;
+        ProgresoEspectro = 0;
+        var cts = _ctsEspectro = new CancellationTokenSource();
+        _engine.ReleaseAudio();   // no conviene leer mientras suena algo
+        try
+        {
+            if (!Store.IsScanned) { Status = "Escaneando biblioteca…"; await Store.ScanAsync(); }
+            var todas = Store.Tracks.Select(t => t.FilePath).ToList();
+            var analizables = todas.Where(EspectroScanner.Analizable).ToList();
+            _engine.Logger.Head($"Calidad: analizando el espectro de {analizables.Count} canciones");
+            var reloj = System.Diagnostics.Stopwatch.StartNew();
+            var avance = new Progress<(int done, int total, string file)>(p =>
+            {
+                ProgresoEspectro = p.total == 0 ? 0 : p.done * 100.0 / p.total;
+                Status = $"Analizando el espectro: {p.done} de {p.total}…  {p.file}";
+            });
+            var cache = await Task.Run(() => _engine.Espectro);
+            await cache.MeasureManyAsync(analizables, force: false, avance, cts.Token);
+            await CargarMedidasAsync();
+            ProgresoEspectro = 100;
+            var resumen = ResumenEspectro(todas.Count, analizables.Count);
+            Status = $"Análisis del espectro terminado en {TextUtils.FormatEta(reloj.Elapsed.TotalSeconds)}. {resumen}";
+            _engine.Logger.Sum("Calidad: " + resumen);
+        }
+        catch (OperationCanceledException)
+        {
+            await CargarMedidasAsync();
+            Status = "Análisis del espectro cancelado. Lo analizado hasta ahora queda guardado.";
+        }
+        catch (Exception e)
+        {
+            Status = "Error durante el análisis del espectro: " + e.Message;
+            _engine.Logger.Error("Calidad: fallo al analizar el espectro", e);
+        }
+        finally
+        {
+            IsBusy = false;
+            AnalizandoEspectro = false;
+            _ctsEspectro = null;
+            cts.Dispose();
+        }
+    }
+
+    [RelayCommand]
+    private void CancelarEspectro() => _ctsEspectro?.Cancel();
+
+    private void ActualizarEstado()
+    {
+        if (IsBusy) return;   // mientras se analiza, la línea de estado la lleva el avance
+        var poor = Rows.Count(r => r.IsPoor);
+        var basico = $"{Rows.Count} archivos · {poor} de baja calidad (< 192 kbps).";
+        Status = _medidas.Count == 0 ? basico : basico + " " + ResumenEspectro(Rows.Count, Rows.Count(r => EspectroScanner.Analizable(r.FilePath)));
+    }
+
+    private string ResumenEspectro(int total, int analizables)
+    {
+        var filas = Rows.Where(r => _medidas.ContainsKey(r.FilePath)).ToList();
+        return TextoResumenEspectro(
+            filas.Count,
+            filas.Count(r => r.Valoracion == ValoracionCalidad.Sospechosa),
+            filas.Count(r => r.Valoracion == ValoracionCalidad.Dudosa),
+            Math.Max(0, analizables - filas.Count),
+            total - analizables);
+    }
+
+    /// <summary>
+    /// Resumen del análisis del espectro, con el número y el género bien puestos. Los que no se
+    /// pudieron leer y los que este sistema no sabe decodificar se dicen aparte: no es lo mismo un
+    /// archivo dañado que un FLAC en macOS.
+    /// </summary>
+    internal static string TextoResumenEspectro(int analizados, int sospechosos, int dudosos, int sinLeer, int noAnalizables)
+    {
+        var partes = new List<string>
+        {
+            $"Calidad real: {analizados} {(analizados == 1 ? "archivo analizado" : "archivos analizados")}",
+            $"{sospechosos} {(sospechosos == 1 ? "sospechoso" : "sospechosos")}",
+            $"{dudosos} {(dudosos == 1 ? "dudoso" : "dudosos")}",
+        };
+        if (sinLeer > 0) partes.Add(sinLeer == 1 ? "1 sin analizar o ilegible" : $"{sinLeer} sin analizar o ilegibles");
+        var texto = string.Join(" · ", partes) + ".";
+        if (noAnalizables > 0)
+            texto += noAnalizables == 1
+                ? " En este sistema solo se analizan archivos MP3, WAV y AIFF: 1 archivo de otro formato queda sin analizar."
+                : $" En este sistema solo se analizan archivos MP3, WAV y AIFF: {noAnalizables} archivos de otros formatos quedan sin analizar.";
+        return texto;
     }
 }
