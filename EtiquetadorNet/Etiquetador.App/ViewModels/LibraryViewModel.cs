@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Collections;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -122,7 +123,7 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
                             if (log.Count > 0)
                             {
                                 u++;
-                                var rec = new UndoRecord { OrigPath = t.FilePath, FinalPath = t.FilePath, Renamed = false, Fields = log };
+                                var rec = new UndoRecord { OrigPath = t.FilePath, FinalPath = t.FilePath, Renamed = false, Fields = log, Origen = nameof(TipoEjecucion.Rekordbox) };
                                 lines.Add(System.Text.Json.JsonSerializer.Serialize(rec));
                             }
                         }
@@ -239,43 +240,68 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
         // Un aviso de avance que llegue tarde no debe tapar el resultado.
         var avance = new Progress<int>(n => { if (!terminado) Status = $"Enviando a la papelera… {n:N0} de {total:N0}"; });
         Status = "Enviando a la papelera…";
+        using var cts = new CancellationTokenSource();
+        _papeleraCts = cts;
         try
         {
-            var resultado = await PapeleraYQuitarAsync(_store, rutas, Papelera.Enviar, avance);
+            var resultado = await PapeleraYQuitarAsync(_store, rutas, Papelera.Enviar, avance, cts.Token);
             terminado = true;
             Status = resultado;
         }
         finally
         {
             terminado = true;
+            _papeleraCts = null;
             IsBusy = false;
         }
+    }
+
+    private CancellationTokenSource? _papeleraCts;
+
+    /// <summary>
+    /// Para el envío a la papelera entre un archivo y el siguiente; lo ya enviado sale de la
+    /// biblioteca. Lo usa el cierre de la ventana. POR QUÉ (hallazgo rendimiento-3): sin esto, cerrar
+    /// a mitad de un envío de cientos de archivos esperaba 15 s y cortaba el proceso de golpe, sin
+    /// quitar de la biblioteca lo que ya estaba en la papelera.
+    /// </summary>
+    public void CancelarPapelera()
+    {
+        try { _papeleraCts?.Cancel(); }
+        catch (ObjectDisposedException) { /* ya había terminado */ }
     }
 
     /// <summary>
     /// Lo de <see cref="EnviarAPapeleraAsync"/> sin el motor, para poder probarlo con una papelera de
     /// mentira. El envío, archivo a archivo, va fuera del hilo de la interfaz; quitarlas de la biblioteca,
     /// de vuelta en él (la tabla está enlazada a esa colección). Las que la papelera rechaza (unidad sin
-    /// papelera, archivo en uso) se quedan en la biblioteca.
+    /// papelera, archivo en uso) se quedan en la biblioteca. Si se cancela, para entre un archivo y el
+    /// siguiente y quita lo ya enviado.
     /// </summary>
     internal static async Task<string> PapeleraYQuitarAsync(LibraryStore store, IReadOnlyList<string> rutas,
-                                                            Func<string, (bool Ok, string Error)> enviar, IProgress<int>? avance = null)
+                                                            Func<string, (bool Ok, string Error)> enviar, IProgress<int>? avance = null,
+                                                            CancellationToken ct = default)
     {
-        var (enviadas, fallos) = await Task.Run(() => EnviarUnaAUna(rutas, enviar, avance));
+        var (enviadas, fallos) = await Task.Run(() => EnviarUnaAUna(rutas, enviar, avance, ct));
 
         // De una sola vez: la biblioteca avisa a todas las pestañas en cada cambio.
         store.RemoveTracks(enviadas);
-        return TextoPapelera(enviadas, fallos);
+        var texto = TextoPapelera(enviadas, fallos);
+        var faltan = rutas.Count - enviadas.Count - fallos.Count;
+        return faltan > 0
+            ? $"Envío a la papelera detenido. {texto} {(faltan == 1 ? "1 archivo no se ha tocado." : $"{faltan} archivos no se han tocado.")}"
+            : texto;
     }
 
-    /// <summary>Envía cada archivo y dice, tras cada uno, cuántos lleva.</summary>
+    /// <summary>Envía cada archivo y dice, tras cada uno, cuántos lleva. Cancelado, para antes del siguiente.</summary>
     internal static (List<string> Enviadas, List<string> Fallos) EnviarUnaAUna(IReadOnlyList<string> rutas,
-                                                                              Func<string, (bool Ok, string Error)> enviar, IProgress<int>? avance)
+                                                                              Func<string, (bool Ok, string Error)> enviar, IProgress<int>? avance,
+                                                                              CancellationToken ct = default)
     {
         var enviadas = new List<string>();
         var fallos = new List<string>();
         for (var i = 0; i < rutas.Count; i++)
         {
+            if (ct.IsCancellationRequested) break;
             var r = rutas[i];
             var (ok, error) = enviar(r);
             if (ok) enviadas.Add(r);

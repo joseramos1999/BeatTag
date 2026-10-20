@@ -42,7 +42,9 @@
                     ToolTip.Tip="Escribe los cambios de todas las canciones con la casilla «Aplicar» marcada, también las que oculte la búsqueda. Antes de empezar pide confirmación y, si hay una búsqueda activa, ofrece aplicar solo las que se ven.">
                 <TextBlock Text="{Binding Marcadas, StringFormat='Aplicar marcadas ({0})'}" />
             </Button>
-            <Button Content="Deshacer última" Command="{Binding UndoCommand}" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#D97706" />
+            <!-- No se limita a la carpeta de F1: deshace la ejecución más reciente, sea de donde sea (interfaz-5). -->
+            <Button Content="Deshacer última" Command="{Binding UndoCommand}" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#D97706"
+                    ToolTip.Tip="Deshace la ejecución más reciente que escribió en tus archivos, sea de la pestaña que sea (Enriquecer, Editor, Volumen, Bandeja…) y de cualquier carpeta, aunque esta tabla muestre solo una. Respeta lo que hayas cambiado después a mano." />
             <!-- E14: elegir qué ejecución, o qué canciones de ella, deshacer. -->
             <Button Content="Historial de cambios…" Click="Historial_Click" IsEnabled="{Binding !IsBusy}" Classes="act" Background="#B45309" Margin="0,0,12,4"
                     ToolTip.Tip="Lista todo lo que la aplicación ha escrito en tus archivos (Enriquecer, Editor, Volumen, géneros…) y permite deshacer una ejecución concreta o solo algunas de sus canciones, aunque haya otras posteriores." />
@@ -149,7 +151,7 @@
                         ToolTip.Tip="Vuelve a mostrar las propuestas de todas las carpetas marcadas. Lo analizado en esta carpeta se conserva." />
                 <StackPanel VerticalAlignment="Center" Spacing="1">
                     <TextBlock Text="{Binding AmbitoTexto}" FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{DynamicResource InfoTexto}" />
-                    <TextBlock Text="Analizar, aplicar y marcar actúan solo sobre esta carpeta. Las demás siguen marcadas y sus propuestas se conservan."
+                    <TextBlock Text="Analizar, aplicar y marcar actúan solo sobre esta carpeta. Las demás siguen marcadas y sus propuestas se conservan. «Deshacer última» y el historial de cambios no se limitan a esta carpeta."
                                FontSize="12" Foreground="{DynamicResource InfoTexto}" TextWrapping="Wrap" />
                 </StackPanel>
             </DockPanel>

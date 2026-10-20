@@ -21,16 +21,41 @@ public sealed class FilaEjecucion
     public string Fecha => HistorialDeshacerViewModel.Cuando(E.Fecha);
     public string Tipo => E.TipoTexto;
     public int Cambios => E.Cambios;
+
+    /// <summary>
+    /// La columna «Archivos»: archivos distintos, no registros. Un archivo con su registro corrector
+    /// (una lista que el archivo guardó de otra forma) contaba dos veces (hallazgo interfaz-9).
+    /// </summary>
+    public int Archivos => E.Archivos;
+
     public int Renombrados => E.Renombrados;
     public string Estado => E.EstadoTexto;
 }
 
-/// <summary>Un archivo de la ejecución elegida, con su casilla para deshacerlo solo a él.</summary>
+/// <summary>
+/// Un archivo de la ejecución elegida, con su casilla para deshacerlo solo a él. Puede llevar más de
+/// un registro: el corrector que se anota cuando el archivo guarda una lista de otra forma va con su
+/// registro, y marcar la fila los deshace juntos (ver <see cref="HistorialDeshacerViewModel.Agrupar"/>).
+/// </summary>
 public sealed partial class FilaCambio : ObservableObject
 {
-    public FilaCambio(CambioDeshacer c) => C = c;
+    public FilaCambio(CambioDeshacer c) : this(new[] { c }) { }
 
+    public FilaCambio(IReadOnlyList<CambioDeshacer> registros)
+    {
+        if (registros.Count == 0) throw new ArgumentException("Una fila necesita al menos un registro.", nameof(registros));
+        Registros = registros;
+        C = registros[0];
+    }
+
+    /// <summary>El primer registro del archivo: de él salen el nombre, la carpeta y el estado.</summary>
     public CambioDeshacer C { get; }
+
+    /// <summary>Todos los registros de este archivo en la ejecución, en el orden del manifiesto.</summary>
+    public IReadOnlyList<CambioDeshacer> Registros { get; }
+
+    /// <summary>Lo que hay que pasar a deshacer para esta fila: las huellas de todos sus registros.</summary>
+    public IEnumerable<string> Huellas => Registros.Select(r => r.Huella);
 
     [ObservableProperty] private bool _marcada;
 
@@ -40,9 +65,13 @@ public sealed partial class FilaCambio : ObservableObject
     public string Archivo => C.Archivo;
 
     /// <summary>El nombre que tenía antes, solo si la ejecución lo cambió.</summary>
-    public string NombreAnterior => C.Renombra ? C.ArchivoAntes : "";
+    public string NombreAnterior => Registros.FirstOrDefault(r => r.Renombra) is { } r ? r.ArchivoAntes : "";
 
-    public string Cambios => C.CamposTexto;
+    /// <summary>Lo que cambió, sin repetir los campos que llevan sus dos registros.</summary>
+    public string Cambios => Registros.Count == 1 ? C.CamposTexto
+        : string.Join(", ", Registros.SelectMany(r => r.Campos).Distinct(StringComparer.Ordinal).Select(HistorialDeshacer.NombreCampo)
+                                     .Concat(Registros.Any(r => r.Renombra) ? new[] { "nombre" } : Array.Empty<string>()));
+
     public string Carpeta => Path.GetDirectoryName(C.Despues) ?? "";
 
     public string Estado => C.Estado switch
@@ -144,11 +173,7 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
         {
             _todas = await Task.Run(_historial.Listar);
             Filtrar(elegir);
-            var pendientes = _todas.Count(e => e.TienePendientes);
-            if (Estado.Length == 0 || elegir == null)
-                Estado = _todas.Count == 0
-                    ? "Todavía no hay ningún cambio anotado."
-                    : $"{_todas.Count} ejecuciones anotadas · {pendientes} con cambios que se pueden deshacer.";
+            if (Estado.Length == 0 || elegir == null) Estado = ResumenLista(_todas.Count, _todas.Count(e => e.TienePendientes));
         }
         catch (Exception e) { Estado = "No se ha podido leer el historial: " + e.Message; }
         finally { Ocupado = false; }
@@ -169,12 +194,44 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
         Marcadas = 0;
         if (fila == null) return;
         List<FilaCambio> filas;
-        try { filas = await Task.Run(() => _historial.Cambios(fila.E).Select(c => new FilaCambio(c)).ToList()); }
+        try { filas = await Task.Run(() => Agrupar(_historial.Cambios(fila.E))); }
         catch (Exception e) { Estado = "No se han podido leer los cambios de esa ejecución: " + e.Message; return; }
         if (!ReferenceEquals(fila, Seleccionada)) return;   // se eligió otra mientras se leía
         foreach (var f in filas) f.PropertyChanged += AlCambiarMarca;
         Cambios = new ObservableCollection<FilaCambio>(filas);
     }
+
+    /// <summary>
+    /// Una fila por archivo y estado, en el orden del manifiesto. POR QUÉ (hallazgo interfaz-9):
+    /// cuando un archivo guarda una lista de otra forma (en ID3v2.3, «Hip-Hop/Rap» se relee como dos
+    /// géneros), quien escribe anota un segundo registro con lo que de verdad quedó, y el historial
+    /// enseñaba ese archivo dos veces. Marcar solo la primera fila no devolvía nada: su valor ya no
+    /// coincide con el del archivo y se daba por cambiado a mano. Ahora van en una fila y se deshacen
+    /// a la vez.
+    /// </summary>
+    public static List<FilaCambio> Agrupar(IEnumerable<CambioDeshacer> cambios)
+    {
+        var grupos = new Dictionary<(EstadoCambio, string), List<CambioDeshacer>>();
+        var orden = new List<List<CambioDeshacer>>();
+        foreach (var c in cambios)
+        {
+            var clave = (c.Estado, HistorialDeshacer.ClaveArchivo(c).ToUpperInvariant());
+            if (!grupos.TryGetValue(clave, out var g))
+            {
+                grupos[clave] = g = new List<CambioDeshacer>();
+                orden.Add(g);
+            }
+            g.Add(c);
+        }
+        return orden.Select(g => new FilaCambio(g)).ToList();
+    }
+
+    /// <summary>El estado al abrir el historial, en singular o plural.</summary>
+    public static string ResumenLista(int ejecuciones, int conPendientes)
+        => ejecuciones == 0
+            ? "Todavía no hay ningún cambio anotado."
+            : $"{(ejecuciones == 1 ? "1 ejecución anotada" : $"{ejecuciones} ejecuciones anotadas")} · "
+              + $"{conPendientes} con cambios que se pueden deshacer.";
 
     private bool _marcandoEnLote;
 
@@ -211,7 +268,7 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
         IReadOnlyCollection<string>? huellas = null;
         if (soloMarcadas)
         {
-            huellas = Cambios.Where(c => c.Marcada && c.Seleccionable).Select(c => c.C.Huella).ToList();
+            huellas = Cambios.Where(c => c.Marcada && c.Seleccionable).SelectMany(c => c.Huellas).ToList();
             if (huellas.Count == 0) { Estado = "Marca antes alguna canción pendiente."; return null; }
         }
         Ocupado = true;
@@ -291,6 +348,13 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
 
     private static string Archivos(int n) => n == 1 ? "1 archivo" : $"{n} archivos";
 
+    /// <summary>
+    /// Cuántos archivos distintos hay en esos cambios. Los textos hablan de archivos, y un archivo
+    /// puede llevar dos registros (el corrector de una lista; ver <see cref="Agrupar"/>).
+    /// </summary>
+    internal static int Distintos(IEnumerable<CambioDeshacer> cambios)
+        => cambios.Select(HistorialDeshacer.ClaveArchivo).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+
     private static string Lista(IEnumerable<EjecucionDeshacer> ejecuciones)
     {
         var l = ejecuciones.ToList();
@@ -319,7 +383,7 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
         static string Parte(List<BloqueoDeshacer> grupo, bool perdido, Func<int, string, string> porque)
         {
             if (grupo.Count == 0) return "";
-            var n = grupo.Count;
+            var n = Distintos(grupo.Select(b => b.Cambio));
             var uno = n == 1;
             var posteriores = grupo.Select(b => b.Posterior).GroupBy(p => p.Id, StringComparer.OrdinalIgnoreCase)
                                    .Select(g => g.First()).OrderBy(p => p.Id, StringComparer.OrdinalIgnoreCase).ToList();
@@ -358,7 +422,7 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
     /// </summary>
     public static string TextoNombreOcupado(IReadOnlyCollection<CambioDeshacer> ocupados)
     {
-        var n = ocupados.Count;
+        var n = Distintos(ocupados);
         if (n == 0) return "";
         return n == 1
             ? "1 archivo no puede volver a su nombre anterior porque ya hay otro archivo con ese nombre en su carpeta: se queda pendiente. "
@@ -370,7 +434,7 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
     /// <summary>
     /// Los textos de la confirmación, o el motivo para no deshacer nada. Lo bloqueado no se deshace
     /// nunca (se queda pendiente); lo que una posterior volvió a tocar se deshace, avisando antes de
-    /// qué se conserva y de qué deja de poder deshacerse.
+    /// qué se conserva. Los números cuentan archivos, no registros.
     /// </summary>
     public static PlanDeshacer Planificar(AnalisisDeshacer a, bool soloMarcadas)
     {
@@ -386,8 +450,9 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
             return new PlanDeshacer(e, null, 0, "", "", "", "", motivo);
         }
 
-        var cuantos = a.ADeshacer.Count;
-        var renombran = a.ADeshacer.Count(c => c.Renombra);
+        // Archivos, no registros: un archivo con su registro corrector es uno solo (interfaz-9).
+        var cuantos = Distintos(a.ADeshacer);
+        var renombran = Distintos(a.ADeshacer.Where(c => c.Renombra));
         var titulo = soloMarcadas
             ? $"Deshacer {(cuantos == 1 ? "1 canción" : $"{cuantos} canciones")} de {Nombre(e)}"
             : $"Deshacer {Nombre(e)}";
@@ -399,21 +464,21 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
 
         if (a.Solapes.Count > 0)
         {
-            var s = a.Solapes.Count;
+            var s = Distintos(a.Solapes.Select(x => x.Cambio));
             var compartidos = a.Solapes.Where(x => x.CamposCompartidos.Count > 0).ToList();
             var campos = compartidos.SelectMany(x => x.CamposCompartidos).Distinct().Select(HistorialDeshacer.NombreCampo);
             var posteriores = a.Solapes.SelectMany(x => x.Posteriores).GroupBy(p => p.Id).Select(g => g.First())
                                        .OrderBy(p => p.Id, StringComparer.OrdinalIgnoreCase).ToList();
             cuerpo += $"\n\n{(s == 1 ? "1 de estos archivos se volvió" : $"{s} de estos archivos se volvieron")} a cambiar después en {Lista(posteriores)}.";
             if (compartidos.Count > 0)
-                cuerpo += $" Lo que cambiaron las dos ({string.Join(", ", campos)}) se queda como lo dejó la posterior en {Archivos(compartidos.Count)}.";
+                cuerpo += $" Lo que cambiaron las dos ({string.Join(", ", campos)}) se queda como lo dejó la posterior en {Archivos(Distintos(compartidos.Select(x => x.Cambio)))}.";
             cuerpo += TextoPierdeDeshacer(a.Solapes.Where(x => x.PierdeDeshacer).ToList());
             cuerpo += " Si vas a deshacer las dos, empieza por la más reciente.";
         }
 
         if (a.NoEncontrados.Count > 0)
         {
-            var m = a.NoEncontrados.Count;
+            var m = Distintos(a.NoEncontrados);
             cuerpo += $"\n\n{(m == 1 ? "1 archivo no aparece" : $"{m} archivos no aparecen")} en el disco, ni con el nombre que les dejó la ejecución ni con el anterior: se quedará{(m == 1 ? "" : "n")} pendiente{(m == 1 ? "" : "s")}.";
         }
 
@@ -428,30 +493,26 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
 
     /// <summary>
     /// Qué pasa con las ejecuciones posteriores cuando esta devuelve un archivo a su nombre anterior,
-    /// o "". Antes solo se decía que la posterior «ya no podrá deshacer sus cambios en él»; visto en
-    /// revisión, faltaba la consecuencia práctica: su registro queda como no encontrado, «Deshacer
-    /// última» se detiene en ella hasta darla por perdida y, si era un ajuste de volumen, la ganancia
-    /// ya no se puede devolver desde la aplicación. No se bloquea: lo posterior se queda aplicado,
-    /// que suele ser lo que se quiere, y para conservar también su deshacer basta con deshacer antes
-    /// la más reciente, como se aconseja a continuación.
+    /// o "" (<see cref="SolapeDeshacer.PierdeDeshacer"/>).
+    ///
+    /// POR QUÉ ASÍ (hallazgo datos-1). Antes la posterior se quedaba apuntando al nombre que le dejó
+    /// esta ejecución: su registro salía como no encontrado y, si después aparecía OTRO archivo con
+    /// ese nombre (la copia antigua recuperada de la papelera tras «Sustituir»), «Deshacer última» le
+    /// devolvía las etiquetas de la descarga o le quitaba un volumen que nunca se le subió. Ahora
+    /// UndoEngine pone al día el historial de la posterior para que siga al archivo hasta su nombre
+    /// anterior, y eso es lo que se promete. Si ese historial no se deja escribir en ese momento, el
+    /// archivo no se toca y se queda pendiente, con un aviso que dice cómo seguir.
     /// </summary>
     public static string TextoPierdeDeshacer(IReadOnlyList<SolapeDeshacer> pierden)
     {
-        var n = pierden.Count;
+        var n = Distintos(pierden.Select(x => x.Cambio));
         if (n == 0) return "";
         var uno = n == 1;
         var posteriores = pierden.SelectMany(x => x.Posteriores).Select(p => p.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         var unaPosterior = posteriores == 1;
-        var texto = $" {(uno ? "1 archivo vuelve" : $"{n} archivos vuelven")} a su nombre anterior, así que "
-                  + (unaPosterior ? "la ejecución posterior ya no " : "las ejecuciones posteriores ya no ")
-                  + $"{(uno ? "lo" : "los")} {(unaPosterior ? "encontrará" : "encontrarán")} donde {(uno ? "lo" : "los")} {(unaPosterior ? "dejó" : "dejaron")}: "
-                  + $"lo que {(unaPosterior ? "cambió" : "cambiaron")} en {(uno ? "él" : "ellos")} se queda y no se podrá deshacer desde la aplicación.";
-        var volumen = pierden.Count(x => x.VolumenPosterior);
-        if (volumen > 0)
-            texto += $" Eso incluye el ajuste de volumen de {Archivos(volumen)}: el audio se queda con la ganancia que se le aplicó.";
-        texto += unaPosterior
-            ? " Cuando «Deshacer última» llegue a esa ejecución, se detendrá en ella hasta que la des por perdida en este historial."
-            : " Cuando «Deshacer última» llegue a esas ejecuciones, se detendrá en ellas hasta que las des por perdidas en este historial.";
-        return texto;
+        return $" {(uno ? "1 archivo vuelve" : $"{n} archivos vuelven")} a su nombre anterior, y el historial se pone al día para que "
+             + (unaPosterior ? "la ejecución posterior " : "las ejecuciones posteriores ")
+             + $"{(uno ? "lo" : "los")} {(unaPosterior ? "encuentre" : "encuentren")} con ese nombre: "
+             + $"lo que {(unaPosterior ? "cambió" : "cambiaron")} en {(uno ? "él" : "ellos")} se queda y se podrá deshacer después.";
     }
 }

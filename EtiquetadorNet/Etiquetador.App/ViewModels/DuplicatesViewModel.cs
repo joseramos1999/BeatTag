@@ -875,6 +875,8 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     private async Task<EnvioPapeleraResultado?> EnviarAPapeleraAsync(IReadOnlyList<string> rutas)
     {
         if (EnviandoAPapelera) return null;
+        using var cts = new CancellationTokenSource();
+        _papeleraCts = cts;
         EnviandoAPapelera = true;
         PapeleraProgreso = 0;
         Status = EnvioPapelera.TextoAvance(0, rutas.Count);
@@ -886,12 +888,36 @@ public partial class DuplicatesViewModel : ScanViewModelBase
                 PapeleraProgreso = p.Total > 0 ? p.Hechas * 100.0 / p.Total : 0;
                 Status = EnvioPapelera.TextoAvance(p.Hechas, p.Total);
             });
-            return await EnvioPapelera.EnviarAsync(rutas, progreso: avance);
+            return await EnvioPapelera.EnviarAsync(rutas, progreso: avance, ct: cts.Token);
         }
         finally
         {
+            _papeleraCts = null;
             EnviandoAPapelera = false;
             PapeleraProgreso = 0;
         }
+    }
+
+    private CancellationTokenSource? _papeleraCts;
+
+    /// <summary>
+    /// El envío a la papelera cuenta como proceso de la página, igual que analizar el audio
+    /// (hallazgo interfaz-1). Es lo que mira la barra lateral para bloquear las demás pestañas y lo
+    /// que mira el cierre para preguntar: durante el envío, las copias siguen en la biblioteca hasta
+    /// el final, y Enriquecer o Volumen podían escribir en un archivo que se estaba moviendo a la
+    /// papelera, o la ventana se cerraba sin preguntar a mitad del envío.
+    /// </summary>
+    public bool Ocupada => IsBusy || EnviandoAPapelera;
+
+    /// <summary>
+    /// Para lo que esté en marcha: el análisis del audio y el envío a la papelera, que se detiene
+    /// entre un archivo y el siguiente (lo ya enviado sale de la tabla y de la biblioteca). Lo usa el
+    /// cierre de la ventana.
+    /// </summary>
+    public void CancelarProcesos()
+    {
+        CancelFingerprints();
+        try { _papeleraCts?.Cancel(); }
+        catch (ObjectDisposedException) { /* ya había terminado */ }
     }
 }

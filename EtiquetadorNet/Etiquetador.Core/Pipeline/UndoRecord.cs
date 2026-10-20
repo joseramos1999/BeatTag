@@ -79,9 +79,10 @@ public sealed class UndoRecord
     /// Sin valor no se escribe, así que los manifiestos de quien no lo pone quedan exactamente como
     /// antes.
     ///
-    /// PENDIENTE: en la tanda 3 ningún escritor lo pone todavía (el Editor y Unificar géneros son de
-    /// otros equipos), así que una edición del Editor que solo cambia el género sigue saliendo como
-    /// «Géneros». Basta con que cada escritor ponga aquí su <see cref="TipoEjecucion"/>.
+    /// Lo pone cada escritor con <c>nameof(TipoEjecucion.X)</c>: aplicar propuestas (ApplyEngine, según
+    /// quien llama), el Editor, Volumen, Unificar géneros, Renombrar con IA y Completar nombres, las
+    /// fichas al comentario y la importación de rekordbox. Un escritor nuevo debe ponerlo también:
+    /// sin él, el historial deduce el tipo por los campos y puede confundirlo con otra herramienta.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? Origen { get; set; }

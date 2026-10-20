@@ -199,7 +199,8 @@ public sealed class AppEngine
 
         Processor = new FileProcessor(Deezer, Itunes, Spotify, MusicBrainz, Discogs, AcoustId, Ai, Fingerprint, Http, ArtistExc, Logger);
         Apply = new ApplyEngine(Covers);
-        Undo = new UndoEngine(Paths, Logger);
+        // Al deshacer, las cachés de audio siguen al archivo igual que al escribir (hallazgo datos-3).
+        Undo = new UndoEngine(Paths, Logger) { AlDeshacer = SeguirDeshecho };
         Tester = new ConnectionTester(Api, Spotify, Ai);
         Fase("Cargando la caché de la biblioteca…");
         Library = new LibraryStore(Config, SaveConfig, new ScanCache(Paths.ScanCachePath)) { Log = Logger };
@@ -463,6 +464,60 @@ public sealed class AppEngine
         EnColaDeHuellas(() => Fingerprints.Retocar(ruta, antes.M, antes.S));
     }
 
+    /// <summary>
+    /// Un deshacer acaba de renombrar o reescribir un archivo (lo avisa UndoEngine en el hilo que
+    /// deshace). Es lo mismo que al escribir, al revés: el audio de un registro de etiquetas es el
+    /// mismo; el de uno de volumen cambia, pero no la canción ni su huella.
+    ///
+    /// POR QUÉ (hallazgo datos-3). Sin esto, deshacer los géneros por reglas de 2.597 canciones, o una
+    /// limpieza de packs, hacía caducar sus huellas y sus respuestas de «Comprobar audio» por la fecha,
+    /// y la siguiente comprobación volvía a mandar al servicio de pago las que AcoustID no reconoce.
+    /// </summary>
+    private void SeguirDeshecho(ArchivoDeshecho a) => SeguirDeshecho(a, SeguirArchivo, VolumenAjustado);
+
+    /// <summary>La regla de <see cref="SeguirDeshecho(ArchivoDeshecho)"/>, aparte para poder probarla sin el motor.</summary>
+    internal static void SeguirDeshecho(ArchivoDeshecho a, Action<string, string, SelloArchivo> seguir, Action<string, SelloArchivo> volumen)
+    {
+        var sello = a.ExistiaAntes ? new SelloArchivo(a.FechaAntes, a.TamanoAntes, true) : default;
+        if (a.Volumen)
+        {
+            if (!string.Equals(a.Desde, a.Hasta, StringComparison.Ordinal)) seguir(a.Desde, a.Hasta, default);
+            volumen(a.Hasta, sello);
+        }
+        // Solo renombrado (sin sello): las entradas se mueven y nada más, porque la fecha no cambia.
+        else seguir(a.Desde, a.Hasta, a.Etiquetas ? sello : default);
+    }
+
+    /// <summary>
+    /// «Deshacer última», con las cachés de audio al día al terminar. Fuera del hilo de la interfaz.
+    /// </summary>
+    public UndoResult DeshacerUltima() => TrasDeshacer(Undo.UndoLastRun());
+
+    /// <summary>
+    /// Deshace desde el historial los cambios elegidos de una ejecución (null: todos), con las cachés
+    /// de audio al día al terminar. Fuera del hilo de la interfaz.
+    /// </summary>
+    public UndoResult DeshacerCambios(string manifiesto, IReadOnlyCollection<string>? huellas)
+        => TrasDeshacer(Undo.DeshacerCambios(manifiesto, huellas));
+
+    /// <summary>
+    /// Guarda lo ligero (identificación, que puede llevar respuestas pagadas, y sonoridad) si el
+    /// deshacer tocó algo. Las huellas (más de 150 MB en una biblioteca grande) las guarda el reloj
+    /// cada cinco minutos y el cierre, como tras las herramientas del Asistente.
+    /// </summary>
+    private UndoResult TrasDeshacer(UndoResult res)
+    {
+        if (res.None || res.Tocadas.Count == 0) return res;
+        try
+        {
+            Identificacion.Save();
+            Loudness.Save();
+            Registrar("los avisos aceptados de Comprobar audio", AudioAceptadas.Save());
+        }
+        catch (Exception e) { Logger.Error("Guardar las cachés de audio tras deshacer", e); }
+        return res;
+    }
+
     private readonly object _cerrojoHuellas = new();
     private Task _colaHuellas = Task.CompletedTask;
 
@@ -496,10 +551,10 @@ public sealed class AppEngine
     /// </summary>
     public async Task<ApplyOneResult> AplicarUnoAsync(ProcessResult info, bool over, FieldFlags fields,
         string coverMode, TagLib.Picture? pngPic, string? undoFile, string doneLogPath, CancellationToken ct = default,
-        bool aplicada = false)
+        bool aplicada = false, string? origen = null)
     {
         var antes = SelloArchivo.De(info.FilePath);
-        var res = await Apply.ApplyOneAsync(info, over, fields, coverMode, pngPic, undoFile, doneLogPath, ct, aplicada).ConfigureAwait(false);
+        var res = await Apply.ApplyOneAsync(info, over, fields, coverMode, pngPic, undoFile, doneLogPath, ct, aplicada, origen).ConfigureAwait(false);
         SeguirArchivo(info.FilePath, res.FinalPath, antes);
         return res;
     }
@@ -675,21 +730,27 @@ public sealed class AppEngine
             try
             {
                 SelloArchivo? sello = null;
+                string[] antes = Array.Empty<string>(), despues = Array.Empty<string>(), previstos = Array.Empty<string>();
                 using (var f = TagLib.File.Create(ruta))
                 {
-                    var antes = f.Tag.Genres ?? Array.Empty<string>();
-                    var despues = GenerosAEscribir(genero);
-                    if (antes.SequenceEqual(despues, StringComparer.Ordinal)) sinCambio++;
+                    antes = f.Tag.Genres ?? Array.Empty<string>();
+                    despues = GenerosAEscribir(genero);
+                    // Lo que se leerá después de escribir: en ID3v2.3 «Dance/Electrónica» vuelve
+                    // como dos géneros (ver Relectura). Si ya es lo que tiene, no hay nada que escribir.
+                    previstos = Relectura.Generos(f, despues);
+                    if (antes.SequenceEqual(despues, StringComparer.Ordinal) || antes.SequenceEqual(previstos, StringComparer.Ordinal)) sinCambio++;
                     else
                     {
                         // Se anota ANTES de tocar el archivo: si el historial ya no se puede escribir,
                         // este archivo y los siguientes se quedan como estaban. Que quede anotado un
                         // cambio que luego falle no estorba: deshacer solo devuelve un campo si sigue
-                        // teniendo lo que escribió la aplicación.
+                        // teniendo lo que escribió la aplicación. Se anota lo que se LEERÁ, que es con
+                        // lo que deshacer lo compara.
                         var anotado = historial.Anotar(new UndoRecord
                         {
                             OrigPath = ruta, FinalPath = ruta, Renamed = false,
-                            Fields = new Dictionary<string, FieldChange> { ["Genre"] = FieldChange.Arr(antes, despues) },
+                            Fields = new Dictionary<string, FieldChange> { ["Genre"] = FieldChange.Arr(antes, previstos) },
+                            Origen = nameof(TipoEjecucion.Generos),
                         });
                         if (anotado.Length > 0)
                             return new ResultadoGeneros(escritas, sinCambio, fallos, "", true, Parada(ruta, anotado, log));
@@ -701,7 +762,35 @@ public sealed class AppEngine
                     }
                 }
                 // Con el archivo ya cerrado, que es cuando su fecha queda al día.
-                if (sello is { } s) seguir?.Invoke(ruta, ruta, s);
+                if (sello is { } s)
+                {
+                    seguir?.Invoke(ruta, ruta, s);
+
+                    // La predicción se comprueba: si el archivo guardó otra cosa, se anota un segundo
+                    // registro con lo que de verdad quedó, que deshacer procesa primero (la misma
+                    // solución que EtiquetasPorReglas.Corregidos para el Asistente).
+                    if (Relectura.DebeReleerse(despues, previstos))
+                    {
+                        string[]? quedo = null;
+                        try { using var releido = TagLib.File.Create(ruta); quedo = releido.Tag.Genres ?? Array.Empty<string>(); }
+                        catch (Exception e) { log?.Log($"Género: {Path.GetFileName(ruta)} se escribió, pero no se pudo volver a leer para comprobarlo: {e.Message}", LogKind.Err); }
+                        if (quedo != null && !quedo.SequenceEqual(previstos, StringComparer.Ordinal))
+                        {
+                            var corregido = historial.Anotar(new UndoRecord
+                            {
+                                OrigPath = ruta, FinalPath = ruta, Renamed = false,
+                                Fields = new Dictionary<string, FieldChange> { ["Genre"] = FieldChange.Arr(antes, quedo) },
+                                Origen = nameof(TipoEjecucion.Generos),
+                            });
+                            if (corregido.Length > 0)
+                            {
+                                var sinAnotar = $"«{Path.GetFileName(ruta)}» quedó escrito, pero lo que guardó el archivo no se pudo anotar tal cual ({corregido}): deshacerlo no lo devolverá";
+                                log?.Err("Género: " + sinAnotar);
+                                return new ResultadoGeneros(escritas, sinCambio, fallos, sinAnotar, true, Parada(ruta, corregido, log));
+                            }
+                        }
+                    }
+                }
             }
             catch (Exception e)
             {
@@ -788,7 +877,10 @@ public sealed class AppEngine
             {
                 // El destino solo se sabe después de renombrar, así que aquí se anota después; si no
                 // se puede, se le devuelve su nombre y se para.
-                var anotado = historial.Anotar(new UndoRecord { OrigPath = t.Origen, FinalPath = t.Destino, Renamed = true });
+                var anotado = historial.Anotar(new UndoRecord
+                {
+                    OrigPath = t.Origen, FinalPath = t.Destino, Renamed = true, Origen = nameof(TipoEjecucion.Renombrado),
+                });
                 if (anotado.Length > 0)
                 {
                     try { File.Move(t.Destino, t.Origen); }
@@ -874,6 +966,7 @@ public sealed class AppEngine
                         {
                             OrigPath = ruta, FinalPath = ruta, Renamed = false,
                             Fields = new Dictionary<string, FieldChange> { ["Comment"] = FieldChange.Str(antes, despues) },
+                            Origen = nameof(TipoEjecucion.Comentario),
                         });
                         if (anotado.Length > 0)
                             return new ResultadoVolcado(escritas, sinCambio, fallos, "", Parada(ruta, anotado, log));

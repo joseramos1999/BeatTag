@@ -51,7 +51,36 @@ public sealed record UndoResult(string File, int Reverted, int Errors, int Missi
     /// cambiado de nombre.
     /// </summary>
     public IReadOnlyList<string> Tocadas { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Archivos que este deshacer ha devuelto a su nombre anterior y ahí se quedan: dónde estaban y
+    /// dónde quedan. Lo que quien llama guarda por ruta para ESE archivo (que una ejecución posterior lo
+    /// dio por aplicado) tiene que seguirlo, igual que lo siguen los registros de esas posteriores
+    /// (hallazgo datos-1). Sin esto, tras deshacer una sustitución de la Bandeja la marca de «aplicada»
+    /// que Enriquecer puso a la descarga se quedaba en la ruta de la biblioteca, y la copia antigua
+    /// que se recuperase allí de la papelera ya no se volvía a proponer.
+    /// </summary>
+    public IReadOnlyList<(string Desde, string Hasta)> Vueltas { get; init; } = Array.Empty<(string, string)>();
 }
+
+/// <summary>
+/// Lo que un deshacer acaba de hacer con un archivo, para que quien guarda cachés por ruta, fecha y
+/// tamaño (huellas, «Comprobar audio», sonoridad) las ponga al día en lugar de darlas por caducadas.
+///
+/// POR QUÉ (hallazgo datos-3). Al escribir, Enriquecer, Unificar géneros o las herramientas del
+/// Asistente avisan a esas cachés; al deshacer no se avisaba a nadie: la fecha del archivo cambiaba,
+/// las huellas se volvían a calcular y «Comprobar audio» volvía a mandar al servicio de pago canciones
+/// que ya había identificado. Desde el historial se deshacen miles de canciones de una vez.
+/// </summary>
+/// <param name="Desde">Dónde estaba el archivo al empezar a deshacer.</param>
+/// <param name="Hasta">Dónde ha quedado (la misma ruta si no ha vuelto a su nombre anterior).</param>
+/// <param name="Etiquetas">Se han reescrito etiquetas o la carátula: el audio es el mismo.</param>
+/// <param name="Volumen">Se ha devuelto el volumen: cambia el audio, pero no la canción ni su huella.</param>
+/// <param name="FechaAntes">Fecha de modificación (ticks UTC) justo antes de tocarlo.</param>
+/// <param name="TamanoAntes">Tamaño en bytes justo antes de tocarlo.</param>
+/// <param name="ExistiaAntes">Se pudieron leer la fecha y el tamaño antes de tocarlo.</param>
+public readonly record struct ArchivoDeshecho(string Desde, string Hasta, bool Etiquetas, bool Volumen,
+                                              long FechaAntes, long TamanoAntes, bool ExistiaAntes);
 
 /// <summary>Resultado de <see cref="UndoEngine.DarPorPerdidos"/>.</summary>
 /// <param name="Archivo">El manifiesto que se ha sacado de la cola ("" si no había ninguno).</param>
@@ -79,6 +108,19 @@ public sealed class UndoEngine
     private readonly Logger? _log;
 
     public UndoEngine(AppPaths paths, Logger? log = null) { _paths = paths; _log = log; }
+
+    /// <summary>
+    /// Se llama tras cada archivo que un deshacer ha renombrado o reescrito, en el hilo que deshace
+    /// (ver <see cref="ArchivoDeshecho"/>). Un fallo de quien escucha no detiene el deshacer.
+    /// </summary>
+    public Action<ArchivoDeshecho>? AlDeshacer { get; set; }
+
+    /// <summary>
+    /// Cómo se reescribe el manifiesto de una ejecución posterior para que siga a un archivo que ha
+    /// vuelto a su nombre anterior. Es <see cref="ArchivoDatos.Escribir"/>; las pruebas lo sustituyen
+    /// para simular un manifiesto bloqueado (antivirus, OneDrive) justo en ese momento.
+    /// </summary>
+    internal Func<string, string, string> EscribirPosterior { get; set; } = ArchivoDatos.Escribir;
 
     // Solo cuentan como «por deshacer» los manifiestos de ejecución puros: run_aaaammdd_hhmmss.jsonl
     // (con un _N opcional por si dos ejecuciones caen en el mismo segundo).
@@ -151,6 +193,370 @@ public sealed class UndoEngine
     public static string HuellaLinea(string linea)
         => Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(Encoding.UTF8.GetBytes(linea)), 0, 8).ToLowerInvariant();
 
+    // --- Lo que hizo el deshacer con cada archivo ---
+
+    /// <summary>Lo que el deshacer de un registro ha hecho con su archivo (ver <see cref="ArchivoDeshecho"/>).</summary>
+    private sealed class Efecto
+    {
+        public string Desde = "", Hasta = "";
+        public bool Movido, Etiquetas, Volumen;
+        public long M, S;
+        public bool Existia;
+
+        /// <summary>Dónde está el archivo y su fecha y tamaño, ANTES de tocarlo.</summary>
+        public void Sellar(string ruta)
+        {
+            Desde = Hasta = ruta;
+            try
+            {
+                var fi = new FileInfo(ruta);
+                if (fi.Exists) { M = fi.LastWriteTimeUtc.Ticks; S = fi.Length; Existia = true; }
+            }
+            catch { /* sin sello, las cachés de ese archivo solo se mueven */ }
+        }
+    }
+
+    private void Avisar(Efecto e)
+    {
+        if (AlDeshacer == null || !(e.Movido || e.Etiquetas || e.Volumen)) return;
+        try { AlDeshacer(new ArchivoDeshecho(e.Desde, e.Hasta, e.Etiquetas, e.Volumen, e.M, e.S, e.Existia)); }
+        catch (Exception x) { _log?.Log($"  deshacer: no se pudieron poner al día las cachés de audio de «{Path.GetFileName(e.Hasta)}»: {x.Message}", LogKind.Err); }
+    }
+
+    // --- Las ejecuciones posteriores siguen al archivo que vuelve a su nombre (hallazgo datos-1) ---
+    //
+    // Desde el historial (E14) se puede deshacer un renombrado aunque una ejecución POSTERIOR siga
+    // pendiente sobre el mismo archivo sin renombrarlo (un ajuste de volumen, el Editor, Enriquecer
+    // sobre una descarga que «Sustituir» llevó a la biblioteca). Al volver el archivo a su nombre
+    // anterior, el registro de la posterior seguía apuntando al nombre que le había dejado esta. Visto
+    // en revisión: si después aparecía OTRO archivo con ese nombre -la copia antigua recuperada de la
+    // papelera, como aconseja la Bandeja al sustituir-, «Deshacer última» le devolvía a ese otro
+    // archivo las etiquetas de la descarga, o le aplicaba la ganancia inversa de un volumen que nunca
+    // se le subió. Y si no aparecía nada, la posterior se quedaba atascada como «no encontrada».
+    //
+    // Ahora, al devolver un archivo a su nombre anterior, los registros PENDIENTES de las ejecuciones
+    // posteriores que lo tocaron sin renombrarlo pasan a apuntar a ese nombre: siguen deshaciéndose
+    // sobre el archivo correcto. Si el historial de una posterior no se deja escribir, ese archivo
+    // vuelve a donde lo dejó la ejecución y se queda pendiente: nunca se deja una posterior
+    // apuntando a un nombre que ya no es el de su archivo.
+
+    /// <summary>Un archivo que este deshacer ha devuelto a su nombre anterior.</summary>
+    /// <param name="Linea">Su registro en el manifiesto que se deshace.</param>
+    /// <param name="Desde">Dónde lo dejó la ejecución, que es donde lo esperan las posteriores.</param>
+    /// <param name="Hasta">Su nombre anterior, donde queda.</param>
+    internal sealed record Vuelta(int Linea, string Desde, string Hasta);
+
+    /// <summary>El manifiesto pendiente de una ejecución posterior, con sus líneas puestas al día.</summary>
+    private sealed class Posterior
+    {
+        public required string Ruta { get; init; }
+
+        /// <summary>Las líneas con contenido, tal como se leyeron; null si no se pudo leer.</summary>
+        public required List<string>? Lineas { get; init; }
+
+        /// <summary>Las líneas puestas al día, o null si ninguna cambia.</summary>
+        public string[]? Nuevas;
+
+        /// <summary>De cada línea puesta al día, la ruta seguida que cambió.</summary>
+        public readonly Dictionary<int, string> Claves = new();
+
+        public bool Escrita;
+    }
+
+    /// <summary>Antes, después y si renombra, de un registro de formato nuevo o antiguo; null si no se entiende.</summary>
+    private static (string Antes, string Despues, bool Renombra)? Rutas3(JsonNode? n)
+    {
+        if (n is not JsonObject o) return null;
+        if (o.ContainsKey("OrigPath"))
+        {
+            var antes = J.S(o["OrigPath"]);
+            var despues = J.S(o["FinalPath"]);
+            if (despues.Length == 0) despues = antes;
+            return (antes, despues, Verdadero(o["Renamed"]) && !string.Equals(antes, despues, StringComparison.Ordinal));
+        }
+        var actual = J.S(o["new"]);
+        if (actual.Length == 0) return null;
+        var orig = J.S(o["orig"]);
+        var previa = orig.Length == 0 ? actual : Path.Combine(Path.GetDirectoryName(actual) ?? "", orig);
+        return (previa, actual, Verdadero(o["renamed"]) && !string.Equals(previa, actual, StringComparison.Ordinal));
+    }
+
+    private static bool Verdadero(JsonNode? n) => n is JsonValue v && v.TryGetValue<bool>(out var b) && b;
+
+    /// <summary>
+    /// La línea <paramref name="linea"/> de una ejecución posterior puesta al día, o null si no cambia.
+    /// <paramref name="seguir"/> lleva cada ruta seguida (donde la posterior esperaba el archivo) a la
+    /// ruta en que queda. Solo cambia un registro que tocó el archivo SIN renombrarlo; uno que lo
+    /// renombra, o que lleva otro archivo a esa ruta, hace que desde ahí esa ruta sea de otro
+    /// archivo, y se deja de seguir. Hay que llamarla con las líneas en orden, de la más antigua a la
+    /// más reciente. <paramref name="clave"/> dice qué ruta seguida cambió.
+    /// </summary>
+    internal static string? Reubicar(string linea, Dictionary<string, string> seguir, out string? clave)
+    {
+        clave = null;
+        if (seguir.Count == 0) return null;
+        JsonObject? o;
+        try { o = JsonNode.Parse(linea) as JsonObject; } catch { return null; }
+        if (Rutas3(o) is not { } r) return null;
+        if (r.Renombra)
+        {
+            seguir.Remove(r.Antes);
+            seguir.Remove(r.Despues);
+            return null;
+        }
+        if (!seguir.TryGetValue(r.Antes, out var nueva)) return null;
+        clave = r.Antes;
+        if (o!.ContainsKey("OrigPath"))
+        {
+            o["OrigPath"] = nueva;
+            if (J.S(o["FinalPath"]).Length > 0) o["FinalPath"] = nueva;
+        }
+        else
+        {
+            o["new"] = nueva;
+            if (J.S(o["orig"]).Length > 0) o["orig"] = Path.GetFileName(nueva);
+        }
+        return o.ToJsonString();
+    }
+
+    /// <summary>
+    /// Los manifiestos pendientes de las ejecuciones POSTERIORES a <paramref name="mf"/>, de la más
+    /// antigua a la más reciente. Se leen dejando que otro los lea a la vez (el historial puede estar
+    /// abierto). <paramref name="ilegible"/>: alguno no se pudo leer.
+    /// </summary>
+    private List<Posterior> LeerPosteriores(string mf, out string ilegible)
+    {
+        ilegible = "";
+        var nombre = Path.GetFileName(mf);
+        var lista = new List<Posterior>();
+        foreach (var p in ManifiestosPendientes().Where(p => string.Compare(Path.GetFileName(p), nombre, StringComparison.OrdinalIgnoreCase) > 0)
+                                                 .OrderBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase))
+        {
+            List<string>? lineas = null;
+            try
+            {
+                using var fs = new FileStream(p, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var lector = new StreamReader(fs, Encoding.UTF8);
+                lineas = new List<string>();
+                for (var l = lector.ReadLine(); l != null; l = lector.ReadLine())
+                    if (l.Trim().Length > 0) lineas.Add(l);
+            }
+            catch (Exception e)
+            {
+                if (ilegible.Length == 0) ilegible = $"{Path.GetFileName(p)}: {e.Message}";
+            }
+            lista.Add(new Posterior { Ruta = p, Lineas = lineas });
+        }
+        return lista;
+    }
+
+    /// <summary>
+    /// De <paramref name="rutas"/> (donde las ejecuciones que se deshacen dejaron sus archivos
+    /// renombrados), las que no se podrían seguir ahora: alguna posterior que tendría que ponerse al
+    /// día no se deja escribir. Se comprueba ANTES de tocar ningún archivo, abriendo cada manifiesto
+    /// en exclusiva un instante, para no renombrar algo que luego haya que devolver. Si alguna
+    /// posterior no se pudo ni leer, no se sabe qué toca: no se sigue ninguna.
+    /// </summary>
+    private static HashSet<string> PosterioresQueNoSeDejanEscribir(List<Posterior> posteriores, IEnumerable<string> rutas,
+                                                                  string ilegible, out string motivo)
+    {
+        motivo = ilegible;
+        var todas = new HashSet<string>(rutas, StringComparer.OrdinalIgnoreCase);
+        if (ilegible.Length > 0) return todas;
+
+        // Las mismas reglas que al seguir de verdad, con las rutas apuntando a sí mismas: solo
+        // interesa qué manifiestos habría que reescribir y por qué rutas.
+        var simulacion = todas.ToDictionary(r => r, r => r, StringComparer.OrdinalIgnoreCase);
+        var bloqueadas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in posteriores)
+        {
+            if (simulacion.Count == 0) break;
+            var claves = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var l in p.Lineas!)
+                if (Reubicar(l, simulacion, out var c) != null && c != null) claves.Add(c);
+            if (claves.Count == 0) continue;
+            try { using (new FileStream(p.Ruta, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { } }
+            catch (Exception e)
+            {
+                if (motivo.Length == 0) motivo = $"{Path.GetFileName(p.Ruta)}: {e.Message}";
+                bloqueadas.UnionWith(claves);
+            }
+        }
+        return bloqueadas;
+    }
+
+    /// <summary>
+    /// El aviso de los renombrados que no se deshacen todavía porque una posterior no se puede poner
+    /// al día (ver <see cref="PosterioresQueNoSeDejanEscribir"/>).
+    ///
+    /// POR QUÉ DOS TEXTOS (revisión de datos-1): si una posterior no se pudo ni leer, se aplazan TODOS
+    /// los renombrados elegidos, también los de archivos que ninguna posterior tocó, porque no se sabe
+    /// qué toca. Decir entonces que «el historial de una ejecución posterior que también los cambió
+    /// está en uso» era falso para esos archivos.
+    /// </summary>
+    /// <param name="n">Cuántos archivos se aplazan.</param>
+    /// <param name="motivo">El manifiesto y el error, tal como los dio el sistema.</param>
+    /// <param name="ilegible">Alguna posterior no se pudo leer (y no solo escribir).</param>
+    internal static string TextoAplazados(int n, string motivo, bool ilegible)
+    {
+        var cuantos = n == 1 ? "1 archivo no se ha deshecho todavía" : $"{n} archivos no se han deshecho todavía";
+        var porque = ilegible
+            ? $"no se ha podido leer el historial de una ejecución posterior ({motivo}), y sin él no se sabe si "
+              + $"{(n == 1 ? "lo cambió" : "los cambió")} también"
+            : $"el historial de una ejecución posterior que también {(n == 1 ? "lo" : "los")} cambió está en uso ({motivo})";
+        return $"{cuantos}: {porque}. Vuelve a intentarlo dentro de unos segundos.";
+    }
+
+    /// <summary>
+    /// Pone al día las posteriores para que sigan a los archivos de <paramref name="vueltas"/>. Lo que
+    /// no se pueda poner al día en TODAS sus posteriores vuelve a donde lo dejó la ejecución, y su
+    /// registro se queda pendiente (con un aviso). Devuelve las rutas de esos archivos.
+    /// </summary>
+    private HashSet<string> SeguirEnPosteriores(List<Posterior> posteriores, List<Vuelta> vueltas,
+                                                Outcome?[] resultado, bool[] pendiente, List<string> avisos)
+    {
+        var noSiguen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seguir = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var v in vueltas) seguir.TryAdd(v.Desde, v.Hasta);
+
+        // 1) En memoria y en orden: una posterior puede haber vuelto a llevar otro archivo a ese nombre.
+        foreach (var p in posteriores)
+        {
+            if (seguir.Count == 0) break;
+            if (p.Lineas == null) continue;
+            for (var k = 0; k < p.Lineas.Count; k++)
+            {
+                var nueva = Reubicar(p.Lineas[k], seguir, out var clave);
+                if (nueva == null || clave == null) continue;
+                p.Nuevas ??= p.Lineas.ToArray();
+                p.Nuevas[k] = nueva;
+                p.Claves[k] = clave;
+            }
+        }
+
+        // 2) A disco. Unos pocos reintentos: un antivirus o OneDrive sueltan el archivo enseguida.
+        var errores = new List<string>();
+        foreach (var p in posteriores.Where(p => p.Nuevas != null))
+        {
+            var error = EscribirConReintentos(p.Ruta, p.Nuevas!);
+            if (error.Length == 0)
+            {
+                p.Escrita = true;
+                _log?.Log($"  deshacer: {p.Claves.Count} registro(s) de {Path.GetFileName(p.Ruta)} siguen a su archivo hasta su nombre anterior.", LogKind.No);
+                continue;
+            }
+            errores.Add($"{Path.GetFileName(p.Ruta)}: {error}");
+            noSiguen.UnionWith(p.Claves.Values);
+        }
+        if (noSiguen.Count == 0) return noSiguen;
+        _log?.Log("  deshacer: no se pudieron poner al día ejecuciones posteriores: " + string.Join(" · ", errores), LogKind.Err);
+
+        // 3) Cada archivo que alguna posterior no sigue vuelve a donde lo dejó la ejecución, y las
+        //    posteriores que sí se pusieron al día vuelven a esperarlo ahí.
+        var devueltas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sinDevolver = new List<string>();
+        foreach (var v in vueltas.Where(v => noSiguen.Contains(v.Desde)))
+        {
+            try
+            {
+                Mover(v.Hasta, v.Desde);
+                devueltas.Add(v.Desde);
+                resultado[v.Linea] = Outcome.Error;
+                pendiente[v.Linea] = true;
+                Avisar(new Efecto { Desde = v.Hasta, Hasta = v.Desde, Movido = true });
+            }
+            catch (Exception e)
+            {
+                sinDevolver.Add(Path.GetFileName(v.Hasta));
+                _log?.Log($"  deshacer: «{Path.GetFileName(v.Hasta)}» no se pudo devolver a «{Path.GetFileName(v.Desde)}»: {e.Message}", LogKind.Err);
+            }
+        }
+        foreach (var p in posteriores.Where(p => p.Escrita))
+        {
+            var volver = p.Claves.Where(kv => devueltas.Contains(kv.Value)).Select(kv => kv.Key).ToList();
+            if (volver.Count == 0) continue;
+            foreach (var k in volver) p.Nuevas![k] = p.Lineas![k];
+            var error = EscribirConReintentos(p.Ruta, p.Nuevas!);
+            if (error.Length > 0)
+            {
+                avisos.Add($"No se ha podido corregir el historial de {Path.GetFileName(p.Ruta)} ({error}): al deshacer esa ejecución, "
+                         + (volver.Count == 1 ? "1 archivo puede no encontrarse." : $"{volver.Count} archivos pueden no encontrarse."));
+                _log?.Log($"  deshacer: {Path.GetFileName(p.Ruta)} se quedó apuntando a {volver.Count} nombre(s) anterior(es): {error}", LogKind.Err);
+            }
+        }
+
+        var n = devueltas.Count;
+        if (n > 0)
+            avisos.Add($"{(n == 1 ? "1 archivo se ha dejado con el nombre que le dio la ejecución" : $"{n} archivos se han dejado con el nombre que les dio la ejecución")}: "
+                     + $"no se pudo poner al día el historial de una ejecución posterior que también {(n == 1 ? "lo" : "los")} cambió ({errores[0]}). "
+                     + $"{(n == 1 ? "Sigue pendiente" : "Siguen pendientes")}; vuelve a intentarlo dentro de unos segundos.");
+        if (sinDevolver.Count > 0)
+            avisos.Add($"No se ha podido poner al día el historial de una ejecución posterior ({errores[0]}) ni devolver "
+                     + (sinDevolver.Count == 1 ? $"«{sinDevolver[0]}» a donde lo dejó" : $"{sinDevolver.Count} archivos a donde los dejó")
+                     + " la ejecución: al deshacer esa ejecución posterior, comprueba antes que sus archivos siguen en su sitio.");
+        noSiguen.IntersectWith(devueltas);
+        return noSiguen;
+    }
+
+    /// <summary>
+    /// Lo mismo dentro del manifiesto que se deshace: sus registros POSTERIORES (en él) que siguen
+    /// pendientes -no elegidos, o que no se pudieron deshacer- y tocaron el archivo sin renombrarlo.
+    ///
+    /// En una sola pasada hacia delante, con un único diccionario en el que cada vuelta entra al
+    /// pasar por su línea. POR QUÉ (revisión de datos-1): antes cada vuelta recorría por su cuenta
+    /// todas las líneas pendientes que la seguían y las volvía a leer como JSON; deshacer desde el
+    /// historial la mitad de una ejecución de miles de renombrados tardaba el triple (MEDIDO: 6.000
+    /// registros, 13,7 s frente a 2,7 s), y con ejecuciones de 15.000 pasaba del minuto. Así cada
+    /// línea pendiente se lee una vez. Y si dos vueltas dejaron su archivo en la misma ruta, manda
+    /// la más reciente, que es la que ocupaba esa ruta cuando se escribieron las líneas de después.
+    /// </summary>
+    internal static void SeguirEnEsteManifiesto(List<string> textos, bool[] pendiente, IEnumerable<Vuelta> vueltas)
+    {
+        var porLinea = vueltas.GroupBy(v => v.Linea).ToDictionary(g => g.Key, g => g.ToList());
+        if (porLinea.Count == 0) return;
+        var desde = porLinea.Keys.Min();
+        var seguir = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        for (var j = desde; j < textos.Count; j++)
+        {
+            // Primero la línea, con lo que venía de antes (si es un renombrado pendiente, deja de
+            // seguirse esa ruta), y después la vuelta que empieza en ella: nunca se sigue a sí misma.
+            if (seguir.Count > 0 && pendiente[j])
+            {
+                var nueva = Reubicar(textos[j], seguir, out _);
+                if (nueva != null) textos[j] = nueva;
+            }
+            if (porLinea.TryGetValue(j, out var empiezan))
+                foreach (var v in empiezan) seguir[v.Desde] = v.Hasta;
+        }
+    }
+
+    /// <summary>Escribe un manifiesto posterior, con unos pocos reintentos. "" si fue bien, o el motivo.</summary>
+    private string EscribirConReintentos(string ruta, IEnumerable<string> lineas)
+    {
+        var contenido = string.Join("\n", lineas) + "\n";
+        var error = "";
+        for (var intento = 0; intento < 3; intento++)
+        {
+            if (intento > 0) System.Threading.Thread.Sleep(150);
+            error = EscribirPosterior(ruta, contenido);
+            if (error.Length == 0) return "";
+        }
+        return error;
+    }
+
+    /// <summary>Mueve un archivo; si solo cambian mayúsculas, en dos pasos (Windows y macOS no distinguen).</summary>
+    private static void Mover(string de, string a)
+    {
+        if (string.Equals(de, a, StringComparison.OrdinalIgnoreCase))
+        {
+            var tmp = Path.Combine(Path.GetDirectoryName(a) ?? "",
+                                   Path.GetFileNameWithoutExtension(a) + "_" + Guid.NewGuid().ToString("N")[..6] + Path.GetExtension(a));
+            File.Move(de, tmp);
+            File.Move(tmp, a);
+        }
+        else File.Move(de, a);
+    }
+
     private UndoResult Deshacer(string mf, IReadOnlySet<string>? seleccion)
     {
         // Cada línea con su texto original: lo que no se pueda revertir vuelve al manifiesto tal cual.
@@ -163,64 +569,119 @@ public sealed class UndoEngine
             if (n == null) _log?.Log("  deshacer: línea ilegible en el manifiesto; se archiva sin tocar ningún archivo", LogKind.Err);
             lineas.Add((ln, n));
         }
+        var textos = lineas.Select(l => l.Texto).ToList();
+        bool Elegida(int i) => seleccion == null || seleccion.Contains(HuellaLinea(lineas[i].Texto));
+
+        // Antes de tocar nada: las ejecuciones posteriores que tendrán que seguir a los archivos que
+        // vuelvan a su nombre anterior, y lo que no se puede deshacer ahora porque su historial no se
+        // deja escribir (ver SeguirEnPosteriores).
+        var posteriores = new List<Posterior>();
+        var avisos = new List<string>();
+        var aplazadas = new HashSet<int>();
+        var renombran = new Dictionary<int, string>();
+        for (var i = 0; i < lineas.Count; i++)
+            if (Elegida(i) && Rutas3(lineas[i].Nodo) is { Renombra: true } r) renombran[i] = r.Despues;
+        if (renombran.Count > 0)
+        {
+            posteriores = LeerPosteriores(mf, out var ilegible);
+            var bloqueadas = PosterioresQueNoSeDejanEscribir(posteriores, renombran.Values, ilegible, out var motivo);
+            foreach (var (i, ruta) in renombran)
+                if (bloqueadas.Contains(ruta)) aplazadas.Add(i);
+            if (aplazadas.Count > 0)
+            {
+                var n = aplazadas.Count;
+                avisos.Add(TextoAplazados(n, motivo, ilegible.Length > 0));
+                _log?.Log(ilegible.Length > 0
+                    ? $"  deshacer: {n} renombrado(s) aplazados; no se pudo leer una ejecución posterior ({motivo})."
+                    : $"  deshacer: {n} renombrado(s) aplazados; una ejecución posterior no se deja poner al día ({motivo}).", LogKind.Err);
+            }
+        }
 
         // Al revés: lo último que se hizo es lo primero que se deshace.
         var pendiente = new bool[lineas.Count];
-        var revertidas = new List<string>();
-        var aplicadasRevertidas = new List<string>();
+        var resultado = new Outcome?[lineas.Count];
+        var vueltas = new List<Vuelta>();
         var tocadas = new List<string>();
         var legadoDeAplicar = ManifiestoAntiguoDeAplicar(lineas.Select(l => l.Nodo));
-        int rev = 0, err = 0, missing = 0, manual = 0;
         for (var i = lineas.Count - 1; i >= 0; i--)
         {
             // Lo que no se ha elegido (E14) se queda pendiente tal cual, sin mirar el archivo.
-            if (seleccion != null && !seleccion.Contains(HuellaLinea(lineas[i].Texto))) { pendiente[i] = true; continue; }
+            if (!Elegida(i)) { pendiente[i] = true; continue; }
+            if (aplazadas.Contains(i)) { pendiente[i] = true; resultado[i] = Outcome.Error; continue; }
             var node = lineas[i].Nodo;
             if (node == null) continue;
             // Primero la de después y luego la de antes: al deshacer, el archivo acaba en la de antes,
             // y la biblioteca relee la lista del final al principio. Con un cambio solo de mayúsculas
             // («tema» → «Tema»), las dos rutas valen para el mismo archivo y debe entrar con «tema».
             tocadas.AddRange(RutasDe(node).Reverse());
+            var efecto = new Efecto();
             Outcome outcome;
             try
             {
                 var isNew = node is JsonObject o && o.ContainsKey("OrigPath");
-                outcome = isNew ? ProcessNew(node.Deserialize<UndoRecord>(Json)!) : ProcessLegacy(node);
+                outcome = isNew ? ProcessNew(node.Deserialize<UndoRecord>(Json)!, efecto) : ProcessLegacy(node, efecto);
             }
             catch (Exception e)
             {
                 outcome = Outcome.Error;
                 _log?.Log("  deshacer ERROR: " + e.Message, LogKind.Err);
             }
-            switch (outcome)
+            resultado[i] = outcome;
+            if (outcome is Outcome.Missing or Outcome.Error) pendiente[i] = true;
+            if (efecto.Movido) vueltas.Add(new Vuelta(i, efecto.Desde, efecto.Hasta));
+            Avisar(efecto);
+        }
+
+        // Las ejecuciones posteriores siguen a los archivos que han vuelto a su nombre anterior.
+        var quedan = new List<(string Desde, string Hasta)>();
+        if (vueltas.Count > 0)
+        {
+            var devueltas = SeguirEnPosteriores(posteriores, vueltas, resultado, pendiente, avisos);
+            var siguen = vueltas.Where(v => !devueltas.Contains(v.Desde)).ToList();
+            SeguirEnEsteManifiesto(textos, pendiente, siguen);
+            quedan.AddRange(siguen.Select(v => (v.Desde, v.Hasta)));
+        }
+
+        // Las cuentas, al final: devolver un archivo a donde lo dejó la ejecución (arriba) cambia el
+        // resultado de su registro.
+        var revertidas = new List<string>();
+        var aplicadasRevertidas = new List<string>();
+        int rev = 0, err = 0, missing = 0, manual = 0;
+        for (var i = lineas.Count - 1; i >= 0; i--)
+        {
+            switch (resultado[i])
             {
                 case Outcome.Reverted:
                     rev++;
-                    var rutas = RutasDe(node).ToList();
-                    if (!SoloVolumen(node)) revertidas.AddRange(rutas);
-                    if (DioPorAplicada(node, legadoDeAplicar)) aplicadasRevertidas.AddRange(rutas);
+                    var rutas = RutasDe(lineas[i].Nodo!).ToList();
+                    if (!SoloVolumen(lineas[i].Nodo!)) revertidas.AddRange(rutas);
+                    if (DioPorAplicada(lineas[i].Nodo, legadoDeAplicar)) aplicadasRevertidas.AddRange(rutas);
                     break;
-                case Outcome.Missing: missing++; pendiente[i] = true; break;
+                case Outcome.Missing: missing++; break;
                 case Outcome.Manual: manual++; break;
-                default: err++; pendiente[i] = true; break;
+                case Outcome.Error: err++; break;
             }
         }
 
         var clean = err == 0 && missing == 0;
-        var aviso = Archivar(mf, lineas.Select(l => l.Texto).ToList(), pendiente);
+        var avisoArchivar = Archivar(mf, textos, pendiente);
+        var aviso = string.Join(" ", new[] { avisoArchivar }.Concat(avisos).Where(t => t.Length > 0));
         var res = new UndoResult(Path.GetFileName(mf), rev, err, missing, manual, clean, false, aviso)
         {
             Revertidas = revertidas,
             AplicadasRevertidas = aplicadasRevertidas,
             Tocadas = tocadas,
+            Vueltas = quedan,
         };
 
         // E2: un registro ausente para siempre (archivo enviado a la papelera) o con un error que no
         // se arregla deja el manifiesto como «el último» indefinidamente: cada clic da lo mismo y las
         // ejecuciones anteriores no se alcanzan. Se dice claramente; la salida es DarPorPerdidos.
+        // Lo aplazado por un historial en uso ya lleva su propio aviso, que dice cómo seguir.
         if (res.SinAvance && aviso.Length == 0)
         {
-            var motivo = missing > 0 && err > 0 ? $"{missing} no aparecen y {err} dan error"
+            var motivo = missing > 0 && err > 0
+                         ? $"{(missing == 1 ? "1 no aparece" : $"{missing} no aparecen")} y {(err == 1 ? "1 da error" : $"{err} dan error")}"
                        : missing > 0 ? (missing == 1 ? "el archivo no aparece" : $"{missing} archivos no aparecen")
                        : (err == 1 ? "da error" : $"{err} dan error");
             var cuales = res.Pendientes == 1
@@ -575,13 +1036,15 @@ public sealed class UndoEngine
         => Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(datos)).ToLowerInvariant();
 
     // ---------- Formato nuevo ----------
-    private Outcome ProcessNew(UndoRecord r)
+    private Outcome ProcessNew(UndoRecord r, Efecto ef)
     {
         var path = File.Exists(r.FinalPath) ? r.FinalPath
             : (File.Exists(r.OrigPath) ? r.OrigPath : null);
         if (path == null) { _log?.Log($"  deshacer: NO encontrado [{Path.GetFileName(r.OrigPath)}]", LogKind.Err); return Outcome.Missing; }
 
+        ef.Sellar(path);
         var renamedBack = RenameBack(r.Renamed, ref path, r.FinalPath, r.OrigPath);
+        if (renamedBack) { ef.Movido = true; ef.Hasta = path; }
 
         bool restoredAny = false, skippedAny = false, volumenFallido = false, volumenDevuelto = false;
 
@@ -593,7 +1056,7 @@ public sealed class UndoEngine
             if (pasos != 0)
             {
                 var res = Analysis.Mp3Gain.Apply(path, -pasos);
-                if (res.Ok) { restoredAny = volumenDevuelto = true; _log?.Log($"  deshacer: volumen devuelto ({-pasos * Analysis.Mp3Gain.DbPerStep:+0.0;-0.0} dB) [{Path.GetFileName(path)}]", LogKind.Ok); }
+                if (res.Ok) { restoredAny = volumenDevuelto = ef.Volumen = true; _log?.Log($"  deshacer: volumen devuelto ({-pasos * Analysis.Mp3Gain.DbPerStep:+0.0;-0.0} dB) [{Path.GetFileName(path)}]", LogKind.Ok); }
                 else
                 {
                     // El audio sigue con el volumen cambiado. Antes esto solo se anotaba y el
@@ -620,7 +1083,7 @@ public sealed class UndoEngine
                     var (restored, skipped) = name == CoverField ? RestoreCover(tf, fc, path) : RestoreField(tf.Tag, name, fc);
                     restoredAny |= restored; skippedAny |= skipped; tocado |= restored;
                 }
-                if (tocado) tf.Save();
+                if (tocado) { tf.Save(); ef.Etiquetas = true; }
             }
             catch (Exception e) when (volumenDevuelto)
             {
@@ -640,7 +1103,7 @@ public sealed class UndoEngine
     }
 
     // ---------- Formato antiguo (new/orig/renamed/tags/wtitle) ----------
-    private Outcome ProcessLegacy(JsonNode r)
+    private Outcome ProcessLegacy(JsonNode r, Efecto ef)
     {
         var cur = J.S(J.P(r, "new"));
         var dir = Path.GetDirectoryName(cur) ?? "";
@@ -650,6 +1113,7 @@ public sealed class UndoEngine
         var path = File.Exists(cur) ? cur
             : (!string.Equals(cur, origPath, StringComparison.Ordinal) && File.Exists(origPath) ? origPath : null);
         if (path == null) { _log?.Log($"  deshacer(antiguo): NO encontrado [{origName}]", LogKind.Err); return Outcome.Missing; }
+        ef.Sellar(path);
 
         var wt = J.S(J.P(r, "wtitle"));
         if (wt.Length > 0)
@@ -660,7 +1124,7 @@ public sealed class UndoEngine
         }
 
         var renamed = J.P(r, "renamed") is JsonValue rv && rv.TryGetValue<bool>(out var rb) && rb;
-        RenameBack(renamed, ref path, cur, origPath);
+        if (RenameBack(renamed, ref path, cur, origPath)) { ef.Movido = true; ef.Hasta = path; }
 
         var tags = J.P(r, "tags");
         if (tags is JsonObject to)
@@ -673,6 +1137,7 @@ public sealed class UndoEngine
             if (to.ContainsKey("Year")) { try { tf.Tag.Year = (uint)J.I(J.P(tags, "Year")); } catch { } }
             if (to.ContainsKey("Bpm")) { try { tf.Tag.BeatsPerMinute = (uint)J.I(J.P(tags, "Bpm")); } catch { } }
             tf.Save(); tf.Dispose();
+            ef.Etiquetas = true;
         }
         return Outcome.Reverted;
     }
@@ -697,42 +1162,47 @@ public sealed class UndoEngine
     }
 
     // Restaura un campo solo si el valor actual coincide con el que escribió la app. (restaurado, omitido).
+    //
+    // Si el valor actual YA es el anterior, no se omite: ya está devuelto (ni restaurado ni omitido).
+    // POR QUÉ (revisión de interfaz-9): un registro con su registro corrector (un género con barra en
+    // ID3v2.3, que se relee partido) se deshace del más reciente al más antiguo; el corrector devuelve
+    // el campo y el original ya no coincide con lo que escribió. Contado como omitido, el resumen
+    // decía «1 revertido · 1 conservado» y el registro, «cambios manuales conservados», aunque el
+    // archivo había vuelto entero. Lo mismo si el usuario lo había devuelto a mano a como estaba.
     private static (bool restored, bool skipped) RestoreField(TagLib.Tag tag, string name, FieldChange fc)
     {
         switch (name)
         {
-            case "Title":
-                if ((tag.Title ?? "") == (fc.NewStr ?? "")) { tag.Title = Empty(fc.OldStr); return (true, false); }
-                return (false, true);
-            case "Album":
-                if ((tag.Album ?? "") == (fc.NewStr ?? "")) { tag.Album = Empty(fc.OldStr); return (true, false); }
-                return (false, true);
-            case "Comment":   // ficha de DJ volcada al comentario
-                if ((tag.Comment ?? "") == (fc.NewStr ?? "")) { tag.Comment = Empty(fc.OldStr); return (true, false); }
-                return (false, true);
-            case "Key":   // clave musical (importación de rekordbox)
-                if ((tag.InitialKey ?? "") == (fc.NewStr ?? "")) { tag.InitialKey = Empty(fc.OldStr); return (true, false); }
-                return (false, true);
-            case "Remixer":   // quién firma la versión (TPE4), lo escribe Tagging junto al título
-                if ((tag.RemixedBy ?? "") == (fc.NewStr ?? "")) { tag.RemixedBy = Empty(fc.OldStr); return (true, false); }
-                return (false, true);
-            case "Artist":
-                if (SeqEq(tag.Performers, fc.NewArr)) { tag.Performers = (fc.OldArr ?? new()).ToArray(); return (true, false); }
-                return (false, true);
-            case "Genre":
-                if (SeqEq(tag.Genres, fc.NewArr)) { tag.Genres = (fc.OldArr ?? new()).ToArray(); return (true, false); }
-                return (false, true);
-            case "Year":
-                if (tag.Year == fc.NewNum) { tag.Year = fc.OldNum; return (true, false); }
-                return (false, true);
-            case "Bpm":
-                if (tag.BeatsPerMinute == fc.NewNum) { tag.BeatsPerMinute = fc.OldNum; return (true, false); }
-                return (false, true);
-            case Tagging.IsrcField:   // ISRC del catálogo (C14), solo si el usuario lo activó en Ajustes
-                if ((tag.ISRC ?? "") == (fc.NewStr ?? "")) { tag.ISRC = Empty(fc.OldStr); return (true, false); }
-                return (false, true);
+            case "Title": return Texto(tag.Title, fc, v => tag.Title = v);
+            case "Album": return Texto(tag.Album, fc, v => tag.Album = v);
+            case "Comment": return Texto(tag.Comment, fc, v => tag.Comment = v);           // ficha de DJ volcada al comentario
+            case "Key": return Texto(tag.InitialKey, fc, v => tag.InitialKey = v);         // clave musical (importación de rekordbox)
+            case "Remixer": return Texto(tag.RemixedBy, fc, v => tag.RemixedBy = v);       // quién firma la versión (TPE4), lo escribe Tagging junto al título
+            case Tagging.IsrcField: return Texto(tag.ISRC, fc, v => tag.ISRC = v);         // ISRC del catálogo (C14), solo si el usuario lo activó en Ajustes
+            case "Artist": return Lista(tag.Performers, fc, v => tag.Performers = v);
+            case "Genre": return Lista(tag.Genres, fc, v => tag.Genres = v);
+            case "Year": return Numero(tag.Year, fc, v => tag.Year = v);
+            case "Bpm": return Numero(tag.BeatsPerMinute, fc, v => tag.BeatsPerMinute = v);
             default:
                 return (false, false);
+        }
+
+        static (bool, bool) Texto(string? actual, FieldChange fc, Action<string?> poner)
+        {
+            if ((actual ?? "") == (fc.NewStr ?? "")) { poner(Empty(fc.OldStr)); return (true, false); }
+            return (false, (actual ?? "") != (fc.OldStr ?? ""));
+        }
+
+        static (bool, bool) Lista(string[]? actual, FieldChange fc, Action<string[]> poner)
+        {
+            if (SeqEq(actual, fc.NewArr)) { poner((fc.OldArr ?? new()).ToArray()); return (true, false); }
+            return (false, !SeqEq(actual, fc.OldArr));
+        }
+
+        static (bool, bool) Numero(uint actual, FieldChange fc, Action<uint> poner)
+        {
+            if (actual == fc.NewNum) { poner(fc.OldNum); return (true, false); }
+            return (false, actual != fc.OldNum);
         }
     }
 

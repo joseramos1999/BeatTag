@@ -34,6 +34,21 @@ public enum TipoEjecucion
     Rekordbox,
     Bpm,
     Desconocido,
+
+    // Las herramientas de la tanda 3. Sus campos coinciden con los de otras (la limpieza de packs
+    // escribe álbum, artista y comentario como el Editor; el género por carpeta, solo el género como
+    // Unificar géneros; sustituir una copia desde la Bandeja mueve el archivo como «Pasar a la
+    // biblioteca»), así que solo se distinguen si su escritor anota UndoRecord.Origen con estos
+    // nombres (hallazgo interfaz-9). Van al final: el historial guarda el NOMBRE, nunca el número.
+
+    /// <summary>«Limpiar la publicidad de los packs» (Asistente): álbum, artista y comentario.</summary>
+    LimpiezaPacks,
+
+    /// <summary>«Género por carpeta y por artista» (Asistente).</summary>
+    GeneroPorReglas,
+
+    /// <summary>«Sustituir» desde la Bandeja: la descarga ocupa el lugar de su copia de la biblioteca.</summary>
+    Sustitucion,
 }
 
 /// <summary>Cómo está una ejecución en el historial.</summary>
@@ -87,6 +102,17 @@ public sealed record EjecucionDeshacer(string Id, DateTime Fecha, TipoEjecucion 
 {
     public int Cambios => Pendientes + Deshechos + Perdidos;
 
+    /// <summary>
+    /// Archivos distintos que tocó la ejecución. No siempre es <see cref="Cambios"/>: un mismo archivo
+    /// puede llevar dos registros (el corrector que se anota cuando el archivo guarda una lista de
+    /// otra forma, ver EtiquetasPorReglas.Corregidos), y la columna «Archivos» lo contaba dos veces
+    /// (hallazgo interfaz-9). Sin calcular (null), vale lo mismo que <see cref="Cambios"/>.
+    /// </summary>
+    public int? ArchivosDistintos { get; init; }
+
+    /// <summary>Lo que enseña la columna «Archivos».</summary>
+    public int Archivos => ArchivosDistintos ?? Cambios;
+
     public EstadoEjecucion Estado =>
         Pendientes > 0 ? (Deshechos + Perdidos > 0 ? EstadoEjecucion.Parcial : EstadoEjecucion.Pendiente)
         : Deshechos > 0 ? EstadoEjecucion.Deshecha
@@ -127,8 +153,10 @@ public sealed record BloqueoDeshacer(CambioDeshacer Cambio, EjecucionDeshacer Po
 /// <summary>Un cambio cuyo archivo volvieron a tocar ejecuciones posteriores que siguen pendientes.</summary>
 /// <param name="CamposCompartidos">Campos que cambiaron esta ejecución y alguna posterior: se queda el valor posterior.</param>
 /// <param name="PierdeDeshacer">
-/// Esta ejecución lo renombró: al deshacerla vuelve a su nombre original, y las posteriores ya no lo
-/// encontrarán donde lo dejaron (sus cambios en él no se podrán deshacer desde la aplicación).
+/// Esta ejecución lo renombró: al deshacerla vuelve a su nombre anterior, y los registros pendientes
+/// de las posteriores se ponen al día para seguirlo hasta ese nombre (UndoEngine, hallazgo datos-1).
+/// Lo que cambiaron las posteriores se queda y se sigue pudiendo deshacer. El nombre se conserva por
+/// compatibilidad: antes esas posteriores perdían el archivo.
 /// </param>
 /// <param name="VolumenPosterior">Una posterior pendiente le cambió el volumen (la ganancia del audio).</param>
 public sealed record SolapeDeshacer(CambioDeshacer Cambio, IReadOnlyList<EjecucionDeshacer> Posteriores,
@@ -240,6 +268,7 @@ public sealed class HistorialDeshacer
     private EjecucionDeshacer? Resumir(Grupo g)
     {
         var nodos = new List<JsonNode?>();
+        var archivos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int pendientes = 0, deshechos = 0, perdidos = 0, renombrados = 0;
         void Contar(FileInfo f, ref int n)
         {
@@ -249,7 +278,9 @@ public sealed class HistorialDeshacer
                 JsonNode? nodo = null;
                 try { nodo = JsonNode.Parse(linea); } catch { }
                 nodos.Add(nodo);
-                if (nodo != null && Cambio(nodo, linea, EstadoCambio.Pendiente).Renombra) renombrados++;
+                var c = Cambio(nodo, linea, EstadoCambio.Pendiente);
+                if (c.Renombra) renombrados++;
+                archivos.Add(ClaveArchivo(c));
             }
         }
         if (g.Pendiente != null) Contar(g.Pendiente, ref pendientes);
@@ -261,8 +292,14 @@ public sealed class HistorialDeshacer
                     ?? g.Deshechos.Concat(g.Perdidos).Select(f => f.LastWriteTime).DefaultIfEmpty(DateTime.MinValue).Min();
         DateTime? ultimo = g.Deshechos.Count == 0 ? null : g.Deshechos.Max(f => f.LastWriteTime);
         return new EjecucionDeshacer(g.Id, fecha, DeducirTipo(nodos), pendientes, deshechos, perdidos, renombrados,
-                                     pendientes > 0 ? g.Pendiente?.FullName : null, ultimo);
+                                     pendientes > 0 ? g.Pendiente?.FullName : null, ultimo) { ArchivosDistintos = archivos.Count };
     }
+
+    /// <summary>
+    /// Qué archivo es el de un cambio, para contar archivos y juntar los registros de un mismo archivo
+    /// en una fila: la ruta en que lo dejó la ejecución. Una línea ilegible cuenta aparte.
+    /// </summary>
+    public static string ClaveArchivo(CambioDeshacer c) => c.Legible ? c.Despues : "\0" + c.Huella;
 
     /// <summary>Los cambios de una ejecución: primero los pendientes, después los deshechos y los perdidos.</summary>
     public IReadOnlyList<CambioDeshacer> Cambios(EjecucionDeshacer ejecucion)
@@ -434,6 +471,9 @@ public sealed class HistorialDeshacer
         TipoEjecucion.Caratula => "Carátula",
         TipoEjecucion.Rekordbox => "Importación de rekordbox",
         TipoEjecucion.Bpm => "BPM",
+        TipoEjecucion.LimpiezaPacks => "Limpieza de packs",
+        TipoEjecucion.GeneroPorReglas => "Género por carpeta y artista",
+        TipoEjecucion.Sustitucion => "Sustitución desde la Bandeja",
         _ => "Sin identificar",
     };
 
@@ -469,7 +509,8 @@ public sealed class HistorialDeshacer
     ///   · Si una posterior lo tocó sin renombrarlo, se puede deshacer, pero se avisa: los campos que
     ///     cambiaron las dos se quedan como los dejó la posterior (deshacer solo devuelve un campo si
     ///     sigue como lo escribió esta ejecución), y si esta ejecución lo había renombrado, al volver
-    ///     a su nombre original la posterior ya no podrá deshacer lo suyo en él.
+    ///     a su nombre anterior el registro de la posterior se pone al día para seguirlo (lo hace
+    ///     UndoEngine al deshacer).
     ///   · Si esta ejecución lo renombró y su nombre ANTERIOR lo ocupa ahora otro archivo, deshacer
     ///     fallaría (File.Move no sobrescribe). Si lo llevó ahí una posterior, se BLOQUEA como arriba;
     ///     si el historial no lo explica (está en el disco y nada más), se aparta en

@@ -86,7 +86,29 @@ public static class Tagging
 
         f.Save();
         f.Dispose();
+        AnotarLoReleido(info.FilePath, log);
         return log;
+    }
+
+    /// <summary>
+    /// Pone en el registro lo que de verdad quedó escrito en las listas (artista y género).
+    ///
+    /// POR QUÉ. MEDIDO con TagLib# 2.3: en ID3v2.3 una lista se guarda en un solo texto y al leerla se
+    /// parte por «/». Un género del catálogo como «Rap/Hip Hop» o un artista como «AC/DC» vuelven
+    /// como dos valores, y deshacer, que compara lo que hay en el archivo con lo anotado, los daba por
+    /// cambiados a mano y no los devolvía. Es lo mismo que resuelven Unificar géneros (Relectura) y el
+    /// Asistente (EtiquetasPorReglas.Corregidos); aquí basta con corregir el registro, porque
+    /// ApplyEngine lo anota después de escribir. Solo se relee si hay alguna barra.
+    /// </summary>
+    internal static void AnotarLoReleido(string ruta, Dictionary<string, FieldChange> log)
+    {
+        if (!Dj.EtiquetasPorReglas.HayQueReleer(log)) return;
+        try
+        {
+            using var releido = TagLib.File.Create(ruta);
+            foreach (var (campo, cambio) in Dj.EtiquetasPorReglas.Corregidos(releido.Tag, log)) log[campo] = cambio;
+        }
+        catch { /* sin releer se anota lo pedido: deshacer lo dará por cambiado a mano y no lo tocará */ }
     }
 
     /// <summary>Clave del ISRC en el manifiesto de deshacer (la restaura UndoEngine).</summary>
