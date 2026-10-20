@@ -194,6 +194,8 @@
                                     Background="#0D9488" Foreground="White" FontWeight="SemiBold"
                                     ToolTip.Tip="Guarda las pistas de la tabla, en el orden en que se ven." />
                         </WrapPanel>
+                        <TextBlock Text="{Binding AvisoNunca}" IsVisible="{Binding HayAvisoNunca}" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource AvisoTexto}" />
                         <TextBlock Classes="desc" Text="Abre antes la colección exportada de rekordbox." IsVisible="{Binding !HayColeccion}" />
                     </StackPanel>
                     <DataGrid Name="TablaNunca" ItemsSource="{Binding NuncaView}" SelectedItem="{Binding NuncaElegida}"

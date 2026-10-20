@@ -246,6 +246,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
             }
             _coleccion = coleccion;
             _leidaEn = modificada;
+            AvisoNunca = AvisoReproducciones(coleccion);
             _engine.Config.RekordboxXml = ruta;
             _engine.SaveConfig();
             InfoColeccion = TextoColeccion(ruta, coleccion, File.GetLastWriteTime(ruta));
@@ -358,6 +359,37 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         MostrarRotas();
 
         AplicarFiltros();
+    }
+
+    /// <summary>Por qué «Nunca pinchadas» puede no servir con esta colección, o "".</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HayAvisoNunca))]
+    private string _avisoNunca = "";
+
+    public bool HayAvisoNunca => AvisoNunca.Length > 0;
+
+    /// <summary>
+    /// Por debajo de una pista con reproducciones de cada cien, el contador de rekordbox no refleja lo
+    /// que se pincha: quien pincha con otro programa, o con un USB cuyo historial no vuelve a rekordbox,
+    /// lo tiene a cero en casi toda la colección, y «Nunca pinchadas» sería la colección entera.
+    /// MEDIDO en una colección real: 11 de 19.690 pistas (0,06 %) tenían alguna reproducción.
+    /// </summary>
+    internal const double MinimoConReproducciones = 0.01;
+
+    /// <summary>Con menos pistas no se saca ninguna conclusión del contador.</summary>
+    internal const int MinimoParaAvisar = 100;
+
+    internal static string AvisoReproducciones(ColeccionRekordbox c)
+    {
+        var total = c.Pistas.Count;
+        if (total < MinimoParaAvisar) return "";
+        var con = c.Pistas.Count(p => p.Reproducciones > 0);
+        if (con >= total * MinimoConReproducciones) return "";
+        var cuantas = con == 0
+            ? "Ninguna pista de esta colección tiene reproducciones anotadas en rekordbox."
+            : $"Solo {Cuenta(con, "pista", "pistas")} de {total.ToString("N0", CultureInfo.CurrentCulture)} "
+              + (con == 1 ? "tiene reproducciones anotadas en rekordbox." : "tienen reproducciones anotadas en rekordbox.");
+        return cuantas + " Si pinchas con otro programa, o con un USB cuyo historial no se importa en rekordbox, esta lista no indica lo que no has pinchado.";
     }
 
     /// <summary>Ver solo las entradas rotas que se pueden reparar (las demás se explican en el resumen).</summary>
@@ -624,7 +656,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
             var porRuta = new Dictionary<string, Track>(ComparadorRutas.Instancia);
             foreach (var t in canciones) porRuta.TryAdd(t.FilePath, t);
             listas = SinRepetidas(SoloDeLaBiblioteca(listas, porRuta));
-            var locations = LocationsConocidas();
+            var locations = LocationsConocidas(porRuta);
 
             Status = "Escribiendo el XML para rekordbox…";
             var r = await Task.Run(() => ExportadorRekordbox.Escribir(destino, listas, ruta => DatosDe(porRuta, ruta), locations), ct);
@@ -710,12 +742,29 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
     }
 
     /// <summary>La Location que ya tiene cada archivo en rekordbox, si se ha abierto su colección.</summary>
-    private Dictionary<string, string>? LocationsConocidas()
+    private Dictionary<string, string>? LocationsConocidas(IReadOnlyDictionary<string, Track> porRuta)
+        => _coleccion == null ? null : LocationsDeRekordbox(_coleccion.Pistas, porRuta);
+
+    /// <summary>
+    /// La Location de cada archivo tal como la tiene rekordbox. Si tiene dos entradas del mismo archivo
+    /// que solo se diferencian en mayúsculas, se elige la que se escribe como el archivo de hoy.
+    ///
+    /// MEDIDO en la colección real (19.690 pistas): rekordbox distingue mayúsculas en la Location y
+    /// tenía 8 archivos con dos entradas, «…(No More Love On the Run).mp3» y «…(No More Love on the
+    /// Run).mp3», la de antes y la de después de corregir el nombre. Quedándose con la primera, la
+    /// lista podía apuntar a la entrada vieja.
+    /// </summary>
+    internal static Dictionary<string, string> LocationsDeRekordbox(IEnumerable<PistaRekordbox> pistas, IReadOnlyDictionary<string, Track> porRuta)
     {
-        if (_coleccion == null) return null;
-        var d = new Dictionary<string, string>(ComparadorRutas.Instancia);
-        foreach (var p in _coleccion.Pistas) d.TryAdd(p.Ruta, p.Location);
-        return d;
+        var d = new Dictionary<string, (string Ruta, string Location)>(ComparadorRutas.Instancia);
+        foreach (var p in pistas)
+        {
+            if (!d.TryGetValue(p.Ruta, out var ya)) { d[p.Ruta] = (p.Ruta, p.Location); continue; }
+            var hoy = porRuta.TryGetValue(p.Ruta, out var t) ? t.FilePath : "";
+            if (!string.Equals(ya.Ruta, hoy, StringComparison.Ordinal) && string.Equals(p.Ruta, hoy, StringComparison.Ordinal))
+                d[p.Ruta] = (p.Ruta, p.Location);
+        }
+        return d.ToDictionary(kv => kv.Key, kv => kv.Value.Location, ComparadorRutas.Instancia);
     }
 
     internal static DatosPistaRekordbox DatosDe(IReadOnlyDictionary<string, Track> porRuta, string ruta)

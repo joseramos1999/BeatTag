@@ -100,6 +100,41 @@ public class RekordboxPaginaTests
         Assert.StartsWith("1 ruta reparada", RekordboxViewModel.TextoReparada(1, "x.xml"));
     }
 
+    // MEDIDO: en una colección real solo 11 de 19.690 pistas tenían alguna reproducción; «Nunca
+    // pinchadas» sería la colección entera, y la página lo advierte en lugar de presentarlo sin más.
+    [Fact]
+    public void Si_rekordbox_casi_no_cuenta_reproducciones_se_advierte()
+    {
+        ColeccionRekordbox Con(int total, int pinchadas) => new()
+        {
+            Pistas = Enumerable.Range(0, total).Select(i => Pista(R($"{i}.mp3")) with { Reproducciones = i < pinchadas ? 3 : 0 }).ToList(),
+        };
+
+        Assert.StartsWith("Ninguna pista de esta colección tiene reproducciones anotadas en rekordbox.", RekordboxViewModel.AvisoReproducciones(Con(200, 0)));
+        Assert.StartsWith("Solo 1 pista de 200 tiene reproducciones", RekordboxViewModel.AvisoReproducciones(Con(200, 1)));
+        Assert.Equal("", RekordboxViewModel.AvisoReproducciones(Con(200, 2)));     // una de cada cien: el contador sirve
+        Assert.Equal("", RekordboxViewModel.AvisoReproducciones(Con(50, 0)));      // con tan pocas no se concluye nada
+    }
+
+    // rekordbox distingue mayúsculas en la Location: con dos entradas del mismo archivo, la exportación
+    // usa la que se escribe como el archivo de hoy.
+    [Fact]
+    public void Con_dos_entradas_del_mismo_archivo_se_usa_la_escrita_como_hoy()
+    {
+        var vieja = R("Billy Ocean - Caribbean Queen (No More Love On the Run).mp3");
+        var hoy = R("Billy Ocean - Caribbean Queen (No More Love on the Run).mp3");
+        var otra = R("otra.mp3");
+        var porRuta = new Dictionary<string, Track>(ComparadorRutas.Instancia) { [hoy] = new Track { FilePath = hoy } };
+
+        var d = RekordboxViewModel.LocationsDeRekordbox(new[] { Pista(vieja), Pista(hoy), Pista(otra) }, porRuta);
+
+        Assert.Equal(RekordboxRelocator.PathToLocation(hoy), d[hoy]);
+        Assert.Equal(RekordboxRelocator.PathToLocation(hoy), d[vieja]);   // es el mismo archivo
+        Assert.Equal(RekordboxRelocator.PathToLocation(otra), d[otra]);
+        // Si la buena va primero, no la sustituye la vieja.
+        Assert.Equal(RekordboxRelocator.PathToLocation(hoy), RekordboxViewModel.LocationsDeRekordbox(new[] { Pista(hoy), Pista(vieja) }, porRuta)[hoy]);
+    }
+
     // La importación de BPM y tonalidad de Biblioteca ya no se queda en «0 coincidencias».
     [Fact]
     public void La_importacion_de_Biblioteca_explica_por_que_no_encuentra_nada()

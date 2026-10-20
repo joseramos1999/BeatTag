@@ -55,19 +55,33 @@ public sealed record PistaRekordbox
     /// <summary>Segundo del hot cue cuando solo tiene uno, o null.</summary>
     public double? UnicoHotCue { get; init; }
 
+    /// <summary>Nombre del hot cue cuando solo tiene uno («1.1Bars»…), o "".</summary>
+    public string NombreUnicoHotCue { get; init; } = "";
+
     public string Bpm { get; init; } = "";
     public string Tonalidad { get; init; } = "";
 
     /// <summary>
-    /// Su único marcador es un hot cue en el primer tiempo del beatgrid. Es lo que dejan rekordbox y
-    /// otras herramientas al analizar, sin que nadie haya preparado la pista: MEDIDO en una colección
-    /// real exportada de rekordbox 7.2 (19.690 pistas), los 14.937 hot cues que había eran todos así
-    /// -uno por pista, en la ranura A, llamado «1.1Bars», a menos de una décima del primer tiempo-;
-    /// contarlas como preparadas habría escondido tres cuartas partes de la colección.
+    /// Su único marcador es el hot cue que pone el análisis automático en el primer tiempo de compás,
+    /// sin que nadie haya preparado la pista. Se reconoce por su sitio (a menos de
+    /// <see cref="ToleranciaCueInicial"/> del primer tiempo del beatgrid) o por su nombre, el de la
+    /// posición en compases que le da el análisis: «1.1Bars», compás 1, tiempo 1.
+    ///
+    /// MEDIDO en una colección real exportada de rekordbox 7.2 (19.690 pistas): los 14.937 hot cues
+    /// eran todos así -uno por pista, en la ranura A, llamado «1.1Bars»-; 14.900 caían a menos de una
+    /// décima del primer tiempo calculado y los 37 restantes, aunque se llamaban igual, quedaban más
+    /// lejos porque su beatgrid empieza de otra forma (34 a menos de un tiempo). Contarlas como
+    /// preparadas habría escondido tres cuartas partes de la colección; mirando solo el sitio, 37
+    /// pistas sin preparar se daban por preparadas.
     /// </summary>
     public bool SoloCueInicial
-        => HotCues == 1 && CuesMemoria == 0 && UnicoHotCue is { } c && PrimerCompas is { } p
-           && Math.Abs(c - p) <= ToleranciaCueInicial;
+        => HotCues == 1 && CuesMemoria == 0
+           && (EsNombreAutomatico(NombreUnicoHotCue)
+               || (UnicoHotCue is { } c && PrimerCompas is { } p && Math.Abs(c - p) <= ToleranciaCueInicial));
+
+    /// <summary>«1.1Bars»: el nombre que da el análisis a un hot cue en el compás 1, tiempo 1.</summary>
+    public static bool EsNombreAutomatico(string? nombre)
+        => string.Equals((nombre ?? "").Trim(), "1.1Bars", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Margen para decir que un hot cue está «en el primer tiempo». Un tiempo a 175 BPM dura 0,34 s:
@@ -160,6 +174,7 @@ public static class LectorRekordbox
         public DateTime? Alta;
         public bool Beatgrid;
         public double? PrimerCompas, PrimerHotCue;
+        public string NombrePrimerHotCue = "";
     }
 
     private static ColeccionRekordbox Leer(XmlReader r, CancellationToken ct)
@@ -205,7 +220,11 @@ public static class LectorRekordbox
                             if (num >= 0)
                             {
                                 actual.HotCues++;
-                                if (actual.HotCues == 1) actual.PrimerHotCue = Decimal(r.GetAttribute("Start"));
+                                if (actual.HotCues == 1)
+                                {
+                                    actual.PrimerHotCue = Decimal(r.GetAttribute("Start"));
+                                    actual.NombrePrimerHotCue = r.GetAttribute("Name") ?? "";
+                                }
                             }
                             else actual.CuesMemoria++;
                             break;
@@ -271,6 +290,7 @@ public static class LectorRekordbox
             Tamano = p.Tamano, Duracion = p.Duracion, Reproducciones = p.Reproducciones, Alta = p.Alta,
             Valoracion = p.Valoracion, HotCues = p.HotCues, CuesMemoria = p.CuesMemoria, Beatgrid = p.Beatgrid,
             PrimerCompas = p.PrimerCompas, UnicoHotCue = p.HotCues == 1 ? p.PrimerHotCue : null,
+            NombreUnicoHotCue = p.HotCues == 1 ? p.NombrePrimerHotCue : "",
             Bpm = p.Bpm, Tonalidad = p.Tonalidad,
         });
     }

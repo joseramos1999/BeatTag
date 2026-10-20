@@ -97,8 +97,27 @@ public class RekordboxCruceTests
     [Fact]
     public void Un_hot_cue_puesto_en_otro_sitio_si_es_preparacion()
     {
-        var xml = Coleccion.Replace("Start=\"1.500\" Num=\"0\" Red", "Start=\"32.000\" Num=\"0\" Red");
+        var xml = Coleccion.Replace("Name=\"1.1Bars\" Type=\"0\" Start=\"1.500\"", "Name=\"Drop\" Type=\"0\" Start=\"32.000\"");
         Assert.False(LectorRekordbox.LeerTexto(xml).Pistas[1].SoloCueInicial);
+        // En el primer tiempo pero con otro nombre: por su sitio, sigue siendo el del análisis.
+        var enSuSitio = Coleccion.Replace("Name=\"1.1Bars\"", "Name=\"\"");
+        Assert.True(LectorRekordbox.LeerTexto(enSuSitio).Pistas[1].SoloCueInicial);
+    }
+
+    // MEDIDO: 37 de los 14.937 hot cues «1.1Bars» de la colección real quedaban a más de una décima del
+    // primer tiempo calculado (su beatgrid empieza de otra forma). Por el nombre, también son el del análisis.
+    [Fact]
+    public void El_hot_cue_llamado_1_1Bars_es_el_automatico_aunque_el_beatgrid_no_case()
+    {
+        var xml = Coleccion.Replace("Start=\"1.500\" Num=\"0\" Red", "Start=\"1.180\" Num=\"0\" Red");
+        var p = LectorRekordbox.LeerTexto(xml).Pistas[1];
+        Assert.Equal("1.1Bars", p.NombreUnicoHotCue);
+        Assert.True(p.SoloCueInicial);
+        Assert.True(PistaRekordbox.EsNombreAutomatico(" 1.1bars "));
+        Assert.False(PistaRekordbox.EsNombreAutomatico("Drop"));
+        // Con más marcadores ya no es «solo» el automático.
+        Assert.False(LectorRekordbox.LeerTexto(xml.Replace("Num=\"0\" Red=\"255\" Green=\"55\" Blue=\"111\"/>",
+                     "Num=\"0\" Red=\"255\" Green=\"55\" Blue=\"111\"/><POSITION_MARK Name=\"\" Type=\"0\" Start=\"9.0\" Num=\"-1\"/>")).Pistas[1].SoloCueInicial);
     }
 
     [Theory]
