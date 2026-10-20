@@ -595,7 +595,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     /// lugar de «0 enviadas, 120 con problemas» y el primero de la lista.
     /// </summary>
     internal static string ResumenPapelera(int enviadas, IReadOnlyList<(string Archivo, string Motivo)> fallos)
-        => EnvioPapelera.Resumen(enviadas, fallos, "copia");   // la misma regla que la Bandeja (X15)
+        => EnvioPapelera.Resumen(enviadas, fallos, Sustantivo.Copia);   // la misma regla que la Bandeja (X15)
 
     /// <summary>
     /// Descriptor de edición sacado del nombre del archivo ("Aca Out", "Melodic Intro"…). Vacío si

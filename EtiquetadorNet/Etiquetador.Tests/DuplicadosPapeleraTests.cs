@@ -236,7 +236,7 @@ public class DuplicadosPapeleraTests
 
     [Fact]
     public void Todas_enviadas_lo_dice_sin_mas()
-        => Assert.Equal("120 copia(s) enviadas a la papelera.",
+        => Assert.Equal("120 copias enviadas a la papelera.",
                         DuplicatesViewModel.ResumenPapelera(120, Array.Empty<(string, string)>()));
 
     // Si la papelera se niega por un motivo común (por ejemplo, una unidad sin papelera, donde
@@ -249,7 +249,7 @@ public class DuplicadosPapeleraTests
 
         Assert.Equal("No se ha enviado ninguna copia a la papelera: " + motivo,
                      DuplicatesViewModel.ResumenPapelera(0, fallos));
-        Assert.Equal("3 copia(s) enviadas a la papelera · 120 no se han enviado: " + motivo,
+        Assert.Equal("3 copias enviadas a la papelera · 120 no se han enviado: " + motivo,
                      DuplicatesViewModel.ResumenPapelera(3, fallos));
     }
 

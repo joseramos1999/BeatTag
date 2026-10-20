@@ -292,6 +292,6 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
                                        : $"{enviadas.Count} archivos enviados a la papelera.";
         return enviadas.Count == 0 && fallos.Count == 1
             ? "No se pudo enviar a la papelera. " + fallos[0]
-            : $"{enviadas.Count} enviados a la papelera, {fallos.Count} con problemas. El primero: {fallos[0]}";
+            : $"{enviadas.Count} {(enviadas.Count == 1 ? "enviado" : "enviados")} a la papelera, {fallos.Count} con problemas. El primero: {fallos[0]}";
     }
 }

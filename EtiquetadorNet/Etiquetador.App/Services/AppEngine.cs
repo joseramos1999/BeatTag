@@ -234,6 +234,7 @@ public sealed class AppEngine
         // Cada vez que la biblioteca se reescanea -típicamente tras aplicar o deshacer renombrados-,
         // las fichas se recolocan con sus archivos. Se suscribe AQUÍ, antes de que existan las
         // páginas, para que cuando estas recalculen las fichas ya estén en su sitio.
+        Library.Changed += ConciliarSustituciones;   // I14 (equipo catalogo): ANTES de recolocar las huérfanas
         Library.Changed += ReubicarFichas;
 
         // Una carpeta marcada que no se ha podido leer (el disco externo sin enchufar) se dice en la
@@ -1092,5 +1093,82 @@ public sealed class AppEngine
             Etiquetador.Core.Analysis.ExplicitDetector.AnotarCatalogo(p, r.Explicit, sustituir: primera);
             primera = false;
         }
+    }
+
+    // --- Sustituir desde la Bandeja (I14, equipo catalogo) ---
+
+    private AlmacenSustituciones? _sustituciones;
+
+    /// <summary>
+    /// Las sustituciones hechas desde la Bandeja, con lo que había de la copia antigua (ver
+    /// <see cref="AlmacenSustituciones"/>). Se lee la primera vez que hace falta: casi siempre está
+    /// vacío y no merece la pena retrasar el arranque.
+    /// </summary>
+    public AlmacenSustituciones Sustituciones
+    {
+        get
+        {
+            if (_sustituciones != null) return _sustituciones;
+            _sustituciones = new AlmacenSustituciones(AlmacenSustituciones.RutaEn(Paths.DataDir));
+            if (_sustituciones.AvisoCarga.Length > 0)
+            {
+                Logger.Err(_sustituciones.AvisoCarga);
+                Avisos.Poner("carga:sustituciones", _sustituciones.AvisoCarga);
+            }
+            return _sustituciones;
+        }
+    }
+
+    /// <summary>
+    /// Se ha sustituido una copia de la biblioteca: lo calculado sobre esas rutas (una propuesta de
+    /// Enriquecer con su casilla marcada) se hizo con el archivo anterior y ya no vale.
+    /// </summary>
+    public event Action<IReadOnlyCollection<string>>? ArchivosSustituidos;
+    public void AvisarArchivosSustituidos(IReadOnlyCollection<string> rutas) => ArchivosSustituidos?.Invoke(rutas);
+
+    /// <summary>
+    /// Con cada cambio de la biblioteca, mira si se ha deshecho alguna sustitución o si ha vuelto de
+    /// la papelera la copia antigua de una deshecha, y devuelve a cada archivo su ficha y lo decidido
+    /// sobre él. Va ANTES que <see cref="ReubicarFichas"/>: si no, esta seguiría la vuelta deshecha
+    /// (destino → bandeja) y se llevaría a la descarga la ficha fusionada.
+    ///
+    /// En el hilo de la interfaz, pero sin nada pesado: sin sustituciones apuntadas no hace nada; con
+    /// ellas, recorre una vez la lista de la biblioteca (sin tocar el disco) y solo mira en disco las
+    /// pocas cuyo archivo ha dejado de estar (o ha vuelto a estar) en ella.
+    /// </summary>
+    private void ConciliarSustituciones()
+    {
+        if (!Library.IsScanned) return;
+        try
+        {
+            var almacen = Sustituciones;
+            if (almacen.Count == 0) return;
+            var vigilar = new HashSet<string>(almacen.RutasAVigilar(), StringComparer.OrdinalIgnoreCase);
+            var presentes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var t in Library.Tracks)
+                if (vigilar.Contains(t.FilePath)) presentes.Add(t.FilePath);
+
+            var c = almacen.Conciliar(Fichas, presentes.Contains, SustitucionesBandeja.Tamano, DateTime.Now);
+            if (!c.HayCambios) return;
+
+            var decisiones = SustitucionesBandeja.Asentar(c, Applied, Ignored, Marks, AudioAceptadas,
+                                                         (de, a) => SeguirArchivo(de, a, default));
+            foreach (var texto in SustitucionesBandeja.TextosRegistro(c)) Logger.Detail(texto);
+            Registrar("las sustituciones de la bandeja", almacen.Guardar());
+            if (c.Deshechas.Count == 0 && c.Recuperadas.Count == 0) return;
+
+            Registrar("las fichas de DJ", Fichas.Guardar());
+            if (decisiones)
+            {
+                Registrar("las canciones aplicadas", Applied.Save());
+                Registrar("las canciones descartadas", Ignored.Save());
+                Registrar("las casillas «Aplicar»", Marks.Save());
+                Registrar("los avisos aceptados de Comprobar audio", AudioAceptadas.Save());
+            }
+            // Las páginas recalculan con este mismo cambio de la biblioteca; el aviso les llega después.
+            if (SynchronizationContext.Current is { } hilo) hilo.Post(_ => AvisarFichasCambiadas(), null);
+            else AvisarFichasCambiadas();
+        }
+        catch (Exception e) { Logger.Error("Error al devolver las fichas de una sustitución deshecha de la bandeja", e); }
     }
 }

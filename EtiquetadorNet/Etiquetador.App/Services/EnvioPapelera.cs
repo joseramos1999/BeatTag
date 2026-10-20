@@ -76,21 +76,48 @@ public static class EnvioPapelera
     /// El estado al terminar. Cuando todas fallan por el MISMO motivo (por ejemplo, una unidad sin
     /// papelera, donde enviar sería borrar para siempre), se dice ese motivo una vez en lugar de «0
     /// enviadas, 120 con problemas» y el primero de la lista.
+    ///
+    /// Con el singular y el plural de lo que se envía y su género (revisión de la tanda 3,
+    /// interfaz-11): antes salía «1 descarga(s) enviadas a la papelera».
     /// </summary>
-    /// <param name="sustantivo">Qué se envía, en femenino singular: «copia», «descarga».</param>
-    public static string Resumen(int enviadas, IReadOnlyList<(string Archivo, string Motivo)> fallos, string sustantivo)
+    /// <param name="que">Qué se envía: <see cref="Sustantivo.Copia"/>, <see cref="Sustantivo.Descarga"/>, <see cref="Sustantivo.Archivo"/>.</param>
+    public static string Resumen(int enviadas, IReadOnlyList<(string Archivo, string Motivo)> fallos, Sustantivo que)
     {
-        if (fallos.Count == 0) return $"{enviadas} {sustantivo}(s) enviadas a la papelera.";
+        if (fallos.Count == 0)
+            return enviadas == 0
+                ? $"No se ha enviado {que.Ninguno} a la papelera."
+                : $"{enviadas} {que.De(enviadas)} {que.Enviado(enviadas)} a la papelera.";
 
         var motivos = new HashSet<string>(StringComparer.Ordinal);
         foreach (var f in fallos) motivos.Add(f.Motivo);
         if (motivos.Count == 1)
             return enviadas == 0
-                ? $"No se ha enviado ninguna {sustantivo} a la papelera: {Motivo(fallos[0].Motivo)}"
-                : $"{enviadas} {sustantivo}(s) enviadas a la papelera · {fallos.Count} no se han enviado: {Motivo(fallos[0].Motivo)}";
+                ? $"No se ha enviado {que.Ninguno} a la papelera: {Motivo(fallos[0].Motivo)}"
+                : $"{enviadas} {que.De(enviadas)} {que.Enviado(enviadas)} a la papelera · "
+                  + $"{fallos.Count} no se {(fallos.Count == 1 ? "ha" : "han")} enviado: {Motivo(fallos[0].Motivo)}";
 
-        return $"{enviadas} enviadas, {fallos.Count} con problemas. La primera: {fallos[0].Archivo}: {Motivo(fallos[0].Motivo)}";
+        return $"{enviadas} {que.Enviado(enviadas)}, {fallos.Count} con problemas. {que.ElPrimero}: {fallos[0].Archivo}: {Motivo(fallos[0].Motivo)}";
 
         static string Motivo(string m) => string.IsNullOrWhiteSpace(m) ? "motivo desconocido." : m;
     }
+}
+
+/// <summary>Lo que se envía a la papelera, para que el resumen concuerde en número y género.</summary>
+public sealed record Sustantivo(string Singular, string Plural, bool Femenino)
+{
+    public static readonly Sustantivo Copia = new("copia", "copias", true);
+    public static readonly Sustantivo Descarga = new("descarga", "descargas", true);
+    public static readonly Sustantivo Archivo = new("archivo", "archivos", false);
+
+    /// <summary>«copia» o «copias».</summary>
+    public string De(int n) => n == 1 ? Singular : Plural;
+
+    /// <summary>«enviada», «enviadas», «enviado», «enviados».</summary>
+    public string Enviado(int n) => (Femenino ? "enviada" : "enviado") + (n == 1 ? "" : "s");
+
+    /// <summary>«ninguna copia», «ningún archivo».</summary>
+    public string Ninguno => (Femenino ? "ninguna " : "ningún ") + Singular;
+
+    /// <summary>Cómo se nombra el primer fallo: «La primera», «El primero».</summary>
+    public string ElPrimero => Femenino ? "La primera" : "El primero";
 }

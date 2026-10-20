@@ -428,7 +428,7 @@ public class DialogosCancionTests
 
             Assert.Equal(new[] { b, c }, store.Tracks);                         // la rechazada se queda
             Assert.Equal(1, avisos);                                             // un solo aviso a las pestañas
-            Assert.Equal("1 enviados a la papelera, 1 con problemas. El primero: b.mp3: La unidad no tiene papelera.", estado);
+            Assert.Equal("1 enviado a la papelera, 1 con problemas. El primero: b.mp3: La unidad no tiene papelera.", estado);
             Assert.Equal(new[] { 1, 2 }, avance.Valores);                        // el avance, archivo a archivo
 
             Assert.Equal("Enviado a la papelera: c.mp3.", await LibraryViewModel.PapeleraYQuitarAsync(store, new[] { c.FilePath }, _ => (true, "")));

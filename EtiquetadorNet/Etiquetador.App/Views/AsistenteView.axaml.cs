@@ -173,10 +173,11 @@ public partial class AsistenteView : UserControl
             : tabla.ItemsSource as System.Collections.IList;
         foreach (var f in enviadas) lista?.Remove(f);
 
+        // El resumen, con la misma regla que Duplicados y la Bandeja (singular y plural; equipo catalogo).
         vm.Status = fallos.Count == 0
             ? (enviadas.Count == 1 ? "Enviado a la papelera." : $"{enviadas.Count} archivos enviados a la papelera.")
               + (ReferenceEquals(tabla, TablaMezcla) ? " Vuelve a ordenar para recalcular las transiciones." : "")
-            : $"{enviadas.Count} enviados, {fallos.Count} con problemas. El primero: {fallos[0]}";
+            : Services.EnvioPapelera.Resumen(enviadas.Count, res.Fallos, Services.Sustantivo.Archivo);
         if (res.Interrumpido)
             vm.Status = $"Cancelado: {enviadas.Count} de {filas.Count} enviados a la papelera; el resto no se ha tocado."
                       + (fallos.Count > 0 ? $" {fallos.Count} con problemas. El primero: {fallos[0]}" : "");
