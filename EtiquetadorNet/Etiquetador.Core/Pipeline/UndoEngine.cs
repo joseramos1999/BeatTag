@@ -244,7 +244,7 @@ public sealed class UndoEngine
     /// <param name="Linea">Su registro en el manifiesto que se deshace.</param>
     /// <param name="Desde">Dónde lo dejó la ejecución, que es donde lo esperan las posteriores.</param>
     /// <param name="Hasta">Su nombre anterior, donde queda.</param>
-    private sealed record Vuelta(int Linea, string Desde, string Hasta);
+    internal sealed record Vuelta(int Linea, string Desde, string Hasta);
 
     /// <summary>El manifiesto pendiente de una ejecución posterior, con sus líneas puestas al día.</summary>
     private sealed class Posterior
@@ -386,6 +386,28 @@ public sealed class UndoEngine
     }
 
     /// <summary>
+    /// El aviso de los renombrados que no se deshacen todavía porque una posterior no se puede poner
+    /// al día (ver <see cref="PosterioresQueNoSeDejanEscribir"/>).
+    ///
+    /// POR QUÉ DOS TEXTOS (revisión de datos-1): si una posterior no se pudo ni leer, se aplazan TODOS
+    /// los renombrados elegidos, también los de archivos que ninguna posterior tocó, porque no se sabe
+    /// qué toca. Decir entonces que «el historial de una ejecución posterior que también los cambió
+    /// está en uso» era falso para esos archivos.
+    /// </summary>
+    /// <param name="n">Cuántos archivos se aplazan.</param>
+    /// <param name="motivo">El manifiesto y el error, tal como los dio el sistema.</param>
+    /// <param name="ilegible">Alguna posterior no se pudo leer (y no solo escribir).</param>
+    internal static string TextoAplazados(int n, string motivo, bool ilegible)
+    {
+        var cuantos = n == 1 ? "1 archivo no se ha deshecho todavía" : $"{n} archivos no se han deshecho todavía";
+        var porque = ilegible
+            ? $"no se ha podido leer el historial de una ejecución posterior ({motivo}), y sin él no se sabe si "
+              + $"{(n == 1 ? "lo cambió" : "los cambió")} también"
+            : $"el historial de una ejecución posterior que también {(n == 1 ? "lo" : "los")} cambió está en uso ({motivo})";
+        return $"{cuantos}: {porque}. Vuelve a intentarlo dentro de unos segundos.";
+    }
+
+    /// <summary>
     /// Pone al día las posteriores para que sigan a los archivos de <paramref name="vueltas"/>. Lo que
     /// no se pueda poner al día en TODAS sus posteriores vuelve a donde lo dejó la ejecución, y su
     /// registro se queda pendiente (con un aviso). Devuelve las rutas de esos archivos.
@@ -479,18 +501,32 @@ public sealed class UndoEngine
     /// <summary>
     /// Lo mismo dentro del manifiesto que se deshace: sus registros POSTERIORES (en él) que siguen
     /// pendientes -no elegidos, o que no se pudieron deshacer- y tocaron el archivo sin renombrarlo.
+    ///
+    /// En una sola pasada hacia delante, con un único diccionario en el que cada vuelta entra al
+    /// pasar por su línea. POR QUÉ (revisión de datos-1): antes cada vuelta recorría por su cuenta
+    /// todas las líneas pendientes que la seguían y las volvía a leer como JSON; deshacer desde el
+    /// historial la mitad de una ejecución de miles de renombrados tardaba el triple (MEDIDO: 6.000
+    /// registros, 13,7 s frente a 2,7 s), y con ejecuciones de 15.000 pasaba del minuto. Así cada
+    /// línea pendiente se lee una vez. Y si dos vueltas dejaron su archivo en la misma ruta, manda
+    /// la más reciente, que es la que ocupaba esa ruta cuando se escribieron las líneas de después.
     /// </summary>
-    private static void SeguirEnEsteManifiesto(List<string> textos, bool[] pendiente, IEnumerable<Vuelta> vueltas)
+    internal static void SeguirEnEsteManifiesto(List<string> textos, bool[] pendiente, IEnumerable<Vuelta> vueltas)
     {
-        foreach (var v in vueltas.OrderBy(v => v.Linea))
+        var porLinea = vueltas.GroupBy(v => v.Linea).ToDictionary(g => g.Key, g => g.ToList());
+        if (porLinea.Count == 0) return;
+        var desde = porLinea.Keys.Min();
+        var seguir = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        for (var j = desde; j < textos.Count; j++)
         {
-            var seguir = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [v.Desde] = v.Hasta };
-            for (var j = v.Linea + 1; j < textos.Count && seguir.Count > 0; j++)
+            // Primero la línea, con lo que venía de antes (si es un renombrado pendiente, deja de
+            // seguirse esa ruta), y después la vuelta que empieza en ella: nunca se sigue a sí misma.
+            if (seguir.Count > 0 && pendiente[j])
             {
-                if (!pendiente[j]) continue;
                 var nueva = Reubicar(textos[j], seguir, out _);
                 if (nueva != null) textos[j] = nueva;
             }
+            if (porLinea.TryGetValue(j, out var empiezan))
+                foreach (var v in empiezan) seguir[v.Desde] = v.Hasta;
         }
     }
 
@@ -554,10 +590,10 @@ public sealed class UndoEngine
             if (aplazadas.Count > 0)
             {
                 var n = aplazadas.Count;
-                avisos.Add($"{(n == 1 ? "1 archivo no se ha deshecho todavía" : $"{n} archivos no se han deshecho todavía")}: "
-                         + $"el historial de una ejecución posterior que también {(n == 1 ? "lo" : "los")} cambió está en uso ({motivo}). "
-                         + "Vuelve a intentarlo dentro de unos segundos.");
-                _log?.Log($"  deshacer: {n} renombrado(s) aplazados; una ejecución posterior no se deja poner al día ({motivo}).", LogKind.Err);
+                avisos.Add(TextoAplazados(n, motivo, ilegible.Length > 0));
+                _log?.Log(ilegible.Length > 0
+                    ? $"  deshacer: {n} renombrado(s) aplazados; no se pudo leer una ejecución posterior ({motivo})."
+                    : $"  deshacer: {n} renombrado(s) aplazados; una ejecución posterior no se deja poner al día ({motivo}).", LogKind.Err);
             }
         }
 
@@ -1126,42 +1162,47 @@ public sealed class UndoEngine
     }
 
     // Restaura un campo solo si el valor actual coincide con el que escribió la app. (restaurado, omitido).
+    //
+    // Si el valor actual YA es el anterior, no se omite: ya está devuelto (ni restaurado ni omitido).
+    // POR QUÉ (revisión de interfaz-9): un registro con su registro corrector (un género con barra en
+    // ID3v2.3, que se relee partido) se deshace del más reciente al más antiguo; el corrector devuelve
+    // el campo y el original ya no coincide con lo que escribió. Contado como omitido, el resumen
+    // decía «1 revertido · 1 conservado» y el registro, «cambios manuales conservados», aunque el
+    // archivo había vuelto entero. Lo mismo si el usuario lo había devuelto a mano a como estaba.
     private static (bool restored, bool skipped) RestoreField(TagLib.Tag tag, string name, FieldChange fc)
     {
         switch (name)
         {
-            case "Title":
-                if ((tag.Title ?? "") == (fc.NewStr ?? "")) { tag.Title = Empty(fc.OldStr); return (true, false); }
-                return (false, true);
-            case "Album":
-                if ((tag.Album ?? "") == (fc.NewStr ?? "")) { tag.Album = Empty(fc.OldStr); return (true, false); }
-                return (false, true);
-            case "Comment":   // ficha de DJ volcada al comentario
-                if ((tag.Comment ?? "") == (fc.NewStr ?? "")) { tag.Comment = Empty(fc.OldStr); return (true, false); }
-                return (false, true);
-            case "Key":   // clave musical (importación de rekordbox)
-                if ((tag.InitialKey ?? "") == (fc.NewStr ?? "")) { tag.InitialKey = Empty(fc.OldStr); return (true, false); }
-                return (false, true);
-            case "Remixer":   // quién firma la versión (TPE4), lo escribe Tagging junto al título
-                if ((tag.RemixedBy ?? "") == (fc.NewStr ?? "")) { tag.RemixedBy = Empty(fc.OldStr); return (true, false); }
-                return (false, true);
-            case "Artist":
-                if (SeqEq(tag.Performers, fc.NewArr)) { tag.Performers = (fc.OldArr ?? new()).ToArray(); return (true, false); }
-                return (false, true);
-            case "Genre":
-                if (SeqEq(tag.Genres, fc.NewArr)) { tag.Genres = (fc.OldArr ?? new()).ToArray(); return (true, false); }
-                return (false, true);
-            case "Year":
-                if (tag.Year == fc.NewNum) { tag.Year = fc.OldNum; return (true, false); }
-                return (false, true);
-            case "Bpm":
-                if (tag.BeatsPerMinute == fc.NewNum) { tag.BeatsPerMinute = fc.OldNum; return (true, false); }
-                return (false, true);
-            case Tagging.IsrcField:   // ISRC del catálogo (C14), solo si el usuario lo activó en Ajustes
-                if ((tag.ISRC ?? "") == (fc.NewStr ?? "")) { tag.ISRC = Empty(fc.OldStr); return (true, false); }
-                return (false, true);
+            case "Title": return Texto(tag.Title, fc, v => tag.Title = v);
+            case "Album": return Texto(tag.Album, fc, v => tag.Album = v);
+            case "Comment": return Texto(tag.Comment, fc, v => tag.Comment = v);           // ficha de DJ volcada al comentario
+            case "Key": return Texto(tag.InitialKey, fc, v => tag.InitialKey = v);         // clave musical (importación de rekordbox)
+            case "Remixer": return Texto(tag.RemixedBy, fc, v => tag.RemixedBy = v);       // quién firma la versión (TPE4), lo escribe Tagging junto al título
+            case Tagging.IsrcField: return Texto(tag.ISRC, fc, v => tag.ISRC = v);         // ISRC del catálogo (C14), solo si el usuario lo activó en Ajustes
+            case "Artist": return Lista(tag.Performers, fc, v => tag.Performers = v);
+            case "Genre": return Lista(tag.Genres, fc, v => tag.Genres = v);
+            case "Year": return Numero(tag.Year, fc, v => tag.Year = v);
+            case "Bpm": return Numero(tag.BeatsPerMinute, fc, v => tag.BeatsPerMinute = v);
             default:
                 return (false, false);
+        }
+
+        static (bool, bool) Texto(string? actual, FieldChange fc, Action<string?> poner)
+        {
+            if ((actual ?? "") == (fc.NewStr ?? "")) { poner(Empty(fc.OldStr)); return (true, false); }
+            return (false, (actual ?? "") != (fc.OldStr ?? ""));
+        }
+
+        static (bool, bool) Lista(string[]? actual, FieldChange fc, Action<string[]> poner)
+        {
+            if (SeqEq(actual, fc.NewArr)) { poner((fc.OldArr ?? new()).ToArray()); return (true, false); }
+            return (false, !SeqEq(actual, fc.OldArr));
+        }
+
+        static (bool, bool) Numero(uint actual, FieldChange fc, Action<uint> poner)
+        {
+            if (actual == fc.NewNum) { poner(fc.OldNum); return (true, false); }
+            return (false, actual != fc.OldNum);
         }
     }
 

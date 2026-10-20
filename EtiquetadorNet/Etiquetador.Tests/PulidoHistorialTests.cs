@@ -260,6 +260,99 @@ public class PulidoHistorialTests : IDisposable
         Assert.Null(UndoEngine.Reubicar(volumen, seguir, out _));
     }
 
+    private static string Titulo(string ruta)
+        => JsonSerializer.Serialize(new UndoRecord { OrigPath = ruta, FinalPath = ruta, Fields = new() { ["Title"] = FieldChange.Str("x", "y") } });
+
+    private static string RutaDe(string linea) => Registro(linea).FinalPath;
+
+    // Revisión de datos-1: cada vuelta recorría por su cuenta todas las líneas pendientes que la
+    // seguían (MEDIDO: 6.000 registros, 13,7 s frente a 2,7 s). Con 5.000 vueltas y 5.000 pendientes
+    // intercaladas, la versión anterior leía unos 12 millones de líneas (minutos); esta, 5.000.
+    [Fact]
+    public void Seguir_en_la_misma_ejecucion_lee_cada_linea_una_vez()
+    {
+        const int n = 5000;
+        var textos = new List<string>();
+        var vueltas = new List<UndoEngine.Vuelta>();
+        for (var i = 0; i < n; i++)
+        {
+            var nombre = Rutas.De("m", $"tema {i}.mp3");
+            vueltas.Add(new UndoEngine.Vuelta(textos.Count, nombre, Rutas.De("m", $"pista{i:00000}.mp3")));
+            textos.Add(JsonSerializer.Serialize(new UndoRecord { OrigPath = Rutas.De("m", $"pista{i:00000}.mp3"), FinalPath = nombre, Renamed = true }));
+            textos.Add(Titulo(nombre));   // no elegida: tocó el archivo después de renombrarlo
+        }
+        var pendiente = textos.Select((_, j) => j % 2 == 1).ToArray();
+
+        var reloj = System.Diagnostics.Stopwatch.StartNew();
+        UndoEngine.SeguirEnEsteManifiesto(textos, pendiente, vueltas);
+        reloj.Stop();
+
+        Assert.True(reloj.Elapsed < TimeSpan.FromSeconds(5), $"tardó {reloj.Elapsed.TotalSeconds:0.0} s");
+        for (var i = 0; i < n; i++)
+            Assert.Equal(Rutas.De("m", $"pista{i:00000}.mp3"), RutaDe(textos[2 * i + 1]));
+    }
+
+    // Si dos vueltas dejaron su archivo en la misma ruta, lo pendiente que va detrás de la segunda es
+    // de la segunda: antes lo reclamaba la primera, porque se recorría entera antes que la otra.
+    [Fact]
+    public void Seguir_en_la_misma_ejecucion_atiende_a_la_vuelta_mas_reciente()
+    {
+        var a = Rutas.Archivo("a.mp3");
+        var h1 = Rutas.Archivo("h1.mp3");
+        var h2 = Rutas.Archivo("h2.mp3");
+        var c = Rutas.Archivo("c.mp3");
+        var textos = new List<string>
+        {
+            JsonSerializer.Serialize(new UndoRecord { OrigPath = h1, FinalPath = a, Renamed = true }),   // 0: vuelta 1
+            Titulo(a),                                                                                    // 1: pendiente → h1
+            JsonSerializer.Serialize(new UndoRecord { OrigPath = h2, FinalPath = a, Renamed = true }),   // 2: vuelta 2
+            Titulo(a),                                                                                    // 3: pendiente → h2
+            JsonSerializer.Serialize(new UndoRecord { OrigPath = a, FinalPath = c, Renamed = true }),    // 4: pendiente, renombra
+            Titulo(a),                                                                                    // 5: ya es otro archivo
+        };
+        var pendiente = new[] { false, true, false, true, true, true };
+
+        UndoEngine.SeguirEnEsteManifiesto(textos, pendiente,
+            new[] { new UndoEngine.Vuelta(2, a, h2), new UndoEngine.Vuelta(0, a, h1) });
+
+        Assert.Equal(new[] { h1, h2, c, a }, new[] { 1, 3, 4, 5 }.Select(j => RutaDe(textos[j])));
+    }
+
+    // Revisión de datos-1: si una posterior no se puede ni leer, se aplazan todos los renombrados
+    // elegidos, también los de archivos que no tocó. El aviso no puede decir que los cambió.
+    [Fact]
+    public void El_aviso_de_lo_aplazado_dice_si_la_posterior_no_se_pudo_leer()
+    {
+        Assert.Equal("1 archivo no se ha deshecho todavía: el historial de una ejecución posterior que también lo cambió está en uso (run_2.jsonl: en uso). "
+                     + "Vuelve a intentarlo dentro de unos segundos.",
+                     UndoEngine.TextoAplazados(1, "run_2.jsonl: en uso", ilegible: false));
+        Assert.Equal("3 archivos no se han deshecho todavía: no se ha podido leer el historial de una ejecución posterior (run_2.jsonl: en uso), "
+                     + "y sin él no se sabe si los cambió también. Vuelve a intentarlo dentro de unos segundos.",
+                     UndoEngine.TextoAplazados(3, "run_2.jsonl: en uso", ilegible: true));
+        Assert.Contains("no se sabe si lo cambió también", UndoEngine.TextoAplazados(1, "x", ilegible: true));
+    }
+
+    // Lo mismo con archivos de verdad: la posterior, bloqueada hasta para leerla, solo tocó OTRO
+    // archivo. En macOS y Linux abrir un archivo no impide que otro lo lea.
+    [WindowsFact]
+    public void Con_una_posterior_ilegible_el_aviso_no_dice_que_cambio_el_archivo()
+    {
+        var a = Cancion("pista01.mp3", "pista01");
+        var b = Path.Combine(_musica, "Fisher - Losing It.mp3");
+        var otro = Cancion("otro.mp3", "Otro");
+        Escribir("run_20261001_100000.jsonl", Renombrar(a, b, "Losing It"));
+        Escribir("run_20261002_100000.jsonl", CambiarTitulo(otro, "OTRO", aplicada: false));
+
+        UndoResult res;
+        using (new FileStream(Manifiesto("run_20261002_100000.jsonl"), FileMode.Open, FileAccess.Read, FileShare.None))
+            res = new UndoEngine(_paths).DeshacerCambios(Manifiesto("run_20261001_100000.jsonl"), null);
+
+        Assert.Equal((0, 1), (res.Reverted, res.Errors));
+        Assert.True(File.Exists(b));   // no se toca: no se sabe qué hace la posterior
+        Assert.Contains("1 archivo no se ha deshecho todavía: no se ha podido leer el historial de una ejecución posterior", res.Aviso);
+        Assert.DoesNotContain("que también lo cambió", res.Aviso);
+    }
+
     // ---------------------------------------------------------------- datos-3
 
     [Fact]
@@ -356,9 +449,10 @@ public class PulidoHistorialTests : IDisposable
         Assert.Equal(2, new FilaEjecucion(e).Archivos);
 
         var undo = new UndoEngine(_paths);
+        UndoResult? hecho = null;
         var vm = new HistorialDeshacerViewModel(Historial, (ej, h) =>
         {
-            var r = undo.DeshacerCambios(ej.Manifiesto!, h);
+            var r = hecho = undo.DeshacerCambios(ej.Manifiesto!, h);
             return Task.FromResult<string?>($"{r.Reverted}");
         });
         await vm.CargarAsync();
@@ -377,6 +471,28 @@ public class PulidoHistorialTests : IDisposable
 
         Assert.Equal(new[] { "Rap" }, Generos(p));
         Assert.Equal(new[] { "House" }, Generos(otra));   // no estaba marcada
+        // El original, cuando le llega el turno, ya encuentra el género devuelto por su corrector: no
+        // es un cambio manual conservado (antes, «1 revertido · 1 conservado» con el archivo entero).
+        Assert.Equal((2, 0), (hecho!.Reverted, hecho.Manual));
+    }
+
+    // Un campo que ya tiene el valor de antes está devuelto, no «cambiado a mano»; uno con otro valor
+    // sí se conserva, como siempre.
+    [Fact]
+    public void Un_campo_que_ya_esta_como_antes_cuenta_como_devuelto()
+    {
+        var p = Cancion("tema.mp3", "Tema");
+        var q = Cancion("otro.mp3", "Otro");
+        Escribir("run_20261001_100000.jsonl", CambiarTitulo(p, "Tema (Extended)"), CambiarTitulo(q, "Otro (Extended)"));
+        Mp3Fixture.SetTags(p, "Tema", null, null);          // el usuario lo devolvió a mano a como estaba
+        Mp3Fixture.SetTags(q, "Otro (Mi edición)", null, null);   // y este lo cambió por otra cosa
+
+        var res = new UndoEngine(_paths).UndoLastRun();
+
+        Assert.Equal((1, 1), (res.Reverted, res.Manual));
+        Assert.Equal(new[] { p }, res.AplicadasRevertidas.Distinct());   // vuelve a proponerse: está como antes de aplicar
+        Assert.Equal("Tema", Mp3Fixture.GetTitle(p));
+        Assert.Equal("Otro (Mi edición)", Mp3Fixture.GetTitle(q));
     }
 
     [Fact]
