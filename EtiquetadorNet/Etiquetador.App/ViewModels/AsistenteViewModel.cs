@@ -134,8 +134,15 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
     internal void IaPerdida(string motivo)
     {
         IaDisponible = false;
-        EstadoIa = $"{motivo} Pulsa «Comprobar» cuando esté resuelto.";
+        EstadoIa = TextoIaPerdida(motivo);
     }
+
+    /// <summary>
+    /// El aviso de <see cref="IaPerdida"/>. Nombra el botón tal como se ve en la banda de la IA: en
+    /// el pulido de la tanda 3 pasó de «Comprobar» a «Comprobar la IA», y el aviso seguía pidiendo
+    /// pulsar un botón que ya no se llamaba así.
+    /// </summary>
+    internal static string TextoIaPerdida(string motivo) => $"{motivo} Pulsa «Comprobar la IA» cuando esté resuelto.";
 
     /// <summary>
     /// Las listas de colecciones de todas las herramientas, como están ahora en Colecciones. Si la

@@ -30,14 +30,18 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   de **letra explícita** y, si lo activas en Ajustes, se escribe su **ISRC** (solo si el archivo es
   exactamente esa grabación).
 - **Historial de cambios**: todas las ejecuciones que han escrito en tus archivos (propuestas,
-  Editor, Volumen, géneros, renombrados, Bandeja…), con su estado. Cada una se puede deshacer entera
-  o solo en las canciones que elijas, aunque haya otras después; antes de deshacer se revisa qué
-  tocaron las ejecuciones posteriores y se explica qué va a pasar. Los procesos largos guardan lo
-  hecho por tramos, así que un cierre inesperado no pierde la tirada entera.
+  Editor, Volumen, géneros, renombrados, Bandeja, herramientas del Asistente…), con su tipo y su
+  estado, y un archivo por fila. Cada una se puede deshacer entera o solo en las canciones que
+  elijas, aunque haya otras después; antes de deshacer se revisa qué tocaron las ejecuciones
+  posteriores y se explica qué va a pasar. Al deshacer, las ejecuciones posteriores siguen al
+  archivo si vuelve a su nombre anterior, y su huella acústica y lo que respondió «Comprobar audio»
+  siguen valiendo. Los procesos largos guardan lo hecho por tramos, así que un cierre inesperado no
+  pierde la tirada entera.
 - **Menú contextual de la Biblioteca** (sobre una o varias canciones): **buscar compatibles** (las
   que entran bien después de una canción por tono Camelot, tempo y, si hay ficha, energía y momento
   de la sesión), **ver sus versiones** (original, extended, remixes, acapella, ediciones de DJ y
-  mashups que la usan), ordenar para mezclar la selección y enviar a la papelera.
+  mashups que la usan), ordenar para mezclar la selección y enviar a la papelera, con «Cancelar el
+  envío» si son muchas. Todas las tablas con canciones ordenan ese menú de la misma forma.
 - **Buscador en cada tabla**: filtra por palabras sueltas y en cualquier orden, sin acentos ni
   mayúsculas. Selección múltiple con Ctrl+clic y Mayús+clic para marcar, aplicar o descartar por
   bloques.
@@ -45,7 +49,8 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
 - **Duplicados**: agrupa copias (por artista+título, solo título, o +duración) y **marca en verde la
   que conviene conservar**, según el criterio que elijas: carpeta prioritaria, mejor calidad o mayor
   duración. Puedes marcar las sobrantes de todos los grupos a la vez y enviarlas a la papelera de
-  una sola pasada, con el avance en la barra de estado, conservando siempre un ejemplar de cada canción.
+  una sola pasada, con el avance a la vista y la opción de cancelar, conservando siempre un ejemplar
+  de cada canción.
   Con **«Excluir ediciones de DJ»** se dejan fuera del análisis las ediciones hechas para pinchar
   (hype intro, open show, aca out, acapellas, transiciones, mashups): no son copias sobrantes, y
   emparejadas con su original tapan los duplicados de verdad.
@@ -54,8 +59,9 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   ejemplar: tus ediciones de DJ no se marcan como sobrantes.
 - **Calidad**: clasifica el audio por bitrate/formato y filtra el de baja calidad.
 - **Formatos**: MP3, FLAC, WAV, **AIFF** (.aif y .aiff), M4A, AAC, OGG, Opus y WMA. Los AIFF-C que
-  exportan algunas aplicaciones de macOS se pueden escuchar y medir, pero sus etiquetas todavía no se
-  leen.
+  exportan algunas aplicaciones de macOS se pueden escuchar, medir y comprobar, y entran en la
+  biblioteca con su duración, su calidad y sus etiquetas, pero BeatTag todavía no escribe en ellos:
+  para etiquetarlos, conviértelos a AIFF o WAV sin comprimir.
 - **Incompletas / No encontradas**: temas a los que les falta algún tag o que ninguna fuente
   identifica.
 - **Volumen**: mide la sonoridad de cada grabación según **EBU R128** y corrige las que se apartan
@@ -68,14 +74,16 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   playlist (o un álbum) de **Spotify o Deezer** para ver qué canciones están en la biblioteca y
   cuáles faltan, con la misma exportación a M3U8 o a una carpeta. De Deezer se lee entera; de
   Spotify, las 100 primeras canciones, que es lo que Spotify deja leer sin iniciar sesión.
-  En las dos, **«Ordenar para mezclar»** ordena las disponibles para pincharlas seguidas,
-  **«Añadir a pendientes»** guarda las que faltan y **«Seguir esta lista»** marca, en la siguiente
-  revisión hecha otro día, las canciones que han entrado.
+  En las dos, **«Ordenar para mezclar»** ordena las disponibles para pincharlas seguidas (y deja
+  elegir con cuál empezar), **«Añadir a pendientes»** guarda las que faltan y **«Seguir esta
+  lista»** marca, cuando se revise otro día, las canciones que han entrado.
 - **Pendientes**: las canciones que faltan en la biblioteca y quieres conseguir. Se tachan solas
-  cuando aparecen en ella (al escanear o al pasar canciones desde la Bandeja), se exportan a texto o
-  CSV, y **«Buscar en mi pool»** abre su búsqueda en el pool de descargas que configures. También
-  reúne las playlists y charts que sigues: «Actualizar todas» los vuelve a leer en segundo plano y
-  cuenta las canciones nuevas.
+  cuando aparecen en ella (al escanear o al pasar canciones desde la Bandeja), y vuelven a pendiente
+  si el archivo con el que se tacharon desaparece sin dejar otra copia. Si una se tachó con un archivo que
+  no es la canción, «Volver a pendiente» lo corrige y se puede deshacer. Se exportan a texto o CSV,
+  y **«Buscar en mi pool»** abre su búsqueda en el pool de descargas que configures. También reúne
+  las playlists y charts que sigues: «Actualizar todas» los vuelve a leer en segundo plano y cuenta
+  las canciones nuevas y cuántas de ellas faltan.
 - **Tonalidad**: muestra la clave de cada tema y su código **Camelot**, para mezclar en armónico.
   Se lee de los tags (la escriben rekordbox y similares); BeatTag no la deduce del audio.
 - **Listas M3U8**: exporta lo que hayas filtrado a una lista que abren rekordbox, Engine DJ o Serato.
@@ -86,7 +94,11 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   Las descargas que sobran se **descartan a la papelera** de una vez, y cuando una descarga es la
   misma grabación que una canción de la biblioteca con mejor calidad, **«Sustituir la copia de la
   biblioteca»** la pone en su lugar (misma carpeta y mismo nombre, con la ficha de DJ de la antigua) y
-  manda la antigua a la papelera, también con deshacer.
+  manda la antigua a la papelera, también con deshacer. Con **«Sustituir y copiar sus etiquetas»**
+  pasan además el comentario, la tonalidad y el BPM de la copia antigua. Al deshacer, la descarga
+  vuelve a la bandeja con su propia ficha de DJ y la copia antigua recupera la suya cuando vuelve de
+  la papelera (la Ayuda explica los detalles). Una sustitución cortada por un cierre inesperado se
+  recoge al volver a arrancar.
 - **Ficha DJ**: lo que sabes de cada canción y no cabe en los tags — energía (1-10), momento de la
   sesión, voz, letra limpia o explícita, idioma, ambiente, etiquetas libres y «arma secreta». Se
   guarda en BeatTag sin tocar los archivos; se rellena por lotes (editar cuarenta a la vez no borra lo
@@ -142,11 +154,12 @@ incluirlos en tus copias de seguridad:
 | `pendientes.json` | Lista de pendientes |
 | `listas-seguidas.json` | Playlists y charts que sigues |
 | `generos-por-carpeta.json` | Reglas de «Género por carpeta y artista» |
+| `bandeja-sustituidas.json` | Sustituciones de la Bandeja que aún se pueden deshacer, con la ficha de DJ de la copia antigua |
 | `ArtistAliases.json`, `ArtistsExceptions.json` | Nombres de artista (ver más abajo) |
 
 La carpeta `bandeja-sustituciones` solo tiene contenido mientras hay una sustitución de la Bandeja en
-curso: si la aplicación se cierra a medias, la descarga vuelve a la bandeja la próxima vez que la
-analices.
+curso: si la aplicación se cierra a medias, la descarga vuelve a la bandeja al arrancar de nuevo o al
+analizarla.
 
 ## 🤖 IA local (opcional)
 
@@ -172,6 +185,7 @@ o completa datos que ya estaban en el nombre o en los tags.
 
 La pestaña **Asistente IA** reúne las herramientas que usan el modelo sin pasar por un catálogo.
 Todas siguen la misma norma: **la IA propone, las reglas y tu biblioteca comprueban, y tú decides**.
+Sin IA, las que la usan funcionan solo con reglas, salvo «Renombrar con IA», que la necesita.
 Cada una se midió con bibliotecas reales antes de construirla, y la ayuda de la aplicación dice
 cuánto acierta:
 
@@ -195,14 +209,15 @@ cuánto acierta:
 
 El Asistente reúne también herramientas **solo con reglas, sin IA**: ordenar para mezclar (que
 respeta el momento de la sesión de las fichas), **limpiar la publicidad de los packs** (vacía un
-Álbum que es el nombre del pool y propone el artista del nombre del archivo cuando el Artista es un
-«@usuario»; lo retirado puede guardarse en el comentario) y **género por carpeta y artista** (reglas
-por carpeta que se guardan y, para el resto, el género dominante del artista; nunca cambia un género
-existente).
+Álbum que es el nombre del pool y propone el artista del nombre del archivo, escrito como en el resto
+de la biblioteca, cuando el Artista es un «@usuario»; lo dudoso sale desmarcado y lo retirado puede
+guardarse en el comentario) y **género por carpeta y artista** (reglas por carpeta que se guardan,
+con subcarpetas que se pueden excluir de la regla de su carpeta madre, y, para el resto, el género
+dominante del artista; nunca cambia un género existente).
 
 Todas las tablas del Asistente tienen el **menú contextual** del resto de la aplicación: escuchar,
-editar etiquetas, marcar o desmarcar las seleccionadas, abrir la carpeta y enviar a la papelera (en
-segundo plano y cancelable).
+editar etiquetas, marcar o desmarcar las seleccionadas, abrir la carpeta y enviar a la papelera
+(se puede parar con «Cancelar el proceso»).
 
 Lo que escriben en tus archivos (géneros, nombres y etiquetas de los packs) se puede deshacer. Nada
 se aplica sin que lo marques.
