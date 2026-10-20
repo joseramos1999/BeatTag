@@ -67,12 +67,41 @@ public class AsistenteReglasTests : IDisposable
     [InlineData("Dj City Latino 06 07 2023", "es un record pool")]
     [InlineData("@tryitmusic", "usuario de redes")]
     [InlineData("  @Rodrigmzz @Paquillocastrodj", "usuario de redes")]
+    [InlineData("Heavy Hits Vol. 3", "es un record pool")]          // el pool con su volumen
+    [InlineData("LatinBox Week 45", "es un record pool")]           // con su semana
+    [InlineData("BRGS PRO QATAR 2022", "es un record pool")]
+    [InlineData("Latin Box - Diciembre 2024", "es un record pool")] // con su mes
     public void P8_un_album_que_es_un_pool_o_un_usuario_es_publicidad_fuerte(string album, string motivo)
     {
         var porQue = LimpiezaPacks.PorQueAlbum(album, out var fuerte);
         Assert.NotNull(porQue);
         Assert.Contains(motivo, porQue);
         Assert.True(fuerte);
+    }
+
+    // Revisión de la tanda 3: PoolRe se escribió para nombres de archivo. En el Álbum, un álbum de
+    // verdad puede llevar dentro el nombre de un pool; con más texto que el pool y su fecha, se
+    // propone desmarcado y «Por qué» dice qué texto queda.
+    [Theory]
+    [InlineData("FIFA World Cup Qatar 2022", "FIFA World Cup")]
+    [InlineData("Lo Mejor de Intensa", "Lo Mejor")]
+    [InlineData("Latin Urbano Hits 2023", "Hits")]
+    public void P8_un_album_con_el_nombre_de_un_pool_y_mas_texto_sale_desmarcado(string album, string resto)
+    {
+        var porQue = LimpiezaPacks.PorQueAlbum(album, out var fuerte);
+        Assert.NotNull(porQue);
+        Assert.False(fuerte);
+        Assert.Contains($"pero también «{resto}»", porQue);
+        Assert.Contains("Revísalo", porQue);
+    }
+
+    [Fact]
+    public void P8_el_album_desmarcado_por_llevar_mas_texto_se_propone_sin_marcar()
+    {
+        var t = T(Rutas.De("lib", "a.mp3"), "Shakira", "Tema", "FIFA World Cup Qatar 2022");
+        var p = Assert.Single(LimpiezaPacks.Proponer(new[] { t }));
+        Assert.Equal(CampoPublicidad.Album, p.Campo);
+        Assert.False(p.Marcada);
     }
 
     // Visto en una biblioteca real: «El Cangri.com» (Daddy Yankee) y «souljaboytellem.com» (Soulja Boy)
@@ -157,9 +186,65 @@ public class AsistenteReglasTests : IDisposable
         var bien = Leido("Nuevo Artista - Cancion Unica.mp3", "Cancion Unica");
         Assert.Equal("Nuevo Artista", bien?.Artista);
         Assert.Contains("título de las etiquetas", bien!.PorQue);
+        Assert.False(bien.Fuerte);   // sin artistas conocidos que lo apoyen: se revisa a mano
 
         Assert.Null(Leido("Cancion Unica - Nuevo Artista.mp3", "Cancion Unica"));
         Assert.Null(Leido("Nuevo Artista - Cancion Unica.mp3", null));
+    }
+
+    // Revisión de la tanda 3: la vía del título es la más débil (en los mashups el orden del nombre
+    // cambia) y salía marcada como las demás.
+    [Fact]
+    public void P8_el_artista_que_solo_confirma_el_titulo_sale_desmarcado_y_el_de_artistas_conocidos_marcado()
+    {
+        var debil = T(Rutas.De("pack", "Nuevo Artista - Cancion Unica.mp3"), "@editor", "Cancion Unica");
+        var fuerte = T(Rutas.De("pack", "Khea, Cazzu - Loca.mp3"), "@editor", null);
+        var p = LimpiezaPacks.Proponer(Conocidos("Khea", "Cazzu").Append(debil).Append(fuerte).ToList());
+
+        var d = Assert.Single(p, x => x.Ruta == debil.FilePath);
+        Assert.Equal("Nuevo Artista", d.Nuevo);
+        Assert.False(d.Marcada);
+        Assert.Contains("Revísalo", d.PorQue);
+        var f = Assert.Single(p, x => x.Ruta == fuerte.FilePath);
+        Assert.Equal("Khea, Cazzu", f.Nuevo);
+        Assert.True(f.Marcada);
+    }
+
+    // Revisión de la tanda 3: los packs nombran en mayúsculas y copiar el nombre del archivo creaba
+    // otra variante de un artista que la biblioteca ya escribe de otra forma.
+    [Fact]
+    public void P8_el_artista_se_escribe_como_lo_escribe_la_biblioteca()
+    {
+        var biblioteca = new[]
+        {
+            T(Rutas.De("lib", "1.mp3"), "Kevin Roldan", "A"), T(Rutas.De("lib", "2.mp3"), "Kevin Roldan", "B"),
+            T(Rutas.De("lib", "3.mp3"), "KEVIN ROLDAN", "C"),
+            T(Rutas.De("lib", "4.mp3"), "Bad Bunny", "D"), T(Rutas.De("lib", "5.mp3"), "Bad Bunny feat. Otro", "E"),
+        };
+        var pack = T(Rutas.De("pack", "KEVIN ROLDAN, BAD BUNNY - Tema.mp3"), "@editor", null);
+        var indice = new IndiceArtistas(biblioteca.Append(pack));
+
+        Assert.Equal("Kevin Roldan", indice.Grafia("KEVIN ROLDAN"));
+        Assert.Equal("Desconocido Total", indice.Grafia("Desconocido Total"));   // no lo conoce: tal cual
+        Assert.Equal("Kevin Roldan, Bad Bunny", indice.ComoEnLaBiblioteca("KEVIN ROLDAN, BAD BUNNY"));
+        Assert.Equal("Kevin Roldan x Nuevo", indice.ComoEnLaBiblioteca("KEVIN ROLDAN x Nuevo"));   // separadores y desconocidos, igual
+
+        var r = LimpiezaPacks.ArtistaDelNombre(pack, indice);
+        Assert.Equal("Kevin Roldan, Bad Bunny", r!.Artista);
+        Assert.True(r.Fuerte);
+        Assert.Contains("«Kevin Roldan» ya es artista de 3 canciones", r.PorQue);
+        Assert.Contains("como en el resto de tu biblioteca", r.PorQue);
+    }
+
+    // A igualdad de canciones, la grafía que no va toda en mayúsculas.
+    [Fact]
+    public void P8_a_igualdad_gana_la_grafia_que_no_va_en_mayusculas()
+    {
+        var indice = new IndiceArtistas(new[]
+        {
+            T(Rutas.De("lib", "1.mp3"), "OZUNA", "A"), T(Rutas.De("lib", "2.mp3"), "Ozuna", "B"),
+        });
+        Assert.Equal("Ozuna", indice.Grafia("ozuna"));
     }
 
     // Visto en una biblioteca real: varias canciones tenían «Remix» como artista, y «REMIX» pasaba por
@@ -303,14 +388,53 @@ public class AsistenteReglasTests : IDisposable
             new PublicidadFila(new PropuestaPublicidad(Rutas.De("p", "a.mp3"), CampoPublicidad.Artista, "@x", "Daddy Yankee", "u", true), true),
         };
         var (cuerpo, nota) = LimpiarPacksViewModel.Confirmacion(filas, alComentario: true);
-        Assert.Contains("1 canciones: 1 álbumes y 1 artistas", cuerpo);
-        Assert.Contains("⚠ 1 no salían marcadas", nota);
+        Assert.Contains("1 canción: 1 álbum y 1 artista", cuerpo);
+        Assert.Contains("⚠ 1 no salía marcada", nota);
         Assert.Contains("Duplicados y la Bandeja", nota);
         Assert.Contains("«Recargar etiqueta»", nota);
         Assert.Contains("comentario", nota);
         Assert.Contains("Recargar etiqueta", LimpiarPacksViewModel.AvisoTrasAplicar(0));
         Assert.DoesNotContain("Duplicados", LimpiarPacksViewModel.AvisoTrasAplicar(0));
         Assert.Contains("Duplicados", LimpiarPacksViewModel.AvisoTrasAplicar(3));
+        Assert.Contains("el artista de 1 canción:", LimpiarPacksViewModel.AvisoTrasAplicar(1));
+        Assert.Contains("el artista de 3 canciones:", LimpiarPacksViewModel.AvisoTrasAplicar(3));
+    }
+
+    [Fact]
+    public void P8_los_textos_distinguen_singular_y_plural_y_cuentan_canciones()
+    {
+        var a = Rutas.De("p", "a.mp3");
+        var una = new[] { new PropuestaPublicidad(a, CampoPublicidad.Album, "Latin Box", "", "pool", true) };
+        Assert.Equal("1 álbum y 0 artistas con publicidad", LimpiarPacksViewModel.TextoResumen(una, 0));
+        var varias = una.Append(new PropuestaPublicidad(Rutas.De("p", "b.mp3"), CampoPublicidad.Album, "@x", "", "u", true))
+                        .Append(new PropuestaPublicidad(a, CampoPublicidad.Artista, "@x", "Ozuna", "u", true)).ToList();
+        Assert.StartsWith("2 álbumes y 1 artista con publicidad · 1 canción con un artista «@usuario»", LimpiarPacksViewModel.TextoResumen(varias, 1));
+        Assert.StartsWith("3 canciones con un artista «@usuario» o de un pool se quedan sin propuesta", LimpiarPacksViewModel.TextoSinPropuesta(3));
+
+        var (cuerpo, _) = LimpiarPacksViewModel.Confirmacion(new[]
+        {
+            new PublicidadFila(new PropuestaPublicidad(a, CampoPublicidad.Album, "Latin Box", "", "pool", true), true),
+            new PublicidadFila(new PropuestaPublicidad(Rutas.De("p", "b.mp3"), CampoPublicidad.Album, "@y", "", "u", true), true),
+        }, alComentario: false);
+        Assert.Equal("Se limpiarán las etiquetas de 2 canciones: 2 álbumes y 0 artistas.", cuerpo);
+    }
+
+    // Revisión de la tanda 3: en un mismo archivo, el artista «@usuario» marcado y el álbum «El
+    // Cangri.com» desmarcado. Tras aplicar, el álbum desaparecía de la tabla sin haberse aplicado.
+    [Fact]
+    public void P8_tras_aplicar_se_quedan_las_filas_desmarcadas_aunque_su_archivo_se_escribiera()
+    {
+        var ruta = Rutas.De("p", "a.mp3");
+        var artista = new PublicidadFila(new PropuestaPublicidad(ruta, CampoPublicidad.Artista, "@x", "Daddy Yankee", "u", true), true);
+        var album = new PublicidadFila(new PropuestaPublicidad(ruta, CampoPublicidad.Album, "El Cangri.com", "", "web", false), true);
+        var fallida = new PublicidadFila(new PropuestaPublicidad(Rutas.De("p", "b.mp3"), CampoPublicidad.Album, "Latin Box", "", "pool", true), true);
+        var respetada = new PublicidadFila(new PropuestaPublicidad(Rutas.De("p", "c.mp3"), CampoPublicidad.Album, "Latin Box", "", "pool", true), true);
+        var res = new EscrituraPorReglas.Resultado(new[] { ruta }, new[] { respetada.Ruta }, new[] { "b.mp3: en uso" }, "", false);
+
+        var quedan = LimpiarPacksViewModel.QuedanTrasAplicar(new[] { artista, album, fallida, respetada }, new[] { artista, fallida, respetada }, res);
+
+        // Sale lo aplicado y lo que cambió por otro lado; se quedan la desmarcada y la que falló.
+        Assert.Equal(new[] { album, fallida }, quedan);
     }
 
     // =================================================================================================
@@ -456,9 +580,10 @@ public class AsistenteReglasTests : IDisposable
     }
 
     // MEDIDO con TagLib#: en ID3v2.3 «AC/DC» se lee como «AC» y «DC». Lo anotado tiene que ser lo que
-    // quedó en el archivo, o deshacer lo daría por editado a mano y no lo devolvería.
+    // quedó en el archivo, o deshacer lo daría por editado a mano y no lo devolvería. Y en UNA sola
+    // línea: con un registro corrector aparte, el historial contaba dos cambios por archivo.
     [Fact]
-    public void Un_valor_con_barra_se_anota_como_quedo_y_tambien_se_deshace()
+    public void Un_valor_con_barra_se_anota_como_quedo_en_una_sola_linea_y_tambien_se_deshace()
     {
         var paths = new AppPaths(Path.Combine(_dir, "datos"));
         var ruta = Mp3("a.mp3", artistas: new[] { "@editor" });
@@ -467,16 +592,89 @@ public class AsistenteReglasTests : IDisposable
             var res = EscrituraPorReglas.Escribir(new[] { new CambioEtiquetas(ruta) { ArtistaVisto = "@editor", ArtistaNuevo = "AC/DC" } },
                                                   m, error, null, null, null, CancellationToken.None, "prueba");
             Assert.Equal("", res.UndoErr);
-            string[] quedo;
-            using (var f0 = TagLib.File.Create(ruta)) quedo = f0.Tag.Performers;
-            // Si el archivo lo partió, hay un segundo registro con lo que de verdad quedó.
-            Assert.Equal(quedo.SequenceEqual(new[] { "AC/DC" }) ? 1 : 2, m!.Anotados);
+            Assert.Equal(1, m!.Anotados);
         }
 
         new UndoEngine(paths).UndoLastRun();
 
         using var f = TagLib.File.Create(ruta);
         Assert.Equal(new[] { "@editor" }, f.Tag.Performers);
+    }
+
+    /// <summary>Un MP3 con su etiqueta ID3v2 en la versión pedida (2.3 parte los valores con «/» al leerlos).</summary>
+    private string Mp3Id3v2(string nombre, byte version)
+    {
+        var ruta = Mp3(nombre, artistas: new[] { "@editor" });
+        using var f = TagLib.File.Create(ruta);
+        var id3 = (TagLib.Id3v2.Tag)f.GetTag(TagLib.TagTypes.Id3v2, true);
+        id3.Version = version;
+        f.Save();
+        return ruta;
+    }
+
+    [Theory]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void Se_anota_de_entrada_lo_que_el_archivo_leera_despues(byte version)
+    {
+        var ruta = Mp3Id3v2("a.mp3", version);
+        var historial = new HistorialQueFalla();
+
+        var res = EscrituraPorReglas.Escribir(new[] { new CambioEtiquetas(ruta) { GeneroNuevo = "Hip-Hop/Rap" } },
+                                              historial, "", null, null, null, CancellationToken.None, "prueba");
+
+        Assert.Equal(new[] { ruta }, res.Escritos);
+        var registro = Assert.Single(historial.Anotados);   // sin registro corrector
+        string[] quedo;
+        using (var f = TagLib.File.Create(ruta)) quedo = f.Tag.Genres;
+        Assert.Equal(quedo, registro.Fields!["Genre"].NewArr);
+    }
+
+    [Fact]
+    public void La_lista_releida_es_la_de_tagLib_en_cada_version()
+    {
+        Assert.Equal(new[] { "AC", "DC" }, EtiquetasPorReglas.ListaReleidaId3v2(3, "Artist", new[] { "AC/DC" }));
+        Assert.Equal(new[] { "AC/DC" }, EtiquetasPorReglas.ListaReleidaId3v2(4, "Artist", new[] { "AC/DC" }));
+        Assert.Equal(new[] { "Bad Bunny" }, EtiquetasPorReglas.ListaReleidaId3v2(3, "Artist", new[] { "Bad Bunny" }));
+    }
+
+    // El historial reconoce la herramienta (datos-4): sin Origen, una limpieza de packs (álbum,
+    // artista, comentario) salía como «Edición de etiquetas», que es el Editor.
+    [Fact]
+    public void Escribir_anota_el_origen_y_el_historial_reconoce_la_herramienta()
+    {
+        var ruta = Mp3("a.mp3", "Latin Box", new[] { "@x" });
+        var historial = new HistorialQueFalla();
+
+        EscrituraPorReglas.Escribir(new[] { new CambioEtiquetas(ruta) { AlbumVisto = "Latin Box", ArtistaVisto = "@x", ArtistaNuevo = "Ozuna" } },
+                                    historial, "", null, null, null, CancellationToken.None, "prueba", TipoEjecucion.LimpiezaPacks);
+
+        var registro = Assert.Single(historial.Anotados);
+        Assert.Equal(nameof(TipoEjecucion.LimpiezaPacks), registro.Origen);
+        var nodo = System.Text.Json.JsonSerializer.SerializeToNode(registro);
+        Assert.Equal(TipoEjecucion.LimpiezaPacks, HistorialDeshacer.DeducirTipo(new[] { nodo }));
+        Assert.Equal("Limpieza de publicidad de packs", HistorialDeshacer.Texto(TipoEjecucion.LimpiezaPacks));
+
+        // Sin origen, el historial lo deduce de los campos, como en los manifiestos anteriores.
+        registro.Origen = null;
+        Assert.Equal(TipoEjecucion.EdicionEtiquetas, HistorialDeshacer.DeducirTipo(new[] { System.Text.Json.JsonSerializer.SerializeToNode(registro) }));
+    }
+
+    [Fact]
+    public void El_historial_nombra_el_campo_isrc_en_mayusculas()
+        => Assert.Equal("ISRC", HistorialDeshacer.NombreCampo(Tagging.IsrcField));
+
+    // Un archivo enviado a la papelera desde otra tabla (o movido) se dice en español, sin el texto
+    // en inglés de TagLib.
+    [Fact]
+    public void Escribir_un_archivo_que_ya_no_esta_lo_dice_en_espanol()
+    {
+        var ruta = Path.Combine(_dir, "no-esta.mp3");
+        var res = EscrituraPorReglas.Escribir(new[] { new CambioEtiquetas(ruta) { AlbumVisto = "Latin Box" } },
+                                              new HistorialQueFalla(), "", null, null, null, CancellationToken.None, "prueba");
+        var fallo = Assert.Single(res.Fallos);
+        Assert.Equal("no-esta.mp3: " + EscrituraPorReglas.YaNoEsta, fallo);
+        Assert.Contains("1 no se pudo escribir (no-esta.mp3: ya no está", EscrituraPorReglas.Cola(res));
     }
 
     [Fact]
@@ -504,10 +702,17 @@ public class AsistenteReglasTests : IDisposable
     public void La_cola_del_estado_dice_si_se_puede_deshacer()
     {
         var bien = new EscrituraPorReglas.Resultado(new[] { "a" }, new[] { "b" }, Array.Empty<string>(), "", false);
-        Assert.Contains("1 se han dejado como estaban", EscrituraPorReglas.Cola(bien));
+        Assert.Contains("1 se ha dejado como estaba porque cambió después de proponerla", EscrituraPorReglas.Cola(bien));
         Assert.Contains("«Deshacer última»", EscrituraPorReglas.Cola(bien));
         var mal = bien with { UndoErr = "disco lleno" };
         Assert.Contains("no se podrá deshacer", EscrituraPorReglas.Cola(mal));
+        var varias = bien with { Respetados = new[] { "b", "c" }, Fallos = new[] { "x.mp3: en uso", "y.mp3: en uso" } };
+        Assert.Contains("2 se han dejado como estaban", EscrituraPorReglas.Cola(varias));
+        Assert.Contains("2 no se pudieron escribir (la primera, x.mp3: en uso)", EscrituraPorReglas.Cola(varias));
+
+        Assert.Equal("1 canción", EscrituraPorReglas.Cuenta(1, "canción", "canciones"));
+        Assert.Equal("0 canciones", EscrituraPorReglas.Cuenta(0, "canción", "canciones"));
+        Assert.Equal($"{1500:N0} canciones", EscrituraPorReglas.Cuenta(1500, "canción", "canciones"));
     }
 
     // =================================================================================================
@@ -581,7 +786,7 @@ public class AsistenteReglasTests : IDisposable
         {
             [Rutas.De("Musica", "Flamenco")] = "Flamenco",
             [Rutas.De("Musica", "Flamenco", "Rumbas")] = "Rumba",
-            [Rutas.De("Musica", "Mezcla")] = "  ",   // sin género: no cuenta
+            [Rutas.De("Musica", "Mezcla")] = "  ",   // sin género: excluida, no da regla
         };
         Assert.Equal(("Rumba", Rutas.De("Musica", "Flamenco", "Rumbas")),
                      GeneroPorReglas.ReglaDeCarpeta(mapa, Rutas.De("Musica", "Flamenco", "Rumbas", "Peret", "a.mp3")));
@@ -611,6 +816,147 @@ public class AsistenteReglasTests : IDisposable
         var arriba = GeneroPorReglas.ConSubcarpetas(canciones, Rutas.De("M"));
         Assert.Equal(3, arriba.SinGenero);
         Assert.Equal(8, arriba.Total);
+        Assert.True(arriba.Subcarpetas);
+    }
+
+    // Revisión de la tanda 3: en una biblioteca Género/Pack/… la lista solo enseñaba los packs, y la
+    // carpeta del género había que añadirla a mano.
+    private static List<Track> GeneroYPacks() => new()
+    {
+        T(Rutas.De("M", "Reggaeton", "Pack1", "1.mp3")), T(Rutas.De("M", "Reggaeton", "Pack1", "2.mp3"), genero: "Reggaeton"),
+        T(Rutas.De("M", "Reggaeton", "Pack2", "1.mp3")), T(Rutas.De("M", "Reggaeton", "Pack2", "2.mp3"), genero: "Reggaeton"),
+        T(Rutas.De("M", "Reggaeton", "Pack2", "3.mp3"), genero: "reguetón"),
+        T(Rutas.De("M", "Salsa", "1.mp3")), T(Rutas.De("M", "Salsa", "2.mp3"), genero: "Salsa"),
+        T(Rutas.De("M", "Salsa", "3.mp3"), genero: "Salsa"), T(Rutas.De("M", "Salsa", "4.mp3"), genero: "Salsa"),
+    };
+
+    [Fact]
+    public void P9_la_lista_incluye_la_carpeta_que_agrupa_otras_con_sus_cifras()
+    {
+        var c = GeneroPorReglas.Carpetas(GeneroYPacks(), new[] { Rutas.De("M") });
+
+        var reggaeton = Assert.Single(c, x => x.Ruta == Rutas.De("M", "Reggaeton"));
+        Assert.Equal(new CarpetaSinGenero(Rutas.De("M", "Reggaeton"), 2, 5, "Reggaeton", 3, 3, Subcarpetas: true), reggaeton);
+        Assert.Equal(reggaeton, c[0]);                                  // la que más cubre, arriba
+        Assert.Contains(c, x => x.Ruta == Rutas.De("M", "Reggaeton", "Pack1") && !x.Subcarpetas);
+        Assert.Contains(c, x => x.Ruta == Rutas.De("M", "Salsa"));
+        // La carpeta de la biblioteca mezcla Reggaeton y Salsa: darle un género lo pondría en todo.
+        Assert.DoesNotContain(c, x => x.Ruta == Rutas.De("M"));
+        Assert.Equal(4, c.Count);
+
+        // Sin las carpetas de la biblioteca no se sube por encima de las que tienen canciones.
+        Assert.DoesNotContain(GeneroPorReglas.Carpetas(GeneroYPacks()), x => x.Ruta == Rutas.De("M", "Reggaeton"));
+    }
+
+    [Fact]
+    public void P9_la_carpeta_de_la_biblioteca_sale_si_es_la_de_un_genero()
+    {
+        var soloReggaeton = GeneroYPacks().Where(t => t.FilePath.Contains("Reggaeton")).ToList();
+        var c = GeneroPorReglas.Carpetas(soloReggaeton, new[] { Rutas.De("M", "Reggaeton") });
+        Assert.Equal(Rutas.De("M", "Reggaeton"), c[0].Ruta);   // 3 de 3 con género llevan Reggaeton
+    }
+
+    // Una subcarpeta que mezcla estilos («WarmUp» dentro de «Reggaeton») se excluye de la regla de
+    // su carpeta madre. Antes, dejar el género vacío borraba la regla y volvía a valer la de la madre.
+    [Fact]
+    public void P9_una_subcarpeta_excluida_no_recibe_la_regla_de_su_madre()
+    {
+        var mapa = new Dictionary<string, string>
+        {
+            [Rutas.De("M", "Reggaeton")] = "Reggaeton",
+            [Rutas.De("M", "Reggaeton", "WarmUp")] = "",
+            [Rutas.De("M", "Reggaeton", "WarmUp", "Solo Reggaeton")] = "Reggaeton",
+        };
+        Assert.Null(GeneroPorReglas.ReglaDeCarpeta(mapa, Rutas.De("M", "Reggaeton", "WarmUp", "a.mp3")));
+        Assert.Null(GeneroPorReglas.ReglaDeCarpeta(mapa, Rutas.De("M", "Reggaeton", "WarmUp", "Otra", "a.mp3")));
+        Assert.Equal("Reggaeton", GeneroPorReglas.ReglaDeCarpeta(mapa, Rutas.De("M", "Reggaeton", "WarmUp", "Solo Reggaeton", "a.mp3"))?.Genero);
+        Assert.Equal("Reggaeton", GeneroPorReglas.ReglaDeCarpeta(mapa, Rutas.De("M", "Reggaeton", "Pack1", "a.mp3"))?.Genero);
+
+        var canciones = new[] { T(Rutas.De("M", "Reggaeton", "WarmUp", "a.mp3"), "Nadie", "Tema"), T(Rutas.De("M", "Reggaeton", "Pack1", "b.mp3"), "Nadie", "Otro") };
+        var p = Assert.Single(GeneroPorReglas.Proponer(canciones, mapa));
+        Assert.Equal(canciones[1].FilePath, p.Ruta);
+    }
+
+    [Fact]
+    public void P9_el_mapa_guarda_las_carpetas_excluidas()
+    {
+        var archivo = Path.Combine(_dir, MapaGenerosCarpeta.NombreArchivo);
+        var madre = Rutas.De("M", "Reggaeton");
+        var warmUp = Rutas.De("M", "Reggaeton", "WarmUp");
+        var mapa = new MapaGenerosCarpeta(archivo);
+        mapa.Poner(madre, "Reggaeton");
+        Assert.True(mapa.Excluir(warmUp));
+        Assert.False(mapa.Excluir(warmUp));   // ya lo estaba
+        Assert.Equal("", mapa.Guardar());
+
+        var leido = new MapaGenerosCarpeta(archivo);
+        Assert.True(leido.Excluida(warmUp));
+        Assert.False(leido.Excluida(madre));
+        Assert.Equal(1, leido.ConGenero);
+        Assert.Equal(2, leido.Reglas.Count);
+
+        // Quitar la regla de una excluida la devuelve a la de su madre.
+        Assert.True(leido.Poner(warmUp, ""));
+        Assert.False(leido.Excluida(warmUp));
+        Assert.Single(leido.Reglas);
+    }
+
+    [Fact]
+    public void P9_la_fila_de_carpeta_dice_si_esta_excluida_y_si_cuenta_subcarpetas()
+    {
+        var datos = new CarpetaSinGenero(Rutas.De("M", "Reggaeton"), 2, 5, "Reggaeton", 3, 3, Subcarpetas: true);
+        var fila = new CarpetaGeneroFila(datos, "", excluida: true);
+        Assert.Equal("Excluida (sin regla de carpeta)", fila.Regla);
+        Assert.Equal("Reggaeton (y subcarpetas)", fila.Nombre);
+        fila.Excluida = false;
+        Assert.Equal("Sin asignar", fila.Regla);
+    }
+
+    [Fact]
+    public void P9_los_textos_distinguen_singular_y_plural()
+    {
+        Assert.Equal("1 carpeta con canciones sin género · 0 con regla", GeneroPorReglasViewModel.TextoCarpetas(1, 0, 0));
+        Assert.Equal("3 carpetas con canciones sin género · 2 con regla · 1 excluida", GeneroPorReglasViewModel.TextoCarpetas(3, 2, 1));
+        Assert.Equal("1 canción sin género · 1 por su carpeta · 0 por su artista (0 marcadas)", GeneroPorReglasViewModel.TextoResumen(1, 1, 0, 0));
+        Assert.EndsWith("(1 marcada)", GeneroPorReglasViewModel.TextoResumen(4, 1, 3, 1));
+        Assert.StartsWith("«WarmUp» queda excluida", GeneroPorReglasViewModel.TextoReglaCambiada(1, "WarmUp", "", excluir: true));
+        Assert.StartsWith("2 carpetas quedan excluidas", GeneroPorReglasViewModel.TextoReglaCambiada(2, "WarmUp", "", excluir: true));
+        Assert.Equal("Regla quitada de «Salsa».", GeneroPorReglasViewModel.TextoReglaCambiada(1, "Salsa", "", excluir: false));
+
+        var t = T(Rutas.De("A", "a.mp3"), "Feid", "Tema");
+        var una = new[] { new GeneroReglaFila(new PropuestaGeneroRegla(t.FilePath, "Reggaeton", ReglaGenero.Carpeta, "Carpeta", true), t) };
+        Assert.Equal("Se pondrá género a 1 canción que no tiene: 1 por su carpeta y 0 por su artista.", GeneroPorReglasViewModel.Confirmacion(una).Cuerpo);
+    }
+
+    // Revisión de la tanda 3: el género corregido a mano en la tabla se escribía tal cual y creaba
+    // otra variante («reguetón» junto a «Reggaeton»).
+    [Fact]
+    public void P9_el_genero_corregido_a_mano_se_escribe_como_en_la_biblioteca()
+    {
+        var t = T(Rutas.De("A", "a.mp3"), "Feid", "Tema");
+        var u = T(Rutas.De("A", "b.mp3"), "Feid", "Otro");
+        var corregida = new GeneroReglaFila(new PropuestaGeneroRegla(t.FilePath, "Latin", ReglaGenero.Artista, "Artista", true), t) { Genero = " reguetón " };
+        var vaciada = new GeneroReglaFila(new PropuestaGeneroRegla(u.FilePath, "Latin", ReglaGenero.Artista, "Artista", true), u) { Genero = "  " };
+
+        var cambio = Assert.Single(GeneroPorReglasViewModel.Cambios(new[] { corregida, vaciada }, new[] { "Reggaeton", "Salsa" }));
+        Assert.Equal("Reggaeton", cambio.GeneroNuevo);
+    }
+
+    [Fact]
+    public void P9_tras_aplicar_se_quedan_las_desmarcadas_y_las_que_fallaron()
+    {
+        GeneroReglaFila Fila(string archivo)
+        {
+            var t = T(Rutas.De("A", archivo), "Feid", "Tema");
+            return new GeneroReglaFila(new PropuestaGeneroRegla(t.FilePath, "Reggaeton", ReglaGenero.Artista, "Artista", true), t);
+        }
+        var escrita = Fila("a.mp3");
+        var desmarcada = Fila("b.mp3");
+        var fallida = Fila("c.mp3");
+        var res = new EscrituraPorReglas.Resultado(new[] { escrita.Ruta }, Array.Empty<string>(), new[] { "c.mp3: en uso" }, "", false);
+
+        Assert.Equal(new[] { desmarcada, fallida },
+                     GeneroPorReglasViewModel.QuedanTrasAplicar(new[] { escrita, desmarcada, fallida }, new[] { escrita, fallida }, res));
     }
 
     // =================================================================================================
@@ -692,10 +1038,10 @@ public class AsistenteReglasTests : IDisposable
         };
         var (cuerpo, nota) = GeneroPorReglasViewModel.Confirmacion(filas);
         Assert.Contains("2 canciones que no tienen: 1 por su carpeta y 1 por su artista", cuerpo);
-        Assert.Contains("⚠ 1 no salían marcadas", nota);
+        Assert.Contains("⚠ 1 no salía marcada", nota);
         Assert.Contains("«Recargar etiqueta»", nota);
 
-        var cambio = Assert.Single(GeneroPorReglasViewModel.Cambios(filas.Take(1)));
+        var cambio = Assert.Single(GeneroPorReglasViewModel.Cambios(filas.Take(1), new[] { "Reggaeton" }));
         Assert.Equal("Reggaeton", cambio.GeneroNuevo);
         Assert.Null(cambio.AlbumVisto);
         Assert.Null(cambio.ArtistaNuevo);

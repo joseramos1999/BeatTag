@@ -402,10 +402,10 @@ public class DialogosCancionTests
     }
 
     /// <summary>Recoge el avance tal cual llega, sin pasar por el hilo de la interfaz.</summary>
-    private sealed class Avance : IProgress<int>
+    private sealed class Avance : IProgress<(int Hechas, int Total)>
     {
         public List<int> Valores { get; } = new();
-        public void Report(int value) { lock (Valores) Valores.Add(value); }
+        public void Report((int Hechas, int Total) value) { lock (Valores) Valores.Add(value.Hechas); }
     }
 
     [Fact]
@@ -428,14 +428,66 @@ public class DialogosCancionTests
 
             Assert.Equal(new[] { b, c }, store.Tracks);                         // la rechazada se queda
             Assert.Equal(1, avisos);                                             // un solo aviso a las pestañas
-            Assert.Equal("1 enviados a la papelera, 1 con problemas. El primero: b.mp3: La unidad no tiene papelera.", estado);
+            Assert.Equal("1 archivo enviado a la papelera · 1 no se ha enviado. b.mp3: La unidad no tiene papelera.", estado);
             Assert.Equal(new[] { 1, 2 }, avance.Valores);                        // el avance, archivo a archivo
 
             Assert.Equal("Enviado a la papelera: c.mp3.", await LibraryViewModel.PapeleraYQuitarAsync(store, new[] { c.FilePath }, _ => (true, "")));
-            Assert.Equal("No se pudo enviar a la papelera. b.mp3: motivo desconocido.",
+            Assert.Equal("No se ha podido enviar a la papelera. b.mp3: motivo desconocido.",
                          await LibraryViewModel.PapeleraYQuitarAsync(store, new[] { b.FilePath }, _ => (false, "")));
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Papelera_desde_la_biblioteca_se_puede_cancelar_y_quita_solo_lo_enviado()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var store = new LibraryStore(new AppConfig(), () => { }, new ScanCache(Path.Combine(dir, "scan.json")));
+            var canciones = Enumerable.Range(0, 5).Select(i => T($"c{i}.mp3")).ToList();
+            foreach (var t in canciones) store.Tracks.Add(t);
+            using var cts = new CancellationTokenSource();
+
+            // Se cancela tras enviar la segunda, como al pulsar «Cancelar el envío» a mitad.
+            var enviadas = 0;
+            var estado = await LibraryViewModel.PapeleraYQuitarAsync(store, canciones.Select(t => t.FilePath).ToList(),
+                _ => { if (++enviadas == 2) cts.Cancel(); return (true, ""); }, ct: cts.Token);
+
+            Assert.Equal(canciones.Skip(2), store.Tracks);                       // las no enviadas siguen
+            Assert.Equal("Cancelado: 2 de 5 enviados a la papelera; el resto no se ha tocado.", estado);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void Papelera_el_estado_dice_el_motivo_comun_una_vez_y_distingue_singular_y_plural()
+    {
+        var unidad = "La unidad no tiene papelera.";
+        var todas = new EnvioPapeleraResultado(Array.Empty<string>(), new[] { ("a.mp3", unidad), ("b.mp3", unidad) });
+        Assert.Equal("No se ha enviado ningún archivo a la papelera: La unidad no tiene papelera.",
+                     LibraryViewModel.TextoPapelera(todas, 2));
+
+        var mezcla = new EnvioPapeleraResultado(new[] { "x.mp3", "y.mp3" }, new[] { ("a.mp3", unidad), ("b.mp3", "En uso.") });
+        Assert.Equal("2 archivos enviados a la papelera · 2 no se han enviado. El primero, a.mp3: La unidad no tiene papelera.",
+                     LibraryViewModel.TextoPapelera(mezcla, 4));
+
+        var bien = new EnvioPapeleraResultado(new[] { "x.mp3", "y.mp3", "z.mp3" }, Array.Empty<(string, string)>());
+        Assert.Equal("3 archivos enviados a la papelera.", LibraryViewModel.TextoPapelera(bien, 3));
+    }
+
+    [Fact]
+    public void Papelera_la_confirmacion_cuenta_archivos_y_enseña_los_cinco_primeros()
+    {
+        var (t1, c1) = LibraryViewModel.TextosConfirmacionPapelera(new[] { Path.Combine(Raiz, "uno.mp3") });
+        Assert.Equal("Se va a enviar a la papelera", t1);
+        Assert.Equal("uno.mp3", c1);
+
+        var rutas = Enumerable.Range(1, 1200).Select(i => Path.Combine(Raiz, $"t{i}.mp3")).ToList();
+        var (t, c) = LibraryViewModel.TextosConfirmacionPapelera(rutas);
+        Assert.Equal($"Se van a enviar {1200:N0} archivos a la papelera", t);
+        Assert.Equal(6, c.Split('\n').Length);
+        Assert.EndsWith($"… y {1195:N0} más", c);
     }
 
     [Fact]

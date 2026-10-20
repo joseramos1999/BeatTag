@@ -69,8 +69,10 @@ public partial class AsistenteView : UserControl
             separaMarcas.IsVisible = conArchivo && marcable;
 
             var vm = DataContext as AsistenteViewModel;
+            // Se cuentan ARCHIVOS, no filas: en «Limpiar publicidad de packs» un archivo tiene una fila
+            // por etiqueta (el álbum y el artista).
             var estado = CalcularMenu(tabla.SelectedItem != null, vm?.IsBusy == true, vm?.EscribiendoArchivos == true,
-                                      tabla.SelectedItems.OfType<IFilaConArchivo>().Count());
+                                      RutasDistintas(tabla.SelectedItems.OfType<IFilaConArchivo>()).Count);
             escuchar.IsEnabled = estado.Escuchar;
             editar.IsEnabled = estado.Editar;
             carpeta.IsEnabled = estado.Carpeta;
@@ -120,6 +122,27 @@ public partial class AsistenteView : UserControl
     }
 
     /// <summary>
+    /// Los archivos de unas filas, sin repetir y en el orden en que aparecen. En «Limpiar publicidad de
+    /// packs» cada archivo tiene una fila por etiqueta (el álbum y el artista): con las dos
+    /// seleccionadas, el diálogo decía «2 archivos» y el segundo envío fallaba con un error en inglés
+    /// de que el archivo ya no existía.
+    /// </summary>
+    internal static List<string> RutasDistintas(IEnumerable<IFilaConArchivo> filas)
+        => filas.Select(f => f.RutaArchivo).Where(r => !string.IsNullOrEmpty(r))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    /// <summary>
+    /// Las filas de la tabla cuyos archivos se han enviado a la papelera, estén seleccionadas o no: la
+    /// fila del álbum de un archivo cuya fila de artista se envió ya no tiene archivo, y aplicarla
+    /// fallaría.
+    /// </summary>
+    internal static List<object> FilasDeArchivos(System.Collections.IEnumerable filas, IReadOnlyCollection<string> enviadas)
+    {
+        var rutas = new HashSet<string>(enviadas, StringComparer.OrdinalIgnoreCase);
+        return filas.Cast<object>().Where(f => f is IFilaConArchivo a && rutas.Contains(a.RutaArchivo)).ToList();
+    }
+
+    /// <summary>
     /// Envía a la papelera los archivos de las filas seleccionadas, tras confirmar. Van a la papelera
     /// del sistema, así que se pueden recuperar; se quitan de la biblioteca y de la tabla.
     /// </summary>
@@ -127,19 +150,13 @@ public partial class AsistenteView : UserControl
     {
         if (DataContext is not AsistenteViewModel vm || TopLevel.GetTopLevel(this) is not Window owner) return;
         if (vm.IsBusy) { vm.Status = "Espera a que termine el proceso en curso."; return; }
-        var filas = tabla.SelectedItems.OfType<IFilaConArchivo>().ToList();
-        if (filas.Count == 0) return;
+        var rutas = RutasDistintas(tabla.SelectedItems.OfType<IFilaConArchivo>());
+        if (rutas.Count == 0) return;
 
-        var titulo = filas.Count == 1
-            ? "Se va a enviar a la papelera"
-            : $"Se van a enviar {filas.Count} archivos a la papelera";
-        var cuerpo = filas.Count == 1
-            ? System.IO.Path.GetFileName(filas[0].RutaArchivo)
-            : string.Join("\n", filas.Take(5).Select(f => System.IO.Path.GetFileName(f.RutaArchivo)))
-              + (filas.Count > 5 ? $"\n… y {filas.Count - 5} más" : "");
-        var ok = await ConfirmDialog.AskAsync(owner, titulo, cuerpo,
-            Services.Papelera.NotaConfirmacion(filas.Select(f => f.RutaArchivo)),
-            "Enviar a la papelera");
+        var (titulo, cuerpo) = LibraryViewModel.TextosConfirmacionPapelera(rutas);
+        // La nota mira la unidad y la papelera de cada archivo: con muchas filas, fuera del hilo de la interfaz.
+        var nota = await Task.Run(() => Services.Papelera.NotaConfirmacion(rutas));
+        var ok = await ConfirmDialog.AskAsync(owner, titulo, cuerpo, nota, "Enviar a la papelera");
         if (!ok) return;
         // Por si una herramienta empezó mientras se confirmaba.
         if (vm.IsBusy) { vm.Status = "Espera a que termine el proceso en curso."; return; }
@@ -149,7 +166,7 @@ public partial class AsistenteView : UserControl
         // Duplicados y la Bandeja. Antes el bucle iba aquí mismo y la ventana se quedaba congelada (en
         // macOS, un osascript por archivo que puede esperar hasta 20 s al permiso del sistema).
         Services.EnvioPapeleraResultado? res = null;
-        await vm.TrabajarAsync(Services.EnvioPapelera.TextoAvance(0, filas.Count), async ct =>
+        await vm.TrabajarAsync(Services.EnvioPapelera.TextoAvance(0, rutas.Count), async ct =>
         {
             var avance = new Progress<(int Hechas, int Total)>(p =>
             {
@@ -157,29 +174,23 @@ public partial class AsistenteView : UserControl
                 vm.Progress = p.Total > 0 ? 100.0 * p.Hechas / p.Total : 0;
                 vm.Status = Services.EnvioPapelera.TextoAvance(p.Hechas, p.Total);
             });
-            res = await Services.EnvioPapelera.EnviarAsync(filas.Select(f => f.RutaArchivo).ToList(), progreso: avance, ct: ct);
+            res = await Services.EnvioPapelera.EnviarAsync(rutas, progreso: avance, ct: ct);
         }, escribeArchivos: true);
         if (res == null) return;   // el error ya lo ha dicho TrabajarAsync
-        var rutasEnviadas = new HashSet<string>(res.Enviadas, StringComparer.OrdinalIgnoreCase);
-        var enviadas = filas.Where(f => rutasEnviadas.Contains(f.RutaArchivo)).ToList();
-        var fallos = res.Fallos.Select(f => $"{f.Archivo}: {f.Motivo}").ToList();
 
         // De una sola vez: la biblioteca avisa a todas las pestañas en cada cambio.
-        vm.Engine.Library.RemoveTracks(enviadas.Select(f => f.RutaArchivo));
+        vm.Engine.Library.RemoveTracks(res.Enviadas);
 
-        // Y fuera de la tabla. La de «Renombrar con IA» va a través de una vista con filtro.
+        // Y fuera de la tabla, con todas sus filas. La de «Renombrar con IA» va a través de una vista con filtro.
         var lista = tabla.ItemsSource is Avalonia.Collections.DataGridCollectionView v
             ? v.SourceCollection as System.Collections.IList
             : tabla.ItemsSource as System.Collections.IList;
-        foreach (var f in enviadas) lista?.Remove(f);
+        if (lista != null)
+            foreach (var f in FilasDeArchivos(lista, res.Enviadas)) lista.Remove(f);
 
-        vm.Status = fallos.Count == 0
-            ? (enviadas.Count == 1 ? "Enviado a la papelera." : $"{enviadas.Count} archivos enviados a la papelera.")
-              + (ReferenceEquals(tabla, TablaMezcla) ? " Vuelve a ordenar para recalcular las transiciones." : "")
-            : $"{enviadas.Count} enviados, {fallos.Count} con problemas. El primero: {fallos[0]}";
-        if (res.Interrumpido)
-            vm.Status = $"Cancelado: {enviadas.Count} de {filas.Count} enviados a la papelera; el resto no se ha tocado."
-                      + (fallos.Count > 0 ? $" {fallos.Count} con problemas. El primero: {fallos[0]}" : "");
+        vm.Status = LibraryViewModel.TextoPapelera(res, rutas.Count)
+                    + (res.Fallos.Count == 0 && !res.Interrumpido && ReferenceEquals(tabla, TablaMezcla)
+                        ? " Vuelve a ordenar para recalcular las transiciones." : "");
     }
 
     private static MenuItem Opcion(string texto, Action accion)
@@ -328,6 +339,11 @@ public partial class AsistenteView : UserControl
         if (DataContext is AsistenteViewModel vm) vm.GeneroReglas.QuitarRegla(CarpetasSeleccionadas());
     }
 
+    private void ExcluirReglaCarpeta_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is AsistenteViewModel vm) vm.GeneroReglas.ExcluirDeLaRegla(CarpetasSeleccionadas());
+    }
+
     /// <summary>Al seleccionar una sola carpeta con regla, el desplegable enseña su género, listo para cambiarlo.</summary>
     private void CarpetasGenero_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
@@ -373,9 +389,11 @@ public partial class AsistenteView : UserControl
         var versiones = Opcion("Ver sus versiones…",
             () => _ = Acciones.AccionesCancion.AbrirVersionesAsync(Acciones.AccionesCancion.RutaDe(TablaMezcla.SelectedItem)));
 
-        // Detrás de «Editar»: son acciones sobre la canción, y van antes de las del archivo.
+        // Detrás de «Editar»: son acciones sobre la canción, y van antes de las del archivo. En el orden
+        // común a todas las tablas con canciones (ver AccionesCancion.Puesto): Compatibles, Versiones y, al
+        // final del grupo, la de ordenar («Empezar por esta» aquí, «Ordenar la selección» en Biblioteca).
         var donde = Math.Min(2, menu.Items.Count);
-        foreach (var c in new Control[] { new Separator(), empezar, compatibles, versiones })
+        foreach (var c in new Control[] { new Separator(), compatibles, versiones, empezar })
             menu.Items.Insert(donde++, c);
 
         menu.Opening += (_, _) =>

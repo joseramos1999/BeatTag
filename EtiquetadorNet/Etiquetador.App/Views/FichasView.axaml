@@ -37,9 +37,10 @@
                     <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
                     <MenuItem Header="Editar etiquetas de esta canción" Command="{Binding EditThisCommand}" />
                     <Separator />
-                    <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
                     <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding SelectedRow}" />
                     <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding SelectedRow}" />
+                    <Separator />
+                    <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
                 </ContextMenu>
             </DataGrid.ContextMenu>
             <DataGrid.Columns>

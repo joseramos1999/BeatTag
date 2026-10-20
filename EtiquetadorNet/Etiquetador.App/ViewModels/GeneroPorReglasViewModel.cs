@@ -18,25 +18,30 @@ namespace Etiquetador.App.ViewModels;
 /// <summary>Una carpeta con canciones sin género, y el género que el usuario le ha asignado.</summary>
 public sealed partial class CarpetaGeneroFila : ObservableObject
 {
-    public CarpetaGeneroFila(CarpetaSinGenero c, string genero, bool conSubcarpetas = false)
+    public CarpetaGeneroFila(CarpetaSinGenero c, string genero, bool conSubcarpetas = false, bool excluida = false)
     {
         Datos = c;
         _genero = genero;
-        ConSubcarpetas = conSubcarpetas;
+        _excluida = excluida;
+        ConSubcarpetas = conSubcarpetas || c.Subcarpetas;
     }
 
     public CarpetaSinGenero Datos { get; }
 
-    /// <summary>La añadió el usuario a mano: sus cifras incluyen las subcarpetas.</summary>
+    /// <summary>Sus cifras incluyen canciones de subcarpetas (a las que también se aplica su regla).</summary>
     public bool ConSubcarpetas { get; }
 
     /// <summary>El género de la regla de esta carpeta ("" = sin regla).</summary>
     [ObservableProperty] private string _genero;
 
+    /// <summary>Excluida de la regla de su carpeta madre: sus canciones solo dependen del artista.</summary>
+    [ObservableProperty] private bool _excluida;
+
     partial void OnGeneroChanged(string value) => OnPropertyChanged(nameof(Regla));
+    partial void OnExcluidaChanged(bool value) => OnPropertyChanged(nameof(Regla));
 
     /// <summary>La regla, para la columna «Género asignado».</summary>
-    public string Regla => Genero.Length > 0 ? Genero : "Sin asignar";
+    public string Regla => Genero.Length > 0 ? Genero : Excluida ? "Excluida (sin regla de carpeta)" : "Sin asignar";
 
     public string Ruta => Datos.Ruta;
     public string Nombre => GeneroPorReglas.NombreCarpeta(Datos.Ruta) + (ConSubcarpetas ? " (y subcarpetas)" : "");
@@ -140,13 +145,17 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
         if (!_p.BibliotecaLista(out var motivo)) { _p.Status = motivo; return; }
 
         var canciones = _p.Engine.Library.Tracks.ToList();   // instantánea en el hilo de la interfaz
+        var raices = _p.Engine.Library.Folders.Select(f => f.Path).ToList();
         var reglas = new Dictionary<string, string>(Mapa.Reglas, StringComparer.OrdinalIgnoreCase);
+        var conRegla = Mapa.ConGenero;
+        var excluidas = reglas.Count - conRegla;
         var calculo = await Task.Run(() =>
         {
             var generos = GeneroPorReglas.GenerosDeLaBiblioteca(canciones).Select(g => g.Genero).ToList();
-            // Lo escrito en el mapa, como lo escribe la biblioteca («reguetón» → «Reggaeton»).
+            // Lo escrito en el mapa, como lo escribe la biblioteca («reguetón» → «Reggaeton»). Las
+            // excluidas ("") siguen vacías.
             var mapa = reglas.ToDictionary(r => r.Key, r => GeneroPorReglas.ComoEnLaBiblioteca(r.Value, generos), StringComparer.OrdinalIgnoreCase);
-            var carpetas = GeneroPorReglas.Carpetas(canciones);
+            var carpetas = GeneroPorReglas.Carpetas(canciones, raices);
             var conocidas = new HashSet<string>(carpetas.Select(c => c.Ruta), StringComparer.OrdinalIgnoreCase);
             // Las carpetas con regla que no salen en la lista (ya no les falta género, o se añadieron a
             // mano por sus subcarpetas) también se enseñan: si no, no habría forma de quitarles la regla.
@@ -182,15 +191,26 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
 
         var porCarpeta = calculo.propuestas.Count(p => p.Regla == ReglaGenero.Carpeta);
         var porArtista = calculo.propuestas.Count - porCarpeta;
-        ResumenCarpetas = $"{calculo.carpetas.Count} carpetas con canciones sin género · {reglas.Count} con regla";
-        Resumen = $"{calculo.sinGenero} canciones sin género · {porCarpeta} por su carpeta · {porArtista} por su artista "
-                  + $"({calculo.propuestas.Count(p => p.Regla == ReglaGenero.Artista && p.Marcada)} marcadas)";
+        ResumenCarpetas = TextoCarpetas(calculo.carpetas.Count, conRegla, excluidas);
+        Resumen = TextoResumen(calculo.sinGenero, porCarpeta, porArtista,
+                               calculo.propuestas.Count(p => p.Regla == ReglaGenero.Artista && p.Marcada));
         _p.Status = AvisoMapaUnaVez()
-                    + (calculo.sinGenero == 0 ? "Todas las canciones tienen género." : Resumen + ". " + Consejo(reglas.Count, porArtista))
+                    + (calculo.sinGenero == 0 ? "Todas las canciones tienen género." : Resumen + ". " + Consejo(conRegla, porArtista))
                     + (calculo.Variantes > 0
-                        ? $" Hay {calculo.Variantes} géneros escritos de varias formas o que no son un género: pasa antes «Unificar géneros» para que las cuentas por artista sean más fiables."
+                        ? (calculo.Variantes == 1
+                            ? " Hay 1 género escrito de varias formas o que no es un género"
+                            : $" Hay {calculo.Variantes:N0} géneros escritos de varias formas o que no son un género")
+                          + ": pasa antes «Unificar géneros» para que las cuentas por artista sean más fiables."
                         : "");
     });
+
+    internal static string TextoCarpetas(int carpetas, int conRegla, int excluidas)
+        => $"{EscrituraPorReglas.Cuenta(carpetas, "carpeta con canciones sin género", "carpetas con canciones sin género")} · {conRegla:N0} con regla"
+           + (excluidas > 0 ? $" · {excluidas:N0} {(excluidas == 1 ? "excluida" : "excluidas")}" : "");
+
+    internal static string TextoResumen(int sinGenero, int porCarpeta, int porArtista, int artistaMarcadas)
+        => $"{EscrituraPorReglas.Cuenta(sinGenero, "canción sin género", "canciones sin género")} · {porCarpeta:N0} por su carpeta · "
+           + $"{porArtista:N0} por su artista ({artistaMarcadas:N0} {(artistaMarcadas == 1 ? "marcada" : "marcadas")})";
 
     internal static string Consejo(int reglas, int porArtista)
         => reglas == 0
@@ -199,7 +219,7 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
                 ? "Las del artista salen marcadas solo cuando casi todas sus canciones llevan el mismo género: revisa el resto."
                 : "Revisa las propuestas y aplica las marcadas.";
 
-    private CarpetaGeneroFila Fila(CarpetaSinGenero c, bool conSubcarpetas) => new(c, Mapa.De(c.Ruta), conSubcarpetas);
+    private CarpetaGeneroFila Fila(CarpetaSinGenero c, bool conSubcarpetas) => new(c, Mapa.De(c.Ruta), conSubcarpetas, Mapa.Excluida(c.Ruta));
 
     /// <summary>
     /// Añade una carpeta que no sale en la lista (por ejemplo, la que agrupa varias): su regla vale para
@@ -238,21 +258,38 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
         CambiarRegla(carpetas, genero);
     }
 
-    /// <summary>Quita la regla de las carpetas seleccionadas: sus canciones vuelven a depender solo del artista.</summary>
+    /// <summary>
+    /// Quita la regla de las carpetas seleccionadas (o que estén excluidas): vuelve a valer la de su
+    /// carpeta madre, si la tiene; si no, sus canciones dependen solo del artista.
+    /// </summary>
     public void QuitarRegla(IReadOnlyList<CarpetaGeneroFila> carpetas) => CambiarRegla(carpetas, "");
 
-    private void CambiarRegla(IReadOnlyList<CarpetaGeneroFila> carpetas, string? genero)
+    /// <summary>
+    /// Excluye las carpetas seleccionadas de la regla de su carpeta madre: una «WarmUp» dentro de
+    /// «Reggaeton» mezcla estilos y no debe recibir su género. Antes no había forma: dejar el género
+    /// vacío borraba la regla, y entonces volvía a valer la de la madre.
+    /// </summary>
+    public void ExcluirDeLaRegla(IReadOnlyList<CarpetaGeneroFila> carpetas) => CambiarRegla(carpetas, null, excluir: true);
+
+    private void CambiarRegla(IReadOnlyList<CarpetaGeneroFila> carpetas, string? genero, bool excluir = false)
     {
         if (carpetas.Count == 0) { _p.Status = "Selecciona antes una o varias carpetas de la lista."; return; }
-        var valor = GeneroPorReglas.ComoEnLaBiblioteca(genero, GenerosDisponibles);
+        var valor = excluir ? "" : GeneroPorReglas.ComoEnLaBiblioteca(genero, GenerosDisponibles);
         var cambiadas = 0;
         foreach (var c in carpetas)
         {
-            if (!Mapa.Poner(c.Ruta, valor)) continue;
+            if (!(excluir ? Mapa.Excluir(c.Ruta) : Mapa.Poner(c.Ruta, valor))) continue;
             c.Genero = valor;
+            c.Excluida = excluir;
             cambiadas++;
         }
-        if (cambiadas == 0) { _p.Status = valor.Length == 0 ? "Esas carpetas no tenían regla." : $"Esas carpetas ya tenían «{valor}»."; return; }
+        if (cambiadas == 0)
+        {
+            _p.Status = excluir ? (carpetas.Count == 1 ? "Esa carpeta ya estaba excluida." : "Esas carpetas ya estaban excluidas.")
+                      : valor.Length == 0 ? (carpetas.Count == 1 ? "Esa carpeta no tenía regla." : "Esas carpetas no tenían regla.")
+                      : carpetas.Count == 1 ? $"Esa carpeta ya tenía «{valor}»." : $"Esas carpetas ya tenían «{valor}».";
+            return;
+        }
 
         ReglasSinAplicar = true;
         var err = Mapa.Guardar();
@@ -262,9 +299,18 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
             _p.Status = "⚠ La regla se usará en esta sesión, pero no se ha podido guardar: " + err;
             return;
         }
-        var cuales = cambiadas == 1 ? $"«{carpetas[0].Nombre}»" : $"{cambiadas} carpetas";
-        _p.Status = (valor.Length == 0 ? $"Regla quitada de {cuales}." : $"{cuales} → {valor}.")
+        _p.Status = TextoReglaCambiada(cambiadas, carpetas[0].Nombre, valor, excluir)
                     + " Pulsa «Proponer géneros» para ver a qué canciones se aplica.";
+    }
+
+    internal static string TextoReglaCambiada(int cambiadas, string primera, string valor, bool excluir)
+    {
+        var cuales = cambiadas == 1 ? $"«{primera}»" : $"{cambiadas:N0} carpetas";
+        if (excluir)
+            return cambiadas == 1
+                ? $"{cuales} queda excluida de la regla de su carpeta madre: sus canciones solo dependen del artista."
+                : $"{cuales} quedan excluidas de la regla de su carpeta madre: sus canciones solo dependen del artista.";
+        return valor.Length == 0 ? $"Regla quitada de {cuales}." : $"{cuales} → {valor}.";
     }
 
     [RelayCommand]
@@ -280,18 +326,43 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
     {
         var porCarpeta = marcadas.Count(f => f.Propuesta.Regla == ReglaGenero.Carpeta);
         var porArtista = marcadas.Count - porCarpeta;
-        var cuerpo = $"Se pondrá género a {marcadas.Count} canciones que no tienen: {porCarpeta} por su carpeta y {porArtista} por su artista.";
+        var cuerpo = marcadas.Count == 1
+            ? $"Se pondrá género a 1 canción que no tiene: {porCarpeta} por su carpeta y {porArtista} por su artista."
+            : $"Se pondrá género a {marcadas.Count:N0} canciones que no tienen: {porCarpeta:N0} por su carpeta y {porArtista:N0} por su artista.";
         var nota = "Solo se escribe en las que sigan sin género: si alguna ya tiene uno, se respeta. "
                  + "rekordbox no vuelve a leer las etiquetas de las pistas ya importadas hasta que usas «Recargar etiqueta». "
                  + "Se puede deshacer desde Enriquecer.";
         var debiles = marcadas.Count(f => !f.Propuesta.Marcada);
-        if (debiles > 0) nota = $"⚠ {debiles} no salían marcadas porque la regla no es tan fuerte: comprueba que las has revisado. " + nota;
+        if (debiles > 0)
+            nota = (debiles == 1
+                       ? "⚠ 1 no salía marcada porque la regla no es tan fuerte: comprueba que la has revisado. "
+                       : $"⚠ {debiles:N0} no salían marcadas porque la regla no es tan fuerte: comprueba que las has revisado. ")
+                   + nota;
         return (cuerpo, nota);
     }
 
-    /// <summary>Los cambios: solo el género, y solo si el archivo sigue sin él.</summary>
-    internal static List<CambioEtiquetas> Cambios(IEnumerable<GeneroReglaFila> marcadas)
-        => marcadas.Select(f => new CambioEtiquetas(f.Ruta) { GeneroNuevo = f.Genero.Trim() }).ToList();
+    /// <summary>
+    /// Los cambios: solo el género, y solo si el archivo sigue sin él. El género pasa por
+    /// <see cref="GeneroPorReglas.ComoEnLaBiblioteca"/>, como el del mapa: el que se corrige a mano en
+    /// la columna «Género» («reguetón») se escribe como lo escribe la biblioteca («Reggaeton») y no
+    /// crea otra variante que luego haya que unificar.
+    /// </summary>
+    internal static List<CambioEtiquetas> Cambios(IEnumerable<GeneroReglaFila> marcadas, IReadOnlyList<string> generosBiblioteca)
+        => marcadas.Select(f => new CambioEtiquetas(f.Ruta) { GeneroNuevo = GeneroPorReglas.ComoEnLaBiblioteca(f.Genero, generosBiblioteca) })
+                   .Where(c => c.GeneroNuevo!.Length > 0)
+                   .ToList();
+
+    /// <summary>
+    /// Las propuestas que siguen en la tabla tras aplicar: salen las aplicadas cuyo archivo se escribió
+    /// o ya tenía género. Las desmarcadas se quedan siempre.
+    /// </summary>
+    internal static List<GeneroReglaFila> QuedanTrasAplicar(IEnumerable<GeneroReglaFila> filas, IReadOnlyCollection<GeneroReglaFila> aplicadas,
+                                                          EscrituraPorReglas.Resultado res)
+    {
+        var hechos = new HashSet<string>(res.Escritos.Concat(res.Respetados), StringComparer.OrdinalIgnoreCase);
+        var enviadas = new HashSet<GeneroReglaFila>(aplicadas);
+        return filas.Where(f => !(enviadas.Contains(f) && hechos.Contains(f.Ruta))).ToList();
+    }
 
     /// <summary>Escribe los géneros marcados. La confirmación la pide la vista.</summary>
     public Task AplicarAsync() => _p.EscribirArchivosAsync("Escribiendo géneros…", async ct =>
@@ -300,16 +371,18 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
         if (marcadas.Count == 0) { _p.Status = "No hay ninguna propuesta marcada."; return; }
 
         _p.Engine.ReleaseAudio();
-        var cambios = Cambios(marcadas);
+        var cambios = Cambios(marcadas, GenerosDisponibles);
         var progreso = new Progress<double>(v => _p.Progress = v);
-        var res = await Task.Run(() => EscrituraPorReglas.EscribirConHistorial(_p.Engine, cambios, progreso, ct, "Género por reglas"));
+        // Con su propio tipo en el historial («Género por carpeta y artista»): solo escribe el género,
+        // como «Unificar géneros» o una edición del Editor, y sin el Origen no se distinguirían.
+        var res = await Task.Run(() => EscrituraPorReglas.EscribirConHistorial(_p.Engine, cambios, progreso, ct, "Género por reglas",
+                                                                                Etiquetador.Core.Pipeline.TipoEjecucion.GeneroPorReglas));
 
-        var hechos = new HashSet<string>(res.Escritos.Concat(res.Respetados), StringComparer.OrdinalIgnoreCase);
-        var quedan = Propuestas.Where(f => !hechos.Contains(f.Ruta)).ToList();
+        var quedan = QuedanTrasAplicar(Propuestas, marcadas, res);
         if (quedan.Count != Propuestas.Count) Propuestas = new ObservableCollection<GeneroReglaFila>(quedan);
         if (res.Escritos.Count > 0) await _p.Engine.Library.RefrescarAsync(res.Escritos);   // solo lo escrito, sin recorrer las carpetas
 
-        _p.Status = $"Género puesto en {res.Escritos.Count} canciones" + EscrituraPorReglas.Cola(res)
+        _p.Status = $"Género puesto en {EscrituraPorReglas.Cuenta(res.Escritos.Count, "canción", "canciones")}" + EscrituraPorReglas.Cola(res)
                     + (res.Escritos.Count > 0
                         ? " rekordbox no vuelve a leer las etiquetas de las pistas que ya tiene importadas: selecciónalas allí y usa «Recargar etiqueta»."
                         : "");

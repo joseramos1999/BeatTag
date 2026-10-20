@@ -120,6 +120,49 @@ public static class EtiquetasPorReglas
         => cambios.Values.Any(c => c.Kind == FieldKind.Arr && (c.NewArr ?? new List<string>()).Any(v => v.Contains('/')));
 
     /// <summary>
+    /// Lo que se anota en el historial: los cambios, con cada lista como la VA A LEER el archivo
+    /// después de escribirla. Lo que se escribe sigue siendo <paramref name="cambios"/>.
+    ///
+    /// POR QUÉ. Con un valor con «/» en ID3v2.3 («Hip-Hop/Rap», «R&amp;B/Soul», «AC/DC»), anotar lo que se
+    /// pide y corregirlo después con un segundo registro dejaba DOS líneas por archivo: el historial
+    /// contaba el doble de cambios, «Deshacer las marcadas» podía archivar la primera como deshecha
+    /// (editada a mano) con el género aún puesto, y el resumen de deshacer daba el archivo por revertido
+    /// y por cambiado a mano a la vez. Se calcula escribiendo una etiqueta ID3v2 de la misma versión
+    /// en memoria y leyéndola, así que es exactamente lo que hará TagLib con el archivo, y queda una
+    /// sola línea. Si aun así no coincidiera (otro formato, otra etiqueta delante), la relectura tras
+    /// guardar lo corrige como antes (<see cref="Corregidos"/>).
+    /// </summary>
+    public static Dictionary<string, FieldChange> ComoSeLeera(TagLib.File archivo, IReadOnlyDictionary<string, FieldChange> cambios)
+    {
+        var res = new Dictionary<string, FieldChange>(cambios, StringComparer.Ordinal);
+        if (!HayQueReleer(cambios) || archivo.GetTag(TagLib.TagTypes.Id3v2, false) is not TagLib.Id3v2.Tag id3) return res;
+        foreach (var (campo, c) in cambios)
+        {
+            if (c.Kind != FieldKind.Arr || campo is not ("Artist" or "Genre")) continue;
+            if (ListaReleidaId3v2(id3.Version, campo, c.NewArr ?? new List<string>()) is { } leida)
+                res[campo] = FieldChange.Arr(c.OldArr ?? new List<string>(), leida);
+        }
+        return res;
+    }
+
+    /// <summary>
+    /// Cómo se lee una lista de artistas («Artist») o de géneros («Genre») escrita en una etiqueta
+    /// ID3v2 de esa versión. Null si TagLib no sabe escribir esa versión: entonces decide la relectura.
+    /// </summary>
+    public static string[]? ListaReleidaId3v2(byte version, string campo, IReadOnlyList<string> valores)
+    {
+        try
+        {
+            var tag = new TagLib.Id3v2.Tag { Version = version };
+            if (campo == "Artist") tag.Performers = valores.ToArray();
+            else tag.Genres = valores.ToArray();
+            var leida = new TagLib.Id3v2.Tag(tag.Render());
+            return campo == "Artist" ? leida.Performers : leida.Genres;
+        }
+        catch (Exception) { return null; }
+    }
+
+    /// <summary>
     /// Las listas anotadas que no coinciden con lo que quedó escrito, ya corregidas (vacío si todas
     /// coinciden). Se anotan en un segundo registro, que deshacer procesa primero.
     /// </summary>

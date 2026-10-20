@@ -35,8 +35,13 @@ internal static class EscrituraPorReglas
     /// motivo, en <paramref name="errorHistorial"/>): entonces no se toca nada. Hay que llamarlo fuera
     /// del hilo de la interfaz y con el reproductor parado.
     /// </summary>
+    /// <param name="origen">
+    /// Qué herramienta escribe, para el historial de cambios (<see cref="UndoRecord.Origen"/>): con los
+    /// campos solos, una limpieza de packs (álbum, artista y comentario) no se distingue del Editor.
+    /// </param>
     internal static Resultado Escribir(IReadOnlyList<CambioEtiquetas> cambios, IHistorialDeshacer? historial, string errorHistorial,
-        Action<string, string, SelloArchivo>? seguir, Logger? log, IProgress<double>? progreso, CancellationToken ct, string que)
+        Action<string, string, SelloArchivo>? seguir, Logger? log, IProgress<double>? progreso, CancellationToken ct, string que,
+        TipoEjecucion? origen = null)
     {
         var escritos = new List<string>();
         var respetados = new List<string>();
@@ -51,17 +56,31 @@ internal static class EscrituraPorReglas
             var ruta = c.Ruta;
             try
             {
+                // Un archivo que ya no está (enviado a la papelera desde otra tabla, movido) se dice en
+                // español; TagLib lo diría en inglés («Could not find file…»).
+                if (!File.Exists(ruta))
+                {
+                    fallos.Add(Path.GetFileName(ruta) + ": " + YaNoEsta);
+                    log?.Log($"{que}: {Path.GetFileName(ruta)}: {YaNoEsta}", LogKind.Err);
+                    progreso?.Report(100.0 * (i + 1) / cambios.Count);
+                    continue;
+                }
+
                 SelloArchivo? sello = null;
-                Dictionary<string, FieldChange>? escrito = null;
+                Dictionary<string, FieldChange>? escrito = null, anotadoTalCual = null;
                 using (var f = TagLib.File.Create(ruta))
                 {
                     var calculo = EtiquetasPorReglas.Calcular(f.Tag, c);
                     if (calculo.Respetados > 0) respetados.Add(ruta);
                     if (calculo.Cambios.Count > 0)
                     {
+                        // Se anota lo que el archivo va a leer después (una lista con «/» en ID3v2.3 vuelve
+                        // partida): así queda UNA línea por archivo en el historial.
+                        var aAnotar = EtiquetasPorReglas.ComoSeLeera(f, calculo.Cambios);
+
                         // Antes de tocar el archivo: si el historial ya no se puede escribir, este y los
                         // siguientes se quedan como estaban.
-                        var anotado = historial.Anotar(Registro(ruta, calculo.Cambios));
+                        var anotado = historial.Anotar(Registro(ruta, aAnotar, origen));
                         if (anotado.Length > 0)
                             return new Resultado(escritos, respetados, fallos, "", true, Parada(ruta, anotado, log));
 
@@ -69,22 +88,24 @@ internal static class EscrituraPorReglas
                         EtiquetasPorReglas.Poner(f.Tag, calculo.Cambios);
                         f.Save();
                         escrito = calculo.Cambios;
+                        anotadoTalCual = aAnotar;
                     }
                 }
 
-                if (escrito != null)
+                if (escrito != null && anotadoTalCual != null)
                 {
                     escritos.Add(ruta);
                     // Con el archivo ya cerrado, que es cuando su fecha queda al día.
                     if (sello is { } s) seguir?.Invoke(ruta, ruta, s);
 
+                    // La red de seguridad: si lo previsto no es lo que quedó, se anota lo que quedó.
                     if (EtiquetasPorReglas.HayQueReleer(escrito))
                     {
                         Dictionary<string, FieldChange> corregidos;
-                        using (var releido = TagLib.File.Create(ruta)) corregidos = EtiquetasPorReglas.Corregidos(releido.Tag, escrito);
+                        using (var releido = TagLib.File.Create(ruta)) corregidos = EtiquetasPorReglas.Corregidos(releido.Tag, anotadoTalCual);
                         if (corregidos.Count > 0)
                         {
-                            var anotado = historial.Anotar(Registro(ruta, corregidos));
+                            var anotado = historial.Anotar(Registro(ruta, corregidos, origen));
                             if (anotado.Length > 0)
                             {
                                 var sinAnotar = $"«{Path.GetFileName(ruta)}» quedó escrito, pero lo que guardó el archivo no se pudo anotar tal cual ({anotado}): deshacerlo no lo devolverá";
@@ -107,8 +128,16 @@ internal static class EscrituraPorReglas
         return new Resultado(escritos, respetados, fallos, "", false);
     }
 
-    private static UndoRecord Registro(string ruta, Dictionary<string, FieldChange> campos)
-        => new() { OrigPath = ruta, FinalPath = ruta, Renamed = false, Fields = new Dictionary<string, FieldChange>(campos) };
+    internal const string YaNoEsta = "ya no está en su carpeta (se ha movido, renombrado o enviado a la papelera)";
+
+    // Origen va con el nombre del tipo, como lo lee HistorialDeshacer.DeducirTipo; sin él, el
+    // historial lo deduce de los campos, como en los manifiestos anteriores.
+    private static UndoRecord Registro(string ruta, Dictionary<string, FieldChange> campos, TipoEjecucion? origen)
+        => new()
+        {
+            OrigPath = ruta, FinalPath = ruta, Renamed = false, Fields = new Dictionary<string, FieldChange>(campos),
+            Origen = origen?.ToString(),
+        };
 
     /// <summary>El historial no se pudo ni abrir: no se ha tocado nada.</summary>
     private static string SinHistorial(string error, Logger? log)
@@ -136,11 +165,11 @@ internal static class EscrituraPorReglas
     /// cerrar, y una entrada que no llegara a guardarse solo se volvería a calcular.
     /// </summary>
     internal static Resultado EscribirConHistorial(AppEngine engine, IReadOnlyList<CambioEtiquetas> cambios,
-        IProgress<double>? progreso, CancellationToken ct, string que)
+        IProgress<double>? progreso, CancellationToken ct, string que, TipoEjecucion origen)
     {
         Resultado res;
         using (var manifiesto = ManifiestoDeshacer.Abrir(engine.Paths.NuevoManifiesto(), out var error))
-            res = Escribir(cambios, manifiesto, error, engine.SeguirArchivo, engine.Logger, progreso, ct, que);
+            res = Escribir(cambios, manifiesto, error, engine.SeguirArchivo, engine.Logger, progreso, ct, que, origen);
         if (res.Escritos.Count > 0)
         {
             try { engine.Identificacion.Save(); engine.Loudness.Save(); }
@@ -149,13 +178,21 @@ internal static class EscrituraPorReglas
         return res;
     }
 
+    /// <summary>«1 canción», «2 canciones»: el número con el sustantivo en singular o en plural.</summary>
+    internal static string Cuenta(int n, string singular, string plural) => n == 1 ? "1 " + singular : $"{n:N0} {plural}";
+
     /// <summary>El final del estado, igual en las dos herramientas: fallos, parada, cancelación y si se puede deshacer.</summary>
     internal static string Cola(Resultado res)
     {
         var texto = "";
         if (res.Respetados.Count > 0)
-            texto += $" · {res.Respetados.Count} se han dejado como estaban porque cambiaron después de proponerlas";
-        if (res.Fallos.Count > 0) texto += $" · {res.Fallos.Count} no se pudieron escribir ({res.Fallos[0]})";
+            texto += res.Respetados.Count == 1
+                ? " · 1 se ha dejado como estaba porque cambió después de proponerla"
+                : $" · {res.Respetados.Count:N0} se han dejado como estaban porque cambiaron después de proponerlas";
+        if (res.Fallos.Count > 0)
+            texto += res.Fallos.Count == 1
+                ? $" · 1 no se pudo escribir ({res.Fallos[0]})"
+                : $" · {res.Fallos.Count:N0} no se pudieron escribir (la primera, {res.Fallos[0]})";
         if (res.Detenido.Length > 0) texto += " · ⚠ " + res.Detenido.TrimEnd('.');
         else if (res.Cancelado) texto += " · cancelado a medias";
         texto += res.UndoErr.Length > 0

@@ -541,7 +541,7 @@ public class PulidoHistorialTests : IDisposable
     }
 
     [Theory]
-    [InlineData(nameof(TipoEjecucion.LimpiezaPacks), "Limpieza de packs")]
+    [InlineData(nameof(TipoEjecucion.LimpiezaPacks), "Limpieza de publicidad de packs")]
     [InlineData(nameof(TipoEjecucion.GeneroPorReglas), "Género por carpeta y artista")]
     [InlineData(nameof(TipoEjecucion.Sustitucion), "Sustitución desde la Bandeja")]
     public void Las_herramientas_nuevas_tienen_nombre_propio(string origen, string texto)
@@ -699,7 +699,7 @@ public class PulidoHistorialTests : IDisposable
 
         Assert.Equal(3, enviadas);
         Assert.Equal(7, store.Tracks.Count);
-        Assert.Equal("Envío a la papelera detenido. 3 archivos enviados a la papelera. 7 archivos no se han tocado.", estado);
+        Assert.Equal("Cancelado: 3 de 10 enviados a la papelera; el resto no se ha tocado.", estado);
     }
 
     [Fact]

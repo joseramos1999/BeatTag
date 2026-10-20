@@ -16,14 +16,17 @@ public enum ReglaGenero
 public sealed record PropuestaGeneroRegla(string Ruta, string Genero, ReglaGenero Regla, string PorQue, bool Marcada);
 
 /// <summary>
-/// Una carpeta con canciones sin género, para que el usuario decida qué género le corresponde.
+/// Una carpeta con canciones sin género, para que el usuario decida qué género le corresponde. Las
+/// cifras incluyen las subcarpetas, que es a lo que se aplica su regla.
 /// </summary>
-/// <param name="SinGenero">Canciones de la carpeta (solo las de dentro, sin subcarpetas) que no tienen género.</param>
-/// <param name="Total">Canciones de la carpeta.</param>
+/// <param name="SinGenero">Canciones de la carpeta y sus subcarpetas que no tienen género.</param>
+/// <param name="Total">Canciones de la carpeta y sus subcarpetas.</param>
 /// <param name="Dominante">El género más repetido entre las que sí tienen, ya normalizado ("" si ninguna tiene).</param>
 /// <param name="ConDominante">Cuántas lo llevan.</param>
 /// <param name="ConGenero">Cuántas tienen algún género.</param>
-public sealed record CarpetaSinGenero(string Ruta, int SinGenero, int Total, string Dominante, int ConDominante, int ConGenero);
+/// <param name="Subcarpetas">Parte de las canciones está en subcarpetas.</param>
+public sealed record CarpetaSinGenero(string Ruta, int SinGenero, int Total, string Dominante, int ConDominante, int ConGenero,
+                                      bool Subcarpetas = false);
 
 /// <summary>
 /// Poner género a las canciones que no tienen, sin IA (idea P9).
@@ -168,30 +171,88 @@ public static class GeneroPorReglas
         return Existente(canonico) ?? canonico;
     }
 
+    /// <summary>Lo que se va sumando de una carpeta y todo lo que tiene debajo.</summary>
+    private sealed class Cuenta
+    {
+        public int Total, SinGenero;
+        public bool Subcarpetas;
+        public readonly List<string?> Generos = new();
+
+        /// <summary>
+        /// Por dónde le llegan canciones sin género: «.» las suyas y, si no, el nombre de la subcarpeta
+        /// inmediata. Con dos o más, la carpeta agrupa varias.
+        /// </summary>
+        public readonly HashSet<string> Fuentes = new(StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Las carpetas que tienen canciones sin género, de más a menos. Es por donde conviene empezar el
     /// mapa: unas pocas carpetas grandes suelen cubrir la mayoría. El dominante se enseña como pista,
     /// no se aplica solo.
+    ///
+    /// Las cifras incluyen las subcarpetas, porque la regla de una carpeta vale también para ellas. Y
+    /// salen también las carpetas que AGRUPAN otras con canciones sin género (dentro de las carpetas
+    /// de la biblioteca, <paramref name="raices"/>), aunque no tengan canciones propias. POR QUÉ: en
+    /// una biblioteca organizada como Género/Pack/… la lista solo enseñaba cientos de carpetas pequeñas
+    /// de pack, y la carpeta del género, que es donde tiene sentido la regla, había que buscarla y
+    /// añadirla a mano. Una carpeta con una sola subcarpeta no se repite: daría las mismas cifras.
+    /// Sin <paramref name="raices"/> no se sube por encima de las carpetas con canciones.
     /// </summary>
-    public static List<CarpetaSinGenero> Carpetas(IEnumerable<Track> canciones)
+    public static List<CarpetaSinGenero> Carpetas(IEnumerable<Track> canciones, IEnumerable<string>? raices = null)
     {
-        var porCarpeta = new Dictionary<string, List<Track>>(StringComparer.OrdinalIgnoreCase);
+        var listaRaices = (raices ?? Enumerable.Empty<string>()).Where(r => !string.IsNullOrWhiteSpace(r)).ToList();
+        var dentro = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        bool EnLaBiblioteca(string carpeta)
+        {
+            if (!dentro.TryGetValue(carpeta, out var si))
+                dentro[carpeta] = si = listaRaices.Any(r => Rutas.MismaCarpeta(carpeta, r) || Rutas.EstaDentroDe(carpeta, r));
+            return si;
+        }
+
+        var cuentas = new Dictionary<string, Cuenta>(StringComparer.OrdinalIgnoreCase);
+        var propias = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // con canciones sin género dentro
+        var normalizado = Normalizador();
         foreach (var t in canciones)
         {
             var dir = Path.GetDirectoryName(t.FilePath) ?? "";
             if (dir.Length == 0) continue;
-            if (!porCarpeta.TryGetValue(dir, out var l)) porCarpeta[dir] = l = new List<Track>();
-            l.Add(t);
+            var sin = SinGenero(t);
+            var genero = normalizado(t.Genre);
+            if (sin) propias.Add(dir);
+
+            // La carpeta de la canción y, dentro de la biblioteca, todas las que tiene por encima.
+            string? carpeta = dir, hija = null;
+            while (!string.IsNullOrEmpty(carpeta))
+            {
+                if (!cuentas.TryGetValue(carpeta, out var c)) cuentas[carpeta] = c = new Cuenta();
+                c.Total++;
+                c.Generos.Add(genero);
+                if (hija != null) c.Subcarpetas = true;
+                if (sin)
+                {
+                    c.SinGenero++;
+                    c.Fuentes.Add(hija == null ? "." : Path.GetFileName(hija.TrimEnd('\\', '/')));
+                }
+                var madre = Path.GetDirectoryName(carpeta.TrimEnd('\\', '/'));
+                if (string.IsNullOrEmpty(madre) || !EnLaBiblioteca(madre)) break;
+                hija = carpeta;
+                carpeta = madre;
+            }
         }
 
         var res = new List<CarpetaSinGenero>();
-        var normalizado = Normalizador();
-        foreach (var (dir, lista) in porCarpeta)
+        foreach (var (carpeta, c) in cuentas)
         {
-            var sin = lista.Count(SinGenero);
-            if (sin == 0) continue;
-            var (dominante, con, total) = Dominante(lista.Select(t => normalizado(t.Genre)));
-            res.Add(new CarpetaSinGenero(dir, sin, lista.Count, dominante, con, total));
+            if (c.SinGenero == 0 || (!propias.Contains(carpeta) && c.Fuentes.Count < 2)) continue;
+            var (dominante, con, total) = Dominante(c.Generos);
+            // Una carpeta de la biblioteca que solo agrupa otras (sin canciones sin género propias)
+            // suele ser TODA la música, de muchos estilos: saldría la primera de la lista, y darle un
+            // género lo pondría en todo lo que no cubra otra regla. Solo sale si las canciones que
+            // tienen género coinciden como lo exige la regla del artista (al menos 3 y 7 de cada 10),
+            // como cuando la carpeta añadida a la biblioteca es la de un género.
+            if (!propias.Contains(carpeta) && listaRaices.Any(r => Rutas.MismaCarpeta(carpeta, r)) && !Fuerza(con, total).Propone)
+                continue;
+            res.Add(new CarpetaSinGenero(carpeta, c.SinGenero, c.Total, dominante, con, total, c.Subcarpetas));
         }
         return res.OrderByDescending(c => c.SinGenero).ThenBy(c => c.Ruta, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
@@ -202,13 +263,16 @@ public static class GeneroPorReglas
     /// </summary>
     public static CarpetaSinGenero ConSubcarpetas(IEnumerable<Track> canciones, string carpeta)
     {
-        var dentro = canciones.Where(t =>
+        var dentro = new List<Track>();
+        var subcarpetas = false;
+        foreach (var t in canciones)
         {
             var dir = Path.GetDirectoryName(t.FilePath) ?? "";
-            return Rutas.MismaCarpeta(dir, carpeta) || Rutas.EstaDentroDe(dir, carpeta);
-        }).ToList();
+            if (Rutas.MismaCarpeta(dir, carpeta)) dentro.Add(t);
+            else if (Rutas.EstaDentroDe(dir, carpeta)) { dentro.Add(t); subcarpetas = true; }
+        }
         var (dominante, con, total) = Dominante(dentro.Select(t => t.Genre).Select(Normalizador()));
-        return new CarpetaSinGenero(carpeta, dentro.Count(SinGenero), dentro.Count, dominante, con, total);
+        return new CarpetaSinGenero(carpeta, dentro.Count(SinGenero), dentro.Count, dominante, con, total, subcarpetas);
     }
 
     /// <summary>El género más repetido de una lista (null = sin género), cuántas lo llevan y cuántas tienen alguno.</summary>
@@ -231,21 +295,24 @@ public static class GeneroPorReglas
 
     /// <summary>
     /// La regla de carpeta que corresponde a un archivo: la de su carpeta o la de la carpeta más
-    /// cercana por encima. Null si ninguna lo cubre. Las reglas sin género no cuentan.
+    /// cercana por encima. Null si ninguna lo cubre.
+    ///
+    /// Una regla con el género vacío es una carpeta EXCLUIDA (<see cref="MapaGenerosCarpeta.Excluir"/>):
+    /// como es la más cercana, tapa la de su carpeta madre, y sus canciones se quedan sin regla de
+    /// carpeta (solo cuenta la del artista). Una subcarpeta suya con regla propia sí la tiene.
     /// </summary>
     public static (string Genero, string Carpeta)? ReglaDeCarpeta(IReadOnlyDictionary<string, string> mapa, string rutaArchivo)
     {
         var dir = Path.GetDirectoryName(rutaArchivo) ?? "";
-        (string, string)? mejor = null;
+        (string Genero, string Carpeta)? mejor = null;
         var largo = -1;
         foreach (var (carpeta, genero) in mapa)
         {
-            if (string.IsNullOrWhiteSpace(genero)) continue;
             if (!Rutas.MismaCarpeta(dir, carpeta) && !Rutas.EstaDentroDe(dir, carpeta)) continue;
             var l = carpeta.TrimEnd('\\', '/').Length;
-            if (l > largo) { largo = l; mejor = (genero.Trim(), carpeta); }
+            if (l > largo) { largo = l; mejor = ((genero ?? "").Trim(), carpeta); }
         }
-        return mejor;
+        return mejor is { Genero.Length: > 0 } ? mejor : null;
     }
 
     /// <summary>
@@ -334,6 +401,10 @@ public static class GeneroPorReglas
 /// El mapa carpeta → género que rellena el usuario, guardado en su propio archivo
 /// (generos-por-carpeta.json, en la carpeta de datos). Es trabajo hecho a mano: se escribe de forma
 /// atómica y un archivo ilegible se aparta en vez de pisarse (<see cref="ArchivoJson"/>).
+///
+/// Una carpeta con el género vacío ("") está EXCLUIDA: la regla de su carpeta madre no vale para ella
+/// (una carpeta «WarmUp» dentro de «Reggaeton»). Una versión anterior que lea el archivo la ignora,
+/// que es lo mismo que no tener regla propia.
 /// </summary>
 public sealed class MapaGenerosCarpeta
 {
@@ -354,26 +425,46 @@ public sealed class MapaGenerosCarpeta
         var leido = ArchivoJson.Leer(archivo, () => new Dictionary<string, string>(), out var aviso, out var soloLectura);
         _reglas = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (carpeta, genero) in leido)
-            if (!string.IsNullOrWhiteSpace(carpeta) && !string.IsNullOrWhiteSpace(genero)) _reglas[carpeta] = genero.Trim();
+            if (!string.IsNullOrWhiteSpace(carpeta)) _reglas[carpeta] = (genero ?? "").Trim();
         AvisoCarga = aviso;
         SoloLectura = soloLectura;
     }
 
     public static string RutaEn(AppPaths paths) => Path.Combine(paths.DataDir, NombreArchivo);
 
-    /// <summary>Las reglas, carpeta → género.</summary>
+    /// <summary>Las reglas, carpeta → género ("" = carpeta excluida de la regla de su madre).</summary>
     public IReadOnlyDictionary<string, string> Reglas => _reglas;
 
-    /// <summary>El género de la regla de esa carpeta, o "" si no tiene.</summary>
+    /// <summary>Cuántas carpetas tienen un género asignado (sin contar las excluidas).</summary>
+    public int ConGenero => _reglas.Values.Count(g => g.Length > 0);
+
+    /// <summary>El género de la regla de esa carpeta, o "" si no tiene (o está excluida).</summary>
     public string De(string carpeta) => _reglas.TryGetValue(carpeta, out var g) ? g : "";
 
-    /// <summary>Pone (o quita, con un género vacío) la regla de una carpeta. Devuelve si cambió algo. No guarda en disco.</summary>
+    /// <summary>La carpeta está excluida de la regla de su carpeta madre.</summary>
+    public bool Excluida(string carpeta) => _reglas.TryGetValue(carpeta, out var g) && g.Length == 0;
+
+    /// <summary>
+    /// Pone la regla de una carpeta, o la quita con un género vacío (vuelve a valer la de su carpeta
+    /// madre, si la hay; también deja de estar excluida). Devuelve si cambió algo. No guarda en disco.
+    /// </summary>
     public bool Poner(string carpeta, string? genero)
     {
         var g = (genero ?? "").Trim();
         if (g.Length == 0) return _reglas.Remove(carpeta);
         if (_reglas.TryGetValue(carpeta, out var antes) && string.Equals(antes, g, StringComparison.Ordinal)) return false;
         _reglas[carpeta] = g;
+        return true;
+    }
+
+    /// <summary>
+    /// Excluye la carpeta (y sus subcarpetas sin regla propia) de la regla de su carpeta madre.
+    /// Devuelve si cambió algo. No guarda en disco.
+    /// </summary>
+    public bool Excluir(string carpeta)
+    {
+        if (Excluida(carpeta)) return false;
+        _reglas[carpeta] = "";
         return true;
     }
 

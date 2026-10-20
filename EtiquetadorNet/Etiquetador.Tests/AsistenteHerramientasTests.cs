@@ -177,6 +177,10 @@ public class AsistenteHerramientasTests : IDisposable
         Assert.Equal("", modelo);
         Assert.StartsWith(motivo, texto);
         Assert.DoesNotContain("IA local: llama3.1:8b", texto);
+        // interfaz-8: no todas las herramientas usan la IA, y «Renombrar con IA» no funciona sin ella.
+        Assert.EndsWith("Mientras tanto, " + AsistenteViewModel.SinIa, texto);
+        Assert.Contains("las herramientas que la usan", AsistenteViewModel.TextoIaDesactivada);
+        Assert.Contains("salvo «Renombrar con IA»", AsistenteViewModel.TextoIaDesactivada);
     }
 
     [Fact]
@@ -308,6 +312,40 @@ public class AsistenteHerramientasTests : IDisposable
 
         var sinSeleccion = AsistenteView.CalcularMenu(haySeleccion: false, ocupado: false, escribiendo: false, cuantas: 0);
         Assert.False(sinSeleccion.Escuchar || sinSeleccion.Papelera || sinSeleccion.Marcar);
+    }
+
+    // --- interfaz-3: la papelera cuenta archivos, no filas ---
+
+    // En «Limpiar publicidad de packs» un archivo tiene una fila por etiqueta (álbum y artista). Con
+    // las dos seleccionadas, el diálogo decía «2 archivos» y el segundo envío fallaba en inglés.
+    [Fact]
+    public void La_papelera_del_asistente_envia_cada_archivo_una_vez()
+    {
+        var a = Rutas.Archivo("a.mp3");
+        var b = Rutas.Archivo("b.mp3");
+        var filas = new[]
+        {
+            new PublicidadFila(new PropuestaPublicidad(a, CampoPublicidad.Album, "Latin Box", "", "pool", true), true),
+            new PublicidadFila(new PropuestaPublicidad(a.ToUpperInvariant(), CampoPublicidad.Artista, "@x", "Ozuna", "u", true), true),
+            new PublicidadFila(new PropuestaPublicidad(b, CampoPublicidad.Album, "@y", "", "u", true), true),
+        };
+
+        Assert.Equal(new[] { a, b }, AsistenteView.RutasDistintas(filas));
+    }
+
+    // Enviada la fila del artista, la del álbum del mismo archivo (sin seleccionar) también sale de la
+    // tabla: su archivo ya no está y aplicarla fallaría.
+    [Fact]
+    public void Tras_la_papelera_salen_de_la_tabla_todas_las_filas_de_los_archivos_enviados()
+    {
+        var a = Rutas.Archivo("a.mp3");
+        var album = new PublicidadFila(new PropuestaPublicidad(a, CampoPublicidad.Album, "Latin Box", "", "pool", true), true);
+        var artista = new PublicidadFila(new PropuestaPublicidad(a, CampoPublicidad.Artista, "@x", "Ozuna", "u", true), true);
+        var otra = new PublicidadFila(new PropuestaPublicidad(Rutas.Archivo("b.mp3"), CampoPublicidad.Album, "@y", "", "u", true), true);
+
+        var quitar = AsistenteView.FilasDeArchivos(new object[] { album, artista, otra }, new[] { a });
+
+        Assert.Equal(new object[] { album, artista }, quitar);
     }
 
     // --- X5 (revisión): una colección borrada no cambia el ámbito en silencio ---
