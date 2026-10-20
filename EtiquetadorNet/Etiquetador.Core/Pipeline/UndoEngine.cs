@@ -51,6 +51,16 @@ public sealed record UndoResult(string File, int Reverted, int Errors, int Missi
     /// cambiado de nombre.
     /// </summary>
     public IReadOnlyList<string> Tocadas { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Archivos que este deshacer ha devuelto a su nombre anterior y ahí se quedan: dónde estaban y
+    /// dónde quedan. Lo que quien llama guarda por ruta para ESE archivo (que una ejecución posterior lo
+    /// dio por aplicado) tiene que seguirlo, igual que lo siguen los registros de esas posteriores
+    /// (hallazgo datos-1). Sin esto, tras deshacer una sustitución de la Bandeja la marca de «aplicada»
+    /// que Enriquecer puso a la descarga se quedaba en la ruta de la biblioteca, y la copia antigua
+    /// que se recuperase allí de la papelera ya no se volvía a proponer.
+    /// </summary>
+    public IReadOnlyList<(string Desde, string Hasta)> Vueltas { get; init; } = Array.Empty<(string, string)>();
 }
 
 /// <summary>
@@ -460,8 +470,8 @@ public sealed class UndoEngine
                      + $"{(n == 1 ? "Sigue pendiente" : "Siguen pendientes")}; vuelve a intentarlo dentro de unos segundos.");
         if (sinDevolver.Count > 0)
             avisos.Add($"No se ha podido poner al día el historial de una ejecución posterior ({errores[0]}) ni devolver "
-                     + $"{(sinDevolver.Count == 1 ? $"«{sinDevolver[0]}»" : $"{sinDevolver.Count} archivos")} a donde los dejó la ejecución: "
-                     + "al deshacer esa ejecución posterior, comprueba antes que sus archivos siguen en su sitio.");
+                     + (sinDevolver.Count == 1 ? $"«{sinDevolver[0]}» a donde lo dejó" : $"{sinDevolver.Count} archivos a donde los dejó")
+                     + " la ejecución: al deshacer esa ejecución posterior, comprueba antes que sus archivos siguen en su sitio.");
         noSiguen.IntersectWith(devueltas);
         return noSiguen;
     }
@@ -587,10 +597,13 @@ public sealed class UndoEngine
         }
 
         // Las ejecuciones posteriores siguen a los archivos que han vuelto a su nombre anterior.
+        var quedan = new List<(string Desde, string Hasta)>();
         if (vueltas.Count > 0)
         {
             var devueltas = SeguirEnPosteriores(posteriores, vueltas, resultado, pendiente, avisos);
-            SeguirEnEsteManifiesto(textos, pendiente, vueltas.Where(v => !devueltas.Contains(v.Desde)));
+            var siguen = vueltas.Where(v => !devueltas.Contains(v.Desde)).ToList();
+            SeguirEnEsteManifiesto(textos, pendiente, siguen);
+            quedan.AddRange(siguen.Select(v => (v.Desde, v.Hasta)));
         }
 
         // Las cuentas, al final: devolver un archivo a donde lo dejó la ejecución (arriba) cambia el
@@ -622,6 +635,7 @@ public sealed class UndoEngine
             Revertidas = revertidas,
             AplicadasRevertidas = aplicadasRevertidas,
             Tocadas = tocadas,
+            Vueltas = quedan,
         };
 
         // E2: un registro ausente para siempre (archivo enviado a la papelera) o con un error que no
@@ -630,7 +644,8 @@ public sealed class UndoEngine
         // Lo aplazado por un historial en uso ya lleva su propio aviso, que dice cómo seguir.
         if (res.SinAvance && aviso.Length == 0)
         {
-            var motivo = missing > 0 && err > 0 ? $"{missing} no aparecen y {err} dan error"
+            var motivo = missing > 0 && err > 0
+                         ? $"{(missing == 1 ? "1 no aparece" : $"{missing} no aparecen")} y {(err == 1 ? "1 da error" : $"{err} dan error")}"
                        : missing > 0 ? (missing == 1 ? "el archivo no aparece" : $"{missing} archivos no aparecen")
                        : (err == 1 ? "da error" : $"{err} dan error");
             var cuales = res.Pendientes == 1

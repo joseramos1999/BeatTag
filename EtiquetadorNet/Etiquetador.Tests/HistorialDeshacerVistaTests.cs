@@ -99,9 +99,10 @@ public class HistorialDeshacerVistaTests : IDisposable
         Assert.Contains("Se quedan pendientes.", p.Cuerpo);
         Assert.Contains("1 de estos archivos se volvió a cambiar después en «Edición de etiquetas» del 10/10/2026 18:02.", p.Cuerpo);
         Assert.Contains("Lo que cambiaron las dos (título) se queda como lo dejó la posterior en 1 archivo.", p.Cuerpo);
-        Assert.Contains("1 archivo vuelve a su nombre anterior, así que la ejecución posterior ya no lo encontrará donde lo dejó: "
-                        + "lo que cambió en él se queda y no se podrá deshacer desde la aplicación.", p.Cuerpo);
-        Assert.Contains("Cuando «Deshacer última» llegue a esa ejecución, se detendrá en ella hasta que la des por perdida en este historial.", p.Cuerpo);
+        // Datos-1: la posterior sigue al archivo hasta su nombre anterior, y eso es lo que se promete.
+        Assert.Contains("1 archivo vuelve a su nombre anterior, y el historial se pone al día para que la ejecución posterior lo encuentre con ese nombre: "
+                        + "lo que cambió en él se queda y se podrá deshacer después.", p.Cuerpo);
+        Assert.DoesNotContain("se detendrá", p.Cuerpo);
         Assert.DoesNotContain("volumen", p.Cuerpo);
         Assert.Contains("empieza por la más reciente", p.Cuerpo);
         Assert.Contains("1 archivo no aparece en el disco", p.Cuerpo);
@@ -175,10 +176,11 @@ public class HistorialDeshacerVistaTests : IDisposable
         Assert.StartsWith("2 archivos no pueden volver a su nombre anterior porque ya hay otros archivos con esos nombres en sus carpetas: se quedan pendientes.", q.Motivo);
     }
 
-    // Visto en revisión: el aviso no decía la consecuencia práctica de dejar a una posterior sin
-    // su archivo, y con un ajuste de volumen esa ganancia ya no se puede devolver.
+    // Antes se avisaba de que la posterior perdía su archivo (y, con un ajuste de volumen, su
+    // ganancia). Desde datos-1 la posterior lo sigue hasta su nombre anterior, también un volumen,
+    // así que se promete eso y no se asusta con una pérdida que ya no ocurre.
     [Fact]
-    public void Si_la_posterior_que_pierde_su_deshacer_es_de_volumen_se_dice()
+    public void Si_vuelve_a_su_nombre_se_dice_que_las_posteriores_lo_siguen()
     {
         var volumen = Ejecucion("run_20261012_120000", TipoEjecucion.Volumen, 2);
         var x = Cambio("x.mp3", true, "Title");
@@ -191,10 +193,8 @@ public class HistorialDeshacerVistaTests : IDisposable
 
         var texto = HistorialDeshacerViewModel.TextoPierdeDeshacer(pierden);
 
-        Assert.Equal(" 2 archivos vuelven a su nombre anterior, así que las ejecuciones posteriores ya no los encontrarán donde los dejaron: "
-                     + "lo que cambiaron en ellos se queda y no se podrá deshacer desde la aplicación. "
-                     + "Eso incluye el ajuste de volumen de 2 archivos: el audio se queda con la ganancia que se le aplicó. "
-                     + "Cuando «Deshacer última» llegue a esas ejecuciones, se detendrá en ellas hasta que las des por perdidas en este historial.", texto);
+        Assert.Equal(" 2 archivos vuelven a su nombre anterior, y el historial se pone al día para que las ejecuciones posteriores los encuentren con ese nombre: "
+                     + "lo que cambiaron en ellos se queda y se podrá deshacer después.", texto);
         Assert.Equal("", HistorialDeshacerViewModel.TextoPierdeDeshacer(Array.Empty<SolapeDeshacer>()));
     }
 
@@ -203,10 +203,12 @@ public class HistorialDeshacerVistaTests : IDisposable
     {
         var res = new UndoResult("run_20261009_160301.jsonl", 3, 1, 1, 0, false, false);
 
-        var texto = EnrichViewModel.ResumenDeshacer(res, vuelven: 2, retiradas: 0, nada: "nada", reintento: "siguen en el historial para reintentarlo.");
+        var texto = EnrichViewModel.ResumenDeshacer(res, vuelven: 2, retiradas: 0, nada: "nada", reintento: "se puede reintentar desde el historial.");
 
-        Assert.StartsWith("Deshecho: 3 revertidos · 0 conservados · 1 ausentes · 1 errores.", texto);
-        Assert.Contains("Quedan 2 pendientes: siguen en el historial para reintentarlo.", texto);
+        Assert.StartsWith("Deshecho: 3 revertidos · 0 conservados · 1 ausente · 1 error.", texto);   // singular y plural correctos
+        Assert.Contains("Quedan 2 pendientes: se puede reintentar desde el historial.", texto);
+        Assert.StartsWith("Deshecho: 1 revertido · 1 conservado · 0 ausentes · 1 error. Queda 1 pendiente: x",
+                          EnrichViewModel.ResumenDeshacer(new UndoResult("run.jsonl", 1, 1, 0, 1, false, false), 0, 0, "nada", "x"));
         Assert.Contains("2 canciones vuelven a estar pendientes", texto);
         Assert.Equal("nada", EnrichViewModel.ResumenDeshacer(new UndoResult("", 0, 0, 0, 0, false, true), 0, 0, "nada", "x"));
     }

@@ -1001,7 +1001,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
 
         Status = ResumenDeshacer(res, vuelven, RetirarRevertidas(res),
                                  nada: "No hay ninguna ejecución que deshacer.",
-                                 reintento: "«Deshacer última» reintentará solo esos.");
+                                 reintento: "«Deshacer última» reintentará solo lo pendiente.");
     }
 
     /// <summary>
@@ -1016,11 +1016,15 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         // Solo lo que se había dado por aplicado: deshacer un ajuste de volumen, Unificar géneros
         // o la importación de rekordbox no devuelve a pendientes nada de Enriquecer.
         var vuelven = OlvidarRevertidas(_engine.Applied, _engine.Marks, res.AplicadasRevertidas);
-        if (vuelven > 0)
+        // Lo que una ejecución posterior dio por aplicado sigue al archivo que vuelve a su nombre
+        // anterior, como su registro (datos-1). Va después: lo que esta ejecución dio por aplicado
+        // ya se ha olvidado arriba.
+        var siguen = SeguirAplicadas(_engine.Applied, res.Vueltas);
+        if (vuelven + siguen > 0)
         {
             _engine.Applied.Save();
             _engine.Marks.Save();
-            _engine.Logger.Detail($"    {vuelven} canciones revertidas dejan de contar como aplicadas.");
+            if (vuelven > 0) _engine.Logger.Detail($"    {vuelven} canciones revertidas dejan de contar como aplicadas.");
         }
         // M12: refleja el estado revertido releyendo solo esos archivos (las dos rutas de cada
         // registro), no las 15-20k canciones de todas las carpetas.
@@ -1054,11 +1058,15 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     public static string ResumenDeshacer(UndoResult res, int vuelven, int retiradas, string nada, string reintento)
         => res.None
             ? nada
-            : $"Deshecho: {res.Reverted} revertidos · {res.Manual} conservados · {res.Missing} ausentes · {res.Errors} errores."
-              + (res.Pendientes > 0 ? $" Quedan {res.Pendientes} pendientes: {reintento}" : "")
+            : $"Deshecho: {Cuenta(res.Reverted, "revertido", "revertidos")} · {Cuenta(res.Manual, "conservado", "conservados")} · "
+              + $"{Cuenta(res.Missing, "ausente", "ausentes")} · {Cuenta(res.Errors, "error", "errores")}."
+              + (res.Pendientes > 0 ? $" {(res.Pendientes == 1 ? "Queda 1 pendiente" : $"Quedan {res.Pendientes} pendientes")}: {reintento}" : "")
               + (vuelven > 0 ? $" {(vuelven == 1 ? "1 canción vuelve" : $"{vuelven} canciones vuelven")} a estar pendiente{(vuelven == 1 ? "" : "s")}: pulsa «Analizar» para ver de nuevo sus propuestas." : "")
               + (retiradas > 0 ? $" {(retiradas == 1 ? "Se retira 1 propuesta" : $"Se retiran {retiradas} propuestas")} de la lista porque su archivo ha cambiado: «Analizar» la{(retiradas == 1 ? "" : "s")} vuelve a calcular." : "")
               + (res.Aviso.Length > 0 ? " ⚠ " + res.Aviso : "");
+
+    /// <summary>«1 ausente», «0 ausentes», «3 ausentes».</summary>
+    private static string Cuenta(int n, string singular, string plural) => n == 1 ? $"1 {singular}" : $"{n} {plural}";
 
     /// <summary>
     /// Filas cuyo archivo acaba de revertirse (por su ruta antes o después del cambio deshecho).
@@ -1089,6 +1097,28 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         {
             if (aplicadas.Contains(ruta)) { aplicadas.Remove(ruta); n++; }
             marcas.Forget(ruta);   // casilla antigua guardada solo por ruta, si quedaba alguna
+        }
+        return n;
+    }
+
+    /// <summary>
+    /// Lleva la marca de «aplicada» de cada archivo que el deshacer ha devuelto a su nombre anterior
+    /// (<see cref="UndoResult.Vueltas"/>) a la ruta en que queda. Devuelve cuántas se han movido.
+    ///
+    /// POR QUÉ (hallazgo datos-1). Al deshacer desde el historial una sustitución de la Bandeja, la
+    /// descarga vuelve a la bandeja con lo que Enriquecer le aplicó después; su marca se quedaba en la
+    /// ruta de la biblioteca, y la copia antigua que se recuperase ahí de la papelera dejaba de
+    /// proponerse por una aplicación que nunca fue suya.
+    /// </summary>
+    public static int SeguirAplicadas(IgnoreList aplicadas, IEnumerable<(string Desde, string Hasta)> vueltas)
+    {
+        var n = 0;
+        foreach (var (desde, hasta) in vueltas)
+        {
+            if (!aplicadas.Contains(desde)) continue;
+            aplicadas.Remove(desde);
+            aplicadas.Add(hasta);
+            n++;
         }
         return n;
     }
@@ -1605,7 +1635,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
 
         Status = ResumenDeshacer(res, vuelven, RetirarRevertidas(res),
                                  nada: "No quedaba nada pendiente en esa ejecución.",
-                                 reintento: "siguen en el historial para reintentarlo.");
+                                 reintento: "se puede reintentar desde el historial.");
         return Status;
     }
 }

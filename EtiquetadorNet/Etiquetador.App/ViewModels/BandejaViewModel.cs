@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Collections;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -650,6 +651,8 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         IsBusy = true;
         Progress = 0;
         Status = EnvioPapelera.TextoAvance(0, filas.Count);
+        using var cts = new CancellationTokenSource();
+        _descarteCts = cts;
         try
         {
             _engine.ReleaseAudio();   // si suena, el archivo está abierto y no se puede mover a la papelera
@@ -660,7 +663,9 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
                 Progress = p.Total > 0 ? 100.0 * p.Hechas / p.Total : 0;
                 Status = EnvioPapelera.TextoAvance(p.Hechas, p.Total);
             });
-            var res = await EnvioPapelera.EnviarAsync(rutas, progreso: avance);
+            // Con token: al cerrar la ventana se para entre un archivo y el siguiente, y lo ya enviado
+            // se olvida y se guarda como siempre (hallazgo rendimiento-3).
+            var res = await EnvioPapelera.EnviarAsync(rutas, progreso: avance, ct: cts.Token);
 
             foreach (var ruta in res.Enviadas)
             {
@@ -673,9 +678,11 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
 
             QuitarFilas(res.Enviadas);
             // Sin releer ningún archivo: solo se rehacen los avisos, porque la que estaba «repetida en
-            // la bandeja» puede haber dejado de estarlo.
-            if (res.Enviadas.Count > 0) await RevisarAsync();
-            Status = EnvioPapelera.Resumen(res.Enviadas.Count, res.Fallos, "descarga")
+            // la bandeja» puede haber dejado de estarlo. Interrumpido es que la ventana se cierra: no
+            // hace falta.
+            if (res.Enviadas.Count > 0 && !res.Interrumpido) await RevisarAsync();
+            Status = (res.Interrumpido ? "Descarte detenido. " : "")
+                   + EnvioPapelera.Resumen(res.Enviadas.Count, res.Fallos, "descarga")
                    + (plan.Conservar.Count > 0 ? " " + RevisionBandeja.TextoConservadasTrasDescartar(plan.Conservar.Count) : "");
         }
         catch (Exception e)
@@ -683,7 +690,16 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
             _engine.Logger.Error("Error al descartar descargas de la bandeja", e);
             Status = "Error al descartar: " + e.Message;
         }
-        finally { IsBusy = false; Progress = 0; }
+        finally { _descarteCts = null; IsBusy = false; Progress = 0; }
+    }
+
+    private CancellationTokenSource? _descarteCts;
+
+    /// <summary>Para el descarte a la papelera entre un archivo y el siguiente. Lo usa el cierre de la ventana.</summary>
+    public void CancelarDescarte()
+    {
+        try { _descarteCts?.Cancel(); }
+        catch (ObjectDisposedException) { /* ya había terminado */ }
     }
 
     /// <summary>Quita de la tabla las filas de esas rutas, sin releer la bandeja.</summary>

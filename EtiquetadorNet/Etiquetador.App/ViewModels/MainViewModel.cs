@@ -176,8 +176,12 @@ public partial class MainViewModel : ViewModelBase
                 Titulo = "TU MÚSICA",
                 Paginas = new PaginaNav[]
                 {
-                    new() { Indice = 0,  Icono = "📚", Nombre = "Biblioteca", Vm = Library, Ocupada = () => Library.IsBusy },
-                    new() { Indice = 13, Icono = "📥", Nombre = "Bandeja de entrada", Vm = Bandeja, Ocupada = () => Bandeja.IsBusy },
+                    // Cancelar: el envío a la papelera se detiene entre un archivo y el siguiente al
+                    // cerrar, en lugar de esperar 15 s y cortarse a medias (hallazgo rendimiento-3).
+                    new() { Indice = 0,  Icono = "📚", Nombre = "Biblioteca", Vm = Library, Ocupada = () => Library.IsBusy,
+                            Cancelar = Library.CancelarPapelera },
+                    new() { Indice = 13, Icono = "📥", Nombre = "Bandeja de entrada", Vm = Bandeja, Ocupada = () => Bandeja.IsBusy,
+                            Cancelar = Bandeja.CancelarDescarte },
                     new() { Indice = 2,  Icono = "✏",  Nombre = "Editor",     Vm = Editor, Ocupada = () => Editor.IsBusy },
                 },
             },
@@ -200,8 +204,9 @@ public partial class MainViewModel : ViewModelBase
                 Titulo = "LIMPIAR",
                 Paginas = new PaginaNav[]
                 {
-                    new() { Indice = 3,  Icono = "👥", Nombre = "Duplicados",  Vm = Duplicates, Ocupada = () => Duplicates.IsBusy,
-                            Cancelar = () => Duplicates.CancelFingerprintsCommand.Execute(null) },
+                    // El envío a la papelera también cuenta (hallazgo interfaz-1).
+                    new() { Indice = 3,  Icono = "👥", Nombre = "Duplicados",  Vm = Duplicates, Ocupada = () => Duplicates.Ocupada,
+                            Cancelar = Duplicates.CancelarProcesos },
                     new() { Indice = 4,  Icono = "🎧", Nombre = "Calidad",     Vm = Quality, Ocupada = () => Quality.IsBusy },
                     new() { Indice = 5,  Icono = "⚠",  Nombre = "Incompletas", Vm = Incomplete, Ocupada = () => Incomplete.IsBusy },
                     new() { Indice = 10, Icono = "🔊", Nombre = "Volumen",     Vm = Loudness, Ocupada = () => Loudness.IsBusy,
@@ -462,8 +467,16 @@ public partial class MainViewModel : ViewModelBase
 
     private void OnChildChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is "IsBusy" or "AiBusy" or "LoadingCountries") RecomputeBusy();
+        if (CambiaLaOcupacion(e.PropertyName)) RecomputeBusy();
     }
+
+    /// <summary>
+    /// Las propiedades de una página que pueden cambiar si está ocupada (<see cref="PaginaNav.Ocupada"/>).
+    /// «EnviandoAPapelera» es la de Duplicados, que envía en segundo plano sin pasar por IsBusy
+    /// (hallazgo interfaz-1).
+    /// </summary>
+    internal static bool CambiaLaOcupacion(string? propiedad)
+        => propiedad is "IsBusy" or "AiBusy" or "LoadingCountries" or nameof(DuplicatesViewModel.EnviandoAPapelera);
 
     private void RecomputeBusy()
     {

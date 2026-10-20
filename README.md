@@ -45,7 +45,7 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
 - **Duplicados**: agrupa copias (por artista+título, solo título, o +duración) y **marca en verde la
   que conviene conservar**, según el criterio que elijas: carpeta prioritaria, mejor calidad o mayor
   duración. Puedes marcar las sobrantes de todos los grupos a la vez y enviarlas a la papelera de
-  una sola pasada, en segundo plano, conservando siempre un ejemplar de cada canción.
+  una sola pasada, con el avance en la barra de estado, conservando siempre un ejemplar de cada canción.
   Con **«Excluir ediciones de DJ»** se dejan fuera del análisis las ediciones hechas para pinchar
   (hype intro, open show, aca out, acapellas, transiciones, mashups): no son copias sobrantes, y
   emparejadas con su original tapan los duplicados de verdad.

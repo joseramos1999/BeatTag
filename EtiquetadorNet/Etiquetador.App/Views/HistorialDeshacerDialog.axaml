@@ -49,7 +49,8 @@
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Fecha" Binding="{Binding Fecha}" Width="140" />
                     <DataGridTextColumn Header="Tipo" Binding="{Binding Tipo}" Width="200" />
-                    <DataGridTextColumn Header="Archivos" Binding="{Binding Cambios}" Width="90" />
+                    <!-- Archivos distintos: un archivo con su registro corrector cuenta una vez. -->
+                    <DataGridTextColumn Header="Archivos" Binding="{Binding Archivos}" Width="90" />
                     <DataGridTextColumn Header="Renombrados" Binding="{Binding Renombrados}" Width="110" />
                     <DataGridTextColumn Header="Estado" Binding="{Binding Estado}" Width="*" />
                 </DataGrid.Columns>
