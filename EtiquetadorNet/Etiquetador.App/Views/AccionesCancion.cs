@@ -38,6 +38,57 @@ public static class AccionesCancion
     public static ICommand VerVersiones { get; } =
         new AsyncRelayCommand<object?>(fila => AbrirVersionesAsync(RutaDe(fila)), fila => RutaDe(fila).Length > 0);
 
+    /// <summary>
+    /// «Editar etiquetas de esta canción» para las tablas cuyo ViewModel no tiene su propio comando
+    /// (Colecciones, Tendencias, Playlists). Sin archivo (una canción de la lista que no tienes), sale
+    /// desactivada.
+    /// </summary>
+    public static ICommand EditarEtiquetas { get; } =
+        new RelayCommand<object?>(fila => Editar(RutaDe(fila)), fila => RutaDe(fila).Length > 0);
+
+    // --- El orden del menú contextual ---
+    //
+    // Hallazgo de la revisión de la tanda 3: la misma canción ofrecía menús distintos según la pestaña
+    // («Abrir carpeta contenedora» salía en segunda, cuarta o última posición, y Colecciones,
+    // Tendencias y Playlists no tenían «Editar»). Todas las tablas con canciones siguen este orden, en
+    // grupos separados: escuchar y editar · lo que busca a partir de la canción · lo que toca el
+    // archivo · lo propio de las listas. Cada tabla pone solo las opciones que le corresponden.
+
+    public const string TextoEscuchar = "Escuchar / Parar";
+    public const string TextoEditar = "Editar etiquetas de esta canción";
+    public const string TextoCompatibles = "Buscar compatibles…";
+    public const string TextoVersiones = "Ver sus versiones…";
+    public const string TextoCarpeta = "Abrir carpeta contenedora";
+    public const string TextoPapelera = "Enviar a la papelera";
+
+    /// <summary>El orden común, por el principio de cada rótulo (los de ordenar y papelera llevan cifras o avisos detrás).</summary>
+    private static readonly string[] OrdenComun =
+    {
+        TextoEscuchar, TextoEditar, TextoCompatibles, TextoVersiones, "Ordenar para mezclar", "Empezar por esta",
+        TextoCarpeta, TextoPapelera, "Añadir a pendientes", "Buscar en mi pool",
+    };
+
+    /// <summary>
+    /// La posición de una opción en el orden común, o -1 si no es de las comunes. «Ordenar la
+    /// selección» (Biblioteca) y «Empezar por esta» (la tabla de mezcla) ocupan el mismo puesto.
+    /// </summary>
+    public static int Puesto(string rotulo)
+    {
+        for (var i = 0; i < OrdenComun.Length; i++)
+            if (rotulo.StartsWith(OrdenComun[i], System.StringComparison.Ordinal))
+                return OrdenComun[i] == "Empezar por esta" ? i - 1 : i;
+        return -1;
+    }
+
+    private static void Editar(string ruta)
+    {
+        if (ruta.Length == 0 || !Contexto(out var ventana, out var engine)) return;
+        // Con otra página trabajando, el resto está bloqueado: saltar al Editor no llegaría a abrirlo y
+        // dejaría elegida en él otra canción.
+        if (ventana.DataContext is MainViewModel { Busy: true }) return;
+        engine.RequestEdit(ruta);
+    }
+
     /// <summary>La ruta del archivo de una fila de cualquier tabla, o "" si no tiene.</summary>
     internal static string RutaDe(object? fila) => fila switch
     {

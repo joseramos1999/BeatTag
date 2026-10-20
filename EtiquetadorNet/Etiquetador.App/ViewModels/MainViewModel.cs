@@ -176,7 +176,8 @@ public partial class MainViewModel : ViewModelBase
                 Titulo = "TU MÚSICA",
                 Paginas = new PaginaNav[]
                 {
-                    new() { Indice = 0,  Icono = "📚", Nombre = "Biblioteca", Vm = Library, Ocupada = () => Library.IsBusy },
+                    new() { Indice = 0,  Icono = "📚", Nombre = "Biblioteca", Vm = Library, Ocupada = () => Library.IsBusy,
+                            Cancelar = () => Library.CancelarCommand.Execute(null) },
                     new() { Indice = 13, Icono = "📥", Nombre = "Bandeja de entrada", Vm = Bandeja, Ocupada = () => Bandeja.IsBusy },
                     new() { Indice = 2,  Icono = "✏",  Nombre = "Editor",     Vm = Editor, Ocupada = () => Editor.IsBusy },
                 },

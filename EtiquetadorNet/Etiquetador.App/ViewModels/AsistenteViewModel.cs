@@ -15,7 +15,8 @@ using Etiquetador.Core.Dj;
 namespace Etiquetador.App.ViewModels;
 
 /// <summary>
-/// Página Asistente IA: las herramientas que usan la IA local, más una que no la necesita.
+/// Página Asistente IA: las herramientas que usan la IA local y tres que funcionan solo con reglas
+/// («Ordenar para mezclar», «Limpiar publicidad de packs» y «Género por carpeta y artista»).
 ///
 /// Todas siguen la misma norma, que sale de medir el modelo antes de construir nada: la IA
 /// PROPONE, las reglas y los datos reales COMPRUEBAN, y el usuario DECIDE. Nada de lo que diga el
@@ -64,8 +65,16 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
         Completar = new CompletarNombresViewModel(this);
     }
 
-    internal const string TextoIaDesactivada =
-        "La IA local está desactivada en Enriquecer. Las herramientas funcionan solo con reglas.";
+    /// <summary>
+    /// Qué pasa sin IA. No todas las herramientas de la página la usan («Limpiar publicidad de packs»,
+    /// «Género por carpeta y artista» y «Ordenar para mezclar» son solo reglas), y «Renombrar con IA»
+    /// no funciona sin ella: decir «las herramientas funcionan solo con reglas» era inexacto en los dos
+    /// sentidos.
+    /// </summary>
+    internal const string SinIa =
+        "las herramientas que la usan funcionan solo con reglas, salvo «Renombrar con IA», que la necesita.";
+
+    internal const string TextoIaDesactivada = "La IA local está desactivada en Enriquecer. Mientras tanto, " + SinIa;
 
     /// <summary>Mira si Ollama responde y con qué modelo. Se llama al entrar en la página.</summary>
     [RelayCommand]
@@ -113,7 +122,7 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
     internal static (bool Disponible, string Modelo, string Texto) DescribirIa(EstadoModelo estado, string elegido)
     {
         if (!estado.Disponible)
-            return (false, "", $"{estado.Motivo} Mientras tanto, las herramientas funcionan solo con reglas.");
+            return (false, "", $"{estado.Motivo} Mientras tanto, {SinIa}");
         var automatico = string.IsNullOrWhiteSpace(elegido) ? " (elegido automáticamente)" : "";
         return (true, estado.Modelo, $"IA local: {estado.Modelo}{automatico}");
     }

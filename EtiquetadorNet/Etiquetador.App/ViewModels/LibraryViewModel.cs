@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Collections;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -210,6 +211,20 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
     // canciones: con una carpeta entera o Ctrl+A son cientos o miles de archivos, y tanto la nota del
     // diálogo (mira la unidad y la papelera de cada uno) como el envío (una operación del sistema por
     // archivo) dejaban la ventana sin responder durante segundos o minutos.
+    //
+    // Mientras dura, la página está ocupada (IsBusy) y el resto de la aplicación queda bloqueado, como
+    // en cualquier proceso que toca archivos: un escaneo lanzado a mitad del envío devolvería a la
+    // biblioteca lo ya enviado. Por eso se puede CANCELAR (revisión de la tanda 3): con miles de
+    // archivos, la única salida era esperar o cerrar la aplicación.
+
+    private CancellationTokenSource? _ctsPapelera;
+
+    /// <summary>Se están enviando canciones a la papelera: se enseña «Cancelar el envío».</summary>
+    [ObservableProperty] private bool _enviandoPapelera;
+
+    /// <summary>Para el envío a la papelera entre un archivo y el siguiente. Lo ya enviado se queda en la papelera.</summary>
+    [RelayCommand]
+    private void Cancelar() => _ctsPapelera?.Cancel();
 
     /// <summary>La nota del diálogo de confirmación (<see cref="Papelera.NotaConfirmacion"/>), calculada fuera del hilo de la interfaz.</summary>
     public async Task<string> NotaPapeleraAsync(IReadOnlyList<string> rutas)
@@ -233,65 +248,88 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
     {
         if (Ocupada) { Status = "Espera a que termine el proceso en curso."; return; }
         _engine.ReleaseAudio();
+        using var cts = new CancellationTokenSource();
+        _ctsPapelera = cts;
         IsBusy = true;
-        var total = rutas.Count;
+        EnviandoPapelera = true;
         var terminado = false;
         // Un aviso de avance que llegue tarde no debe tapar el resultado.
-        var avance = new Progress<int>(n => { if (!terminado) Status = $"Enviando a la papelera… {n:N0} de {total:N0}"; });
-        Status = "Enviando a la papelera…";
+        var avance = new Progress<(int Hechas, int Total)>(p => { if (!terminado) Status = EnvioPapelera.TextoAvance(p.Hechas, p.Total); });
+        Status = EnvioPapelera.TextoAvance(0, rutas.Count);
         try
         {
-            var resultado = await PapeleraYQuitarAsync(_store, rutas, Papelera.Enviar, avance);
+            var resultado = await PapeleraYQuitarAsync(_store, rutas, Papelera.Enviar, avance, cts.Token);
             terminado = true;
             Status = resultado;
         }
         finally
         {
             terminado = true;
+            _ctsPapelera = null;
+            EnviandoPapelera = false;
             IsBusy = false;
         }
     }
 
     /// <summary>
     /// Lo de <see cref="EnviarAPapeleraAsync"/> sin el motor, para poder probarlo con una papelera de
-    /// mentira. El envío, archivo a archivo, va fuera del hilo de la interfaz; quitarlas de la biblioteca,
-    /// de vuelta en él (la tabla está enlazada a esa colección). Las que la papelera rechaza (unidad sin
-    /// papelera, archivo en uso) se quedan en la biblioteca.
+    /// mentira. El envío, archivo a archivo, va fuera del hilo de la interfaz con el servicio común
+    /// (<see cref="EnvioPapelera"/>, el de Duplicados, la Bandeja y el Asistente); quitarlas de la
+    /// biblioteca, de vuelta en él (la tabla está enlazada a esa colección). Las que la papelera rechaza
+    /// (unidad sin papelera, archivo en uso) y las que no llegaron a enviarse por cancelar se quedan en
+    /// la biblioteca.
     /// </summary>
     internal static async Task<string> PapeleraYQuitarAsync(LibraryStore store, IReadOnlyList<string> rutas,
-                                                            Func<string, (bool Ok, string Error)> enviar, IProgress<int>? avance = null)
+                                                            Func<string, (bool Ok, string Error)> enviar,
+                                                            IProgress<(int Hechas, int Total)>? avance = null,
+                                                            CancellationToken ct = default)
     {
-        var (enviadas, fallos) = await Task.Run(() => EnviarUnaAUna(rutas, enviar, avance));
+        var res = await EnvioPapelera.EnviarAsync(rutas, enviar, avance, ct);
 
         // De una sola vez: la biblioteca avisa a todas las pestañas en cada cambio.
-        store.RemoveTracks(enviadas);
-        return TextoPapelera(enviadas, fallos);
+        if (res.Enviadas.Count > 0) store.RemoveTracks(res.Enviadas);
+        return TextoPapelera(res, rutas.Count);
     }
 
-    /// <summary>Envía cada archivo y dice, tras cada uno, cuántos lleva.</summary>
-    internal static (List<string> Enviadas, List<string> Fallos) EnviarUnaAUna(IReadOnlyList<string> rutas,
-                                                                              Func<string, (bool Ok, string Error)> enviar, IProgress<int>? avance)
+    /// <summary>El título y el cuerpo del diálogo de confirmación: cuántos archivos y los primeros nombres.</summary>
+    internal static (string Titulo, string Cuerpo) TextosConfirmacionPapelera(IReadOnlyList<string> rutas)
     {
-        var enviadas = new List<string>();
-        var fallos = new List<string>();
-        for (var i = 0; i < rutas.Count; i++)
-        {
-            var r = rutas[i];
-            var (ok, error) = enviar(r);
-            if (ok) enviadas.Add(r);
-            else fallos.Add($"{System.IO.Path.GetFileName(r)}: {(string.IsNullOrWhiteSpace(error) ? "motivo desconocido." : error)}");
-            avance?.Report(i + 1);
-        }
-        return (enviadas, fallos);
+        var titulo = rutas.Count == 1 ? "Se va a enviar a la papelera" : $"Se van a enviar {rutas.Count:N0} archivos a la papelera";
+        var cuerpo = rutas.Count == 1
+            ? System.IO.Path.GetFileName(rutas[0])
+            : string.Join("\n", rutas.Take(5).Select(System.IO.Path.GetFileName))
+              + (rutas.Count > 5 ? $"\n… y {rutas.Count - 5:N0} más" : "");
+        return (titulo, cuerpo);
     }
 
-    private static string TextoPapelera(IReadOnlyList<string> enviadas, IReadOnlyList<string> fallos)
+    /// <summary>
+    /// El estado al terminar, igual en Biblioteca y en el Asistente. Cuando varias fallan por el MISMO
+    /// motivo (una unidad sin papelera, donde enviar sería borrar para siempre), el motivo se dice una
+    /// vez. Si se canceló, cuántas se enviaron de cuántas.
+    /// </summary>
+    internal static string TextoPapelera(EnvioPapeleraResultado res, int total)
     {
+        static string Motivo(string m) => string.IsNullOrWhiteSpace(m) ? "motivo desconocido." : m;
+        var enviadas = res.Enviadas.Count;
+        var fallos = res.Fallos;
+        var deFallos = fallos.Count == 0 ? ""
+            : fallos.Count == 1 ? $"1 no se ha enviado. {fallos[0].Archivo}: {Motivo(fallos[0].Motivo)}"
+            : fallos.Select(f => f.Motivo).Distinct(StringComparer.Ordinal).Count() == 1
+                ? $"{fallos.Count:N0} no se han enviado: {Motivo(fallos[0].Motivo)}"
+                : $"{fallos.Count:N0} no se han enviado. El primero, {fallos[0].Archivo}: {Motivo(fallos[0].Motivo)}";
+
+        if (res.Interrumpido)
+            return $"Cancelado: {enviadas:N0} de {total:N0} enviados a la papelera; el resto no se ha tocado."
+                   + (deFallos.Length > 0 ? " " + deFallos : "");
         if (fallos.Count == 0)
-            return enviadas.Count == 1 ? $"Enviado a la papelera: {System.IO.Path.GetFileName(enviadas[0])}."
-                                       : $"{enviadas.Count} archivos enviados a la papelera.";
-        return enviadas.Count == 0 && fallos.Count == 1
-            ? "No se pudo enviar a la papelera. " + fallos[0]
-            : $"{enviadas.Count} enviados a la papelera, {fallos.Count} con problemas. El primero: {fallos[0]}";
+            return enviadas == 1 ? $"Enviado a la papelera: {System.IO.Path.GetFileName(res.Enviadas[0])}."
+                                 : $"{enviadas:N0} archivos enviados a la papelera.";
+        if (enviadas == 0)
+            return fallos.Count == 1
+                ? $"No se ha podido enviar a la papelera. {fallos[0].Archivo}: {Motivo(fallos[0].Motivo)}"
+                : fallos.Select(f => f.Motivo).Distinct(StringComparer.Ordinal).Count() == 1
+                ? $"No se ha enviado ningún archivo a la papelera: {Motivo(fallos[0].Motivo)}"
+                : $"No se ha enviado ningún archivo a la papelera. El primero, {fallos[0].Archivo}: {Motivo(fallos[0].Motivo)}";
+        return (enviadas == 1 ? "1 archivo enviado a la papelera · " : $"{enviadas:N0} archivos enviados a la papelera · ") + deFallos;
     }
 }

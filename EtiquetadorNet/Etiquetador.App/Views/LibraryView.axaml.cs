@@ -102,13 +102,10 @@ public partial class LibraryView : UserControl
     {
         if (DataContext is not LibraryViewModel vm || TopLevel.GetTopLevel(this) is not Window owner) return;
         if (vm.Ocupada) { vm.Status = "Espera a que termine el proceso en curso."; return; }
-        var rutas = Seleccion().Select(t => t.FilePath).ToList();
+        var rutas = Seleccion().Select(t => t.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (rutas.Count == 0) return;
 
-        var titulo = rutas.Count == 1 ? "Se va a enviar a la papelera" : $"Se van a enviar {rutas.Count} archivos a la papelera";
-        var cuerpo = rutas.Count == 1
-            ? Path.GetFileName(rutas[0])
-            : string.Join("\n", rutas.Take(5).Select(Path.GetFileName)) + (rutas.Count > 5 ? $"\n… y {rutas.Count - 5} más" : "");
+        var (titulo, cuerpo) = LibraryViewModel.TextosConfirmacionPapelera(rutas);
         var nota = await vm.NotaPapeleraAsync(rutas);
         var ok = await ConfirmDialog.AskAsync(owner, titulo, cuerpo, nota, "Enviar a la papelera");
         if (ok) await vm.EnviarAPapeleraAsync(rutas);

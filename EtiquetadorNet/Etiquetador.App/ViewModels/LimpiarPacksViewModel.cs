@@ -111,20 +111,23 @@ public sealed partial class LimpiarPacksViewModel : ObservableObject
 
         Resumen = TextoResumen(propuestas, sinPropuesta);
         _p.Status = propuestas.Count == 0
-            ? "No hay publicidad de packs en el álbum ni en el artista." + (sinPropuesta > 0 ? " " + TextoSinPropuesta(sinPropuesta) : "")
-            : Resumen + ". Lo dudoso (un álbum que parece una web) sale desmarcado.";
+            ? "No hay publicidad de packs en el álbum ni en el artista." + (sinPropuesta > 0 ? " " + TextoSinPropuesta(sinPropuesta) + "." : "")
+            : Resumen + ". Lo dudoso sale desmarcado: la columna «Por qué» explica cada caso.";
     });
 
     internal static string TextoResumen(IReadOnlyCollection<PropuestaPublicidad> propuestas, int sinPropuesta)
     {
         var albumes = propuestas.Count(p => p.Campo == CampoPublicidad.Album);
         var artistas = propuestas.Count(p => p.Campo == CampoPublicidad.Artista);
-        var texto = $"{albumes} álbumes y {artistas} artistas con publicidad";
+        var texto = $"{EscrituraPorReglas.Cuenta(albumes, "álbum", "álbumes")} y {EscrituraPorReglas.Cuenta(artistas, "artista", "artistas")} con publicidad";
         return sinPropuesta > 0 ? $"{texto} · {TextoSinPropuesta(sinPropuesta)}" : texto;
     }
 
-    private static string TextoSinPropuesta(int n)
-        => $"{n} artistas «@usuario» o de pool sin propuesta: el nombre del archivo no deja claro cuál es el artista";
+    /// <summary>Cuenta canciones, no artistas distintos: un mismo «@usuario» puede firmar muchas.</summary>
+    internal static string TextoSinPropuesta(int canciones)
+        => canciones == 1
+            ? "1 canción con un artista «@usuario» o de un pool se queda sin propuesta: el nombre del archivo no deja claro cuál es el artista"
+            : $"{canciones:N0} canciones con un artista «@usuario» o de un pool se quedan sin propuesta: el nombre del archivo no deja claro cuál es el artista";
 
     [RelayCommand]
     private void MarcarTodas() { foreach (var f in Filas) f.Aplicar = true; }
@@ -142,7 +145,8 @@ public sealed partial class LimpiarPacksViewModel : ObservableObject
         var canciones = marcadas.Select(f => f.Ruta).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         var albumes = marcadas.Count(f => f.EsAlbum);
         var artistas = marcadas.Count - albumes;
-        var cuerpo = $"Se limpiarán las etiquetas de {canciones} canciones: {albumes} álbumes y {artistas} artistas.";
+        var cuerpo = $"Se limpiarán las etiquetas de {EscrituraPorReglas.Cuenta(canciones, "canción", "canciones")}: "
+                     + $"{EscrituraPorReglas.Cuenta(albumes, "álbum", "álbumes")} y {EscrituraPorReglas.Cuenta(artistas, "artista", "artistas")}.";
         var nota = (alComentario
                        ? "Lo que se quita se guarda al final del comentario («[Pack: …]», «[Editor: …]»). "
                        : "Lo que se quita se borra. ")
@@ -152,7 +156,11 @@ public sealed partial class LimpiarPacksViewModel : ObservableObject
         if (artistas > 0)
             nota = "Duplicados y la Bandeja reconocen cada canción por su artista y su título: después, vuelve a buscar duplicados. " + nota;
         var dudosas = marcadas.Count(f => !f.Propuesta.Marcada);
-        if (dudosas > 0) nota = $"⚠ {dudosas} no salían marcadas porque son dudosas: comprueba que las has revisado. " + nota;
+        if (dudosas > 0)
+            nota = (dudosas == 1
+                       ? "⚠ 1 no salía marcada porque es dudosa: comprueba que la has revisado. "
+                       : $"⚠ {dudosas:N0} no salían marcadas porque son dudosas: comprueba que las has revisado. ")
+                   + nota;
         return (cuerpo, nota);
     }
 
@@ -180,19 +188,34 @@ public sealed partial class LimpiarPacksViewModel : ObservableObject
         _p.Engine.ReleaseAudio();
         var cambios = Cambios(marcadas, AlComentario);
         var progreso = new Progress<double>(v => _p.Progress = v);
-        var res = await Task.Run(() => EscrituraPorReglas.EscribirConHistorial(_p.Engine, cambios, progreso, ct, "Limpiar packs"));
+        var res = await Task.Run(() => EscrituraPorReglas.EscribirConHistorial(_p.Engine, cambios, progreso, ct, "Limpiar packs",
+                                                                                Etiquetador.Core.Pipeline.TipoEjecucion.LimpiezaPacks));
 
-        // Fuera de la tabla lo escrito y lo que cambió por otro lado (su propuesta ya no vale).
-        var hechos = new HashSet<string>(res.Escritos.Concat(res.Respetados), StringComparer.OrdinalIgnoreCase);
-        var quedan = Filas.Where(f => !hechos.Contains(f.Ruta)).ToList();
+        var quedan = QuedanTrasAplicar(Filas, marcadas, res);
         if (quedan.Count != Filas.Count) Filas = new ObservableCollection<PublicidadFila>(quedan);
         if (res.Escritos.Count > 0) await _p.Engine.Library.RefrescarAsync(res.Escritos);   // solo lo escrito, sin recorrer las carpetas
 
         var escritos = new HashSet<string>(res.Escritos, StringComparer.OrdinalIgnoreCase);
         var artistas = marcadas.Count(f => !f.EsAlbum && escritos.Contains(f.Ruta));
-        _p.Status = $"Etiquetas limpiadas en {res.Escritos.Count} canciones" + EscrituraPorReglas.Cola(res)
+        _p.Status = $"Etiquetas limpiadas en {EscrituraPorReglas.Cuenta(res.Escritos.Count, "canción", "canciones")}" + EscrituraPorReglas.Cola(res)
                     + (res.Escritos.Count > 0 ? " " + AvisoTrasAplicar(artistas) : "");
     });
+
+    /// <summary>
+    /// Las filas que siguen en la tabla tras aplicar. Salen las que se aplicaron (marcadas en ese
+    /// momento) de los archivos escritos o con cambios posteriores (su propuesta ya no vale). Las
+    /// DESMARCADAS se quedan aunque su archivo se escribiera por la otra etiqueta: visto en revisión,
+    /// con el artista «@usuario» marcado y el álbum «El Cangri.com» desmarcado en el mismo archivo, el
+    /// álbum desaparecía de la tabla sin haberse aplicado y no volvía hasta buscar otra vez. Siguen
+    /// valiendo: lo aplicado no toca su campo, y si su campo cambiara, al aplicarla se respetaría.
+    /// </summary>
+    internal static List<PublicidadFila> QuedanTrasAplicar(IEnumerable<PublicidadFila> filas, IReadOnlyCollection<PublicidadFila> aplicadas,
+                                                         EscrituraPorReglas.Resultado res)
+    {
+        var hechos = new HashSet<string>(res.Escritos.Concat(res.Respetados), StringComparer.OrdinalIgnoreCase);
+        var enviadas = new HashSet<PublicidadFila>(aplicadas);
+        return filas.Where(f => !(enviadas.Contains(f) && hechos.Contains(f.Ruta))).ToList();
+    }
 
     /// <summary>
     /// Lo que conviene saber después: rekordbox no se entera solo, y el artista es parte de cómo se
@@ -202,7 +225,8 @@ public sealed partial class LimpiarPacksViewModel : ObservableObject
     {
         var texto = "rekordbox no vuelve a leer las etiquetas de las pistas que ya tiene importadas: selecciónalas allí y usa «Recargar etiqueta».";
         if (artistasCambiados > 0)
-            texto += $" Has cambiado el artista de {artistasCambiados} canciones: Duplicados y la Bandeja reconocen cada canción por su artista y su título, así que vuelve a buscar duplicados para ver los grupos al día.";
+            texto += $" Has cambiado el artista de {EscrituraPorReglas.Cuenta(artistasCambiados, "canción", "canciones")}: "
+                     + "Duplicados y la Bandeja reconocen cada canción por su artista y su título, así que vuelve a buscar duplicados para ver los grupos al día.";
         return texto;
     }
 }

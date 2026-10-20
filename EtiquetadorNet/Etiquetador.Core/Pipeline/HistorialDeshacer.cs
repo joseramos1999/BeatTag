@@ -34,6 +34,12 @@ public enum TipoEjecucion
     Rekordbox,
     Bpm,
     Desconocido,
+
+    /// <summary>
+    /// «Limpiar publicidad de packs» del Asistente: álbum, artista y comentario, los mismos campos que
+    /// el Editor, así que solo se reconoce por <see cref="UndoRecord.Origen"/>.
+    /// </summary>
+    LimpiezaPacks,
 }
 
 /// <summary>Cómo está una ejecución en el historial.</summary>
@@ -434,6 +440,7 @@ public sealed class HistorialDeshacer
         TipoEjecucion.Caratula => "Carátula",
         TipoEjecucion.Rekordbox => "Importación de rekordbox",
         TipoEjecucion.Bpm => "BPM",
+        TipoEjecucion.LimpiezaPacks => "Limpieza de publicidad de packs",
         _ => "Sin identificar",
     };
 
@@ -449,6 +456,7 @@ public sealed class HistorialDeshacer
         "Key" => "tonalidad",
         "Comment" => "comentario",
         "Remixer" => "remezclador",
+        Tagging.IsrcField => "ISRC",
         UndoEngine.CoverField => "carátula",
         UndoEngine.VolumeField => "volumen",
         _ => campo,

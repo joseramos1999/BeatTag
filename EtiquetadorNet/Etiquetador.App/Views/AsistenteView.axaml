@@ -10,20 +10,26 @@
 
     <DockPanel Margin="8">
 
-        <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,8">
-            <TextBlock Classes="titulo" Text="Asistente IA" />
-            <TextBlock Classes="desc"
-                       Text="Herramientas que usan la IA local de tu equipo. La IA propone y tú decides: nada se guarda ni se escribe en tus archivos sin que lo revises y lo aceptes." />
-        </StackPanel>
+        <!-- Cancelar va junto al título y no en la banda de la IA: sirve para cualquier herramienta
+             (también las de solo reglas y el envío a la papelera), no solo para las que usan la IA. -->
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+            <StackPanel Grid.Column="0" Spacing="2">
+                <TextBlock Classes="titulo" Text="Asistente IA" />
+                <TextBlock Classes="desc"
+                           Text="Herramientas para revisar y ordenar tu biblioteca. Unas funcionan solo con reglas y otras usan además la IA local de tu equipo, sin enviar nada a internet; la descripción de cada una lo indica. En todas, lo que se propone lo decides tú: nada se guarda ni se escribe en tus archivos sin que lo revises y lo aceptes." />
+            </StackPanel>
+            <Button Grid.Column="1" Content="Cancelar el proceso" Command="{Binding CancelarCommand}" IsVisible="{Binding IsBusy}"
+                    VerticalAlignment="Top" Margin="12,0,0,0"
+                    ToolTip.Tip="Detiene la herramienta que está trabajando. Lo que ya se ha escrito o enviado a la papelera se queda así." />
+        </Grid>
 
-        <!-- Estado de la IA -->
+        <!-- Estado de la IA: solo afecta a las herramientas que la usan -->
         <Border DockPanel.Dock="Top" Padding="10,6" CornerRadius="6" Margin="0,0,0,8"
                 Background="{DynamicResource SuperficieSuave}" BorderBrush="{DynamicResource BordeSuave}" BorderThickness="1">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+            <Grid ColumnDefinitions="Auto,*,Auto">
                 <TextBlock Grid.Column="0" Text="🤖" VerticalAlignment="Center" Margin="0,0,8,0" />
                 <TextBlock Grid.Column="1" Text="{Binding EstadoIa}" VerticalAlignment="Center" TextWrapping="Wrap" />
-                <Button Grid.Column="2" Content="Comprobar" Command="{Binding ComprobarIaCommand}" IsEnabled="{Binding !IsBusy}" Margin="8,0,0,0" />
-                <Button Grid.Column="3" Content="Cancelar" Command="{Binding CancelarCommand}" IsEnabled="{Binding IsBusy}" Margin="6,0,0,0" />
+                <Button Grid.Column="2" Content="Comprobar la IA" Command="{Binding ComprobarIaCommand}" IsEnabled="{Binding !IsBusy}" Margin="8,0,0,0" />
             </Grid>
         </Border>
 
@@ -290,7 +296,7 @@
             <TabItem Header="Limpiar publicidad de packs">
                 <DockPanel DataContext="{Binding Packs}" x:DataType="vm:LimpiarPacksViewModel" Margin="0,8,0,0">
                     <TextBlock DockPanel.Dock="Top" Classes="desc" Margin="0,0,0,6"
-                               Text="Quita de las etiquetas el nombre del record pool o del usuario que distribuyó el archivo: un Álbum como «Latin Box 15 12 2025» o «@usuario» y un Artista como «@usuario_dj». rekordbox muestra y busca en esos campos, y BeatTag usa el artista para reconocer duplicados. Funciona solo con reglas, sin IA: el álbum se vacía, y el artista se sustituye por el que figura en el nombre del archivo, solo cuando ese nombre deja claro cuál es el artista (si no, no se propone nada). Lo dudoso sale desmarcado. Lo que se quita puede guardarse en el comentario para conservar, por ejemplo, la fecha del pack. Se puede deshacer desde Enriquecer." />
+                               Text="Quita de las etiquetas el nombre del record pool o del usuario que distribuyó el archivo: un Álbum como «Latin Box 15 12 2025» o «@usuario» y un Artista como «@usuario_dj». rekordbox muestra y busca en esos campos, y BeatTag usa el artista para reconocer duplicados. Funciona solo con reglas, sin IA: el álbum se vacía, y el artista se sustituye por el que figura en el nombre del archivo, escrito como en el resto de tu biblioteca, solo cuando ese nombre deja claro cuál es el artista (si no, no se propone nada). Lo dudoso sale desmarcado, por ejemplo un álbum que lleva más texto que el nombre del pool o que parece una web; la columna «Por qué» explica cada caso. Lo que se quita puede guardarse en el comentario para conservar, por ejemplo, la fecha del pack. Se puede deshacer desde Enriquecer." />
                     <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                         <Button Content="Buscar publicidad" Command="{Binding ProponerCommand}" Margin="0,0,12,4"
                                 IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
@@ -325,7 +331,7 @@
                 <Grid DataContext="{Binding GeneroReglas}" x:DataType="vm:GeneroPorReglasViewModel" Margin="0,8,0,0"
                       RowDefinitions="Auto,Auto,*,6,Auto,1.4*">
                     <TextBlock Grid.Row="0" Classes="desc" Margin="0,0,0,6"
-                               Text="Pone género a las canciones que no tienen, sin IA y sin pisar nunca un género existente. Primera regla: el género que asignes a una carpeta, que vale también para sus subcarpetas (si dos reglas cubren la misma canción, manda la carpeta más concreta); las carpetas que mezclan estilos, déjalas sin regla. Segunda regla, para lo que no cubre ninguna carpeta: el género que llevan casi todas las canciones del mismo artista, solo si tiene al menos 3 con género y 7 de cada 10 llevan el mismo. Las de carpeta salen marcadas; las de artista, solo cuando son 5 o más y al menos 9 de cada 10 coinciden. Conviene pasar antes «Unificar géneros». Se puede deshacer desde Enriquecer." />
+                               Text="Pone género a las canciones que no tienen, sin IA y sin pisar nunca un género existente. Primera regla: el género que asignes a una carpeta, que vale también para sus subcarpetas (si dos reglas cubren la misma canción, manda la carpeta más concreta). La lista incluye las carpetas que agrupan otras, y sus cifras cuentan las subcarpetas. Deja sin regla las carpetas que mezclan estilos, y excluye de la regla de su carpeta madre las subcarpetas que no le correspondan. Segunda regla, para lo que no cubre ninguna carpeta: el género que llevan casi todas las canciones del mismo artista, solo si tiene al menos 3 con género y 7 de cada 10 llevan el mismo. Las de carpeta salen marcadas; las de artista, solo cuando son 5 o más y al menos 9 de cada 10 coinciden. Conviene pasar antes «Unificar géneros». Se puede deshacer desde Enriquecer." />
                     <WrapPanel Grid.Row="1" Margin="0,0,0,6">
                         <Button Content="Proponer géneros" Command="{Binding ProponerCommand}" Margin="0,0,12,4"
                                 IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
@@ -334,7 +340,10 @@
                                   PlaceholderText="Elige o escribe un género" MinWidth="220" Margin="0,0,6,4" MaxDropDownHeight="360" />
                         <Button Content="Poner a las seleccionadas" Click="PonerReglaCarpeta_Click" Margin="0,0,6,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
                                 ToolTip.Tip="Asigna el género a las carpetas seleccionadas en la lista. Puedes seleccionar varias con Ctrl o Mayús." />
-                        <Button Content="Quitar la regla" Click="QuitarReglaCarpeta_Click" Margin="0,0,12,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}" />
+                        <Button Content="Quitar la regla" Click="QuitarReglaCarpeta_Click" Margin="0,0,6,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                ToolTip.Tip="Quita el género asignado a las carpetas seleccionadas (o que dejen de estar excluidas). Vuelve a valer el de su carpeta madre, si lo tiene." />
+                        <Button Content="Excluir de la regla de su carpeta madre" Click="ExcluirReglaCarpeta_Click" Margin="0,0,12,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                ToolTip.Tip="Para una subcarpeta que mezcla estilos (por ejemplo, «WarmUp» dentro de «Reggaeton»): no recibe el género de su carpeta madre, y sus canciones solo dependen del artista." />
                         <Button Content="Añadir otra carpeta…" Click="AnadirCarpetaGenero_Click" Margin="0,0,12,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
                                 ToolTip.Tip="Para dar una regla a una carpeta que agrupa otras: vale para todas sus subcarpetas que no tengan regla propia." />
                         <TextBlock Text="{Binding ResumenCarpetas}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" />
