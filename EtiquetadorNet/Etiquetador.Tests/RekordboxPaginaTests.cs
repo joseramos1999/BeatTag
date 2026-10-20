@@ -67,6 +67,64 @@ public class RekordboxPaginaTests
                      RekordboxViewModel.TextoCruce(ninguna));
     }
 
+    // Las que rekordbox tiene con una ruta antigua no se cuentan como que faltan, y lo primero es repararlas.
+    [Fact]
+    public void El_estado_tras_cruzar_pide_reparar_antes_de_importar()
+    {
+        Track T(string n) => new() { FilePath = R(n) };
+        var conAntiguas = new ResultadoCruce
+        {
+            FaltanEnRekordbox = new[] { T("a.mp3"), T("b.mp3") },
+            ConRutaAntigua = new[] { T("c.mp3"), T("d.mp3"), T("e.mp3") },
+            Rotas = new[] { Rota(ComoReparar.MismoNombreYDuracion), Rota(ComoReparar.MismoNombreYDuracion), Rota(ComoReparar.MismoNombreYDuracion) },
+        };
+        Assert.Equal("2 canciones de la biblioteca no están en rekordbox; 3 entradas de rekordbox apuntan a archivos que no existen. "
+                   + "Otras 3 canciones de la biblioteca están en rekordbox con una ruta antigua: repara antes sus rutas y no las importes de nuevo.",
+                     RekordboxViewModel.TextoCruce(conAntiguas));
+
+        var soloUna = new ResultadoCruce { ConRutaAntigua = new[] { T("c.mp3") }, Rotas = new[] { Rota(ComoReparar.MismoNombreYTamano) } };
+        Assert.Equal("Todas las canciones de la biblioteca están en rekordbox; 1 entrada de rekordbox apunta a un archivo que no existe. "
+                   + "1 de ellas, con una ruta antigua: repara antes su ruta y no la importes de nuevo.",
+                     RekordboxViewModel.TextoCruce(soloUna));
+
+        Assert.Equal("", RekordboxViewModel.TextoConRutaAntigua(0));
+        Assert.StartsWith("No se incluye 1 canción que rekordbox tiene con una ruta antigua (está en «Rutas rotas»). Repara antes esa ruta:",
+                          RekordboxViewModel.TextoConRutaAntigua(1));
+        Assert.StartsWith("No se incluyen 30 canciones que rekordbox tiene con una ruta antigua (están en «Rutas rotas»). Repara antes esas rutas:",
+                          RekordboxViewModel.TextoConRutaAntigua(30));
+    }
+
+    // Con una sola reparable, en singular; y se dice cuántas solo cambiaron de carpeta.
+    [Fact]
+    public void El_resumen_de_rotas_concuerda_en_numero_y_dice_las_que_solo_se_movieron()
+    {
+        PistaRota Movida(string nombre) => new(Pista(R(Path.Combine("Vieja", nombre))), ComoReparar.MismoNombreYDuracion, R(Path.Combine("Nueva", nombre)));
+
+        Assert.Equal("Se puede reparar 1 de 5: 1 encontrada por nombre y duración. De las demás, 4 no se encuentran en la biblioteca.",
+                     RekordboxViewModel.TextoRotas(new[] { Rota(ComoReparar.MismoNombreYDuracion) }
+                         .Concat(Enumerable.Range(0, 4).Select(_ => Rota(ComoReparar.SinEncontrar))).ToList()));
+        Assert.Equal("La entrada rota se puede reparar: renombrada o movida por BeatTag.",
+                     RekordboxViewModel.TextoRotas(new[] { Rota(ComoReparar.RenombradaPorBeatTag) }));
+        Assert.Equal("La entrada rota se puede reparar: encontrada por nombre y duración. Conserva el nombre de archivo: solo ha cambiado de carpeta.",
+                     RekordboxViewModel.TextoRotas(new[] { Movida("x.mp3") }));
+        Assert.Equal("Se pueden reparar 3 de 4: 3 encontradas por nombre y duración. 2 de ellas conservan el nombre de archivo: solo han cambiado de carpeta. "
+                   + "De las demás, 1 no se encuentra en la biblioteca.",
+                     RekordboxViewModel.TextoRotas(new[] { Movida("x.mp3"), Movida("y.mp3"), Rota(ComoReparar.MismoNombreYDuracion), Rota(ComoReparar.SinEncontrar) }));
+        Assert.Contains("Todas conservan el nombre de archivo", RekordboxViewModel.TextoRotas(new[] { Movida("x.mp3"), Movida("y.mp3") }));
+    }
+
+    // Un único hot cue en el primer tiempo cuenta como sin hot cues: se dice en cuántas pistas, por si
+    // quien prepara pone ese cue a mano.
+    [Fact]
+    public void Se_dice_cuantas_pistas_solo_tienen_el_hot_cue_del_primer_tiempo()
+    {
+        Assert.Equal("", RekordboxViewModel.TextoCueInicial(0));
+        Assert.StartsWith("En 1 pista, el único marcador es un hot cue en el primer tiempo de compás, y se cuenta como sin hot cues.", RekordboxViewModel.TextoCueInicial(1));
+        Assert.Contains("marca la casilla para contarlo como preparación", RekordboxViewModel.TextoCueInicial(1));
+        Assert.StartsWith("En 12 pistas, el único marcador es un hot cue en el primer tiempo de compás, y se cuentan como sin hot cues.", RekordboxViewModel.TextoCueInicial(12));
+        Assert.Contains("marca la casilla para contarlos como preparación", RekordboxViewModel.TextoCueInicial(12));
+    }
+
     [Fact]
     public void La_cabecera_de_la_coleccion_dice_de_cuando_es()
     {
@@ -90,14 +148,36 @@ public class RekordboxPaginaTests
         Assert.False(RekordboxViewModel.EsExportacionDeBeatTag(new ColeccionRekordbox { Producto = "" }));
     }
 
+    // Importar a la colección crea pistas NUEVAS: las listas y el historial siguen en las antiguas. Antes
+    // se aconsejaba quitar las antiguas, y eso sacaba esas canciones de todas las listas del DJ.
     [Fact]
-    public void Tras_reparar_se_explica_como_importarla()
+    public void Tras_reparar_se_explica_como_importarla_sin_perder_las_listas()
     {
-        var texto = RekordboxViewModel.TextoReparada(3, "musica reparada.xml");
+        var texto = RekordboxViewModel.TextoReparada(3, 0, "musica reparada.xml");
         Assert.StartsWith("3 rutas reparadas en «musica reparada.xml».", texto);
-        Assert.Contains("Preferencias → Avanzado → rekordbox xml", texto);
         Assert.Contains(RekordboxRelocator.ListaReparadas, texto);
-        Assert.StartsWith("1 ruta reparada", RekordboxViewModel.TextoReparada(1, "x.xml"));
+        Assert.Contains("pistas nuevas", texto);
+        Assert.Contains("tus listas de reproducción y tu historial siguen apuntando a las entradas antiguas", texto);
+        Assert.Contains("no las quites sin importar antes, desde esta copia, las listas que las contienen", texto);
+        Assert.DoesNotContain("puedes quitarlas", texto);
+        Assert.DoesNotContain("reubicación", texto);                    // ninguna solo movida
+        Assert.StartsWith("1 ruta reparada", RekordboxViewModel.TextoReparada(1, 0, "x.xml"));
+        Assert.StartsWith("No había ninguna ruta que reparar", RekordboxViewModel.TextoReparada(0, 0, "x.xml"));
+    }
+
+    // MEDIDO: 2.752 de las 3.375 reparables de una colección real solo habían cambiado de carpeta; para
+    // esas, la reubicación del propio rekordbox conserva listas e historial sin crear pistas nuevas.
+    [Fact]
+    public void Tras_reparar_se_remite_a_la_reubicacion_de_rekordbox_para_las_solo_movidas()
+    {
+        Assert.EndsWith(" 2 de ellas solo han cambiado de carpeta: la reubicación de archivos no encontrados de rekordbox las recupera sin crear pistas nuevas.",
+                        RekordboxViewModel.TextoReparada(5, 2, "x.xml"));
+        Assert.EndsWith(" 1 de ellas solo ha cambiado de carpeta: la reubicación de archivos no encontrados de rekordbox la recupera sin crear una pista nueva.",
+                        RekordboxViewModel.TextoReparada(5, 1, "x.xml"));
+        Assert.EndsWith(" Todas solo han cambiado de carpeta: la reubicación de archivos no encontrados de rekordbox las recupera sin crear pistas nuevas.",
+                        RekordboxViewModel.TextoReparada(4, 4, "x.xml"));
+        Assert.EndsWith(" Esta solo ha cambiado de carpeta: la reubicación de archivos no encontrados de rekordbox la recupera sin crear una pista nueva.",
+                        RekordboxViewModel.TextoReparada(1, 1, "x.xml"));
     }
 
     // MEDIDO: en una colección real solo 11 de 19.690 pistas tenían alguna reproducción; «Nunca
@@ -126,13 +206,66 @@ public class RekordboxPaginaTests
         var otra = R("otra.mp3");
         var porRuta = new Dictionary<string, Track>(ComparadorRutas.Instancia) { [hoy] = new Track { FilePath = hoy } };
 
-        var d = RekordboxViewModel.LocationsDeRekordbox(new[] { Pista(vieja), Pista(hoy), Pista(otra) }, porRuta);
+        var d = RekordboxViewModel.EntradasDeRekordbox(new[] { Pista(vieja), Pista(hoy), Pista(otra) }, porRuta);
 
-        Assert.Equal(RekordboxRelocator.PathToLocation(hoy), d[hoy]);
-        Assert.Equal(RekordboxRelocator.PathToLocation(hoy), d[vieja]);   // es el mismo archivo
-        Assert.Equal(RekordboxRelocator.PathToLocation(otra), d[otra]);
+        Assert.Equal(RekordboxRelocator.PathToLocation(hoy), d[hoy].Location);
+        Assert.Equal(RekordboxRelocator.PathToLocation(hoy), d[vieja].Location);   // es el mismo archivo
+        Assert.Equal(RekordboxRelocator.PathToLocation(otra), d[otra].Location);
         // Si la buena va primero, no la sustituye la vieja.
-        Assert.Equal(RekordboxRelocator.PathToLocation(hoy), RekordboxViewModel.LocationsDeRekordbox(new[] { Pista(hoy), Pista(vieja) }, porRuta)[hoy]);
+        Assert.Equal(RekordboxRelocator.PathToLocation(hoy), RekordboxViewModel.EntradasDeRekordbox(new[] { Pista(hoy), Pista(vieja) }, porRuta)[hoy].Location);
+    }
+
+    // Una canción que rekordbox solo tiene con una ruta antigua: la lista apunta a esa entrada (con sus
+    // cue points) en lugar de añadirla otra vez sin preparar. Y de lo que rekordbox ya tiene se
+    // escriben su título y su artista, no los de la etiqueta: aunque los aplicara, no cambiaría nada.
+    [Fact]
+    public void La_exportacion_apunta_a_la_entrada_que_rekordbox_ya_tiene_aunque_este_rota()
+    {
+        var presente = R("presente.mp3");
+        var movida = R(Path.Combine("Nueva", "movida.mp3"));
+        var nueva = R("nueva.mp3");
+        var porRuta = new Dictionary<string, Track>(ComparadorRutas.Instancia)
+        {
+            [presente] = new Track { FilePath = presente, Title = "Título de la etiqueta", Artist = "Artista de la etiqueta" },
+            [movida] = new Track { FilePath = movida, Title = "Movida", Artist = "M" },
+            [nueva] = new Track { FilePath = nueva, Title = "Nueva", Artist = "N" },
+        };
+        var enRekordbox = Pista(presente) with { Nombre = "Título en rekordbox", Artista = "Artista en rekordbox" };
+        var rota = Pista(R(Path.Combine("Vieja", "movida.mp3"))) with { Nombre = "Movida (rb)", Artista = "M (rb)" };
+        var antiguas = new Dictionary<string, PistaRekordbox>(ComparadorRutas.Instancia) { [movida] = rota };
+
+        var entradas = RekordboxViewModel.EntradasParaExportar(new[] { enRekordbox, rota }, porRuta, antiguas);
+
+        Assert.Equal(rota.Location, entradas[movida].Location);                    // la Location antigua, no la de hoy
+        Assert.Equal(enRekordbox.Location, entradas[presente].Location);
+        Assert.False(entradas.ContainsKey(nueva));                                 // rekordbox no la tiene: se escribe como hoy
+        Assert.Equal(new DatosPistaRekordbox("Título en rekordbox", "Artista en rekordbox"), RekordboxViewModel.DatosDe(porRuta, entradas, presente));
+        Assert.Equal(new DatosPistaRekordbox("Movida (rb)", "M (rb)"), RekordboxViewModel.DatosDe(porRuta, entradas, movida));
+        Assert.Equal(new DatosPistaRekordbox("Nueva", "N"), RekordboxViewModel.DatosDe(porRuta, entradas, nueva));
+        Assert.Equal(new DatosPistaRekordbox("Título de la etiqueta", "Artista de la etiqueta"), RekordboxViewModel.DatosDe(porRuta, null, presente));
+
+        var listas = new[] { new ListaParaRekordbox("", "A", new[] { movida, nueva }), new ListaParaRekordbox("", "B", new[] { movida.ToUpperInvariant(), presente }) };
+        Assert.Equal(1, RekordboxViewModel.ConRutaAntigua(listas, antiguas));     // la misma canción en dos listas cuenta una vez
+        Assert.Equal(0, RekordboxViewModel.ConRutaAntigua(listas, null));
+
+        // Y lo que llega al XML es la Location antigua.
+        using var ms = new MemoryStream();
+        var locations = entradas.ToDictionary(kv => kv.Key, kv => kv.Value.Location, ComparadorRutas.Instancia);
+        ExportadorRekordbox.Escribir(ms, listas, ruta => RekordboxViewModel.DatosDe(porRuta, entradas, ruta), locations);
+        var xml = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+        Assert.Contains($"Location=\"{rota.Location}\"", xml);
+        Assert.DoesNotContain($"Location=\"{RekordboxRelocator.PathToLocation(movida)}\"", xml);
+    }
+
+    [Fact]
+    public void Tras_exportar_se_dice_que_canciones_tienen_la_ruta_antigua()
+    {
+        var r = new ResultadoExportacionRekordbox(2, 10, 0);
+        Assert.DoesNotContain("ruta antigua", RekordboxViewModel.TextoExportado(r, "x.xml"));
+        Assert.EndsWith(" 1 canción está en rekordbox con una ruta antigua: la lista apunta a esa entrada, con sus cue points, y rekordbox "
+                        + "la mostrará como archivo no encontrado hasta que repares su ruta (pestaña «Rutas rotas»).",
+                        RekordboxViewModel.TextoExportado(r, "x.xml", 1));
+        Assert.Contains(" 3 canciones están en rekordbox con una ruta antigua: las listas apuntan a esas entradas", RekordboxViewModel.TextoExportado(r, "x.xml", 3));
     }
 
     // La importación de BPM y tonalidad de Biblioteca ya no se queda en «0 coincidencias».

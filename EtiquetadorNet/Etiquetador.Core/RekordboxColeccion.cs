@@ -62,10 +62,12 @@ public sealed record PistaRekordbox
     public string Tonalidad { get; init; } = "";
 
     /// <summary>
-    /// Su único marcador es el hot cue que pone el análisis automático en el primer tiempo de compás,
-    /// sin que nadie haya preparado la pista. Se reconoce por su sitio (a menos de
-    /// <see cref="ToleranciaCueInicial"/> del primer tiempo del beatgrid) o por su nombre, el de la
-    /// posición en compases que le da el análisis: «1.1Bars», compás 1, tiempo 1.
+    /// Su único marcador es un hot cue en el primer tiempo de compás, que no marca ninguna parte de la
+    /// canción: lo normal es que lo haya dejado una herramienta al analizar, no quien prepara la sesión.
+    /// Se reconoce por su nombre, el de la posición en compases («1.1Bars»: compás 1, tiempo 1), o, si
+    /// no tiene nombre, por su sitio (a menos de <see cref="ToleranciaCueInicial"/> del primer tiempo
+    /// del beatgrid). Uno con otro nombre («Intro», «Entrada»…) lo ha puesto alguien a propósito y sí
+    /// cuenta como preparación.
     ///
     /// MEDIDO en una colección real exportada de rekordbox 7.2 (19.690 pistas): los 14.937 hot cues
     /// eran todos así -uno por pista, en la ranura A, llamado «1.1Bars»-; 14.900 caían a menos de una
@@ -73,11 +75,16 @@ public sealed record PistaRekordbox
     /// lejos porque su beatgrid empieza de otra forma (34 a menos de un tiempo). Contarlas como
     /// preparadas habría escondido tres cuartas partes de la colección; mirando solo el sitio, 37
     /// pistas sin preparar se daban por preparadas.
+    ///
+    /// LÍMITE: el nombre «1.1Bars» sale de esa única colección, y un hot cue SIN nombre en el primer
+    /// tiempo también puede ser el cue de entrada que pone a mano quien prepara la pista. Por eso la
+    /// página dice cuántas pistas están en ese caso y deja contarlas como preparadas con una casilla.
     /// </summary>
     public bool SoloCueInicial
         => HotCues == 1 && CuesMemoria == 0
            && (EsNombreAutomatico(NombreUnicoHotCue)
-               || (UnicoHotCue is { } c && PrimerCompas is { } p && Math.Abs(c - p) <= ToleranciaCueInicial));
+               || (string.IsNullOrWhiteSpace(NombreUnicoHotCue)
+                   && UnicoHotCue is { } c && PrimerCompas is { } p && Math.Abs(c - p) <= ToleranciaCueInicial));
 
     /// <summary>«1.1Bars»: el nombre que da el análisis a un hot cue en el compás 1, tiempo 1.</summary>
     public static bool EsNombreAutomatico(string? nombre)

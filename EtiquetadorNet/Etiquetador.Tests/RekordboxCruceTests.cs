@@ -99,9 +99,15 @@ public class RekordboxCruceTests
     {
         var xml = Coleccion.Replace("Name=\"1.1Bars\" Type=\"0\" Start=\"1.500\"", "Name=\"Drop\" Type=\"0\" Start=\"32.000\"");
         Assert.False(LectorRekordbox.LeerTexto(xml).Pistas[1].SoloCueInicial);
-        // En el primer tiempo pero con otro nombre: por su sitio, sigue siendo el del análisis.
+        // En el primer tiempo y sin nombre: por su sitio, se toma por el del análisis (la página lo dice
+        // y deja contarlo como preparación con una casilla).
         var enSuSitio = Coleccion.Replace("Name=\"1.1Bars\"", "Name=\"\"");
         Assert.True(LectorRekordbox.LeerTexto(enSuSitio).Pistas[1].SoloCueInicial);
+        // En el primer tiempo pero con un nombre puesto por alguien: es un cue de entrada a propósito.
+        var conNombre = Coleccion.Replace("Name=\"1.1Bars\"", "Name=\"Entrada\"");
+        var p = LectorRekordbox.LeerTexto(conNombre).Pistas[1];
+        Assert.False(p.SoloCueInicial);
+        Assert.False(CruceRekordbox.SinPreparar(p, sinHotCues: true, sinBeatgrid: false, cueInicialCuenta: false));
     }
 
     // MEDIDO: 37 de los 14.937 hot cues «1.1Bars» de la colección real quedaban a más de una décima del
@@ -266,6 +272,62 @@ public class RekordboxCruceTests
         Assert.Equal(1, r.FueraDeBiblioteca);                    // existe, pero no es de la biblioteca
         Assert.Same(a, r.Presentes.Single(p => p.Cancion != null).Cancion);
         Assert.Empty(r.Rotas);
+    }
+
+    // MEDIDO en una colección real: 3.378 de las 4.385 que salían como «no están en rekordbox» eran el
+    // archivo de una entrada rota. Guardar esa tabla e importarla antes de reparar creaba otros tantos
+    // duplicados sin cue points, y en el cruce siguiente esas entradas ya no se reparaban.
+    [Fact]
+    public void Lo_que_rekordbox_tiene_con_una_ruta_antigua_no_cuenta_como_que_falta()
+    {
+        var disco = new DiscoFalso();
+        var esta = Cancion(R("Esta.mp3"));
+        var movida = Cancion(R("Nueva", "Movida.mp3"), duracion: 180);                 // reparable
+        var compartida = Cancion(R("Nueva", "Compartida.mp3"), duracion: 200);         // dos entradas rotas la apuntan
+        var copia1 = Cancion(R("X", "Repetida.mp3"), duracion: 150);                   // varias candidatas
+        var copia2 = Cancion(R("Y", "Repetida.mp3"), duracion: 150);
+        var yaEsta = Cancion(R("Nueva", "YaEsta.mp3"), duracion: 120);                // rekordbox ya la tiene con su ruta nueva
+        var nueva = Cancion(R("Descargas", "Nueva.mp3"));                               // de verdad no está
+        var mismoNombreOtraCancion = Cancion(R("Z", "Intro.mp3"), duracion: 30);        // otro tema con el mismo nombre
+
+        var compartidaA = Pista(R("A", "Compartida.mp3"), duracion: 200) with { HotCues = 1 };
+        var compartidaB = Pista(R("B", "Compartida.mp3"), duracion: 200) with { HotCues = 4, Beatgrid = true };
+        var col = Col(
+            Pista(esta.FilePath),
+            Pista(R("Vieja", "Movida.mp3"), duracion: 180),
+            compartidaA, compartidaB,
+            Pista(R("Vieja", "Repetida.mp3"), duracion: 150),
+            Pista(R("Vieja", "YaEsta.mp3"), duracion: 120), Pista(yaEsta.FilePath, duracion: 120),
+            Pista(R("Vieja", "Intro.mp3"), duracion: 95));
+
+        var r = CruceRekordbox.Cruzar(col, new[] { esta, movida, compartida, copia1, copia2, yaEsta, nueva, mismoNombreOtraCancion },
+                                      new Dictionary<string, string>(), disco);
+
+        Assert.Equal(new[] { nueva, mismoNombreOtraCancion }, r.FaltanEnRekordbox);
+        Assert.Equal(new[] { movida, compartida, copia1, copia2 }, r.ConRutaAntigua);
+        Assert.Equal(R("Vieja", "Movida.mp3"), r.EntradaAntigua[movida.FilePath].Ruta);
+        Assert.Same(compartidaB, r.EntradaAntigua[compartida.FilePath]);              // de las dos, la más preparada
+        Assert.Equal(R("Vieja", "Repetida.mp3"), r.EntradaAntigua[copia2.FilePath].Ruta);
+        Assert.False(r.EntradaAntigua.ContainsKey(yaEsta.FilePath));                   // está con su ruta de hoy
+        Assert.Equal(new[] { copia1.FilePath, copia2.FilePath },
+                     r.Rotas.Single(x => x.Como == ComoReparar.VariasCandidatas).Candidatas);
+    }
+
+    // Las que solo cambiaron de carpeta las puede reubicar el propio rekordbox, sin crear pistas nuevas.
+    [Fact]
+    public void Se_distinguen_las_que_solo_cambiaron_de_carpeta()
+    {
+        var movida = Cancion(R("Nueva", "Tema.mp3"));
+        var renombrada = Cancion(R("Artista - Tema.mp3"));
+        var col = Col(Pista(R("Vieja", "Tema.mp3"), duracion: 200), Pista(R("pista01.mp3"), duracion: 200));
+        var r = CruceRekordbox.Cruzar(col, new[] { movida, renombrada },
+                                      new Dictionary<string, string> { [R("pista01.mp3")] = renombrada.FilePath }, new DiscoFalso());
+
+        Assert.True(r.Rotas.Single(x => x.NuevaRuta == movida.FilePath).MismoNombre);
+        Assert.False(r.Rotas.Single(x => x.NuevaRuta == renombrada.FilePath).MismoNombre);
+        Assert.Equal(1, r.SoloMovidas);
+        // Sin reparación posible no cuenta, aunque se sepa adónde apunta.
+        Assert.False(new PistaRota(Pista(R("Vieja", "Tema.mp3")), ComoReparar.YaEnRekordbox, movida.FilePath).MismoNombre);
     }
 
     [Fact]

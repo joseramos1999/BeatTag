@@ -34,6 +34,21 @@ public sealed record PistaRota(PistaRekordbox Pista, ComoReparar Como, string Nu
     /// <summary>Se puede reparar sin dudas (y entra en la colección reparada).</summary>
     public bool Reparable => Como is ComoReparar.RenombradaPorBeatTag or ComoReparar.MismoNombreYTamano or ComoReparar.MismoNombreYDuracion;
 
+    /// <summary>
+    /// Con <see cref="ComoReparar.VariasCandidatas"/>, los archivos de la biblioteca que encajan igual de
+    /// bien. No se repara hacia ninguno, pero uno de ellos es esta entrada: ninguno se da por «no está
+    /// en rekordbox» (ver <see cref="ResultadoCruce.ConRutaAntigua"/>).
+    /// </summary>
+    public IReadOnlyList<string> Candidatas { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Se puede reparar y el archivo conserva su nombre: solo ha cambiado de carpeta. Para estas, la
+    /// reubicación de archivos no encontrados del propio rekordbox, que busca por nombre, las arregla
+    /// sin crear pistas nuevas y conserva las listas de reproducción y el historial.
+    /// </summary>
+    public bool MismoNombre => Reparable && NuevaRuta.Length > 0
+                               && ComparadorRutas.Instancia.Equals(Path.GetFileName(Pista.Ruta), Path.GetFileName(NuevaRuta));
+
     /// <summary>Cómo se dice en la tabla.</summary>
     public string Texto => Como switch
     {
@@ -51,8 +66,29 @@ public sealed record PistaRota(PistaRekordbox Pista, ComoReparar Como, string Nu
 /// <summary>El resultado de cruzar la colección de rekordbox con la biblioteca.</summary>
 public sealed class ResultadoCruce
 {
-    /// <summary>(a) Canciones de la biblioteca que no están en la colección de rekordbox.</summary>
+    /// <summary>
+    /// (a) Canciones de la biblioteca que no están en la colección de rekordbox. No incluye las de
+    /// <see cref="ConRutaAntigua"/>: esas sí están, con otra ruta.
+    /// </summary>
     public IReadOnlyList<Track> FaltanEnRekordbox { get; init; } = Array.Empty<Track>();
+
+    /// <summary>
+    /// Canciones de la biblioteca que rekordbox tiene con una ruta antigua: alguna entrada rota apunta
+    /// a ellas (reparable, compartida con otra entrada o entre varias candidatas). Importarlas de nuevo
+    /// las duplicaría sin sus cue points, su beatgrid ni su valoración, y en el cruce siguiente la
+    /// entrada rota ya no se repararía (su archivo pasaría a estar en rekordbox): hay que reparar antes.
+    /// </summary>
+    public IReadOnlyList<Track> ConRutaAntigua { get; init; } = Array.Empty<Track>();
+
+    /// <summary>
+    /// De cada archivo de <see cref="ConRutaAntigua"/>, la entrada rota que le corresponde (si son
+    /// varias, la más preparada). Con ella, una lista exportada a rekordbox apunta a la pista que ya
+    /// tiene, con sus cue points, en lugar de añadir otra.
+    /// </summary>
+    public IReadOnlyDictionary<string, PistaRekordbox> EntradaAntigua { get; init; } = new Dictionary<string, PistaRekordbox>();
+
+    /// <summary>De las reparables, las que conservan el nombre de archivo (ver <see cref="PistaRota.MismoNombre"/>).</summary>
+    public int SoloMovidas => Rotas.Count(r => r.MismoNombre);
 
     /// <summary>(b) Entradas de rekordbox cuyo archivo no existe.</summary>
     public IReadOnlyList<PistaRota> Rotas { get; init; } = Array.Empty<PistaRota>();
@@ -125,8 +161,6 @@ public static class CruceRekordbox
             else rotas.Add(new PistaPresente(p, null));
         }
 
-        var faltan = biblioteca.Where(t => !enRekordbox.Contains(t.FilePath)).ToList();
-
         // Para buscar por nombre: los archivos de la biblioteca agrupados por nombre de archivo.
         var porNombre = new Dictionary<string, List<Track>>(ComparadorRutas.Instancia);
         foreach (var t in porRuta.Values)
@@ -161,8 +195,59 @@ public static class CruceRekordbox
             if (clasificadas[i].Reparable && repetidos.Contains(clasificadas[i].NuevaRuta))
                 clasificadas[i] = clasificadas[i] with { Como = ComoReparar.MismoDestino };
 
-        return new ResultadoCruce { FaltanEnRekordbox = faltan, Rotas = clasificadas, Presentes = presentes };
+        // (a) Lo que no está en rekordbox, sin los archivos a los que apunta una entrada rota: esos SÍ
+        // están, con la ruta antigua. MEDIDO con la colección real: de las 4.385 canciones que salían
+        // como «no están en rekordbox», 3.378 eran el archivo de una entrada rota; quien guardaba la
+        // tabla como M3U8 y la importaba antes de reparar creaba 3.378 pistas duplicadas sin cue
+        // points, y en el cruce siguiente esas entradas rotas ya no se reparaban (su archivo pasaba a
+        // estar en rekordbox).
+        var antiguas = EntradasAntiguas(clasificadas, enRekordbox);
+        var faltan = new List<Track>();
+        var conRutaAntigua = new List<Track>();
+        foreach (var t in biblioteca)
+        {
+            if (enRekordbox.Contains(t.FilePath)) continue;
+            (antiguas.ContainsKey(t.FilePath) ? conRutaAntigua : faltan).Add(t);
+        }
+
+        return new ResultadoCruce
+        {
+            FaltanEnRekordbox = faltan, ConRutaAntigua = conRutaAntigua, EntradaAntigua = antiguas,
+            Rotas = clasificadas, Presentes = presentes,
+        };
     }
+
+    /// <summary>
+    /// De cada archivo al que apunta una entrada rota, esa entrada. Cuentan las reparables, las que
+    /// comparten archivo con otra (<see cref="ComoReparar.MismoDestino"/>) y las que tienen varias
+    /// candidatas, que son copias de la misma canción (mismo nombre y mismo tamaño o duración): sea
+    /// cual sea la buena, la canción está en rekordbox. Si varias entradas apuntan al mismo archivo, se
+    /// queda la más preparada (más marcadores, con beatgrid, más reproducciones), y a igualdad la
+    /// primera de la colección. Los destinos que rekordbox ya tiene con su ruta nueva no cuentan.
+    /// </summary>
+    private static Dictionary<string, PistaRekordbox> EntradasAntiguas(IEnumerable<PistaRota> rotas, HashSet<string> enRekordbox)
+    {
+        var d = new Dictionary<string, PistaRekordbox>(ComparadorRutas.Instancia);
+        foreach (var r in rotas)
+        {
+            IEnumerable<string> destinos = r.Como switch
+            {
+                ComoReparar.VariasCandidatas => r.Candidatas,
+                ComoReparar.RenombradaPorBeatTag or ComoReparar.MismoNombreYTamano or ComoReparar.MismoNombreYDuracion
+                    or ComoReparar.MismoDestino => r.NuevaRuta.Length > 0 ? new[] { r.NuevaRuta } : Array.Empty<string>(),
+                _ => Array.Empty<string>(),
+            };
+            foreach (var destino in destinos)
+            {
+                if (enRekordbox.Contains(destino)) continue;
+                if (!d.TryGetValue(destino, out var ya) || Preparacion(r.Pista).CompareTo(Preparacion(ya)) > 0) d[destino] = r.Pista;
+            }
+        }
+        return d;
+    }
+
+    private static (int Marcadores, bool Beatgrid, int Reproducciones) Preparacion(PistaRekordbox p)
+        => (p.HotCues + p.CuesMemoria, p.Beatgrid, p.Reproducciones);
 
     private static PistaRota Clasificar(PistaRekordbox p, Dictionary<string, string> renombrados,
                                         Dictionary<string, List<Track>> porNombre, IArchivosCruce disco, Func<string, bool> existe)
@@ -178,17 +263,20 @@ public static class CruceRekordbox
         {
             var mismoTamano = candidatas.Where(c => disco.Tamano(c.FilePath) == p.Tamano).ToList();
             if (mismoTamano.Count == 1) return new PistaRota(p, ComoReparar.MismoNombreYTamano, mismoTamano[0].FilePath);
-            if (mismoTamano.Count > 1) return new PistaRota(p, ComoReparar.VariasCandidatas);
+            if (mismoTamano.Count > 1) return Varias(p, mismoTamano);
         }
 
         if (p.Duracion > 0)
         {
             var mismaDuracion = candidatas.Where(c => c.DurationSeconds > 0 && Math.Abs(c.DurationSeconds - p.Duracion) <= MargenDuracion).ToList();
             if (mismaDuracion.Count == 1) return new PistaRota(p, ComoReparar.MismoNombreYDuracion, mismaDuracion[0].FilePath);
-            if (mismaDuracion.Count > 1) return new PistaRota(p, ComoReparar.VariasCandidatas);
+            if (mismaDuracion.Count > 1) return Varias(p, mismaDuracion);
         }
         return new PistaRota(p, ComoReparar.SinEncontrar);
     }
+
+    private static PistaRota Varias(PistaRekordbox p, List<Track> candidatas)
+        => new(p, ComoReparar.VariasCandidatas) { Candidatas = candidatas.Select(c => c.FilePath).ToList() };
 
     /// <summary>De ruta rota a ruta nueva, para <see cref="RekordboxRelocator.Repair"/>.</summary>
     public static Dictionary<string, string> MapaReparacion(IEnumerable<PistaRota> rotas)

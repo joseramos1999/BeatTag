@@ -38,8 +38,15 @@ public enum DestinoExportacion { NoExiste, DeBeatTag, Otro }
 /// valoración y sus comentarios) y que «Importar a la colección» sobre pistas elegidas SÍ la sustituye
 /// por lo del XML. Por eso no se escriben BPM, tonalidad, valoración, comentarios, cues ni beatgrid:
 /// lo que no va en el XML no se puede pisar con nada inventado aquí, y la página explica que hay que
-/// importar la carpeta, no las pistas. Name y Artist son las etiquetas del propio archivo y sirven
-/// para que una pista que rekordbox aún no tiene no entre sin nombre. La Location se escribe
+/// importar la carpeta, no las pistas.
+///
+/// NAME Y ARTIST. La indicación de partida era escribir solo Location y Name si había dudas, y la
+/// especificación no aclara si rekordbox aplica esos datos a una pista que ya tiene. Se escribe
+/// también Artist porque el riesgo es el mismo que el de Name y se evita igual: quien llama da, para
+/// las pistas que rekordbox ya tiene (si se ha abierto su colección), el título y el artista que
+/// tienen en rekordbox, así que aunque los aplicara no cambiaría nada; para las que no tiene, los de
+/// las etiquetas del archivo, que son los que leería él al añadirlas, y sin Artist entrarían sin
+/// artista. La Location se escribe
 /// exactamente como la escribe rekordbox (<see cref="RekordboxRelocator.PathToLocation"/>) o, si se
 /// conoce la que ya tiene la pista en su colección, esa misma: es lo que la identifica. MEDIDO
 /// exportando una biblioteca real entera (13.590 canciones) en una lista: 81 ms y 3,6 MB, y de las

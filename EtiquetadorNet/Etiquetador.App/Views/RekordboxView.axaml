@@ -40,7 +40,9 @@
                 <DockPanel Margin="0,8,0,0">
                     <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,6">
                         <TextBlock Classes="desc"
-                                   Text="Canciones de la biblioteca que no están en la colección de rekordbox, por ejemplo descargas que nunca se importaron. Guárdalas como lista M3U8 y, en rekordbox, impórtala como lista de reproducción (Archivo → Importar → Importar lista de reproducción): las canciones se añaden a la colección." />
+                                   Text="Canciones de la biblioteca que no están en la colección de rekordbox, por ejemplo descargas que nunca se importaron. Guárdalas como lista M3U8 y, en rekordbox, impórtala como lista de reproducción (Archivo → Importar → Importar lista de reproducción): las canciones se añaden a la colección. Las que rekordbox tiene con una ruta antigua no salen aquí: se reparan en «Rutas rotas», porque importarlas de nuevo crearía pistas duplicadas sin su preparación." />
+                        <TextBlock Text="{Binding AvisoFaltan}" IsVisible="{Binding HayAvisoFaltan}" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource AvisoTexto}" />
                         <WrapPanel ItemSpacing="8" LineSpacing="6">
                             <Button Content="Guardar como lista M3U8…" Click="GuardarFaltan_Click" IsEnabled="{Binding HayColeccion}"
                                     Background="#0D9488" Foreground="White" FontWeight="SemiBold"
@@ -83,6 +85,18 @@
                         <TextBlock Classes="desc"
                                    Text="Entradas de rekordbox cuyo archivo ya no está donde dice, porque se movió o se renombró. Cada una se busca en la biblioteca: primero en los renombrados que BeatTag tiene anotados y después por nombre de archivo y tamaño, o por nombre de archivo y duración. Solo se repara si hay un único archivo que encaja y rekordbox no lo tiene ya: así no se duplican pistas." />
                         <TextBlock Text="{Binding ResumenRotas}" TextWrapping="Wrap" IsVisible="{Binding HayColeccion}" />
+                        <Expander Header="Cómo llevar la reparación a rekordbox" HorizontalAlignment="Stretch">
+                            <StackPanel Spacing="4">
+                                <TextBlock Classes="desc"
+                                           Text="1. Primero, las que solo han cambiado de carpeta (columna «Mismo nombre»): usa la función de rekordbox para reubicar los archivos que no encuentra, que los busca por su nombre en la carpeta que le indiques. Así no se crean pistas nuevas y se conservan tus listas de reproducción y tu historial. Después, vuelve a exportar la colección al mismo archivo: esta página la vuelve a leer al volver a ella." />
+                                <TextBlock Classes="desc"
+                                           Text="2. Para las demás, guarda la colección reparada. En rekordbox, en Preferencias → Avanzado → rekordbox xml, elige ese archivo; en el apartado «rekordbox xml» de la izquierda, abre la lista «Rutas reparadas por BeatTag», selecciona sus pistas e impórtalas a la colección. Llegan con sus cue points, su beatgrid, su valoración y sus comentarios, pero como pistas nuevas." />
+                                <TextBlock Classes="desc"
+                                           Text="3. Tus listas de reproducción y tu historial siguen apuntando a las entradas antiguas, que quedan como archivos no encontrados. No las quites sin importar antes, desde la copia reparada, las listas que las contienen (ya apuntan a las pistas reparadas): si no, esas canciones desaparecerían de tus listas." />
+                                <TextBlock Classes="desc"
+                                           Text="Antes de importar, escucha las encontradas por nombre y duración: otra codificación o masterización del mismo tema puede empezar en otro punto, y sus cue points quedarían desplazados." />
+                            </StackPanel>
+                        </Expander>
                         <WrapPanel ItemSpacing="8" LineSpacing="6">
                             <Button Content="Guardar colección reparada…" Click="Reparar_Click"
                                     Background="#0D9488" Foreground="White" FontWeight="SemiBold"
@@ -117,6 +131,7 @@
                             <DataGridTextColumn Header="Título en rekordbox" Binding="{Binding Nombre}" Width="200" MinWidth="110" />
                             <DataGridTextColumn Header="Artista" Binding="{Binding Artista}" Width="150" MinWidth="90" />
                             <DataGridTextColumn Header="Resultado" Binding="{Binding Como}" Width="220" MinWidth="120" />
+                            <DataGridTextColumn Header="Mismo nombre" Binding="{Binding MismoNombre}" Width="80" MinWidth="70" />
                             <DataGridTextColumn Header="Ruta en rekordbox" Binding="{Binding RutaRekordbox}" Width="280" MinWidth="140" />
                             <DataGridTextColumn Header="Archivo encontrado" Binding="{Binding NuevaRuta}" Width="*" MinWidth="140" />
                             <DataGridTextColumn Header="Hot cues" Binding="{Binding HotCues}" SortMemberPath="HotCuesOrden" Width="110" MinWidth="80" />
@@ -131,11 +146,12 @@
                 <DockPanel Margin="0,8,0,0">
                     <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,6">
                         <TextBlock Classes="desc"
-                                   Text="Pistas de rekordbox sin hot cues o sin beatgrid. Al analizar, rekordbox y otros programas pueden dejar un único hot cue en el primer tiempo de compás; ese hot cue no cuenta como preparación, salvo que marques la casilla." />
+                                   Text="Pistas de rekordbox sin hot cues o sin beatgrid. Un único hot cue en el primer tiempo de compás, sin nombre o llamado «1.1Bars», no marca ninguna parte de la canción y suele dejarlo una herramienta al analizar: por eso no cuenta como preparación. Si tú pones ese cue como cue de entrada, marca la casilla. Un hot cue con otro nombre sí cuenta." />
+                        <TextBlock Text="{Binding AvisoCueInicial}" IsVisible="{Binding HayAvisoCueInicial}" TextWrapping="Wrap" Opacity="0.85" />
                         <WrapPanel ItemSpacing="12" LineSpacing="6">
                             <CheckBox Content="Sin hot cues" IsChecked="{Binding SinHotCues}" VerticalAlignment="Center" />
                             <CheckBox Content="Sin beatgrid" IsChecked="{Binding SinBeatgrid}" VerticalAlignment="Center" />
-                            <CheckBox Content="Contar el hot cue automático del primer tiempo como preparación" IsChecked="{Binding CueInicialCuenta}" VerticalAlignment="Center" />
+                            <CheckBox Content="Contar como preparación un único hot cue en el primer tiempo de compás" IsChecked="{Binding CueInicialCuenta}" VerticalAlignment="Center" />
                             <CheckBox Content="Solo canciones de la biblioteca" IsChecked="{Binding SoloBiblioteca}" VerticalAlignment="Center"
                                       ToolTip.Tip="Sin marcar, entran también las pistas de rekordbox que están en otras carpetas (por ejemplo, sus muestras)." />
                             <Button Content="Guardar como lista M3U8…" Click="GuardarSinPreparar_Click" IsEnabled="{Binding HayColeccion}"
@@ -232,7 +248,7 @@
                 <ScrollViewer Margin="0,8,0,0">
                     <StackPanel Spacing="8" MaxWidth="900" HorizontalAlignment="Left">
                         <TextBlock Classes="desc"
-                                   Text="Escribe un único archivo XML de rekordbox con una carpeta «BeatTag» que contiene las listas elegidas. En rekordbox se importa la carpeta entera de una vez, en lugar de un M3U8 tras otro, y al volver a exportar al mismo archivo rekordbox ve las listas al día. Solo entran las canciones que están en la biblioteca." />
+                                   Text="Escribe un único archivo XML de rekordbox con una carpeta «BeatTag» que contiene las listas elegidas. En rekordbox se importa la carpeta entera de una vez, en lugar de un M3U8 tras otro, y al volver a exportar al mismo archivo rekordbox ve las listas al día. Solo entran las canciones que están en la biblioteca. Abre antes la colección exportada de rekordbox: así cada canción que ya tiene se escribe con su misma ubicación, título y artista, también las que tiene con una ruta antigua, y no se añade otra vez." />
                         <CheckBox Content="Colecciones (en la subcarpeta «Colecciones»)" IsChecked="{Binding ExportarColecciones}" />
                         <CheckBox Content="Listas que sigues: se vuelven a leer de internet (en la subcarpeta «Listas»)" IsChecked="{Binding ExportarSeguidas}" />
                         <CheckBox Content="Listas abiertas en Tendencias y Playlists y sus órdenes para mezclar, y el orden del Asistente" IsChecked="{Binding ExportarListasAbiertas}" />

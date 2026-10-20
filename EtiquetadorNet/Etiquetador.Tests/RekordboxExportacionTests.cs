@@ -73,7 +73,7 @@ public class RekordboxExportacionTests : IDisposable
         Assert.Equal(1, r.Reparadas);
         Assert.Equal(1, r.SinCambio);
         Assert.Equal(antes, File.ReadAllText(origen));                       // el original, intacto
-        Assert.False(File.Exists(destino + ".tmp"));
+        Assert.Empty(Directory.GetFiles(_dir, "*.tmp", SearchOption.AllDirectories));   // ningún temporal suelto
 
         var doc = XDocument.Load(destino);
         var pistas = doc.Root!.Element("COLLECTION")!.Elements("TRACK").ToList();
@@ -102,6 +102,46 @@ public class RekordboxExportacionTests : IDisposable
         Assert.Equal(2, relectura.Pistas.Count);
         Assert.Equal(2, relectura.Listas);
         Assert.All(relectura.Pistas, p => Assert.Equal(1, p.HotCues));
+    }
+
+    // Un comentario de varias líneas (Comments="x&#10;y") se escribía con el salto tal cual, y al releer
+    // el XML un salto dentro de un atributo se convierte en espacio: la copia lo dejaba en «x y».
+    [Fact]
+    public void La_copia_reparada_conserva_los_saltos_de_linea_de_los_atributos()
+    {
+        var vieja = Path.Combine(_dir, "Vieja", "Tema.mp3");
+        var nueva = Archivo(Path.Combine("Nueva", "Tema.mp3"));
+        var origen = Path.Combine(_dir, "collection.xml");
+        var destino = Path.Combine(_dir, "reparada.xml");
+        File.WriteAllText(origen, ColeccionCon(("101", vieja, "Tema"), ("102", Archivo("Quieta.mp3"), "Quieta"))
+            .Replace("Comments=\"Pico de la noche\"", "Comments=\"Pico&#10;de la&#13;&#10;noche&#9;fin\""));
+
+        var r = RekordboxRelocator.Repair(origen, destino, new Dictionary<string, string> { [vieja] = nueva });
+
+        Assert.True(r.Ok, r.Error);
+        var comentarios = XDocument.Load(destino).Root!.Element("COLLECTION")!.Elements("TRACK").Select(t => (string?)t.Attribute("Comments")).ToList();
+        Assert.All(comentarios, c => Assert.Equal("Pico\nde la\r\nnoche\tfin", c));   // la reparada y la que no se toca
+    }
+
+    // Dos reparaciones al mismo destino ya no chocan en el mismo temporal abierto en exclusiva.
+    [Fact]
+    public void Otra_reparacion_al_mismo_destino_no_la_hace_fallar()
+    {
+        var vieja = Path.Combine(_dir, "Vieja", "Tema.mp3");
+        var nueva = Archivo(Path.Combine("Nueva", "Tema.mp3"));
+        var origen = Path.Combine(_dir, "collection.xml");
+        var destino = Path.Combine(_dir, "reparada.xml");
+        File.WriteAllText(origen, ColeccionCon(("101", vieja, "Tema")));
+
+        // Lo que dejaba abierto en exclusiva la otra reparación.
+        using (new FileStream(destino + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            var r = RekordboxRelocator.Repair(origen, destino, new Dictionary<string, string> { [vieja] = nueva });
+            Assert.True(r.Ok, r.Error);
+            Assert.Equal(1, r.Reparadas);
+            Assert.Equal(1, r.SoloMovidas);   // mismo nombre, otra carpeta
+        }
+        Assert.Equal(RekordboxRelocator.PathToLocation(nueva), LectorRekordbox.Leer(destino).Pistas.Single().Location);
     }
 
     [Fact]
@@ -158,6 +198,7 @@ public class RekordboxExportacionTests : IDisposable
                                           tituloDe: ruta => ComparadorRutas.Instancia.Equals(ruta, nueva) ? "Tití Me Preguntó" : "Otro título");
 
         Assert.Equal(2, r.Reparadas);
+        Assert.Equal(1, r.SoloMovidas);   // «Quieta.mp3» solo cambió de carpeta; la otra se renombró
         var pistas = XDocument.Load(destino).Root!.Element("COLLECTION")!.Elements("TRACK").ToList();
         Assert.Equal("Tití Me Preguntó", (string?)pistas.Single(t => (string?)t.Attribute("TrackID") == "7").Attribute("Name"));
         Assert.Equal("Quieta (Edit)", (string?)pistas.Single(t => (string?)t.Attribute("TrackID") == "8").Attribute("Name"));
@@ -210,7 +251,7 @@ public class RekordboxExportacionTests : IDisposable
         Assert.False(r.Ok);
         Assert.Contains("rekordbox", r.Error);
         Assert.False(File.Exists(destino));
-        Assert.False(File.Exists(destino + ".tmp"));
+        Assert.Empty(Directory.GetFiles(_dir, "*.tmp", SearchOption.AllDirectories));
     }
 
     // ---------------------------------------------------------------------------------------------

@@ -65,6 +65,9 @@ public sealed class FilaRota : IFilaConArchivo
     public string Como => R.Texto;
     public string NuevaRuta => R.NuevaRuta;
     public bool Reparable => R.Reparable;
+
+    /// <summary>«Sí» si se puede reparar y solo cambió de carpeta: rekordbox la puede reubicar él mismo.</summary>
+    public string MismoNombre => R.MismoNombre ? "Sí" : "";
     public string HotCues => R.Pista.SoloCueInicial ? "1 (automático)" : R.Pista.HotCues.ToString(CultureInfo.InvariantCulture);
     public int HotCuesOrden => R.Pista.SoloCueInicial ? 0 : R.Pista.HotCues;
     public int Reproducciones => R.Pista.Reproducciones;
@@ -92,6 +95,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
 
     private ColeccionRekordbox? _coleccion;
     private ResultadoCruce? _cruce;
+    private ColeccionRekordbox? _cruceDe;   // la colección con la que se hizo _cruce
     private CancellationTokenSource? _ctsCruce;
     private CancellationTokenSource? _ctsExportar;
     private int _vuelta;
@@ -104,7 +108,17 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
     [NotifyPropertyChangedFor(nameof(Libre))]
     private bool _isBusy;
 
-    public bool Libre => !IsBusy;
+    /// <summary>
+    /// Escribiendo la colección reparada. Va aparte de <see cref="IsBusy"/>: si la biblioteca cambia
+    /// mientras tanto, el cruce que se lanza solo lee y al terminar dejaba IsBusy a false con la
+    /// reparación aún en marcha; el botón volvía a estar activo y una segunda reparación iba a por el
+    /// mismo destino.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Libre))]
+    private bool _reparando;
+
+    public bool Libre => !IsBusy && !Reparando;
 
     [ObservableProperty] private string _infoColeccion = "Ninguna colección abierta.";
     [ObservableProperty] private bool _hayColeccion;
@@ -334,6 +348,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
             }, cts.Token);
             if (vuelta != _vuelta) return;
             _cruce = cruce;
+            _cruceDe = coleccion;
             Mostrar(cruce);
             Status = TextoCruce(cruce);
             _engine.Logger.Sum($"rekordbox: cruce en {reloj.ElapsedMilliseconds} ms · {cruce.FaltanEnRekordbox.Count} no están en rekordbox · "
@@ -359,6 +374,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
             .ToList();
         FaltanView = VistaTabla.Nueva(faltan, FaltanView);
         TituloFaltan = $"No están en rekordbox ({faltan.Count:N0})";
+        AvisoFaltan = TextoConRutaAntigua(cruce.ConRutaAntigua.Count);
 
         TituloRotas = $"Rutas rotas ({cruce.Rotas.Count:N0})";
         ResumenRotas = TextoRotas(cruce.Rotas);
@@ -367,6 +383,24 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
 
         AplicarFiltros();
     }
+
+    /// <summary>Cuántas canciones no salen en «No están en rekordbox» porque rekordbox las tiene con una ruta antigua, o "".</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HayAvisoFaltan))]
+    private string _avisoFaltan = "";
+
+    public bool HayAvisoFaltan => AvisoFaltan.Length > 0;
+
+    /// <summary>
+    /// El aviso de la pestaña (a). Esas canciones no están en la tabla: importarlas de nuevo antes de
+    /// reparar crearía pistas duplicadas sin cue points (ver <see cref="ResultadoCruce.ConRutaAntigua"/>).
+    /// </summary>
+    internal static string TextoConRutaAntigua(int n)
+        => n == 0 ? ""
+         : n == 1 ? "No se incluye 1 canción que rekordbox tiene con una ruta antigua (está en «Rutas rotas»). "
+                    + "Repara antes esa ruta: importarla de nuevo crearía una pista duplicada sin sus cue points, su beatgrid ni su valoración."
+         : $"No se incluyen {n:N0} canciones que rekordbox tiene con una ruta antigua (están en «Rutas rotas»). "
+           + "Repara antes esas rutas: importarlas de nuevo crearía pistas duplicadas sin sus cue points, su beatgrid ni su valoración.";
 
     /// <summary>Por qué «Nunca pinchadas» puede no servir con esta colección, o "".</summary>
     [ObservableProperty]
@@ -431,11 +465,33 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         var sinPreparar = base_.Where(p => CruceRekordbox.SinPreparar(p.Pista, SinHotCues, SinBeatgrid, CueInicialCuenta)).Select(Fila).ToList();
         SinPrepararView = VistaTabla.Nueva(sinPreparar, SinPrepararView);
         TituloSinPreparar = $"Sin preparar ({sinPreparar.Count:N0})";
+        AvisoCueInicial = SinHotCues && !CueInicialCuenta ? TextoCueInicial(base_.Count(p => p.Pista.SoloCueInicial)) : "";
 
         var nunca = base_.Where(p => CruceRekordbox.NuncaPinchada(p.Pista, meses, hoy)).Select(Fila).ToList();
         NuncaView = VistaTabla.Nueva(nunca, NuncaView);
         TituloNunca = $"Nunca pinchadas ({nunca.Count:N0})";
     }
+
+    /// <summary>Cuántas pistas salen como sin hot cues solo por el hot cue del primer tiempo, o "".</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HayAvisoCueInicial))]
+    private string _avisoCueInicial = "";
+
+    public bool HayAvisoCueInicial => AvisoCueInicial.Length > 0;
+
+    /// <summary>
+    /// Un hot cue sin nombre en el primer tiempo puede ser el que deja una herramienta al analizar o el
+    /// cue de entrada que pone a mano quien prepara la pista (ver <see cref="PistaRekordbox.SoloCueInicial"/>).
+    /// Se dice cuántas pistas están en ese caso, para que quien lo hace a mano sepa que tiene que marcar
+    /// la casilla. MEDIDO en la colección real: 9.213 de las 9.213 pistas de la biblioteca, todas con el
+    /// «1.1Bars» del análisis.
+    /// </summary>
+    internal static string TextoCueInicial(int n)
+        => n == 0 ? ""
+         : n == 1 ? "En 1 pista, el único marcador es un hot cue en el primer tiempo de compás, y se cuenta como sin hot cues. "
+                    + "Si ese cue lo pusiste tú como cue de entrada, marca la casilla para contarlo como preparación."
+         : $"En {n:N0} pistas, el único marcador es un hot cue en el primer tiempo de compás, y se cuentan como sin hot cues. "
+           + "Si esos cues los pusiste tú como cue de entrada, marca la casilla para contarlos como preparación.";
 
     private static FilaRekordbox Fila(PistaPresente p)
         => p.Cancion is { } t
@@ -455,6 +511,16 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
             : $"{c.Rotas.Count:N0} entradas de rekordbox apuntan a archivos que no existen",
         };
         var texto = string.Join("; ", partes) + ".";
+        // Lo primero que hay que hacer con ellas es reparar, no importar (ver ResultadoCruce.ConRutaAntigua).
+        var antiguas = c.ConRutaAntigua.Count;
+        if (antiguas > 0 && c.FaltanEnRekordbox.Count == 0)
+            texto += antiguas == 1
+                ? " 1 de ellas, con una ruta antigua: repara antes su ruta y no la importes de nuevo."
+                : $" {antiguas:N0} de ellas, con una ruta antigua: repara antes sus rutas y no las importes de nuevo.";
+        else if (antiguas > 0)
+            texto += antiguas == 1
+                ? " Otra canción de la biblioteca está en rekordbox con una ruta antigua: repara antes su ruta y no la importes de nuevo."
+                : $" Otras {antiguas:N0} canciones de la biblioteca están en rekordbox con una ruta antigua: repara antes sus rutas y no las importes de nuevo.";
         if (c.FueraDeBiblioteca > 0)
             texto += c.FueraDeBiblioteca == 1
                 ? " 1 pista de rekordbox está fuera de las carpetas de la biblioteca."
@@ -492,10 +558,25 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         if (reparables == 0)
             return (rotas.Count == 1 ? "La entrada rota no se puede reparar desde aquí: " : $"Ninguna de las {rotas.Count:N0} entradas rotas se puede reparar desde aquí: ")
                  + string.Join(", ", resto) + ".";
-        var texto = $"Se pueden reparar {reparables:N0} de {rotas.Count:N0}: {string.Join(", ", detalle)}.";
+        var texto = reparables == 1 && rotas.Count == 1 ? $"La entrada rota se puede reparar: {detalle[0][2..]}."
+                  : reparables == 1 ? $"Se puede reparar 1 de {rotas.Count:N0}: {string.Join(", ", detalle)}."
+                  : $"Se pueden reparar {reparables:N0} de {rotas.Count:N0}: {string.Join(", ", detalle)}.";
+        texto += TextoSoloMovidas(rotas.Count(r => r.MismoNombre), reparables);
         if (resto.Count > 0) texto += " De las demás, " + string.Join(", ", resto) + ".";
         return texto;
     }
+
+    /// <summary>
+    /// Cuántas de las reparables solo cambiaron de carpeta (columna «Mismo nombre»). Para esas, la
+    /// reubicación de archivos no encontrados de rekordbox es lo más seguro: no crea pistas nuevas y
+    /// conserva las listas y el historial (ver los pasos de la pestaña). MEDIDO en la colección real:
+    /// 2.752 de las 3.375 reparables.
+    /// </summary>
+    private static string TextoSoloMovidas(int soloMovidas, int reparables)
+        => soloMovidas == 0 ? ""
+         : soloMovidas == reparables ? (reparables == 1 ? " Conserva el nombre de archivo: solo ha cambiado de carpeta." : " Todas conservan el nombre de archivo: solo han cambiado de carpeta.")
+         : soloMovidas == 1 ? " 1 de ellas conserva el nombre de archivo: solo ha cambiado de carpeta."
+         : $" {soloMovidas:N0} de ellas conservan el nombre de archivo: solo han cambiado de carpeta.";
 
     // --- Exportar a M3U8 (a, c, d) ---
 
@@ -563,8 +644,8 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         if (_cruce == null || origen.Length == 0) { Status = "Abre antes la colección exportada de rekordbox."; return; }
         var mapa = CruceRekordbox.MapaReparacion(_cruce.Rotas);
         if (mapa.Count == 0) { Status = "No hay ninguna entrada rota que se pueda reparar."; return; }
-        if (IsBusy) return;
-        IsBusy = true;
+        if (Reparando) return;
+        Reparando = true;
         Status = "Escribiendo la colección reparada…";
         // El título de cada archivo nuevo, de la biblioteca (ver RekordboxRelocator.Repair).
         var titulos = new Dictionary<string, string>(ComparadorRutas.Instancia);
@@ -575,21 +656,40 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
             var r = await Task.Run(() => RekordboxRelocator.Repair(origen, destino, mapa, conLista: true,
                                                                    tituloDe: ruta => titulos.GetValueOrDefault(ruta)));
             if (!r.Ok) { Status = "No se pudo reparar: " + r.Error; return; }
-            Status = TextoReparada(r.Reparadas, Path.GetFileName(destino));
-            _engine.Logger.Sum($"rekordbox: colección reparada en «{destino}»: {r.Reparadas} reparadas · {r.SinCambio} sin cambio · {r.NoEncontradas} no encontradas.");
+            Status = TextoReparada(r.Reparadas, r.SoloMovidas, Path.GetFileName(destino));
+            _engine.Logger.Sum($"rekordbox: colección reparada en «{destino}»: {r.Reparadas} reparadas ({r.SoloMovidas} solo movidas de carpeta) · "
+                             + $"{r.SinCambio} sin cambio · {r.NoEncontradas} no encontradas.");
         }
         catch (Exception e) { Status = "No se pudo reparar: " + e.Message; }
-        finally { IsBusy = false; }
+        finally { Reparando = false; }
     }
 
-    internal static string TextoReparada(int reparadas, string archivo)
-        => reparadas == 0
-            ? "No había ninguna ruta que reparar: los archivos ya están en su sitio o ya no existen."
-            : (reparadas == 1 ? $"1 ruta reparada en «{archivo}». " : $"{reparadas:N0} rutas reparadas en «{archivo}». ")
-              + "Para llevarla a rekordbox: en Preferencias → Avanzado → rekordbox xml, elige ese archivo; después, en el apartado "
-              + $"«rekordbox xml» de la izquierda, abre la lista «{RekordboxRelocator.ListaReparadas}», selecciona sus pistas e impórtalas a la colección. "
-              + "Llegan con sus cue points, su beatgrid, su valoración y sus comentarios. Las entradas antiguas siguen en la colección como "
-              + "archivos no encontrados: cuando compruebes que las reparadas están bien, puedes quitarlas.";
+    /// <summary>
+    /// Lo que se dice tras guardar la colección reparada. Importar a la colección crea pistas NUEVAS
+    /// (con otra Location): las listas de reproducción y el historial de rekordbox siguen apuntando a
+    /// las entradas antiguas. Antes se aconsejaba quitar las antiguas una vez comprobadas, y eso sacaba
+    /// esas canciones de todas las listas del DJ. Ahora se advierte de ello, y para las que solo
+    /// cambiaron de carpeta se remite a la reubicación del propio rekordbox, que no crea pistas nuevas.
+    /// Los pasos completos están en la pestaña «Rutas rotas».
+    /// </summary>
+    internal static string TextoReparada(int reparadas, int soloMovidas, string archivo)
+    {
+        if (reparadas == 0) return "No había ninguna ruta que reparar: los archivos ya están en su sitio o ya no existen.";
+        var texto = (reparadas == 1 ? $"1 ruta reparada en «{archivo}». " : $"{reparadas:N0} rutas reparadas en «{archivo}». ")
+                  + $"Para llevarlas a rekordbox, importa a la colección las pistas de la lista «{RekordboxRelocator.ListaReparadas}» "
+                  + "(los pasos están en esta pestaña). Entran como pistas nuevas, con sus cue points, su beatgrid y su valoración; "
+                  + "tus listas de reproducción y tu historial siguen apuntando a las entradas antiguas, así que no las quites "
+                  + "sin importar antes, desde esta copia, las listas que las contienen.";
+        if (soloMovidas > 0)
+            texto += soloMovidas == reparadas
+                ? (reparadas == 1
+                    ? " Esta solo ha cambiado de carpeta: la reubicación de archivos no encontrados de rekordbox la recupera sin crear una pista nueva."
+                    : " Todas solo han cambiado de carpeta: la reubicación de archivos no encontrados de rekordbox las recupera sin crear pistas nuevas.")
+                : (soloMovidas == 1
+                    ? " 1 de ellas solo ha cambiado de carpeta: la reubicación de archivos no encontrados de rekordbox la recupera sin crear una pista nueva."
+                    : $" {soloMovidas:N0} de ellas solo han cambiado de carpeta: la reubicación de archivos no encontrados de rekordbox las recupera sin crear pistas nuevas.");
+        return texto;
+    }
 
     // =============================================================================================
     // P11: exportar las listas de BeatTag
@@ -663,17 +763,28 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
             var porRuta = new Dictionary<string, Track>(ComparadorRutas.Instancia);
             foreach (var t in canciones) porRuta.TryAdd(t.FilePath, t);
             listas = SinRepetidas(SoloDeLaBiblioteca(listas, porRuta));
-            var locations = LocationsConocidas(porRuta);
+            // Con la colección abierta, cada archivo que rekordbox ya tiene se nombra como lo tiene él,
+            // también los que tiene con una ruta antigua (ver EntradasParaExportar).
+            var coleccion = _coleccion;
+            // Solo si el cruce es de esta misma colección (si el último falló, sería de la anterior).
+            var antiguas = _cruce != null && ReferenceEquals(_cruceDe, coleccion) ? _cruce.EntradaAntigua : null;
+            var conRutaAntigua = ConRutaAntigua(listas, antiguas);
 
             Status = "Escribiendo el XML para rekordbox…";
-            var r = await Task.Run(() => ExportadorRekordbox.Escribir(destino, listas, ruta => DatosDe(porRuta, ruta), locations), ct);
+            var r = await Task.Run(() =>
+            {
+                var entradas = coleccion == null ? null : EntradasParaExportar(coleccion.Pistas, porRuta, antiguas);
+                var locations = entradas?.ToDictionary(kv => kv.Key, kv => kv.Value.Location, ComparadorRutas.Instancia);
+                return ExportadorRekordbox.Escribir(destino, listas, ruta => DatosDe(porRuta, entradas, ruta), locations);
+            }, ct);
             if (!r.Ok) { Status = "No se ha exportado: " + r.Error + Errores(errores); return; }
 
             _engine.Config.RekordboxExportacion = destino;
             _engine.SaveConfig();
             UltimaExportacion = destino;
-            Status = TextoExportado(r, Path.GetFileName(destino)) + Errores(errores);
-            _engine.Logger.Sum($"rekordbox: exportadas {r.Listas} listas ({r.Pistas} canciones) a «{destino}»" + (errores.Count > 0 ? $"; {errores.Count} listas seguidas sin leer" : "") + ".");
+            Status = TextoExportado(r, Path.GetFileName(destino), conRutaAntigua) + Errores(errores);
+            _engine.Logger.Sum($"rekordbox: exportadas {r.Listas} listas ({r.Pistas} canciones, {conRutaAntigua} con la ruta antigua de rekordbox) a «{destino}»"
+                             + (errores.Count > 0 ? $"; {errores.Count} listas seguidas sin leer" : "") + ".");
             foreach (var e in errores) _engine.Logger.Detail("rekordbox: " + e);
         }
         catch (OperationCanceledException) { Status = "Exportación cancelada. No se ha escrito nada."; }
@@ -734,11 +845,17 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
          : errores.Count == 1 ? " No se pudo leer una de las listas que sigues: " + errores[0]
          : $" No se pudieron leer {errores.Count} de las listas que sigues; el detalle está en el registro.";
 
-    internal static string TextoExportado(ResultadoExportacionRekordbox r, string archivo)
+    internal static string TextoExportado(ResultadoExportacionRekordbox r, string archivo, int conRutaAntigua = 0)
         => (r.Listas == 1 ? "1 lista exportada" : $"{r.Listas:N0} listas exportadas")
          + $" con {Cuenta(r.Pistas, "canción", "canciones")} a «{archivo}»"
          + (r.Vacias == 0 ? "." : r.Vacias == 1 ? " (1 lista sin canciones de la biblioteca no se incluye)." : $" ({r.Vacias} listas sin canciones de la biblioteca no se incluyen).")
-         + " En rekordbox, abre el apartado «rekordbox xml», haz clic derecho en la carpeta «BeatTag» e impórtala.";
+         + " En rekordbox, abre el apartado «rekordbox xml», haz clic derecho en la carpeta «BeatTag» e impórtala."
+         + (conRutaAntigua == 0 ? ""
+            : conRutaAntigua == 1
+                ? " 1 canción está en rekordbox con una ruta antigua: la lista apunta a esa entrada, con sus cue points, y rekordbox "
+                  + "la mostrará como archivo no encontrado hasta que repares su ruta (pestaña «Rutas rotas»)."
+                : $" {conRutaAntigua:N0} canciones están en rekordbox con una ruta antigua: las listas apuntan a esas entradas, con sus cue points, y rekordbox "
+                  + "las mostrará como archivos no encontrados hasta que repares sus rutas (pestaña «Rutas rotas»).");
 
     private Dictionary<string, FichaDj> FichasActuales()
     {
@@ -748,36 +865,64 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         return fichas;
     }
 
-    /// <summary>La Location que ya tiene cada archivo en rekordbox, si se ha abierto su colección.</summary>
-    private Dictionary<string, string>? LocationsConocidas(IReadOnlyDictionary<string, Track> porRuta)
-        => _coleccion == null ? null : LocationsDeRekordbox(_coleccion.Pistas, porRuta);
-
     /// <summary>
-    /// La Location de cada archivo tal como la tiene rekordbox. Si tiene dos entradas del mismo archivo
-    /// que solo se diferencian en mayúsculas, se elige la que se escribe como el archivo de hoy.
+    /// La entrada de rekordbox de cada archivo. Si tiene dos entradas del mismo archivo que solo se
+    /// diferencian en mayúsculas, se elige la que se escribe como el archivo de hoy.
     ///
     /// MEDIDO en la colección real (19.690 pistas): rekordbox distingue mayúsculas en la Location y
     /// tenía 8 archivos con dos entradas, «…(No More Love On the Run).mp3» y «…(No More Love on the
     /// Run).mp3», la de antes y la de después de corregir el nombre. Quedándose con la primera, la
     /// lista podía apuntar a la entrada vieja.
     /// </summary>
-    internal static Dictionary<string, string> LocationsDeRekordbox(IEnumerable<PistaRekordbox> pistas, IReadOnlyDictionary<string, Track> porRuta)
+    internal static Dictionary<string, PistaRekordbox> EntradasDeRekordbox(IEnumerable<PistaRekordbox> pistas, IReadOnlyDictionary<string, Track> porRuta)
     {
-        var d = new Dictionary<string, (string Ruta, string Location)>(ComparadorRutas.Instancia);
+        var d = new Dictionary<string, PistaRekordbox>(ComparadorRutas.Instancia);
         foreach (var p in pistas)
         {
-            if (!d.TryGetValue(p.Ruta, out var ya)) { d[p.Ruta] = (p.Ruta, p.Location); continue; }
+            if (!d.TryGetValue(p.Ruta, out var ya)) { d[p.Ruta] = p; continue; }
             var hoy = porRuta.TryGetValue(p.Ruta, out var t) ? t.FilePath : "";
             if (!string.Equals(ya.Ruta, hoy, StringComparison.Ordinal) && string.Equals(p.Ruta, hoy, StringComparison.Ordinal))
-                d[p.Ruta] = (p.Ruta, p.Location);
+                d[p.Ruta] = p;
         }
-        return d.ToDictionary(kv => kv.Key, kv => kv.Value.Location, ComparadorRutas.Instancia);
+        return d;
     }
 
-    internal static DatosPistaRekordbox DatosDe(IReadOnlyDictionary<string, Track> porRuta, string ruta)
-        => porRuta.TryGetValue(ruta, out var t)
-            ? new DatosPistaRekordbox(t.Title ?? "", t.Artist ?? "")
-            : new DatosPistaRekordbox("", "");
+    /// <summary>
+    /// La entrada con la que rekordbox conoce cada archivo de las listas: la suya con la ruta de hoy
+    /// o, si solo la tiene con una ruta antigua (una entrada rota que apunta a ese archivo), esa.
+    ///
+    /// POR QUÉ LA ANTIGUA. Con la ruta de hoy, rekordbox no reconoce la pista y, al importar la lista,
+    /// la añade otra vez: un duplicado sin cue points, sin beatgrid y sin valoración, y en el cruce
+    /// siguiente la entrada rota ya no se repararía (su archivo pasaría a estar en rekordbox). MEDIDO
+    /// con la colección real: 3.378 de las 13.590 canciones de la biblioteca solo estaban en rekordbox
+    /// con una ruta antigua. Con la antigua, la lista apunta a la pista que ya tiene, con su
+    /// preparación, que se ve como archivo no encontrado hasta que se repara.
+    /// </summary>
+    internal static Dictionary<string, PistaRekordbox> EntradasParaExportar(IEnumerable<PistaRekordbox> pistas, IReadOnlyDictionary<string, Track> porRuta,
+                                                                          IReadOnlyDictionary<string, PistaRekordbox>? antiguas)
+    {
+        var d = EntradasDeRekordbox(pistas, porRuta);
+        if (antiguas != null)
+            foreach (var kv in antiguas) d.TryAdd(kv.Key, kv.Value);
+        return d;
+    }
+
+    /// <summary>Cuántos archivos distintos de las listas están en rekordbox solo con una ruta antigua.</summary>
+    internal static int ConRutaAntigua(IEnumerable<ListaParaRekordbox> listas, IReadOnlyDictionary<string, PistaRekordbox>? antiguas)
+        => antiguas == null || antiguas.Count == 0 ? 0
+         : listas.SelectMany(l => l.Rutas).Distinct(ComparadorRutas.Instancia).Count(antiguas.ContainsKey);
+
+    /// <summary>
+    /// El título y el artista que se escriben de cada pista. Si rekordbox ya la tiene (se sabe si se ha
+    /// abierto su colección), los suyos, tal como los tiene: la especificación del XML no dice si al
+    /// importar una lista rekordbox aplica el Name y el Artist a una pista que ya tiene, y así, aunque
+    /// lo hiciera, no cambiaría nada. Si no la tiene, los de las etiquetas del archivo, que son los que
+    /// leería él al añadirla.
+    /// </summary>
+    internal static DatosPistaRekordbox DatosDe(IReadOnlyDictionary<string, Track> porRuta, IReadOnlyDictionary<string, PistaRekordbox>? entradas, string ruta)
+        => entradas != null && entradas.TryGetValue(ruta, out var p) ? new DatosPistaRekordbox(p.Nombre, p.Artista)
+         : porRuta.TryGetValue(ruta, out var t) ? new DatosPistaRekordbox(t.Title ?? "", t.Artist ?? "")
+         : new DatosPistaRekordbox("", "");
 
     /// <summary>
     /// Cada colección con sus canciones, en el mismo orden que en la página Colecciones: por BPM (las

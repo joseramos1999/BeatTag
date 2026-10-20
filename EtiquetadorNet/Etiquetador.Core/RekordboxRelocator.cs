@@ -7,6 +7,12 @@ namespace Etiquetador.Core;
 public sealed record RelocateResult(int Reparadas, int SinCambio, int NoEncontradas, string Error = "")
 {
     public bool Ok => Error.Length == 0;
+
+    /// <summary>
+    /// De las reparadas, las que conservan el nombre de archivo y solo cambiaron de carpeta: esas las
+    /// puede reubicar el propio rekordbox sin crear pistas nuevas (ver <see cref="PistaRota.MismoNombre"/>).
+    /// </summary>
+    public int SoloMovidas { get; init; }
 }
 
 /// <summary>
@@ -274,7 +280,9 @@ public static class RekordboxRelocator
         var porRuta = new Dictionary<string, string>(ComparadorRutas.Instancia);
         foreach (var kv in mapa) porRuta[kv.Key] = kv.Value;
 
-        var tmp = destino + ".tmp";
+        // Un temporal propio de esta llamada: con «destino.tmp», dos reparaciones al mismo destino (dos
+        // clics seguidos) chocaban en el mismo archivo abierto en exclusiva y una de las dos fallaba.
+        var tmp = $"{destino}.{Guid.NewGuid():N}.tmp";
         try
         {
             var dir = Path.GetDirectoryName(destino);
@@ -287,14 +295,19 @@ public static class RekordboxRelocator
             using (var escritor = XmlWriter.Create(salida, new XmlWriterSettings
                    {
                        Encoding = new System.Text.UTF8Encoding(false), CheckCharacters = false,
-                       NewLineHandling = NewLineHandling.None,
+                       // Los saltos de línea y tabuladores de los atributos (un comentario de varias
+                       // líneas: Comments="x&#10;y") se escriben como referencia. Con None salían tal
+                       // cual, y al releer el XML un salto dentro de un atributo se convierte en un
+                       // espacio: la copia perdía el formato de esos comentarios. Entitize conserva
+                       // exactamente lo que se leyó, también en el texto entre etiquetas.
+                       NewLineHandling = NewLineHandling.Entitize,
                    }))
             {
                 copia = new Copia(porRuta, conLista, tituloDe);
                 copia.Copiar(lector, escritor, ct);
             }
             File.Move(tmp, destino, overwrite: true);
-            return new RelocateResult(copia.Reparadas, copia.SinCambio, copia.NoEncontradas);
+            return new RelocateResult(copia.Reparadas, copia.SinCambio, copia.NoEncontradas) { SoloMovidas = copia.SoloMovidas };
         }
         catch (OperationCanceledException) { throw; }
         catch (RekordboxXmlException e) { return new RelocateResult(0, 0, 0, e.Message); }
@@ -327,7 +340,7 @@ public static class RekordboxRelocator
         private readonly bool _conLista;
         private readonly Func<string, string?>? _tituloDe;
         private readonly List<(string Id, string Location)> _reparadas = new();
-        public int Reparadas, SinCambio, NoEncontradas;
+        public int Reparadas, SinCambio, NoEncontradas, SoloMovidas;
 
         public Copia(Dictionary<string, string> mapa, bool conLista, Func<string, string?>? tituloDe)
         {
@@ -462,6 +475,7 @@ public static class RekordboxRelocator
                     // de carpeta (mismo nombre), el Name es el título que puso rekordbox y se respeta.
                     var renombrado = !ComparadorRutas.Instancia.Equals(Path.GetFileNameWithoutExtension(actual),
                                                                       Path.GetFileNameWithoutExtension(nueva));
+                    if (ComparadorRutas.Instancia.Equals(Path.GetFileName(actual), Path.GetFileName(nueva))) SoloMovidas++;
                     var titulo = (_tituloDe?.Invoke(nueva) ?? "").Trim();
                     var nombreNuevo = titulo.Length > 0 ? titulo : Path.GetFileNameWithoutExtension(nueva);
                     CopiarAtributos(r, w, (n, v) => n == "Location" ? nuevaLocation
