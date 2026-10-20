@@ -376,7 +376,9 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
         var error = Almacen.Guardar();
         _corregidos.Add(a.Clave);
         RellenarArtistas();
-        Status = $"«{a.Nombre}» se volverá a buscar en Deezer en la próxima búsqueda."
+        Status = (a.Excluido
+                     ? $"«{a.Nombre}» se volverá a buscar en Deezer en la primera búsqueda después de volver a incluirlo."
+                     : $"«{a.Nombre}» se volverá a buscar en Deezer en la próxima búsqueda.")
                + (error.Length > 0 ? $" No se ha podido guardar: {error}" : "");
     }
 

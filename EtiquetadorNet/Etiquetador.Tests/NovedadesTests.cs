@@ -262,6 +262,7 @@ public class NovedadesTests
             Lanzamiento(15, "Sentimientos Escondidos (Versión Chile)", "2020-04-03"),
             Lanzamiento(16, "Velvet Cake (Tiësto Remix)", "2025-09-12"),
             Lanzamiento(17, "Satalanaaa", "2026-06-05"),
+            Lanzamiento(18, "Pinterest (Portuguese)", "2026-03-06"),
         };
         var desde = NovedadesDeezer.Desde(Hoy, 30);
         (DateTime, string)? Antes(string titulo) => NovedadesDeezer.PublicadaEnElCatalogo(Pista(titulo, album), catalogo, desde);
@@ -274,6 +275,7 @@ public class NovedadesTests
         Assert.Null(Antes("Velvet Cake (Remix)"));                           // un «Remix» a secas no es el de Tiësto
         Assert.Null(Antes("Satalanaaa (Live in Malta Remix)"));
         Assert.Null(Antes("Temperature - Instrumental"));                    // la versión tras un guion también cuenta
+        Assert.Null(Antes("Pinterest (Spanish)"));                           // la versión en otro idioma
         Assert.True(Pista("UUU (EN VIVO)", album).EsEstreno);
     }
 

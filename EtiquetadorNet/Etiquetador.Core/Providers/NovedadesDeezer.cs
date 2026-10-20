@@ -378,11 +378,15 @@ public sealed class NovedadesDeezer
     /// Version)»; ver <see cref="VersionesDelTitulo"/>), el lanzamiento anterior tiene que nombrar esa
     /// misma versión. Al revés sí cuenta: «Monaco» en el álbum nuevo, con un «Monaco (Remix)» de hace
     /// años, ya había salido. MEDIDO con 200 artistas y 90 días (934 canciones): comparando solo el
-    /// título sin versión, unas 20 de las 146 «publicadas antes» eran remezclas y directos nuevos, con
-    /// el ISRC del año («No Te Hagas (Remix)» frente al single «No Te Hagas» de 2025, «UUU (EN VIVO)»,
-    /// «Temperature (GAMEBOYS RMX) (Radio Edit)» frente a «Temperature» de 2006), y «Solo estrenos»
-    /// los escondía: justo lo que más interesa a un DJ. Una grabación antigua de verdad no se pierde
-    /// por esto: su ISRC lo delata y se le pregunta a Deezer (<see cref="MerecePreguntarPorIsrc"/>).
+    /// título sin versión, 23 de las 146 «publicadas antes» eran remezclas, directos y versiones
+    /// nuevos, todos con un ISRC de ese año o del anterior («No Te Hagas (Remix)» frente al single «No
+    /// Te Hagas» de 2025, «UUU (EN VIVO)», «Temperature (GAMEBOYS RMX) (Radio Edit)» frente a
+    /// «Temperature» de 2006), y «Solo estrenos» los escondía: justo lo que más interesa a un DJ. Con
+    /// esta regla quedan 123, y ninguna de esas 23 vuelve a salir como publicada. Una grabación
+    /// antigua de verdad no se pierde: su ISRC lo delata y se le pregunta a Deezer
+    /// (<see cref="MerecePreguntarPorIsrc"/>). En la misma medición, «We Found Love (Calvin Harris
+    /// Extended Mix)» pasó así de «We Found Love (The Remixes)» a «We Found Love (Extended Version)»
+    /// de 2011, que es donde salió de verdad.
     /// </summary>
     public static (DateTime Fecha, string Lanzamiento)? PublicadaEnElCatalogo(PistaNovedad pista,
         IEnumerable<LanzamientoDeezer> catalogo, DateTime desde)
@@ -403,11 +407,13 @@ public sealed class NovedadesDeezer
 
     /// <summary>
     /// Palabras que nombran una grabación distinta de la original: remezclas, ediciones de DJ,
-    /// directos, acústicos, versiones con nombre («Versión Salsa»), aceleradas… Se buscan en el texto
-    /// ya en minúsculas y sin acentos («Versión» → «version», «Acústico» → «acustico»).
+    /// directos, acústicos, versiones con nombre («Versión Salsa») o en otro idioma («(Spanish)»),
+    /// aceleradas… Se buscan en el texto ya en minúsculas y sin acentos («Versión» → «version»,
+    /// «Acústico» → «acustico»). MEDIDO en la misma búsqueda: «Pinterest (Spanish)» se daba por
+    /// publicada en «Pinterest (Portuguese)».
     /// </summary>
     private static readonly Regex NombraVersion = new(
-        @"\b(?:remix(?:es)?|rmx|mix|edit|re ?edit|refix|rework|flip|bootleg|vip|dub|extended|live|en vivo|en directo|directo|unplugged|acoustic|acustic[oa]|version|versiones|sessions?|cover|mashup|blend|slowed|sped up|instrumental|acapella|a ?cappella)\b",
+        @"\b(?:remix(?:es)?|rmx|mix|edit|re ?edit|refix|rework|flip|bootleg|vip|dub|extended|live|en vivo|en directo|directo|unplugged|acoustic|acustic[oa]|version|versiones|sessions?|cover|mashup|blend|slowed|sped up|instrumental|acapella|a ?cappella|spanish|english|portuguese|french|italian|german|espanol|ingles|portugues|frances|italiano)\b",
         RegexOptions.CultureInvariant);
 
     /// <summary>
