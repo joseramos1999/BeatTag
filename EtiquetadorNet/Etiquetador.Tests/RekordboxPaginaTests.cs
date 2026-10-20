@@ -274,6 +274,24 @@ public class RekordboxPaginaTests
         Assert.Equal(new[] { lenta.FilePath, rapida.FilePath, sinBpm.FilePath }, l.Rutas);
     }
 
+    // «Reparar colección de rekordbox» en Ajustes salta a la página por su número: si alguien renumera
+    // las páginas y deja la constante, el botón llevaría a otra sin que nada falle al compilar.
+    [Fact]
+    public void Ajustes_salta_a_la_pagina_rekordbox()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Etiquetador.App", "ViewModels", "MainViewModel.cs")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        var vm = File.ReadAllText(Path.Combine(dir!.FullName, "Etiquetador.App", "ViewModels", "MainViewModel.cs"));
+
+        var constante = System.Text.RegularExpressions.Regex.Match(vm, @"const int RekordboxTabIndex = (\d+);");
+        var enLaBarra = System.Text.RegularExpressions.Regex.Match(vm, @"Indice = (\d+),[^\n]*Nombre = ""rekordbox""");
+        Assert.True(constante.Success && enLaBarra.Success);
+        Assert.Equal(enLaBarra.Groups[1].Value, constante.Groups[1].Value);
+        Assert.Contains("Settings.AbrirRekordboxPedido += () => SelectedTabIndex = RekordboxTabIndex;", vm);
+    }
+
     // La colección exportada que se ha abierto no se sustituye por las listas, la escriba quien la escriba.
     [Fact]
     public void No_se_exporta_encima_de_la_coleccion_abierta()

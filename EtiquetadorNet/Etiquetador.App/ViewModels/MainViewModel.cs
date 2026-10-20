@@ -187,7 +187,7 @@ public partial class MainViewModel : ViewModelBase
                     new() { Indice = 2,  Icono = "✏",  Nombre = "Editor",     Vm = Editor, Ocupada = () => Editor.IsBusy },
                     // Sin «Ocupada»: solo lee el XML exportado y escribe otros XML y listas, nunca la música,
                     // así que no bloquea el resto de la aplicación (equipo «rekordbox», tanda 4).
-                    new() { Indice = RekordboxTabIndex, Icono = "🎛", Nombre = "rekordbox", Vm = Rekordbox },
+                    new() { Indice = 19, Icono = "🎛", Nombre = "rekordbox", Vm = Rekordbox },
                 },
             },
             new()
