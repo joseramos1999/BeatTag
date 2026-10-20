@@ -454,15 +454,18 @@ public class HistorialDeshacerTests : IDisposable
         Assert.True(solape.PierdeDeshacer);
         Assert.Equal("run_20261002_100000", Assert.Single(analisis.Posteriores).Id);
 
-        // Y es verdad lo que se avisa: el título del Editor se conserva, el archivo vuelve a su
-        // nombre y la ejecución posterior ya no lo encuentra.
+        // Y es verdad lo que se avisa: el título del Editor se conserva y el archivo vuelve a su
+        // nombre. La ejecución posterior lo sigue hasta ese nombre (hallazgo datos-1): antes se
+        // quedaba como «no encontrada» y su cambio ya no se podía deshacer.
         var undo = new UndoEngine(_paths);
         var res = undo.DeshacerCambios(lote.Manifiesto!, analisis.Huellas);
         Assert.Equal(2, res.Reverted);
         Assert.True(File.Exists(p0));
         Assert.Equal("MONACO", Mp3Fixture.GetTitle(p0));
         Assert.Equal("o0", Mp3Fixture.GetTitle(otra));
-        Assert.Equal(1, undo.UndoLastRun().Missing);
+        var posterior = undo.UndoLastRun();
+        Assert.Equal((1, 0), (posterior.Reverted, posterior.Missing));
+        Assert.Equal("Monaco", Mp3Fixture.GetTitle(p0));
     }
 
     [Fact]

@@ -994,7 +994,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         var vuelven = 0;
         try
         {
-            res = await Task.Run(() => _engine.Undo.UndoLastRun());
+            res = await Task.Run(_engine.DeshacerUltima);   // con las cachés de audio al día (datos-3)
             vuelven = await AsentarDeshacerAsync(res);
         }
         finally { IsBusy = false; }
@@ -1598,7 +1598,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         var vuelven = 0;
         try
         {
-            res = await Task.Run(() => _engine.Undo.DeshacerCambios(manifiesto, huellas));
+            res = await Task.Run(() => _engine.DeshacerCambios(manifiesto, huellas));
             vuelven = await AsentarDeshacerAsync(res);
         }
         finally { IsBusy = false; }

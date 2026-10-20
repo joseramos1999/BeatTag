@@ -408,6 +408,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 FinalPath = ruta,
                 Renamed = false,
                 Fields = new Dictionary<string, FieldChange> { [UndoEngine.VolumeField] = cambio },
+                Origen = nameof(TipoEjecucion.Volumen),
             };
 
             File.AppendAllText(archivo,

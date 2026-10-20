@@ -443,6 +443,9 @@ public static class EdicionManual
             {
                 OrigPath = origen, FinalPath = final, Renamed = renombrado,
                 Fields = new Dictionary<string, FieldChange>(cambios),
+                // Sin esto, una edición que solo cambia el género salía en el historial como
+                // «Géneros», igual que Unificar géneros: los campos no las distinguen.
+                Origen = nameof(TipoEjecucion.EdicionEtiquetas),
             };
             File.AppendAllText(manifiesto, JsonSerializer.Serialize(rec) + Environment.NewLine, Encoding.UTF8);
             return "";

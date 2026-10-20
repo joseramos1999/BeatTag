@@ -122,7 +122,7 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
                             if (log.Count > 0)
                             {
                                 u++;
-                                var rec = new UndoRecord { OrigPath = t.FilePath, FinalPath = t.FilePath, Renamed = false, Fields = log };
+                                var rec = new UndoRecord { OrigPath = t.FilePath, FinalPath = t.FilePath, Renamed = false, Fields = log, Origen = nameof(TipoEjecucion.Rekordbox) };
                                 lines.Add(System.Text.Json.JsonSerializer.Serialize(rec));
                             }
                         }

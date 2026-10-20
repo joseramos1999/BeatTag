@@ -38,9 +38,14 @@ public sealed class ApplyEngine
     /// No encontradas. Queda en el manifiesto (<see cref="UndoRecord.Aplicada"/>) para que deshacer
     /// sepa qué devolver a pendientes. Incompletas no lo hace: no lleva a aplicadas.json.
     /// </param>
+    /// <param name="origen">
+    /// Qué operación es, para el historial (<see cref="UndoRecord.Origen"/>, con el nombre de un
+    /// <see cref="TipoEjecucion"/>). Sin él: «Aplicar propuestas» si se da por aplicada y «Edición de
+    /// etiquetas» si no (Incompletas).
+    /// </param>
     public async Task<ApplyOneResult> ApplyOneAsync(ProcessResult info, bool over, FieldFlags fields,
         string coverMode, TagLib.Picture? pngPic, string? undoFile, string doneLogPath, CancellationToken ct = default,
-        bool aplicada = false)
+        bool aplicada = false, string? origen = null)
     {
         var origPath = info.FilePath;
         var dir = Path.GetDirectoryName(origPath) ?? "";
@@ -113,7 +118,11 @@ public sealed class ApplyEngine
             try
             {
                 // Con el renombrado fallido nadie la da por aplicada (sigue en su lista con el aviso).
-                var rec = new UndoRecord { OrigPath = origPath, FinalPath = finalPath, Renamed = didRename, Fields = log, Aplicada = aplicada && renOk };
+                var rec = new UndoRecord
+                {
+                    OrigPath = origPath, FinalPath = finalPath, Renamed = didRename, Fields = log, Aplicada = aplicada && renOk,
+                    Origen = origen ?? (aplicada ? nameof(TipoEjecucion.AplicarPropuestas) : nameof(TipoEjecucion.EdicionEtiquetas)),
+                };
                 File.AppendAllText(undoFile, JsonSerializer.Serialize(rec, Json) + Environment.NewLine, Encoding.UTF8);
             }
             catch (Exception e)
