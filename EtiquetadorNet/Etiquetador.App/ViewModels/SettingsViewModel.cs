@@ -740,22 +740,15 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
     }
 
     /// <summary>
-    /// Reescribe las rutas de una colección de rekordbox exportada, para que vuelva a encontrar los
-    /// archivos que BeatTag ha renombrado y NO pierda sus cue points.
+    /// La reparación de la colección de rekordbox se ha trasladado a la página rekordbox (equipo
+    /// «rekordbox», tanda 4), que además de los renombrados de BeatTag encuentra los archivos movidos o
+    /// renombrados fuera de BeatTag y no bloquea la ventana mientras copia el XML. Ajustes conserva el
+    /// apartado, con el recuento de renombrados, porque otros avisos de la aplicación remiten aquí.
     /// </summary>
-    public void RepararRekordbox(string xmlOrigen, string destino)
-    {
-        var mapa = RekordboxRelocator.ReadRenames(_engine.Paths.UndoDir);
-        if (mapa.Count == 0) { Status = "No hay ningún renombrado anotado que reparar."; return; }
+    public event Action? AbrirRekordboxPedido;
 
-        var r = RekordboxRelocator.Repair(xmlOrigen, destino, mapa);
-        if (!r.Ok) { Status = "No se pudo reparar: " + r.Error; return; }
-
-        Status = r.Reparadas > 0
-            ? $"{r.Reparadas} rutas reparadas. Importa el archivo generado en rekordbox para recuperar los cue points."
-            : "No había ninguna ruta que reparar en esa colección.";
-        _engine.Logger.Sum($"rekordbox: {r.Reparadas} reparadas · {r.SinCambio} sin cambio · {r.NoEncontradas} no encontradas.");
-    }
+    [RelayCommand]
+    private void AbrirRekordbox() => AbrirRekordboxPedido?.Invoke();
 
     // --- Avisos de la configuración (T9) ---
     //

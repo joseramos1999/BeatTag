@@ -135,11 +135,13 @@
 
                 <!-- ================= REKORDBOX ================= -->
                 <TextBlock Classes="sec" Text="rekordbox" />
+                <!-- La reparación está en la página rekordbox (equipo «rekordbox», tanda 4); aquí queda el acceso. -->
                 <TextBlock Classes="ayuda"
-                           Text="rekordbox guarda los cue points y el beatgrid en su base de datos, ligados a la ruta del archivo. Al renombrar, los da por perdidos. BeatTag anota cada renombrado, así que puede devolvérselos: exporta tu colección desde rekordbox (Archivo → Exportar colección en formato xml), repárala aquí y vuelve a importarla. El archivo original no se toca." />
+                           Text="rekordbox guarda los cue points y el beatgrid en su base de datos, ligados a la ruta del archivo. Al renombrar o mover un archivo, los da por perdidos. La reparación de la colección está en la página rekordbox: abre allí la colección exportada (Archivo → Exportar colección en formato xml) y BeatTag busca cada entrada rota en la biblioteca, por los renombrados que tiene anotados y por nombre de archivo, tamaño y duración. Se escribe un XML nuevo para importar; ni el exportado ni la base de datos de rekordbox se tocan." />
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Reparar colección de rekordbox" Click="RepairRekordbox_Click"
-                            Background="#0D9488" Foreground="White" FontWeight="SemiBold" />
+                    <Button Content="Reparar colección de rekordbox" Command="{Binding AbrirRekordboxCommand}"
+                            Background="#0D9488" Foreground="White" FontWeight="SemiBold"
+                            ToolTip.Tip="Abre la página rekordbox, donde se comprueba y se repara la colección exportada." />
                     <TextBlock Text="{Binding RenombradosAnotados, StringFormat='{}{0} renombrados que se pueden reparar'}"
                                Foreground="{DynamicResource TextoSecundario}" VerticalAlignment="Center"
                                ToolTip.Tip="Archivos que BeatTag renombró y que siguen con el nombre nuevo. No cuenta los renombrados que se deshicieron." />

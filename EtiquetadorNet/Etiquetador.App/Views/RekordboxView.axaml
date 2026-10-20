@@ -1,0 +1,279 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
+             x:Class="Etiquetador.App.Views.RekordboxView"
+             x:CompileBindings="False">
+
+    <!-- Página rekordbox (equipo «rekordbox», tanda 4): P3, cruce con la colección exportada, y P11, exportar las listas. -->
+    <DockPanel Margin="8">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="6">
+            <TextBlock Classes="titulo" Text="rekordbox" />
+            <TextBlock Classes="desc"
+                       Text="Compara la colección de rekordbox con la biblioteca: qué canciones no están en rekordbox, qué entradas apuntan a archivos que ya no existen, qué pistas no están preparadas y cuáles no se han pinchado nunca. También lleva a rekordbox, de una vez, las listas de BeatTag. Solo se lee el XML que exportas desde rekordbox: BeatTag no toca su base de datos ni ese XML." />
+        </StackPanel>
+
+        <!-- ============================ LA COLECCIÓN EXPORTADA ============================ -->
+        <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BordeSuave}" BorderThickness="1" CornerRadius="4"
+                Padding="8" Margin="0,8,0,0">
+            <StackPanel Spacing="6">
+                <TextBlock Text="Colección de rekordbox" FontWeight="SemiBold" FontSize="14" />
+                <TextBlock Classes="desc"
+                           Text="En rekordbox, usa Archivo → Exportar colección en formato xml y abre aquí ese archivo. Lo que se ve es lo que había al exportar: después de trabajar en rekordbox, vuelve a exportarla al mismo archivo y se leerá de nuevo al volver a esta página." />
+                <WrapPanel ItemSpacing="8" LineSpacing="6">
+                    <Button Content="Abrir colección exportada…" Click="Abrir_Click" IsEnabled="{Binding Libre}"
+                            Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
+                    <Button Content="Volver a leer" Command="{Binding VolverALeerCommand}" IsEnabled="{Binding Libre}"
+                            IsVisible="{Binding HayColeccion}"
+                            ToolTip.Tip="Vuelve a leer el archivo y a compararlo con la biblioteca." />
+                    <TextBlock Text="{Binding InfoColeccion}" VerticalAlignment="Center" Opacity="0.8" TextWrapping="Wrap" />
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+
+        <TabControl Margin="0,8,0,0">
+
+            <!-- ============================ (a) NO ESTÁN EN REKORDBOX ============================ -->
+            <TabItem Header="{Binding TituloFaltan}">
+                <DockPanel Margin="0,8,0,0">
+                    <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,6">
+                        <TextBlock Classes="desc"
+                                   Text="Canciones de la biblioteca que no están en la colección de rekordbox, por ejemplo descargas que nunca se importaron. Guárdalas como lista M3U8 y, en rekordbox, impórtala como lista de reproducción (Archivo → Importar → Importar lista de reproducción): las canciones se añaden a la colección. Las que rekordbox tiene con una ruta antigua no salen aquí: se reparan en «Rutas rotas», porque importarlas de nuevo crearía pistas duplicadas sin su preparación." />
+                        <TextBlock Text="{Binding AvisoFaltan}" IsVisible="{Binding HayAvisoFaltan}" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource AvisoTexto}" />
+                        <WrapPanel ItemSpacing="8" LineSpacing="6">
+                            <Button Content="Guardar como lista M3U8…" Click="GuardarFaltan_Click" IsEnabled="{Binding HayColeccion}"
+                                    Background="#0D9488" Foreground="White" FontWeight="SemiBold"
+                                    ToolTip.Tip="Guarda las canciones de la tabla, en el orden en que se ven." />
+                        </WrapPanel>
+                        <TextBlock Classes="desc" Text="Abre antes la colección exportada de rekordbox." IsVisible="{Binding !HayColeccion}" />
+                    </StackPanel>
+                    <DataGrid Name="TablaFaltan" ItemsSource="{Binding FaltanView}" SelectedItem="{Binding FaltaElegida}"
+                              AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                              CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                              DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <!-- El orden común de las tablas con canciones: ver AccionesCancion.Puesto. -->
+                                <MenuItem Header="Escuchar / Parar" Tag="Faltan" Click="Escuchar_Click" />
+                                <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding FaltaElegida}"
+                                          ToolTip.Tip="Abre la canción en el Editor. Sale desactivada mientras haya un proceso en marcha (espera a que termine)." ToolTip.ShowOnDisabled="True" />
+                                <Separator />
+                                <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding FaltaElegida}" />
+                                <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding FaltaElegida}" />
+                                <Separator />
+                                <MenuItem Header="Abrir carpeta contenedora" Tag="Faltan" Click="AbrirCarpeta_Click" />
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Artista" Binding="{Binding Artista}" Width="180" MinWidth="100" />
+                            <DataGridTextColumn Header="Título" Binding="{Binding Titulo}" Width="220" MinWidth="120" />
+                            <DataGridTextColumn Header="Dur." Binding="{Binding Duracion}" SortMemberPath="DuracionSegundos" Width="62" MinWidth="58" />
+                            <DataGridTextColumn Header="Archivo" Binding="{Binding Archivo}" Width="240" MinWidth="120" />
+                            <DataGridTextColumn Header="Carpeta" Binding="{Binding Carpeta}" Width="*" MinWidth="140" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ============================ (b) RUTAS ROTAS ============================ -->
+            <TabItem Header="{Binding TituloRotas}">
+                <DockPanel Margin="0,8,0,0">
+                    <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,6">
+                        <TextBlock Classes="desc"
+                                   Text="Entradas de rekordbox cuyo archivo ya no está donde dice, porque se movió o se renombró. Cada una se busca en la biblioteca: primero en los renombrados que BeatTag tiene anotados y después por nombre de archivo y tamaño, o por nombre de archivo y duración. Solo se repara si hay un único archivo que encaja y rekordbox no lo tiene ya: así no se duplican pistas." />
+                        <TextBlock Text="{Binding ResumenRotas}" TextWrapping="Wrap" IsVisible="{Binding HayColeccion}" />
+                        <Expander Header="Cómo llevar la reparación a rekordbox" HorizontalAlignment="Stretch">
+                            <StackPanel Spacing="4">
+                                <TextBlock Classes="desc"
+                                           Text="1. Primero, las que solo han cambiado de carpeta (columna «Mismo nombre»): usa la función de rekordbox para reubicar los archivos que no encuentra, que los busca por su nombre en la carpeta que le indiques. Así no se crean pistas nuevas y se conservan tus listas de reproducción y tu historial. Después, vuelve a exportar la colección al mismo archivo: esta página la vuelve a leer al volver a ella." />
+                                <TextBlock Classes="desc"
+                                           Text="2. Para las demás, guarda la colección reparada. En rekordbox, en Preferencias → Avanzado → rekordbox xml, elige ese archivo; en el apartado «rekordbox xml» de la izquierda, abre la lista «Rutas reparadas por BeatTag», selecciona sus pistas e impórtalas a la colección. Llegan con sus cue points, su beatgrid, su valoración y sus comentarios, pero como pistas nuevas." />
+                                <TextBlock Classes="desc"
+                                           Text="3. Tus listas de reproducción y tu historial siguen apuntando a las entradas antiguas, que quedan como archivos no encontrados. No las quites sin importar antes, desde la copia reparada, las listas que las contienen (ya apuntan a las pistas reparadas): si no, esas canciones desaparecerían de tus listas." />
+                                <TextBlock Classes="desc"
+                                           Text="Antes de importar, escucha las encontradas por nombre y duración: otra codificación o masterización del mismo tema puede empezar en otro punto, y sus cue points quedarían desplazados." />
+                            </StackPanel>
+                        </Expander>
+                        <WrapPanel ItemSpacing="8" LineSpacing="6">
+                            <Button Content="Guardar colección reparada…" Click="Reparar_Click"
+                                    Background="#0D9488" Foreground="White" FontWeight="SemiBold"
+                                    ToolTip.Tip="Escribe un XML nuevo con las rutas corregidas y una lista «Rutas reparadas por BeatTag». Ni el XML exportado ni la base de datos de rekordbox se tocan.">
+                                <Button.IsEnabled>
+                                    <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                        <Binding Path="HayReparables" />
+                                        <Binding Path="Libre" />
+                                    </MultiBinding>
+                                </Button.IsEnabled>
+                            </Button>
+                            <CheckBox Content="Mostrar solo las que se pueden reparar" IsChecked="{Binding SoloReparables}" VerticalAlignment="Center" />
+                        </WrapPanel>
+                        <TextBlock Classes="desc" Text="Abre antes la colección exportada de rekordbox." IsVisible="{Binding !HayColeccion}" />
+                    </StackPanel>
+                    <DataGrid Name="TablaRotas" ItemsSource="{Binding RotasView}" SelectedItem="{Binding RotaElegida}"
+                              AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                              CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                              DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Escuchar / Parar" Tag="Rotas" Click="Escuchar_Click"
+                                          ToolTip.Tip="Escucha el archivo encontrado para esta entrada, para comprobar que es la misma pista." />
+                                <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding RotaElegida}"
+                                          ToolTip.Tip="Abre en el Editor el archivo encontrado. Sale desactivada si no se ha encontrado ninguno o mientras haya un proceso en marcha." ToolTip.ShowOnDisabled="True" />
+                                <Separator />
+                                <MenuItem Header="Abrir carpeta contenedora" Tag="Rotas" Click="AbrirCarpeta_Click"
+                                          ToolTip.Tip="Abre la carpeta del archivo encontrado." />
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Título en rekordbox" Binding="{Binding Nombre}" Width="200" MinWidth="110" />
+                            <DataGridTextColumn Header="Artista" Binding="{Binding Artista}" Width="150" MinWidth="90" />
+                            <DataGridTextColumn Header="Resultado" Binding="{Binding Como}" Width="220" MinWidth="120" />
+                            <DataGridTextColumn Header="Mismo nombre" Binding="{Binding MismoNombre}" Width="80" MinWidth="70" />
+                            <DataGridTextColumn Header="Ruta en rekordbox" Binding="{Binding RutaRekordbox}" Width="280" MinWidth="140" />
+                            <DataGridTextColumn Header="Archivo encontrado" Binding="{Binding NuevaRuta}" Width="*" MinWidth="140" />
+                            <DataGridTextColumn Header="Hot cues" Binding="{Binding HotCues}" SortMemberPath="HotCuesOrden" Width="110" MinWidth="80" />
+                            <DataGridTextColumn Header="Veces pinchada" Binding="{Binding Reproducciones}" Width="80" MinWidth="70" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ============================ (c) SIN PREPARAR ============================ -->
+            <TabItem Header="{Binding TituloSinPreparar}">
+                <DockPanel Margin="0,8,0,0">
+                    <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,6">
+                        <TextBlock Classes="desc"
+                                   Text="Pistas de rekordbox sin hot cues o sin beatgrid. Un único hot cue en el primer tiempo de compás, sin nombre o llamado «1.1Bars», no marca ninguna parte de la canción (es el que dejan algunas herramientas al analizar), así que no cuenta como preparación. Si tú pones ese cue como cue de entrada, marca la casilla. Un hot cue con otro nombre sí cuenta." />
+                        <TextBlock Text="{Binding AvisoCueInicial}" IsVisible="{Binding HayAvisoCueInicial}" TextWrapping="Wrap" Opacity="0.85" />
+                        <WrapPanel ItemSpacing="12" LineSpacing="6">
+                            <CheckBox Content="Sin hot cues" IsChecked="{Binding SinHotCues}" VerticalAlignment="Center" />
+                            <CheckBox Content="Sin beatgrid" IsChecked="{Binding SinBeatgrid}" VerticalAlignment="Center" />
+                            <CheckBox Content="Contar como preparación un único hot cue en el primer tiempo de compás" IsChecked="{Binding CueInicialCuenta}" VerticalAlignment="Center" />
+                            <CheckBox Content="Solo canciones de la biblioteca" IsChecked="{Binding SoloBiblioteca}" VerticalAlignment="Center"
+                                      ToolTip.Tip="Sin marcar, entran también las pistas de rekordbox que están en otras carpetas (por ejemplo, sus muestras)." />
+                            <Button Content="Guardar como lista M3U8…" Click="GuardarSinPreparar_Click" IsEnabled="{Binding HayColeccion}"
+                                    Background="#0D9488" Foreground="White" FontWeight="SemiBold"
+                                    ToolTip.Tip="Guarda las pistas de la tabla, en el orden en que se ven, para prepararlas en rekordbox." />
+                        </WrapPanel>
+                        <TextBlock Classes="desc" Text="Abre antes la colección exportada de rekordbox." IsVisible="{Binding !HayColeccion}" />
+                    </StackPanel>
+                    <DataGrid Name="TablaSinPreparar" ItemsSource="{Binding SinPrepararView}" SelectedItem="{Binding SinPrepararElegida}"
+                              AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                              CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                              DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Escuchar / Parar" Tag="SinPreparar" Click="Escuchar_Click" />
+                                <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding SinPrepararElegida}"
+                                          ToolTip.Tip="Abre la canción en el Editor. Sale desactivada mientras haya un proceso en marcha (espera a que termine)." ToolTip.ShowOnDisabled="True" />
+                                <Separator />
+                                <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding SinPrepararElegida}" />
+                                <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding SinPrepararElegida}" />
+                                <Separator />
+                                <MenuItem Header="Abrir carpeta contenedora" Tag="SinPreparar" Click="AbrirCarpeta_Click" />
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Artista" Binding="{Binding Artista}" Width="170" MinWidth="100" />
+                            <DataGridTextColumn Header="Título" Binding="{Binding Titulo}" Width="210" MinWidth="120" />
+                            <DataGridTextColumn Header="Hot cues" Binding="{Binding HotCues}" SortMemberPath="HotCuesOrden" Width="110" MinWidth="80" />
+                            <DataGridTextColumn Header="Beatgrid" Binding="{Binding Beatgrid}" Width="80" MinWidth="70" />
+                            <DataGridTextColumn Header="Veces pinchada" Binding="{Binding Reproducciones}" Width="80" MinWidth="70" />
+                            <DataGridTextColumn Header="En rekordbox desde" Binding="{Binding Alta}" SortMemberPath="AltaFecha" Width="110" MinWidth="90" />
+                            <DataGridTextColumn Header="Valoración" Binding="{Binding Valoracion}" Width="90" MinWidth="70" />
+                            <DataGridTextColumn Header="Archivo" Binding="{Binding Archivo}" Width="*" MinWidth="140" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ============================ (d) NUNCA PINCHADAS ============================ -->
+            <TabItem Header="{Binding TituloNunca}">
+                <DockPanel Margin="0,8,0,0">
+                    <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,6">
+                        <TextBlock Classes="desc"
+                                   Text="Pistas que rekordbox no ha contado nunca como pinchadas y que llevan en la colección más tiempo del elegido. rekordbox solo cuenta lo que se pincha con él (y lo que llega en historiales importados): lo pinchado con otro programa no aparece." />
+                        <WrapPanel ItemSpacing="12" LineSpacing="6">
+                            <TextBlock Text="En la colección desde hace más de" VerticalAlignment="Center" />
+                            <ComboBox ItemsSource="{Binding OpcionesMeses}" SelectedItem="{Binding Meses}" MinWidth="110">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Texto}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <CheckBox Content="Solo canciones de la biblioteca" IsChecked="{Binding SoloBiblioteca}" VerticalAlignment="Center" />
+                            <Button Content="Guardar como lista M3U8…" Click="GuardarNunca_Click" IsEnabled="{Binding HayColeccion}"
+                                    Background="#0D9488" Foreground="White" FontWeight="SemiBold"
+                                    ToolTip.Tip="Guarda las pistas de la tabla, en el orden en que se ven." />
+                        </WrapPanel>
+                        <TextBlock Text="{Binding AvisoNunca}" IsVisible="{Binding HayAvisoNunca}" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource AvisoTexto}" />
+                        <TextBlock Classes="desc" Text="Abre antes la colección exportada de rekordbox." IsVisible="{Binding !HayColeccion}" />
+                    </StackPanel>
+                    <DataGrid Name="TablaNunca" ItemsSource="{Binding NuncaView}" SelectedItem="{Binding NuncaElegida}"
+                              AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                              CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                              DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Escuchar / Parar" Tag="Nunca" Click="Escuchar_Click" />
+                                <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding NuncaElegida}"
+                                          ToolTip.Tip="Abre la canción en el Editor. Sale desactivada mientras haya un proceso en marcha (espera a que termine)." ToolTip.ShowOnDisabled="True" />
+                                <Separator />
+                                <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding NuncaElegida}" />
+                                <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding NuncaElegida}" />
+                                <Separator />
+                                <MenuItem Header="Abrir carpeta contenedora" Tag="Nunca" Click="AbrirCarpeta_Click" />
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Artista" Binding="{Binding Artista}" Width="170" MinWidth="100" />
+                            <DataGridTextColumn Header="Título" Binding="{Binding Titulo}" Width="210" MinWidth="120" />
+                            <DataGridTextColumn Header="En rekordbox desde" Binding="{Binding Alta}" SortMemberPath="AltaFecha" Width="110" MinWidth="90" />
+                            <DataGridTextColumn Header="Hot cues" Binding="{Binding HotCues}" SortMemberPath="HotCuesOrden" Width="110" MinWidth="80" />
+                            <DataGridTextColumn Header="Beatgrid" Binding="{Binding Beatgrid}" Width="80" MinWidth="70" />
+                            <DataGridTextColumn Header="Valoración" Binding="{Binding Valoracion}" Width="90" MinWidth="70" />
+                            <DataGridTextColumn Header="Archivo" Binding="{Binding Archivo}" Width="*" MinWidth="140" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ============================ P11: LLEVAR LAS LISTAS A REKORDBOX ============================ -->
+            <TabItem Header="Llevar listas a rekordbox">
+                <ScrollViewer Margin="0,8,0,0">
+                    <StackPanel Spacing="8" MaxWidth="900" HorizontalAlignment="Left">
+                        <TextBlock Classes="desc"
+                                   Text="Escribe un único archivo XML de rekordbox con una carpeta «BeatTag» que contiene las listas elegidas. En rekordbox se importa la carpeta entera de una vez, en lugar de un M3U8 tras otro, y al volver a exportar al mismo archivo rekordbox ve las listas al día. Solo entran las canciones que están en la biblioteca. Abre antes la colección exportada de rekordbox: así cada canción que ya tiene se escribe con su misma ubicación, título y artista, también las que tiene con una ruta antigua, y no se añade otra vez." />
+                        <CheckBox Content="Colecciones (en la subcarpeta «Colecciones»)" IsChecked="{Binding ExportarColecciones}" />
+                        <CheckBox Content="Listas que sigues: se vuelven a leer de internet (en la subcarpeta «Listas»)" IsChecked="{Binding ExportarSeguidas}" />
+                        <CheckBox Content="Listas abiertas en Tendencias y Playlists y sus órdenes para mezclar, y el orden del Asistente" IsChecked="{Binding ExportarListasAbiertas}" />
+                        <CheckBox Content="Canciones pendientes ya conseguidas (lista «Pendientes conseguidas»)" IsChecked="{Binding ExportarPendientes}" />
+                        <TextBlock Text="{Binding ResumenExportacion}" TextWrapping="Wrap" Opacity="0.85" />
+                        <WrapPanel ItemSpacing="8" LineSpacing="6">
+                            <Button Content="Exportar a XML…" Click="Exportar_Click" IsEnabled="{Binding NoExportando}"
+                                    Background="#7C3AED" Foreground="White" FontWeight="SemiBold" />
+                            <Button Content="{Binding TextoActualizarExportacion}" Click="ActualizarExportacion_Click"
+                                    IsVisible="{Binding HayUltimaExportacion}" IsEnabled="{Binding NoExportando}"
+                                    ToolTip.Tip="Vuelve a exportar al mismo archivo, el que rekordbox tiene configurado." />
+                            <Button Content="Cancelar" Command="{Binding CancelarExportacionCommand}" IsVisible="{Binding Exportando}" />
+                        </WrapPanel>
+                        <TextBlock Text="Cómo importarlas en rekordbox" FontWeight="SemiBold" Margin="0,6,0,0" />
+                        <TextBlock Classes="desc"
+                                   Text="1. En Preferencias → Avanzado → rekordbox xml, elige el archivo exportado. Basta con hacerlo una vez si después exportas siempre al mismo archivo." />
+                        <TextBlock Classes="desc"
+                                   Text="2. En el panel de la izquierda de rekordbox, abre el apartado «rekordbox xml». Si no aparece, actívalo en las preferencias de vista de rekordbox (Vista → Diseño)." />
+                        <TextBlock Classes="desc"
+                                   Text="3. Haz clic derecho en la carpeta «BeatTag» e importa la lista de reproducción. Las canciones que ya están en la colección conservan sus cue points, su beatgrid, su valoración y sus comentarios; las que faltan se añaden." />
+                        <TextBlock Classes="desc"
+                                   Text="No uses «Importar a la colección» sobre canciones que rekordbox ya tiene: las sustituiría por lo que lleva el XML, que solo trae la ubicación, el título y el artista." />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</UserControl>

@@ -166,6 +166,8 @@ public partial class MainViewModel : ViewModelBase
         // Nace con el shell y no al abrir su página: las pendientes se tachan al cambiar la biblioteca
         // aunque nadie la abra (equipo «listas», tanda 3).
         Pendientes = new PendientesViewModel(engine);
+        // Página rekordbox (equipo «rekordbox», tanda 4): las listas abiertas en otras páginas se las da el shell.
+        Rekordbox = new RekordboxViewModel(engine, ListasAbiertasParaRekordbox);
 
         // El ÍNDICE de cada página es su hueco en el contenido de MainWindow.axaml; el ORDEN en que
         // aparecen aquí es el de la barra lateral, y no tiene por qué ser el mismo.
@@ -183,6 +185,9 @@ public partial class MainViewModel : ViewModelBase
                     new() { Indice = 13, Icono = "📥", Nombre = "Bandeja de entrada", Vm = Bandeja, Ocupada = () => Bandeja.IsBusy,
                             Cancelar = Bandeja.CancelarDescarte },
                     new() { Indice = 2,  Icono = "✏",  Nombre = "Editor",     Vm = Editor, Ocupada = () => Editor.IsBusy },
+                    // Sin «Ocupada»: solo lee el XML exportado y escribe otros XML y listas, nunca la música,
+                    // así que no bloquea el resto de la aplicación (equipo «rekordbox», tanda 4).
+                    new() { Indice = 19, Icono = "🎛", Nombre = "rekordbox", Vm = Rekordbox },
                 },
             },
             new()
@@ -304,6 +309,9 @@ public partial class MainViewModel : ViewModelBase
 
         // Escanear sin bloquear se enseña igual: con una banda que dice que se está comprobando.
         Engine.Library.EscaneoCambiado += () => OnPropertyChanged(nameof(ComprobandoBiblioteca));
+
+        // La reparación de rekordbox está en su página; Ajustes lleva hasta ella (equipo «rekordbox», tanda 4).
+        Settings.AbrirRekordboxPedido += () => SelectedTabIndex = RekordboxTabIndex;
 
         _ = InitAsync();
     }
@@ -639,5 +647,33 @@ public partial class MainViewModel : ViewModelBase
 
         public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
             => throw new NotSupportedException();
+    }
+
+    // =================================================================================================
+    // Página rekordbox (equipo «rekordbox», tanda 4): cruce con la colección exportada y exportación de
+    // las listas de BeatTag a un XML de rekordbox.
+    // =================================================================================================
+
+    private const int RekordboxTabIndex = 19;
+
+    public RekordboxViewModel Rekordbox { get; }
+
+    /// <summary>
+    /// Lo que hay abierto en otras páginas y se puede llevar a rekordbox: la lista de Tendencias y la de
+    /// Playlists (con su orden para mezclar, si se ordenaron) y el orden para mezclar del Asistente.
+    /// Se lee en el hilo de la interfaz, que es el único que toca esas filas.
+    /// </summary>
+    private IReadOnlyList<Etiquetador.Core.ListaParaRekordbox> ListasAbiertasParaRekordbox()
+    {
+        var res = new List<Etiquetador.Core.ListaParaRekordbox>();
+        res.AddRange(RekordboxViewModel.DeListaAbierta(Trends.NombreSugerido, Trends.Rows.ToList(),
+                                                        Trends.PasosMezcla.Select(p => p.FilePath).ToList()));
+        res.AddRange(RekordboxViewModel.DeListaAbierta(Playlists.NombreSugerido, Playlists.Rows.ToList(),
+                                                        Playlists.PasosMezcla.Select(p => p.FilePath).ToList()));
+        if (Asistente.Mezcla.Pasos.Count > 0)
+            res.Add(new Etiquetador.Core.ListaParaRekordbox(RekordboxViewModel.CarpetaOrdenes,
+                                                            Asistente.Mezcla.Coleccion?.Nombre is { Length: > 0 } c ? c : "Asistente",
+                                                            Asistente.Mezcla.Pasos.Select(p => p.FilePath).ToList()));
+        return res;
     }
 }

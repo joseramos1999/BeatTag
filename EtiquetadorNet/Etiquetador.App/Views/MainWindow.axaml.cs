@@ -90,6 +90,7 @@ public partial class MainWindow : Window
         [16] = (() => new AsistenteView(),   vm => vm.Asistente),
         [17] = (() => new PlaylistView(),    vm => vm.Playlists),
         [18] = (() => new PendientesView(),  vm => vm.Pendientes),   // equipo «listas», tanda 3
+        [19] = (() => new RekordboxView(),   vm => vm.Rekordbox),    // equipo «rekordbox», tanda 4
     };
 
     private readonly Dictionary<int, Control> _creadas = new();

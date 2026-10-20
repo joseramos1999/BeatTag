@@ -1,4 +1,4 @@
-using System.Xml.Linq;
+using System.Xml;
 using Etiquetador.Core.Pipeline;
 
 namespace Etiquetador.Core;
@@ -7,6 +7,13 @@ namespace Etiquetador.Core;
 public sealed record RelocateResult(int Reparadas, int SinCambio, int NoEncontradas, string Error = "")
 {
     public bool Ok => Error.Length == 0;
+
+    /// <summary>
+    /// De las reparadas, las que conservan el nombre de archivo y solo cambiaron de carpeta: esas las
+    /// puede reubicar el propio rekordbox sin crear pistas nuevas (ver <see cref="PistaRota.MismoNombre"/>).
+    /// MEDIDO con la colección real: 2.752 de las 3.362 reparadas.
+    /// </summary>
+    public int SoloMovidas { get; init; }
 }
 
 /// <summary>
@@ -91,16 +98,27 @@ public static class RekordboxRelocator
             }
         }
 
+        // Quién apunta a cada ruta (de destino a orígenes), para encadenar sin recorrer el mapa entero
+        // en cada paso. MEDIDO en un historial real (7.529 renombrados anotados): recorriéndolo entero
+        // por paso, leerlo tardaba 1,4 s, y AppEngine.ReubicarFichas lo lee al cambiar la biblioteca.
+        var apuntan = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        void Apuntar(string origen, string destino)
+        {
+            if (mapa.TryGetValue(origen, out var antes) && apuntan.TryGetValue(antes, out var deAntes)) deAntes.Remove(origen);
+            mapa[origen] = destino;
+            if (!apuntan.TryGetValue(destino, out var deDestino)) apuntan[destino] = deDestino = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            deDestino.Add(origen);
+        }
+
         foreach (var p in pasos.OrderBy(p => p.Cuando).ThenBy(p => p.Fase)
                                .ThenBy(p => p.Manifiesto, StringComparer.OrdinalIgnoreCase).ThenBy(p => p.Orden))
         {
             // Si algo ya apuntaba a la ruta que este cambio deja atrás, se reencamina al destino
             // nuevo para que la cadena quede resuelta de una vez.
-            foreach (var k in mapa.Where(kv => string.Equals(kv.Value, p.De, StringComparison.OrdinalIgnoreCase))
-                                  .Select(kv => kv.Key).ToList())
-                mapa[k] = p.A;
+            if (apuntan.TryGetValue(p.De, out var previos))
+                foreach (var k in previos.ToList()) Apuntar(k, p.A);
 
-            mapa[p.De] = p.A;
+            Apuntar(p.De, p.A);
         }
 
         // Un archivo que acabó donde empezó no necesita reparación.
@@ -165,6 +183,10 @@ public static class RekordboxRelocator
     /// Con una ruta de macOS antes salía «file://localhost//Users/…»: el primer tramo, vacío, se
     /// unía con otra barra. Y en macOS la barra invertida NO separa carpetas -es un carácter más del
     /// nombre-, así que solo se convierte en las rutas de Windows.
+    ///
+    /// Se escapa COMO rekordbox, no como un URI de manual (ver <see cref="Escapar"/>): la Location es
+    /// lo que identifica la pista al importar un XML, y lo más seguro es escribirla carácter a
+    /// carácter igual que la escribe él.
     /// </summary>
     public static string PathToLocation(string path)
     {
@@ -183,6 +205,16 @@ public static class RekordboxRelocator
         return "file://localhost/" + Escapar(s, dejarUnidad: true);
     }
 
+    /// <summary>
+    /// Signos que rekordbox deja sin escapar. MEDIDO en una colección real exportada de rekordbox 7.2
+    /// (19.690 pistas): deja tal cual «( ) , ! # $ + @ ; =» y escapa el espacio, «&amp; [ ] ' ^ ` %» y
+    /// todo lo que no es ASCII, con las cifras hexadecimales en minúscula («%c3%b3»). Con el escapado
+    /// de manual (Uri.EscapeDataString) 15.018 de esas 19.690 Location salían distintas de las suyas
+    /// -los paréntesis y las comas de «(Extended Mix)» o «Artista, Artista»- aunque nombraran el
+    /// mismo archivo; ahora salen idénticas las 19.690.
+    /// </summary>
+    private const string SinEscapar = "-._~()!,#$+@;=";
+
     /// <summary>Escapa tramo a tramo (las barras separan, no se escapan).</summary>
     private static string Escapar(string ruta, bool dejarUnidad)
     {
@@ -190,65 +222,290 @@ public static class RekordboxRelocator
         for (var i = 0; i < partes.Length; i++)
         {
             if (dejarUnidad && i == 0 && partes[i].EndsWith(':')) continue;
-            partes[i] = Uri.EscapeDataString(partes[i]);
+            partes[i] = EscaparTramo(partes[i]);
         }
         return string.Join("/", partes);
+    }
+
+    private static string EscaparTramo(string tramo)
+    {
+        var sb = new System.Text.StringBuilder(tramo.Length + 16);
+        foreach (var b in System.Text.Encoding.UTF8.GetBytes(tramo))
+        {
+            var c = (char)b;
+            if (b < 0x80 && (char.IsAsciiLetterOrDigit(c) || SinEscapar.Contains(c))) sb.Append(c);
+            else sb.Append('%').Append(b.ToString("x2", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        return sb.ToString();
     }
 
     /// <summary>«D:\…» o «D:/…».</summary>
     internal static bool EsRutaDeUnidad(string ruta)
         => ruta.Length >= 3 && char.IsAsciiLetter(ruta[0]) && ruta[1] == ':' && ruta[2] is '\\' or '/';
 
+    /// <summary>Nombre de la lista que se añade a la colección reparada con las pistas reparadas.</summary>
+    public const string ListaReparadas = "Rutas reparadas por BeatTag";
+
     /// <summary>
     /// Reescribe las rutas del XML. <paramref name="mapa"/> va de ruta ANTIGUA a ruta NUEVA.
     /// Escribe el resultado en <paramref name="destino"/> sin tocar el original: el usuario decide
     /// luego si lo reimporta, y conserva el de partida por si algo saliera mal.
+    ///
+    /// Se copia el XML de principio a fin sin cargarlo en memoria (antes, XDocument.Load con
+    /// colecciones de decenas de MB; ver <see cref="LectorRekordbox"/>), y se escribe primero en un
+    /// temporal: un fallo a mitad no deja en el destino un XML cortado que rekordbox intentaría leer.
+    /// MEDIDO con la colección real (96,6 MB, 19.690 pistas) y las 3.375 reparaciones que encontró el
+    /// cruce: 1,7 s y 27 MB en uso; las 3.362 Location cambiadas apuntan a archivos que existen (las 13
+    /// restantes, a archivos que ya no estaban, se dejaron como estaban) y conservan sus hot cues y su
+    /// beatgrid.
+    ///
+    /// Con <paramref name="conLista"/>, la copia lleva además una lista «Rutas reparadas por BeatTag»
+    /// con las pistas reparadas: en rekordbox se importan desde ella, sin tener que buscarlas una a una
+    /// entre todas las de la colección.
+    ///
+    /// <paramref name="tituloDe"/> da el título de la etiqueta del archivo nuevo, si se conoce (de la
+    /// biblioteca). Name, en rekordbox, es el TÍTULO de la pista, no el nombre del archivo: al reparar
+    /// un renombrado se ponía el nombre del archivo («Artista - Título (Extended Mix)») y la pista
+    /// entraba en rekordbox con el artista repetido en el título. Sin título conocido se sigue usando
+    /// el nombre del archivo, como antes.
     /// </summary>
-    public static RelocateResult Repair(string xmlOrigen, string destino, IReadOnlyDictionary<string, string> mapa)
+    public static RelocateResult Repair(string xmlOrigen, string destino, IReadOnlyDictionary<string, string> mapa,
+                                        bool conLista = false, CancellationToken ct = default,
+                                        Func<string, string?>? tituloDe = null)
     {
         if (mapa.Count == 0) return new RelocateResult(0, 0, 0, "No hay ningún renombrado que reparar.");
+        if (ComparadorRutas.Instancia.Equals(Path.GetFullPath(xmlOrigen), Path.GetFullPath(destino)))
+            return new RelocateResult(0, 0, 0, "La colección reparada se guarda en un archivo nuevo: elige otro nombre para no sustituir la exportada.");
 
+        // Las rutas del XML pueden venir con los acentos en otra forma Unicode que las del mapa (un Mac).
+        var porRuta = new Dictionary<string, string>(ComparadorRutas.Instancia);
+        foreach (var kv in mapa) porRuta[kv.Key] = kv.Value;
+
+        // Un temporal propio de esta llamada: con «destino.tmp», dos reparaciones al mismo destino (dos
+        // clics seguidos) chocaban en el mismo archivo abierto en exclusiva y una de las dos fallaba.
+        var tmp = $"{destino}.{Guid.NewGuid():N}.tmp";
         try
         {
-            var doc = XDocument.Load(xmlOrigen);
-            int reparadas = 0, sinCambio = 0, noEncontradas = 0;
+            var dir = Path.GetDirectoryName(destino);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-            foreach (var tr in doc.Descendants("TRACK"))
+            Copia copia;
+            using (var entrada = new FileStream(xmlOrigen, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 1 << 16))
+            using (var lector = XmlReader.Create(entrada, AjustesCopia()))
+            using (var salida = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16))
+            using (var escritor = XmlWriter.Create(salida, new XmlWriterSettings
+                   {
+                       Encoding = new System.Text.UTF8Encoding(false), CheckCharacters = false,
+                       // Los saltos de línea y tabuladores de los atributos (un comentario de varias
+                       // líneas: Comments="x&#10;y") se escriben como referencia. Con None salían tal
+                       // cual, y al releer el XML un salto dentro de un atributo se convierte en un
+                       // espacio: la copia perdía el formato de esos comentarios. Entitize conserva
+                       // exactamente lo que se leyó, también en el texto entre etiquetas. (En la
+                       // colección medida no había ninguno; los comentarios de rekordbox sí los admiten.)
+                       NewLineHandling = NewLineHandling.Entitize,
+                   }))
             {
-                var loc = (string?)tr.Attribute("Location");
-                if (string.IsNullOrEmpty(loc)) continue;   // los TRACK de PLAYLISTS son referencias
+                copia = new Copia(porRuta, conLista, tituloDe);
+                copia.Copiar(lector, escritor, ct);
+            }
+            File.Move(tmp, destino, overwrite: true);
+            return new RelocateResult(copia.Reparadas, copia.SinCambio, copia.NoEncontradas) { SoloMovidas = copia.SoloMovidas };
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (RekordboxXmlException e) { return new RelocateResult(0, 0, 0, e.Message); }
+        catch (XmlException e)
+        {
+            return new RelocateResult(0, 0, 0, $"La colección no es un XML válido (línea {e.LineNumber:N0}): {e.Message} "
+                                             + "Vuelve a exportarla desde rekordbox (Archivo → Exportar colección en formato xml).");
+        }
+        catch (Exception e) { return new RelocateResult(0, 0, 0, e.Message); }
+        finally
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+        }
+    }
 
-                var actual = RekordboxImporter.LocationToPath(loc);
-                if (mapa.TryGetValue(actual, out var nueva))
+    /// <summary>Como la lectura, pero conservando los espacios entre etiquetas para que la copia se lea igual.</summary>
+    private static XmlReaderSettings AjustesCopia()
+    {
+        var a = LectorRekordbox.Ajustes();
+        a.IgnoreWhitespace = false;
+        a.IgnoreComments = false;
+        a.IgnoreProcessingInstructions = false;
+        return a;
+    }
+
+    /// <summary>La copia del XML nodo a nodo, cambiando solo lo que hay que reparar.</summary>
+    private sealed class Copia
+    {
+        private readonly Dictionary<string, string> _mapa;
+        private readonly bool _conLista;
+        private readonly Func<string, string?>? _tituloDe;
+        private readonly List<(string Id, string Location)> _reparadas = new();
+        public int Reparadas, SinCambio, NoEncontradas, SoloMovidas;
+
+        public Copia(Dictionary<string, string> mapa, bool conLista, Func<string, string?>? tituloDe)
+        {
+            _mapa = mapa;
+            _conLista = conLista;
+            _tituloDe = tituloDe;
+        }
+
+        public void Copiar(XmlReader r, XmlWriter w, CancellationToken ct)
+        {
+            if (r.MoveToContent() != XmlNodeType.Element || r.LocalName != "DJ_PLAYLISTS")
+                throw new RekordboxXmlException("El archivo no es una colección de rekordbox. " + LectorRekordbox.ComoExportar);
+
+            w.WriteStartDocument();
+            var enColeccion = false;
+            var profundidadRaiz = -1;     // la del NODE «ROOT» de las listas
+            var raizAnade = false;        // a ROOT se le sumó la lista nueva en su Count
+            var listaPuesta = false;
+            var pistas = 0;
+
+            // MoveToContent ya ha dejado el lector en el elemento raíz: se procesa antes de leer más.
+            var primero = true;
+            while (primero || r.Read())
+            {
+                primero = false;
+                switch (r.NodeType)
                 {
-                    if (string.Equals(actual, nueva, StringComparison.OrdinalIgnoreCase)) { sinCambio++; continue; }
+                    case XmlNodeType.Element:
+                    {
+                        var nombre = r.LocalName;
+                        var vacio = r.IsEmptyElement;
+                        var profundidad = r.Depth;
+                        w.WriteStartElement(r.Prefix, nombre, r.NamespaceURI);
 
+                        if (nombre == "COLLECTION") enColeccion = !vacio;
+
+                        if (nombre == "TRACK" && enColeccion)
+                        {
+                            CopiarPista(r, w);
+                            if (++pistas % 2048 == 0) ct.ThrowIfCancellationRequested();
+                        }
+                        else if (nombre == "NODE" && profundidadRaiz < 0 && r.GetAttribute("Name") == "ROOT")
+                        {
+                            // La lista nueva cuelga de ROOT, que lleva la cuenta de lo que tiene dentro.
+                            // COLLECTION va antes que PLAYLISTS: aquí ya se sabe qué se ha reparado.
+                            profundidadRaiz = profundidad;
+                            raizAnade = TocaLista;
+                            CopiarAtributos(r, w, (n, v) => n == "Count" && raizAnade ? Mas1(v) : v);
+                            if (vacio && raizAnade) { EscribirLista(w); listaPuesta = true; }
+                        }
+                        else w.WriteAttributes(r, true);
+
+                        if (vacio) w.WriteEndElement();
+                        break;
+                    }
+                    case XmlNodeType.EndElement:
+                        if (r.LocalName == "COLLECTION") enColeccion = false;
+                        if (r.LocalName == "NODE" && r.Depth == profundidadRaiz && !listaPuesta && raizAnade)
+                        {
+                            EscribirLista(w);
+                            listaPuesta = true;
+                        }
+                        if (r.LocalName == "DJ_PLAYLISTS" && profundidadRaiz < 0 && TocaLista)
+                        {
+                            // Un XML sin listas: se crean PLAYLISTS y ROOT para la nueva.
+                            w.WriteStartElement("PLAYLISTS");
+                            w.WriteStartElement("NODE");
+                            w.WriteAttributeString("Type", "0");
+                            w.WriteAttributeString("Name", "ROOT");
+                            w.WriteAttributeString("Count", "1");
+                            EscribirLista(w);
+                            w.WriteEndElement();
+                            w.WriteEndElement();
+                            listaPuesta = true;
+                        }
+                        w.WriteFullEndElement();
+                        break;
+                    case XmlNodeType.Text: w.WriteString(r.Value); break;
+                    case XmlNodeType.CDATA: w.WriteCData(r.Value); break;
+                    case XmlNodeType.Whitespace:
+                    case XmlNodeType.SignificantWhitespace: w.WriteWhitespace(r.Value); break;
+                    case XmlNodeType.Comment: w.WriteComment(r.Value); break;
+                    case XmlNodeType.ProcessingInstruction: w.WriteProcessingInstruction(r.Name, r.Value); break;
+                    // La declaración la pone WriteStartDocument; un DOCTYPE no se copia (no se procesa).
+                }
+            }
+            w.WriteEndDocument();
+        }
+
+        private bool TocaLista => _conLista && _reparadas.Count > 0;
+
+        private static string Mas1(string v)
+            => int.TryParse(v, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var n)
+                ? (n + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) : v;
+
+        private static void CopiarAtributos(XmlReader r, XmlWriter w, Func<string, string, string> valor)
+        {
+            if (!r.MoveToFirstAttribute()) return;
+            do w.WriteAttributeString(r.Prefix, r.LocalName, r.NamespaceURI, valor(r.LocalName, r.Value));
+            while (r.MoveToNextAttribute());
+            r.MoveToElement();
+        }
+
+        private void CopiarPista(XmlReader r, XmlWriter w)
+        {
+            var loc = r.GetAttribute("Location");
+            string? nueva = null;
+            if (!string.IsNullOrEmpty(loc) && loc.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+            {
+                var actual = RekordboxImporter.LocationToPath(loc);
+                if (_mapa.TryGetValue(actual, out var destino))
+                {
                     // Solo se toca lo que rekordbox tiene PERDIDO, y solo para mandarlo a un archivo
                     // que existe. Una pista cuyo archivo sigue en su sitio está bien como está (y con
                     // ella, sus cue points); cambiarla a una ruta que no existe es justo perderla.
-                    if (File.Exists(actual)) { sinCambio++; continue; }
-                    if (!File.Exists(nueva)) { noEncontradas++; continue; }
-
-                    tr.SetAttributeValue("Location", PathToLocation(nueva));
-
-                    // El nombre visible también cambia al renombrar; si no se actualiza, la
-                    // colección apunta bien pero se sigue leyendo el nombre viejo.
-                    var nombre = Path.GetFileNameWithoutExtension(nueva);
-                    if (!string.IsNullOrEmpty(nombre) && tr.Attribute("Name") != null)
-                        tr.SetAttributeValue("Name", nombre);
-
-                    reparadas++;
+                    if (ComparadorRutas.Instancia.Equals(actual, destino) || File.Exists(actual)) SinCambio++;
+                    else if (!File.Exists(destino)) NoEncontradas++;
+                    else
+                    {
+                        nueva = destino;
+                        Reparadas++;
+                    }
                 }
-                else if (!File.Exists(actual)) noEncontradas++;
-                else sinCambio++;
+                else if (!File.Exists(actual)) NoEncontradas++;
+                else SinCambio++;
+
+                if (nueva != null)
+                {
+                    var nuevaLocation = PathToLocation(nueva);
+                    // El nombre visible también cambia al renombrar; si no se actualiza, la colección
+                    // apunta bien pero se sigue leyendo el nombre viejo. Si el archivo solo se movió
+                    // de carpeta (mismo nombre), el Name es el título que puso rekordbox y se respeta.
+                    var renombrado = !ComparadorRutas.Instancia.Equals(Path.GetFileNameWithoutExtension(actual),
+                                                                      Path.GetFileNameWithoutExtension(nueva));
+                    if (ComparadorRutas.Instancia.Equals(Path.GetFileName(actual), Path.GetFileName(nueva))) SoloMovidas++;
+                    var titulo = (_tituloDe?.Invoke(nueva) ?? "").Trim();
+                    var nombreNuevo = titulo.Length > 0 ? titulo : Path.GetFileNameWithoutExtension(nueva);
+                    CopiarAtributos(r, w, (n, v) => n == "Location" ? nuevaLocation
+                                                  : n == "Name" && renombrado && nombreNuevo.Length > 0 ? nombreNuevo
+                                                  : v);
+                    _reparadas.Add((r.GetAttribute("TrackID") ?? "", nuevaLocation));
+                    return;
+                }
             }
-
-            var dir = Path.GetDirectoryName(destino);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            doc.Save(destino);
-
-            return new RelocateResult(reparadas, sinCambio, noEncontradas);
+            w.WriteAttributes(r, true);
         }
-        catch (Exception e) { return new RelocateResult(0, 0, 0, e.Message); }
+
+        /// <summary>La lista con las pistas reparadas, por su TrackID (o por su Location si falta alguno).</summary>
+        private void EscribirLista(XmlWriter w)
+        {
+            var porId = _reparadas.All(x => x.Id.Length > 0);
+            w.WriteStartElement("NODE");
+            w.WriteAttributeString("Name", ListaReparadas);
+            w.WriteAttributeString("Type", "1");
+            w.WriteAttributeString("KeyType", porId ? "0" : "1");
+            w.WriteAttributeString("Entries", _reparadas.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            foreach (var (id, location) in _reparadas)
+            {
+                w.WriteStartElement("TRACK");
+                w.WriteAttributeString("Key", porId ? id : location);
+                w.WriteEndElement();
+            }
+            w.WriteEndElement();
+        }
     }
 }
