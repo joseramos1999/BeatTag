@@ -67,7 +67,9 @@ jobs:
           dotnet-version: '9.0.x'
 
       - name: Test
-        run: dotnet test -c Release
+        # Una prueba colgada se corta a los 10 minutos y se dice cuál era (ver ci.yml).
+        timeout-minutes: 25
+        run: dotnet test -c Release --blame-hang-timeout 10m --blame-hang-dump-type none
 
       - name: Publish single-file exe
         run: >
@@ -109,7 +111,9 @@ jobs:
           dotnet-version: '9.0.x'
 
       - name: Test
-        run: dotnet test -c Release
+        # Una prueba colgada se corta a los 10 minutos y se dice cuál era (ver ci.yml).
+        timeout-minutes: 25
+        run: dotnet test -c Release --blame-hang-timeout 10m --blame-hang-dump-type none
 
       # Mismo script que la CI: universal (arm64 + Intel), con icono y en .tar.gz para no perder
       # el permiso de ejecución por el camino.

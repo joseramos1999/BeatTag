@@ -56,18 +56,24 @@ jobs:
       # Los tests que fallen se publican ademas como ANOTACIONES del run. Los logs completos exigen
       # permisos de administrador para leerse, y las anotaciones no: asi el resultado de macOS se
       # puede consultar desde fuera sin tener que entrar a mirarlo a mano cada vez.
+      #
+      # --blame-hang-timeout: una prueba que se queda colgada se corta a los 10 minutos y se dice
+      # cuál era. Visto en octubre de 2026: en macOS el paso se quedaba colgado de vez en cuando y a
+      # los 46 minutos GitHub daba el equipo por perdido, sin ningún dato de qué prueba lo causaba.
       - name: Test
         shell: bash
+        timeout-minutes: 25
         run: |
-          if dotnet test -c Release --no-build --verbosity normal > test.log 2>&1; then
+          if dotnet test -c Release --no-build --verbosity normal --blame-hang-timeout 10m --blame-hang-dump-type none > test.log 2>&1; then
             tail -3 test.log
           else
             echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
 
             # UNA sola anotacion con todo dentro: GitHub solo conserva unas diez por trabajo y
             # ademas deduplica, asi que emitir una por fallo perdia justo lo que hace falta ver.
-            # %0A es el salto de linea dentro de un mensaje de anotacion.
-            fallos=$(grep -E "^[[:space:]]*(Failed|Con error) [A-Za-z]" test.log | sed 's/^[[:space:]]*//' | sort -u)
+            # %0A es el salto de linea dentro de un mensaje de anotacion. Incluye las pruebas que
+            # estaban en marcha cuando --blame-hang-timeout cortó la ejecución.
+            fallos=$( { grep -E "^[[:space:]]*(Failed|Con error) [A-Za-z]" test.log; grep -iE -A6 "hang|were running|se estaban ejecutando|aborted|anul" test.log; } | sed 's/^[[:space:]]*//' | sort -u)
             total=$(printf '%s\n' "$fallos" | grep -c . || true)
             cuerpo=$(printf '%s\n' "$fallos" | head -60 | awk '{printf "%s%%0A", $0}')
             echo "::error title=Tests que fallan ($total)::$cuerpo"
