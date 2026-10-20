@@ -338,6 +338,21 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
                 OnPropertyChanged(nameof(HayRenombrados));
             }
         };
+        // I14 (equipo catalogo): «Sustituir» de la Bandeja pone otro archivo en la ruta de una copia
+        // de la biblioteca. Su propuesta se calculó con el archivo anterior y, con la casilla marcada,
+        // «Aplicar marcadas» la escribiría en la descarga: se retira, como tras deshacer.
+        engine.ArchivosSustituidos += rutas => RetirarFilasDe(rutas);
+    }
+
+    /// <summary>Quita de la lista las propuestas de esas rutas y devuelve cuántas (I14, equipo catalogo).</summary>
+    public int RetirarFilasDe(IEnumerable<string> rutas)
+    {
+        var quitar = FilasRevertidas(Rows, rutas);
+        if (quitar.Count == 0) return 0;
+        using (Recuento.EnLote())
+            foreach (var f in quitar) Rows.Remove(f);
+        RowsView.Refresh();
+        return quitar.Count;
     }
 
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)

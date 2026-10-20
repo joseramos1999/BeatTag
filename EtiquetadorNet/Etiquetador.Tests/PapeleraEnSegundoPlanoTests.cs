@@ -64,12 +64,12 @@ public class PapeleraEnSegundoPlanoTests : IDisposable
     [Fact]
     public void El_resumen_de_la_bandeja_habla_de_descargas_y_dice_el_motivo()
     {
-        Assert.Equal("25 descarga(s) enviadas a la papelera.", EnvioPapelera.Resumen(25, Array.Empty<(string, string)>(), "descarga"));
+        Assert.Equal("25 descargas enviadas a la papelera.", EnvioPapelera.Resumen(25, Array.Empty<(string, string)>(), Sustantivo.Descarga));
         var fallos = new List<(string, string)> { ("a.mp3", "Está en una unidad extraíble (F:)."), ("b.mp3", "Está en una unidad extraíble (F:).") };
         Assert.Equal("No se ha enviado ninguna descarga a la papelera: Está en una unidad extraíble (F:).",
-                     EnvioPapelera.Resumen(0, fallos, "descarga"));
+                     EnvioPapelera.Resumen(0, fallos, Sustantivo.Descarga));
         // Duplicados sigue diciendo lo mismo que antes.
-        Assert.Equal("3 copia(s) enviadas a la papelera · 2 no se han enviado: Está en una unidad extraíble (F:).",
+        Assert.Equal("3 copias enviadas a la papelera · 2 no se han enviado: Está en una unidad extraíble (F:).",
                      DuplicatesViewModel.ResumenPapelera(3, fallos));
     }
 

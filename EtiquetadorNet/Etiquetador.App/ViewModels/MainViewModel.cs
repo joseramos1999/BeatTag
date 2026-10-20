@@ -204,9 +204,8 @@ public partial class MainViewModel : ViewModelBase
                 Titulo = "LIMPIAR",
                 Paginas = new PaginaNav[]
                 {
-                    // El envío a la papelera también cuenta (hallazgo interfaz-1).
-                    new() { Indice = 3,  Icono = "👥", Nombre = "Duplicados",  Vm = Duplicates, Ocupada = () => Duplicates.Ocupada,
-                            Cancelar = Duplicates.CancelarProcesos },
+                    new() { Indice = 3,  Icono = "👥", Nombre = "Duplicados",  Vm = Duplicates, Ocupada = () => Duplicates.IsBusy,
+                            Cancelar = Duplicates.CancelarTodo },   // huellas y papelera (rendimiento-1, equipo catalogo)
                     new() { Indice = 4,  Icono = "🎧", Nombre = "Calidad",     Vm = Quality, Ocupada = () => Quality.IsBusy },
                     new() { Indice = 5,  Icono = "⚠",  Nombre = "Incompletas", Vm = Incomplete, Ocupada = () => Incomplete.IsBusy },
                     new() { Indice = 10, Icono = "🔊", Nombre = "Volumen",     Vm = Loudness, Ocupada = () => Loudness.IsBusy,

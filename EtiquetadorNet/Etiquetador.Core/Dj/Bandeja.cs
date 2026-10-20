@@ -425,6 +425,16 @@ public static class TrasladoBandeja
 /// <summary>La copia de la biblioteca que una descarga puede sustituir, y por qué es mejor («320 kbps frente a 128 kbps»).</summary>
 public sealed record PropuestaSustitucion(Track Vieja, string Motivo);
 
+/// <summary>
+/// Las etiquetas de DJ que se pueden llevar de la copia antigua a la descarga al sustituir (ver
+/// <see cref="SustitucionBandeja.CopiarEtiquetasDj"/>). Vacío ("" y 0) es «nada que copiar».
+/// </summary>
+public sealed record EtiquetasDj(string Comentario, string Tonalidad, uint Bpm)
+{
+    public static readonly EtiquetasDj Ninguna = new("", "", 0);
+    public bool Vacias => Comentario.Length == 0 && Tonalidad.Length == 0 && Bpm == 0;
+}
+
 /// <summary>Cómo fue sustituir una copia de la biblioteca.</summary>
 /// <param name="Destino">Dónde ha quedado la descarga (la carpeta y el nombre de la copia antigua).</param>
 /// <param name="Error">"" si fue bien; si no, qué pasó y en qué estado han quedado los dos archivos.</param>
@@ -547,6 +557,15 @@ public static class SustitucionBandeja
         + "en la descarga habrá que volver a ponerlos. Traktor los guarda en su colección, ligados a la ruta, igual que rekordbox.";
 
     /// <summary>
+    /// Qué pasa con las fichas si se deshace (ver <see cref="AlmacenSustituciones"/>). La copia antigua
+    /// solo puede volver de la papelera después de deshacer: hasta entonces, su ruta (con la misma
+    /// extensión) la ocupa la descarga.
+    /// </summary>
+    public const string TextoAlDeshacer =
+        "la descarga vuelve a la bandeja con su propia ficha de DJ, y la copia antigua recupera la suya cuando la saques de la papelera "
+        + "y vuelvas a escanear la biblioteca.";
+
+    /// <summary>
     /// El cuerpo y la nota del diálogo de confirmación, con los dos archivos y su calidad. Dice también
     /// lo que NO pasa a la descarga: las etiquetas del archivo antiguo (comentario, tonalidad,
     /// puntuación, color…). Copiarlas sería decidir por el DJ qué etiquetas valen para un archivo
@@ -555,7 +574,11 @@ public static class SustitucionBandeja
     /// Quien llama comprueba ANTES que la unidad de la copia antigua tiene papelera (si no, no se abre
     /// el diálogo), así que la nota puede prometer que se recupera desde ahí.
     /// </summary>
-    public static (string Cuerpo, string Nota) TextosConfirmacion(Track nueva, Track vieja)
+    /// <param name="copiar">
+    /// Lo que se podría copiar de la copia antigua a la descarga (ver <see cref="QueCopiar"/>); con
+    /// algo, el diálogo ofrece «Sustituir y copiar» y aquí se dice qué pasaría.
+    /// </param>
+    public static (string Cuerpo, string Nota) TextosConfirmacion(Track nueva, Track vieja, EtiquetasDj? copiar = null)
     {
         var destino = Destino(vieja.FilePath, nueva.FilePath);
         var carpeta = Path.GetDirectoryName(vieja.FilePath) ?? "";
@@ -563,9 +586,119 @@ public static class SustitucionBandeja
                    + $"en «{carpeta}». La copia de la biblioteca va a la papelera y la descarga ocupa su lugar como "
                    + $"«{Path.GetFileName(destino)}». Su ficha de DJ pasa a la descarga. Las etiquetas del archivo antiguo "
                    + "(comentario, tonalidad, puntuación, color…) no pasan: la descarga conserva las suyas y Enriquecer la volverá a proponer.";
+        if (copiar is { Vacias: false })
+            cuerpo += $" Con «{BotonCopiar}», pasan además a la descarga {DescribirCopia(copiar)} de la copia antigua; "
+                    + "la puntuación y el color, no. Se deshacen con el resto de la sustitución.";
         var nota = TextoRekordbox(vieja.FilePath, destino) + " " + TextoSeratoTraktor
-                 + " La copia antigua se puede recuperar desde la papelera del sistema, y el traslado se puede deshacer desde Enriquecer.";
+                 + " La copia antigua se puede recuperar desde la papelera del sistema, y el traslado se puede deshacer desde Enriquecer: "
+                 + TextoAlDeshacer;
         return (cuerpo, nota);
+    }
+
+    // ---- Copiar las etiquetas de DJ de la copia antigua (revisión de I14, equipo catalogo) ----
+    //
+    // POR QUÉ. Al sustituir, la descarga conserva sus etiquetas y las de la copia antigua se van con
+    // ella a la papelera. Para muchos DJ esas son las que importan: el comentario con sus notas o la
+    // tonalidad de Mixed In Key, el BPM corregido a mano. Se ofrece copiarlas, solo las que deshacer
+    // sabe devolver (comentario, tonalidad y BPM). La puntuación y el color no: cada programa los
+    // guarda a su manera y no habría forma de devolverlos. Los cue points de Serato, tampoco: van en
+    // el archivo, ligados a su audio, y en otra codificación caerían en otro sitio.
+
+    /// <summary>El texto del botón que sustituye copiando las etiquetas de DJ.</summary>
+    public const string BotonCopiar = "Sustituir y copiar sus etiquetas";
+
+    /// <summary>
+    /// Lee las etiquetas de DJ de un archivo. Null si no se puede abrir con TagLib (un AIFF-C, por
+    /// ejemplo, o un archivo dañado).
+    /// </summary>
+    public static EtiquetasDj? LeerEtiquetasDj(string ruta)
+    {
+        try
+        {
+            using var f = TagLib.File.Create(ruta);
+            return new EtiquetasDj((f.Tag.Comment ?? "").Trim(), (f.Tag.InitialKey ?? "").Trim(), f.Tag.BeatsPerMinute);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Lo que cambiaría en la descarga al copiar: lo que la copia antigua tiene y la descarga no tiene
+    /// igual. Vacío si no hay nada que ganar (o si la descarga no se puede escribir).
+    /// </summary>
+    public static EtiquetasDj QueCopiar(EtiquetasDj? vieja, EtiquetasDj? nueva)
+    {
+        if (vieja == null || nueva == null) return EtiquetasDj.Ninguna;
+        return new EtiquetasDj(
+            vieja.Comentario.Length > 0 && vieja.Comentario != nueva.Comentario ? vieja.Comentario : "",
+            vieja.Tonalidad.Length > 0 && !string.Equals(vieja.Tonalidad, nueva.Tonalidad, StringComparison.OrdinalIgnoreCase) ? vieja.Tonalidad : "",
+            vieja.Bpm > 0 && vieja.Bpm != nueva.Bpm ? vieja.Bpm : 0);
+    }
+
+    /// <summary>«el comentario, la tonalidad (8A) y el BPM (124)», con lo que haya.</summary>
+    public static string DescribirCopia(EtiquetasDj c)
+    {
+        var partes = new List<string>();
+        if (c.Comentario.Length > 0) partes.Add("el comentario");
+        if (c.Tonalidad.Length > 0) partes.Add($"la tonalidad ({c.Tonalidad})");
+        if (c.Bpm > 0) partes.Add($"el BPM ({c.Bpm})");
+        return partes.Count switch
+        {
+            0 => "",
+            1 => partes[0],
+            _ => string.Join(", ", partes.Take(partes.Count - 1)) + " y " + partes[^1],
+        };
+    }
+
+    /// <summary>
+    /// Escribe en <paramref name="destino"/> (la descarga, ya en su sitio) lo de <paramref name="copiar"/>.
+    /// Como el resto de escrituras: se anota para deshacer ANTES de guardar el archivo, y si no se
+    /// puede anotar, el archivo no se toca. Solo se anota lo que el formato admite de verdad. Devuelve
+    /// cuántas etiquetas se han copiado y, si algo falló, el motivo. No lanza.
+    /// </summary>
+    public static (int Copiadas, string Error) CopiarEtiquetasDj(string destino, EtiquetasDj copiar, Func<UndoRecord, string> anotar)
+    {
+        if (copiar.Vacias) return (0, "");
+        try
+        {
+            using var f = Tagging.AbrirParaEscribir(destino);
+            var tag = f.Tag;
+            var cambios = new Dictionary<string, FieldChange>();
+            if (copiar.Comentario.Length > 0)
+            {
+                var antes = tag.Comment ?? "";
+                tag.Comment = copiar.Comentario;
+                if ((tag.Comment ?? "") == copiar.Comentario) cambios["Comment"] = FieldChange.Str(antes, copiar.Comentario);
+            }
+            if (copiar.Tonalidad.Length > 0)
+            {
+                var antes = tag.InitialKey ?? "";
+                try { tag.InitialKey = copiar.Tonalidad; } catch { /* el formato no lo admite */ }
+                if ((tag.InitialKey ?? "") == copiar.Tonalidad) cambios["Key"] = FieldChange.Str(antes, copiar.Tonalidad);
+            }
+            if (copiar.Bpm > 0)
+            {
+                var antes = tag.BeatsPerMinute;
+                try { tag.BeatsPerMinute = copiar.Bpm; } catch { /* el formato no lo admite */ }
+                if (tag.BeatsPerMinute == copiar.Bpm) cambios["Bpm"] = FieldChange.Num(antes, copiar.Bpm);
+            }
+            if (cambios.Count == 0) return (0, "el formato de la descarga no admite esas etiquetas.");
+
+            string anotado;
+            try
+            {
+                anotado = anotar(new UndoRecord
+                {
+                    OrigPath = destino, FinalPath = destino, Renamed = false, Fields = cambios, Origen = nameof(TipoEjecucion.Sustitucion),
+                }) ?? "";
+            }
+            catch (Exception e) { anotado = e.Message; }
+            // Sin anotar, el archivo se cierra sin guardar: lo cambiado solo estaba en memoria.
+            if (anotado.Length > 0) return (0, $"no se pudieron anotar para deshacer ({anotado}), así que no se ha tocado la descarga.");
+
+            f.Save();
+            return (cambios.Count, "");
+        }
+        catch (Exception e) { return (0, e.Message); }
     }
 
     /// <summary>
@@ -667,7 +800,10 @@ public static class SustitucionBandeja
         if (carpetaDiario != null)
         {
             diario = Path.Combine(carpetaDiario, id + ".json");
-            var errDiario = ArchivoDatos.EscribirJson(diario, new DiarioSustitucion { Temporal = temporal, Bandeja = nueva, Vieja = vieja });
+            var errDiario = ArchivoDatos.EscribirJson(diario, new DiarioSustitucion
+            {
+                Temporal = temporal, Bandeja = nueva, Vieja = vieja, Bytes = Tamano(nueva) ?? 0,
+            });
             if (errDiario.Length > 0)
                 return Fallo($"No se pudo apuntar la sustitución antes de empezar ({errDiario}). No se ha cambiado nada.");
         }
@@ -710,9 +846,16 @@ public static class SustitucionBandeja
                              + " Recupera la copia antigua desde la papelera si la necesitas.", viejaEnPapelera: true);
             }
 
-            // 4. Queda anotado para deshacer.
+            // 4. Queda anotado para deshacer. Con su origen: el historial lo enseña como traslado (lo es:
+            // la descarga sale de la bandeja y deshacer la devuelve a ella).
             string errAnotar;
-            try { errAnotar = anotar(new UndoRecord { OrigPath = nueva, FinalPath = destino, Renamed = true }) ?? ""; }
+            try
+            {
+                errAnotar = anotar(new UndoRecord
+                {
+                    OrigPath = nueva, FinalPath = destino, Renamed = true, Origen = nameof(TipoEjecucion.Sustitucion),
+                }) ?? "";
+            }
             catch (Exception e) { errAnotar = e.Message; }
             if (errAnotar.Length > 0)
                 return Fallo($"El cambio no se pudo anotar para deshacer ({errAnotar}). "
@@ -737,6 +880,51 @@ public static class SustitucionBandeja
         public string Bandeja { get; set; } = "";
         /// <summary>La copia de la biblioteca que se iba a sustituir.</summary>
         public string Vieja { get; set; } = "";
+
+        /// <summary>
+        /// Tamaño de la descarga, para saber si el archivo que aparezca en la bandeja con su nombre es
+        /// ella (ver <see cref="TemporalSobra"/>). 0 en lo apuntado antes de guardarlo.
+        /// </summary>
+        public long Bytes { get; set; }
+    }
+
+    /// <summary>
+    /// ¿Sobra el temporal de una sustitución cortada, porque en la bandeja hay un archivo con el nombre
+    /// de la descarga? Solo si ese archivo tiene el tamaño de la descarga y el temporal no es mayor: es
+    /// la propia descarga (una copia entre dos discos que no llegó a terminar, o que terminó sin poder
+    /// borrar el original) o una igual. Si no, ese archivo es OTRO y el temporal no se puede borrar.
+    ///
+    /// Visto en revisión (datos-5): se borraba siempre, sin papelera y sin comparar nada. Tras un
+    /// renombrado completo en el mismo disco, la descarga entera es el temporal; si el usuario vio que
+    /// «había desaparecido» y la volvió a bajar, o llegó otra versión con el mismo nombre, se perdía.
+    /// </summary>
+    /// <param name="apuntado">El tamaño apuntado de la descarga (0 si no se apuntó).</param>
+    internal static bool TemporalSobra(long apuntado, long enBandeja, long temporal)
+    {
+        var descarga = apuntado > 0 ? apuntado : enBandeja;
+        return enBandeja == descarga && temporal <= descarga;
+    }
+
+    private static long? Tamano(string ruta)
+    {
+        try
+        {
+            var fi = new FileInfo(ruta);
+            return fi.Exists ? fi.Length : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>«Tema (recuperada).mp3», o «Tema (recuperada 2).mp3» si ese también está ocupado.</summary>
+    private static string NombreRecuperada(string carpeta, string nombre)
+    {
+        var baseNombre = Path.GetFileNameWithoutExtension(nombre);
+        var ext = Path.GetExtension(nombre);
+        for (var n = 1; ; n++)
+        {
+            var ruta = Path.Combine(carpeta, $"{baseNombre} (recuperada{(n == 1 ? "" : " " + n)}){ext}");
+            if (!File.Exists(ruta) && !Directory.Exists(ruta)) return ruta;
+        }
     }
 
     /// <summary>
@@ -746,6 +934,25 @@ public static class SustitucionBandeja
     /// registro. No lanza: lo que no se pueda recoger ahora se intenta en el siguiente análisis.
     /// </summary>
     public static IReadOnlyList<string> Recuperar(string carpetaDiario)
+    {
+        // Se llama al arrancar y al analizar la bandeja, que pueden coincidir: de uno en uno, para que
+        // los dos no intenten devolver la misma descarga a la vez.
+        lock (CerrojoRecuperar) return RecuperarTodas(carpetaDiario);
+    }
+
+    private static readonly object CerrojoRecuperar = new();
+
+    /// <summary>
+    /// ¿Queda alguna sustitución a medias por recoger? Solo mira si la carpeta tiene algo, para no
+    /// gastar nada al arrancar en el caso de siempre (no hay ninguna).
+    /// </summary>
+    public static bool HayQueRecuperar(string carpetaDiario)
+    {
+        try { return Directory.Exists(carpetaDiario) && Directory.EnumerateFiles(carpetaDiario, "*.json").Any(); }
+        catch { return false; }
+    }
+
+    private static IReadOnlyList<string> RecuperarTodas(string carpetaDiario)
     {
         var avisos = new List<string>();
         string[] diarios;
@@ -777,29 +984,35 @@ public static class SustitucionBandeja
         var nombre = Path.GetFileName(d.Bandeja);
         try
         {
-            // El original sigue en la bandeja: el temporal es una copia que no llegó a completarse
-            // entre dos discos (File.Move solo borra el original cuando la copia está entera).
+            var carpetaBandeja = Path.GetDirectoryName(d.Bandeja) ?? "";
+            string destino, texto;
             if (File.Exists(d.Bandeja))
             {
-                File.Delete(d.Temporal);
-                return "";
+                // En la bandeja hay un archivo con su nombre. Si es la propia descarga (ver
+                // TemporalSobra), el temporal sobra; si es otro, el temporal vuelve con otro nombre.
+                if (TemporalSobra(d.Bytes, Tamano(d.Bandeja) ?? 0, Tamano(d.Temporal) ?? 0))
+                {
+                    File.Delete(d.Temporal);
+                    return "";
+                }
+                destino = NombreRecuperada(carpetaBandeja, nombre);
+                texto = $"Una sustitución se interrumpió al cerrarse la aplicación: la descarga ha vuelto a la bandeja como "
+                      + $"«{Path.GetFileName(destino)}», porque ya hay otro archivo llamado «{nombre}».";
             }
-
-            var carpetaBandeja = Path.GetDirectoryName(d.Bandeja) ?? "";
-            string destino;
-            if (carpetaBandeja.Length > 0 && Directory.Exists(carpetaBandeja)) destino = d.Bandeja;
+            else if (carpetaBandeja.Length > 0 && Directory.Exists(carpetaBandeja))
+            {
+                destino = d.Bandeja;
+                texto = $"Una sustitución se interrumpió al cerrarse la aplicación: la descarga «{nombre}» ha vuelto a la bandeja.";
+            }
             else
             {
                 // La carpeta de la bandeja ya no existe: se le devuelve su nombre donde está, a la vista.
-                destino = Path.Combine(Path.GetDirectoryName(d.Temporal) ?? "", nombre);
-                if (File.Exists(destino) || Directory.Exists(destino))
-                    destino = Path.Combine(Path.GetDirectoryName(d.Temporal) ?? "",
-                                           $"{Path.GetFileNameWithoutExtension(nombre)} (recuperada){Path.GetExtension(nombre)}");
+                var carpeta = Path.GetDirectoryName(d.Temporal) ?? "";
+                destino = Path.Combine(carpeta, nombre);
+                if (File.Exists(destino) || Directory.Exists(destino)) destino = NombreRecuperada(carpeta, nombre);
+                texto = $"Una sustitución se interrumpió al cerrarse la aplicación y la carpeta de la bandeja ya no existe: la descarga está en «{destino}».";
             }
             File.Move(d.Temporal, destino);
-            var texto = string.Equals(destino, d.Bandeja, StringComparison.OrdinalIgnoreCase)
-                ? $"Una sustitución se interrumpió al cerrarse la aplicación: la descarga «{nombre}» ha vuelto a la bandeja."
-                : $"Una sustitución se interrumpió al cerrarse la aplicación y la carpeta de la bandeja ya no existe: la descarga está en «{destino}».";
             if (!File.Exists(d.Vieja))
                 texto += $" La copia de la biblioteca («{Path.GetFileName(d.Vieja)}») ya estaba en la papelera, desde donde puedes recuperarla.";
             return texto;

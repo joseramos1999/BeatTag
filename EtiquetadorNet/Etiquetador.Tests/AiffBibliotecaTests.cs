@@ -320,6 +320,138 @@ public class AiffBibliotecaTests : IDisposable
         Assert.Same(s16, AudioSamples.ParaReproducir(s16));
     }
 
+    // ---------------------------------------------------------------- revisión de la tanda 3: AIFF-C en la biblioteca
+
+    /// <summary>Añade un bloque al final de un AIFF y pone al día el tamaño del FORM.</summary>
+    private static void AnadirBloque(string path, string id, byte[] datos)
+    {
+        var todo = File.ReadAllBytes(path).ToList();
+        todo.AddRange(Encoding.ASCII.GetBytes(id));
+        todo.AddRange(new[] { (byte)(datos.Length >> 24), (byte)(datos.Length >> 16), (byte)(datos.Length >> 8), (byte)datos.Length });
+        todo.AddRange(datos);
+        if (datos.Length % 2 == 1) todo.Add(0);
+        var largo = todo.Count - 8;
+        todo[4] = (byte)(largo >> 24); todo[5] = (byte)(largo >> 16); todo[6] = (byte)(largo >> 8); todo[7] = (byte)largo;
+        File.WriteAllBytes(path, todo.ToArray());
+    }
+
+    // TagLib no abre los AIFF-C («File form type is not AIFF»): entraban sin duración ni calidad, y
+    // Duplicados y Sustituir no los tenían en cuenta. Ahora salen de la cabecera.
+    [Fact]
+    public void Un_aifc_entra_en_la_biblioteca_con_su_duracion_y_su_calidad()
+    {
+        var ruta = Path.Combine(_dir, "mac.aif");
+        WriteAifc(ruta, "sowt", 16, 2, Rampa(44100 * 4 * 2));   // dos segundos
+        Assert.ThrowsAny<Exception>(() => TagLib.File.Create(ruta));   // lo que hace TagLib con ellos
+
+        var t = LibraryScanner.ReadTrack(ruta);
+
+        Assert.Equal((2, 44100, 2, 1411), (t.DurationSeconds, t.SampleRate, t.Channels, t.Bitrate));
+        Assert.Null(t.Title);
+        Assert.Equal(QualityTier.Lossless, AudioQuality.Rate(t));
+    }
+
+    // Si lleva bloque ID3 (donde las aplicaciones guardan las etiquetas de un AIFF), también sus etiquetas.
+    [Fact]
+    public void Las_etiquetas_de_un_aifc_se_leen_de_su_bloque_id3()
+    {
+        var ruta = Path.Combine(_dir, "Fisher - Stop It.aif");
+        WriteAifc(ruta, "sowt", 16, 2, Rampa(44100 * 4));
+        var id3 = new TagLib.Id3v2.Tag { Title = "Stop It", Performers = new[] { "Fisher" }, Album = "Stop It EP", InitialKey = "8A", BeatsPerMinute = 126 };
+        AnadirBloque(ruta, "ID3 ", id3.Render().Data);
+
+        var t = LibraryScanner.ReadTrack(ruta);
+
+        Assert.Equal(("Stop It", "Fisher", "Stop It EP", "8A", 126u, 1), (t.Title, t.Artist, t.Album, t.Key, t.Bpm, t.DurationSeconds));
+    }
+
+    // Un AIFF-C comprimido: lo que cuenta su cabecera depende del códec, así que solo se da por bueno
+    // lo que no depende de él (frecuencia y canales).
+    [Fact]
+    public void De_un_aifc_comprimido_solo_se_fia_la_frecuencia_y_los_canales()
+    {
+        var ruta = Path.Combine(_dir, "ulaw.aif");
+        WriteAifc(ruta, "ulaw", 16, 1, new byte[] { 1, 2, 3, 4 });
+
+        var t = LibraryScanner.ReadTrack(ruta);
+
+        Assert.Equal((0, 44100, 1, 0), (t.DurationSeconds, t.SampleRate, t.Channels, t.Bitrate));
+    }
+
+    // Quien ya lo tenía en la caché de escaneo, vacío, lo recupera sin tener que vaciarla.
+    [Fact]
+    public void Un_aifc_que_estaba_vacio_en_la_cache_se_vuelve_a_leer()
+    {
+        var ruta = Path.Combine(_dir, "mac.aiff");
+        WriteAifc(ruta, "sowt", 16, 2, Rampa(44100 * 4));
+        var fi = new FileInfo(ruta);
+        var cacheFile = Path.Combine(_dir, "scan-cache.json");
+        File.WriteAllText(cacheFile, JsonSerializer.Serialize(new Dictionary<string, ScanCache.Entry>
+        {
+            [ruta] = new() { M = fi.LastWriteTimeUtc.Ticks, S = fi.Length },
+        }));
+
+        var t = new ScanCache(cacheFile).Read(ruta);
+
+        Assert.Equal((1, 44100), (t.DurationSeconds, t.SampleRate));
+    }
+
+    // Aplicar una propuesta a un AIFF-C decía «File form type is not AIFF». Ahora, en español y con
+    // qué hacer, sin tocar el archivo.
+    [Fact]
+    public async Task Aplicar_a_un_aifc_lo_dice_con_un_texto_claro_y_no_lo_toca()
+    {
+        var ruta = Path.Combine(_dir, "mac.aif");
+        WriteAifc(ruta, "sowt", 16, 2, Rampa(44100 * 4));
+        var antes = File.ReadAllBytes(ruta);
+        var info = new Etiquetador.Core.Pipeline.ProcessResult
+        {
+            FilePath = ruta, Old = "mac.aif", New = "Fisher - Stop It.aif", Artist = "Fisher", Title = "Stop It", Found = true,
+        };
+
+        var res = await new Etiquetador.Core.Pipeline.ApplyEngine().ApplyOneAsync(info, true, new Etiquetador.Core.Pipeline.FieldFlags(),
+            "keep", null, Path.Combine(_dir, "run.jsonl"), Path.Combine(_dir, "done.log"));
+
+        Assert.False(res.TagOk);
+        Assert.Equal(LectorAiff.TextoNoSeEscribe, res.TagErr);
+        Assert.Equal(ruta, res.FinalPath);   // tampoco se renombra
+        Assert.Equal(antes, File.ReadAllBytes(ruta));
+        Assert.False(File.Exists(Path.Combine(_dir, "run.jsonl")));
+    }
+
+    // Sustituir con una descarga AIFF-C no ofrece copiar las etiquetas de DJ (no se pueden leer ni
+    // escribir), y si se intentara, se dice por qué sin tocar el archivo.
+    [Fact]
+    public void A_un_aifc_no_se_le_copian_etiquetas_de_dj()
+    {
+        var ruta = Path.Combine(_dir, "mac.aif");
+        WriteAifc(ruta, "sowt", 16, 2, Rampa(44100 * 4));
+        var antes = File.ReadAllBytes(ruta);
+
+        Assert.True(Etiquetador.Core.Dj.SustitucionBandeja.QueCopiar(new Etiquetador.Core.Dj.EtiquetasDj("x", "8A", 124),
+                                                                     Etiquetador.Core.Dj.SustitucionBandeja.LeerEtiquetasDj(ruta)).Vacias);
+        var (copiadas, error) = Etiquetador.Core.Dj.SustitucionBandeja.CopiarEtiquetasDj(ruta, new Etiquetador.Core.Dj.EtiquetasDj("x", "8A", 0), _ => "");
+
+        Assert.Equal((0, LectorAiff.TextoNoSeEscribe), (copiadas, error));
+        Assert.Equal(antes, File.ReadAllBytes(ruta));
+    }
+
+    [Fact]
+    public void Solo_un_aifc_se_reconoce_como_tal()
+    {
+        var aifc = Path.Combine(_dir, "a.aif");
+        WriteAifc(aifc, "sowt", 16, 1, new byte[] { 1, 2 });
+        var clasico = Path.Combine(_dir, "b.aiff");
+        WriteSineAiff(clasico, segundos: 1);
+
+        Assert.True(LectorAiff.EsAifc(aifc));
+        Assert.False(LectorAiff.EsAifc(clasico));
+        Assert.False(LectorAiff.EsAifc(Path.Combine(_dir, "no-existe.aif")));
+        var c = LectorAiff.LeerPista(clasico);
+        Assert.Equal((1, 1411), (c!.DurationSeconds, c.Bitrate));   // la misma cuenta que TagLib para uno clásico
+        Assert.Equal(1411, LibraryScanner.ReadTrack(clasico).Bitrate);
+    }
+
     [Fact]
     public void La_cabecera_de_un_aiff_clasico_se_lee()
     {

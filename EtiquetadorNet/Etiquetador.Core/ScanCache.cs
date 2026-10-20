@@ -41,7 +41,9 @@ public sealed class ScanCache
         long m = 0, s = 0;
         try { var fi = new FileInfo(path); m = fi.LastWriteTimeUtc.Ticks; s = fi.Length; } catch { }
 
-        if (_map.TryGetValue(path, out var e) && e.M == m && e.S == s)
+        // Un AIFF guardado sin frecuencia es uno que TagLib no pudo abrir (un AIFF-C de macOS) antes
+        // de que el escáner supiera leer su cabecera: se vuelve a leer en lugar de seguir vacío.
+        if (_map.TryGetValue(path, out var e) && e.M == m && e.S == s && !(e.Sr == 0 && LectorAiff.EsAiff(path)))
             return new Track
             {
                 FilePath = path,

@@ -333,7 +333,7 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
             _engine.Logger.Detail($"Bandeja: {tracks.Count} canciones ({nuevas} nuevas; {olvidadas} ya no estaban).");
             Status = tracks.Count == 0
                 ? "La bandeja está vacía."
-                : $"{tracks.Count} canciones en la bandeja" + (nuevas > 0 ? $", {nuevas} nuevas." : ".");
+                : $"{Canciones(tracks.Count)} en la bandeja" + (nuevas > 0 ? $", {nuevas} {(nuevas == 1 ? "nueva" : "nuevas")}." : ".");
             foreach (var r in recogidas) _engine.Logger.Log("Bandeja: " + r, LogKind.Err);
             if (recogidas.Count > 0) Status = "⚠ " + string.Join(" ", recogidas) + " " + Status;
         }
@@ -483,7 +483,17 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         GuardarBandeja();
         ActualizarRecuento();
         if (Filtro != "Todas") AplicarFiltro();
-        Status = $"{Seleccion.Count} canción(es) marcadas como {AlmacenBandeja.Nombre(estado).ToLowerInvariant()}s.";
+        Status = TextoMarcadas(Seleccion.Count, estado);
+    }
+
+    /// <summary>«1 canción» o «3 canciones»: los textos de la bandeja decían «canción(es)».</summary>
+    internal static string Canciones(int n) => n == 1 ? "1 canción" : $"{n} canciones";
+
+    /// <summary>«1 canción marcada como revisada», «3 canciones marcadas como preparadas».</summary>
+    internal static string TextoMarcadas(int n, EstadoBandeja estado)
+    {
+        var s = n == 1 ? "" : "s";
+        return $"{Canciones(n)} marcada{s} como {AlmacenBandeja.Nombre(estado).ToLowerInvariant()}{s}.";
     }
 
     private void GuardarFicha() => AplicarFicha(Editor.Cambios());
@@ -519,7 +529,7 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         if (IsBusy || Seleccion.Count == 0) return;
         var rutas = Seleccion.Select(r => r.FilePath).ToList();
         IsBusy = true;
-        Status = $"Escribiendo la ficha en el comentario de {rutas.Count} canción(es)…";
+        Status = $"Escribiendo la ficha en el comentario de {Canciones(rutas.Count)}…";
         try
         {
             _engine.ReleaseAudio();
@@ -553,7 +563,7 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         GuardarLoEscrito("antes de pasar a la biblioteca");
         IsBusy = true;
         Progress = 0;
-        Status = $"Pasando {filas.Count} canción(es) a la biblioteca…";
+        Status = $"Pasando {Canciones(filas.Count)} a la biblioteca…";
         try
         {
             _engine.ReleaseAudio();
@@ -572,7 +582,10 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
                     if (t.Ok)
                     {
                         ok.Add(t);
-                        var rec = new UndoRecord { OrigPath = t.Origen, FinalPath = t.Destino, Renamed = true };
+                        var rec = new UndoRecord
+                        {
+                            OrigPath = t.Origen, FinalPath = t.Destino, Renamed = true, Origen = nameof(TipoEjecucion.Traslado),
+                        };
                         try { File.AppendAllText(undo, JsonSerializer.Serialize(rec) + "\n"); }
                         catch (Exception e) { errUndo = e.Message; }
                     }
@@ -604,8 +617,8 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
             if (hechos.Count > 0) await _store.ScanAsync();
             else await RevisarAsync();
 
-            var texto = $"{hechos.Count} canción(es) pasadas a la biblioteca";
-            if (fallos.Count > 0) texto += $" · {fallos.Count} se quedan en la bandeja: {fallos[0].Error}";
+            var texto = $"{Canciones(hechos.Count)} {(hechos.Count == 1 ? "pasada" : "pasadas")} a la biblioteca";
+            if (fallos.Count > 0) texto += $" · {fallos.Count} se {(fallos.Count == 1 ? "queda" : "quedan")} en la bandeja: {fallos[0].Error}";
             texto += undoErr.Length > 0
                 ? $". ⚠ El traslado NO quedó anotado y no se podrá deshacer: {undoErr}"
                 : hechos.Count > 0 ? ". Se puede deshacer desde Enriquecer." : ".";
@@ -682,7 +695,7 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
             // hace falta.
             if (res.Enviadas.Count > 0 && !res.Interrumpido) await RevisarAsync();
             Status = (res.Interrumpido ? "Descarte detenido. " : "")
-                   + EnvioPapelera.Resumen(res.Enviadas.Count, res.Fallos, "descarga")
+                   + EnvioPapelera.Resumen(res.Enviadas.Count, res.Fallos, Sustantivo.Descarga)
                    + (plan.Conservar.Count > 0 ? " " + RevisionBandeja.TextoConservadasTrasDescartar(plan.Conservar.Count) : "");
         }
         catch (Exception e)
@@ -724,7 +737,11 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
     /// Si la unidad de la copia antigua no tiene papelera, no se sustituye: enviar ahí sería borrar
     /// para siempre. Si el historial para deshacer no se puede abrir, no se toca ningún archivo.
     /// </summary>
-    public async Task SustituirAsync(BandejaRow fila)
+    /// <param name="copiar">
+    /// Las etiquetas de DJ de la copia antigua que el DJ ha pedido llevar a la descarga (ver
+    /// <see cref="EtiquetasParaCopiarAsync"/>), o null para no copiar ninguna.
+    /// </param>
+    public async Task SustituirAsync(BandejaRow fila, EtiquetasDj? copiar = null)
     {
         if (IsBusy || fila.Sustitucion is not { } propuesta) return;
         var nueva = fila.FilePath;
@@ -740,14 +757,35 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         {
             _engine.ReleaseAudio();
             var paths = _engine.Paths;
+            // Lo que hay de los dos archivos ANTES de tocarlos, para devolverlo si se deshace (datos-2).
+            var registro = new SustitucionHecha
+            {
+                Fecha = DateTime.Now, Bandeja = nueva, Vieja = vieja,
+                FichaVieja = _engine.Fichas.Obtener(vieja), FichaNueva = _engine.Fichas.Obtener(nueva),
+            };
+            var selloAntesDeCopiar = default(SelloArchivo);
+            var copiadas = (Copiadas: 0, Error: "");
             var res = await Task.Run(() =>
             {
+                registro.ViejaBytes = SustitucionesBandeja.Tamano(vieja) ?? 0;
+                registro.NuevaBytes = SustitucionesBandeja.Tamano(nueva) ?? 0;
                 using var manifiesto = ManifiestoDeshacer.Abrir(paths.NuevoManifiesto(), out var error);
                 if (manifiesto == null)
                     return new ResultadoSustitucion(vieja,
                         $"No se puede anotar el cambio para deshacer ({error}), así que no se ha tocado ningún archivo.", false);
-                return SustitucionBandeja.Ejecutar(nueva, vieja, Papelera.Enviar, manifiesto.Anotar,
-                                                   SustitucionBandeja.CarpetaDiario(paths.DataDir));
+                var r = SustitucionBandeja.Ejecutar(nueva, vieja, Papelera.Enviar, manifiesto.Anotar,
+                                                    SustitucionBandeja.CarpetaDiario(paths.DataDir));
+                // Las etiquetas de DJ, en el MISMO historial: deshacer la sustitución las quita antes
+                // de devolver la descarga a la bandeja (se deshace del final al principio).
+                if (r.Ok && copiar is { Vacias: false })
+                {
+                    selloAntesDeCopiar = SelloArchivo.De(r.Destino);
+                    copiadas = SustitucionBandeja.CopiarEtiquetasDj(r.Destino, copiar, manifiesto.Anotar);
+                    // Con las etiquetas cambiadas, al deshacer la descarga vuelve con otro tamaño: no
+                    // se puede reconocer por él (ver AlmacenSustituciones.Conciliar).
+                    if (copiadas.Copiadas > 0) registro.NuevaBytes = 0;
+                }
+                return r;
             });
 
             if (!res.Ok)
@@ -761,19 +799,30 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
 
             SustitucionBandeja.LlevarFicha(_engine.Fichas, vieja, nueva, res.Destino);
             var errFichas = _engine.Fichas.Guardar();
+            registro.Destino = res.Destino;
+            registro.FichaPuesta = _engine.Fichas.Obtener(res.Destino);
             // ANTES de que las cachés sigan a la descarga: lo decidido sobre la copia antigua no vale
-            // para ella (aplicada, descartada, casillas, avisos de audio aceptados).
+            // para ella (aplicada, descartada, casillas, avisos de audio aceptados). Se apunta antes
+            // de olvidarlo, para devolvérselo si la sustitución se deshace y la copia vuelve.
+            SustitucionesBandeja.Apuntar(registro, _engine.Applied, _engine.Ignored, _engine.Marks, _engine.AudioAceptadas);
             var errDecisiones = OlvidarLoDecididoSobre(new[] { vieja, res.Destino }, _engine.Applied, _engine.Ignored,
                                                        _engine.Marks, _engine.AudioAceptadas)
                 ? GuardarDecisiones()
                 : "";
-            _engine.SeguirArchivo(nueva, res.Destino, default);   // huella, identificación y sonoridad de la descarga
+            // Huella, identificación y sonoridad de la descarga; con el sello de antes de copiar las
+            // etiquetas, que cambian la fecha y el tamaño del archivo pero no su audio.
+            _engine.SeguirArchivo(nueva, res.Destino, selloAntesDeCopiar);
             _engine.Bandeja.Olvidar(nueva);
             GuardarBandeja();
+            _engine.Sustituciones.Anotar(registro);
+            var errRegistro = _engine.Sustituciones.Guardar();
+            if (errRegistro.Length > 0) _engine.Logger.Err("Bandeja: no se pudo guardar la sustitución para deshacerla con su ficha: " + errRegistro);
             QuitarFilas(new[] { nueva });
             _guardando = true;
             try { _engine.AvisarFichasCambiadas(); }
             finally { _guardando = false; }
+            // La propuesta de Enriquecer de esas rutas se calculó con la copia antigua (interfaz-4).
+            _engine.AvisarArchivosSustituidos(new[] { vieja, res.Destino });
             _engine.Logger.Detail($"Bandeja: {Path.GetFileName(nueva)} sustituye a {vieja} (la antigua, a la papelera) → {res.Destino}");
 
             // Solo esas dos rutas: la antigua sale y la nueva entra. Recorrer la biblioteca entera
@@ -781,7 +830,9 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
             await _store.RefrescarAsync(new[] { vieja, res.Destino });
 
             Status = TextoSustituida(propuesta.Vieja.FileName, res.Destino, SustitucionBandeja.TextoRekordbox(vieja, res.Destino),
-                                     errFichas, errDecisiones);
+                                     errFichas, errDecisiones, errRegistro)
+                   + TextoCopiadas(copiar, copiadas.Copiadas, copiadas.Error);
+            if (copiadas.Error.Length > 0) _engine.Logger.Err($"Bandeja: no se copiaron las etiquetas de DJ a {Path.GetFileName(res.Destino)}: {copiadas.Error}");
         }
         catch (Exception e)
         {
@@ -803,18 +854,51 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         return motivo.Length == 0 ? "" : TextoSinPapelera(motivo);
     }
 
+    /// <summary>
+    /// Lo que se podría copiar de la copia antigua a la descarga al sustituir (comentario, tonalidad y
+    /// BPM que la descarga no tiene igual), para que el diálogo lo ofrezca. Vacío si no hay nada o si
+    /// alguno de los dos archivos no se puede leer. Lee los dos archivos fuera del hilo de la interfaz.
+    /// </summary>
+    public async Task<EtiquetasDj> EtiquetasParaCopiarAsync(BandejaRow fila)
+    {
+        if (fila.Sustitucion is not { } propuesta) return EtiquetasDj.Ninguna;
+        var vieja = propuesta.Vieja.FilePath;
+        var nueva = fila.FilePath;
+        try
+        {
+            return await Task.Run(() => SustitucionBandeja.QueCopiar(SustitucionBandeja.LeerEtiquetasDj(vieja),
+                                                                      SustitucionBandeja.LeerEtiquetasDj(nueva)));
+        }
+        catch { return EtiquetasDj.Ninguna; }
+    }
+
+    /// <summary>Lo que se añade al estado tras sustituir sobre las etiquetas copiadas. Puro.</summary>
+    internal static string TextoCopiadas(EtiquetasDj? pedidas, int copiadas, string error)
+    {
+        if (pedidas is not { Vacias: false }) return "";
+        if (error.Length > 0) return $" ⚠ No se han copiado las etiquetas de DJ de la copia antigua: {error}";
+        var pedidasN = (pedidas.Comentario.Length > 0 ? 1 : 0) + (pedidas.Tonalidad.Length > 0 ? 1 : 0) + (pedidas.Bpm > 0 ? 1 : 0);
+        if (copiadas >= pedidasN)
+            return $" {(pedidasN == 1 ? "Se ha copiado" : "Se han copiado")} a la descarga {SustitucionBandeja.DescribirCopia(pedidas)} de la copia antigua.";
+        return $" {(copiadas == 1 ? "Se ha copiado" : "Se han copiado")} a la descarga {copiadas} de las {pedidasN} etiquetas de DJ "
+             + "de la copia antigua; el formato de la descarga no admite el resto.";
+    }
+
     internal static string TextoSinPapelera(string motivo)
         => "No se sustituye la copia de la biblioteca: " + (motivo.Length == 0 ? "" : char.ToLowerInvariant(motivo[0]) + motivo[1..]);
 
     /// <summary>El estado tras sustituir. Puro, para probarlo.</summary>
     internal static string TextoSustituida(string viejaNombre, string destino, string textoRekordbox, string errFichas,
-                                           string errDecisiones = "")
+                                           string errDecisiones = "", string errRegistro = "")
     {
         var texto = $"Sustituida: «{viejaNombre}» está en la papelera y la descarga ocupa su lugar como «{Path.GetFileName(destino)}». "
                   + "Se puede deshacer desde Enriquecer; la copia antigua se recupera desde la papelera. " + textoRekordbox;
         if (errFichas.Length > 0) texto += $" ⚠ No se pudieron guardar las fichas: {errFichas}";
         if (errDecisiones.Length > 0)
             texto += $" ⚠ No se pudo guardar que la descarga está pendiente de revisar en Enriquecer: {errDecisiones}";
+        if (errRegistro.Length > 0)
+            texto += " ⚠ No se pudo guardar en disco la ficha de la copia antigua para devolvérsela si deshaces la sustitución; "
+                   + $"si cierras BeatTag antes de deshacerla, la ficha se quedará con la descarga: {errRegistro}";
         return texto;
     }
 

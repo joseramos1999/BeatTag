@@ -82,11 +82,16 @@ public partial class BandejaView : UserControl
         var conAvisos = preparadas.Count(r => r.HayAvisos);
         var nota = "Los archivos se mueven conservando su nombre. Si en el destino ya hay uno con el mismo nombre, esa canción se queda en la bandeja: nunca se sobrescribe nada. Se puede deshacer desde Enriquecer.";
         if (conAvisos > 0)
-            nota = $"⚠ {conAvisos} de ellas tienen avisos sin resolver (duplicados, calidad baja o etiquetas incompletas). " + nota;
+            nota = (preparadas.Count == 1 ? "⚠ Tiene avisos sin resolver"
+                    : conAvisos == 1 ? "⚠ 1 de ellas tiene avisos sin resolver"
+                    : $"⚠ {conAvisos} de ellas tienen avisos sin resolver")
+                 + " (duplicados, calidad baja o etiquetas incompletas). " + nota;
 
         var ok = await ConfirmDialog.AskAsync(owner,
             "Pasar a la biblioteca",
-            $"Se moverán {preparadas.Count} canción(es) preparadas a «{vm.Destino}».",
+            preparadas.Count == 1
+                ? $"Se moverá 1 canción preparada a «{vm.Destino}»."
+                : $"Se moverán {preparadas.Count} canciones preparadas a «{vm.Destino}».",
             nota,
             "Mover");
         if (ok) await vm.PasarABibliotecaAsync();
@@ -124,9 +129,14 @@ public partial class BandejaView : UserControl
         var sinPapelera = vm.MotivoParaNoSustituir(fila);
         if (sinPapelera.Length > 0) { vm.Status = sinPapelera; return; }
 
-        var (cuerpo, nota) = Etiquetador.Core.Dj.SustitucionBandeja.TextosConfirmacion(fila.Track, propuesta.Vieja);
-        var ok = await ConfirmDialog.AskAsync(owner, "Sustituir la copia de la biblioteca", cuerpo, nota, "Sustituir");
-        if (ok) await vm.SustituirAsync(fila);
+        // Si la copia antigua tiene etiquetas de DJ que la descarga no (comentario, tonalidad, BPM),
+        // se ofrece llevarlas: es un segundo botón, y sin él la sustitución hace lo de siempre.
+        var copiar = await vm.EtiquetasParaCopiarAsync(fila);
+        var (cuerpo, nota) = Etiquetador.Core.Dj.SustitucionBandeja.TextosConfirmacion(fila.Track, propuesta.Vieja, copiar);
+        var eleccion = await ConfirmDialog.ElegirAsync(owner, "Sustituir la copia de la biblioteca", cuerpo, nota, "Sustituir",
+                                                        copiar.Vacias ? "" : Etiquetador.Core.Dj.SustitucionBandeja.BotonCopiar);
+        if (eleccion == ConfirmDialog.Eleccion.Aceptar) await vm.SustituirAsync(fila);
+        else if (eleccion == ConfirmDialog.Eleccion.Alternativa) await vm.SustituirAsync(fila, copiar);
     }
 
     private async void Volcar_Click(object? sender, RoutedEventArgs e)
@@ -135,7 +145,9 @@ public partial class BandejaView : UserControl
         if (vm.CuantasSeleccionadas == 0) { vm.Status = "Selecciona antes las canciones."; return; }
         var ok = await ConfirmDialog.AskAsync(owner,
             "Escribir la ficha en el comentario",
-            $"Se copiará la ficha de {vm.CuantasSeleccionadas} canción(es) al comentario de sus archivos, dentro de un bloque «[DJ: …]».",
+            vm.CuantasSeleccionadas == 1
+                ? "Se copiará la ficha de 1 canción al comentario de su archivo, dentro de un bloque «[DJ: …]»."
+                : $"Se copiará la ficha de {vm.CuantasSeleccionadas} canciones al comentario de sus archivos, dentro de un bloque «[DJ: …]».",
             "Lo que ya hubiera en el comentario se conserva. El cambio se puede deshacer desde Enriquecer.",
             "Escribir");
         if (ok) await vm.VolcarAlComentarioAsync();

@@ -175,6 +175,9 @@ public static class LibraryScanner
         }
         catch
         {
+            // TagLib no abre los AIFF-C de macOS («File form type is not AIFF»): sin esto entraban sin
+            // duración ni calidad, y Duplicados y Sustituir no los tenían en cuenta (ver LectorAiff).
+            if (LectorAiff.EsAiff(path) && LectorAiff.LeerPista(path) is { } aifc) return aifc;
             return new Track { FilePath = path };
         }
     }

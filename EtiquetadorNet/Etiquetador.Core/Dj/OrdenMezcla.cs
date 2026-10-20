@@ -43,10 +43,13 @@ public sealed record ResumenMezcla(int Canciones, int Transiciones, int Armonica
     /// </summary>
     public bool FaltaTonalidad => Transiciones > 0 && SinTonalidad > Transiciones / 2;
 
+    // Singular y plural (revisión de la tanda 3, interfaz-11): con una sola salía «1 choques de tono».
     public string Texto =>
-        $"{Canciones} canciones · {Armonicas} de {Transiciones} transiciones armónicas · {Choques} choques de tono · {SinTonalidad} sin tonalidad"
-        + (VueltasAtras > 0 ? $" · {VueltasAtras} vuelven a un momento anterior" : "")
-        + (Saltos > 0 ? $" · {Saltos} se saltan un momento" : "");
+        $"{Canciones} {(Canciones == 1 ? "canción" : "canciones")} · {Armonicas} de {Transiciones} "
+        + $"{(Transiciones == 1 ? "transición armónica" : "transiciones armónicas")} · "
+        + $"{Choques} {(Choques == 1 ? "choque" : "choques")} de tono · {SinTonalidad} sin tonalidad"
+        + (VueltasAtras > 0 ? $" · {VueltasAtras} {(VueltasAtras == 1 ? "vuelve" : "vuelven")} a un momento anterior" : "")
+        + (Saltos > 0 ? $" · {Saltos} {(Saltos == 1 ? "se salta" : "se saltan")} un momento" : "");
 }
 
 /// <summary>
