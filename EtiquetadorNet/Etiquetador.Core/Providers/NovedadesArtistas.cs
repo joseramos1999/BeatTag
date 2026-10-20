@@ -45,12 +45,28 @@ public static class ArtistasDeLaBiblioteca
     };
 
     /// <summary>
+    /// Un trozo del crédito que describe ediciones en vez de nombrar a un intérprete: «40 Mashups by
+    /// Alex Gonzalez», «Remixes by…», «Bootlegs 2025». MEDIDO con los 200 artistas de una biblioteca
+    /// real: «40 mashups by Alex Gonzalez» entraba entre los principales (24 canciones) y Deezer no lo
+    /// encontraba; solo quitaba el sitio a un artista de verdad. Las palabras van completas para no
+    /// apartar nombres como «Edith» o «Remixa».
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex DescribeEdiciones = new(
+        @"\b(?:mashups?|remix(?:es)?|bootlegs?|edits|bpm|transici[oó]n(?:es)?|transitions?)\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
     /// Los <paramref name="cuantos"/> artistas con más canciones (al menos <see cref="MinimoCanciones"/>),
     /// de más a menos, con los títulos de sus canciones. Recorre la biblioteca dos veces: la primera solo
     /// cuenta; la segunda lee los títulos (y los nombres de archivo) solo de las canciones de los elegidos.
     /// Se llama fuera del hilo de la interfaz.
     /// </summary>
-    public static IReadOnlyList<ArtistaBiblioteca> Principales(IReadOnlyList<Track> canciones, int cuantos, ArtistAliases? alias = null)
+    /// <param name="excluido">
+    /// Artistas (por su clave) que el usuario no quiere consultar. No ocupan sitio: con 100 y dos
+    /// excluidos se consultan los 100 siguientes que no lo están.
+    /// </param>
+    public static IReadOnlyList<ArtistaBiblioteca> Principales(IReadOnlyList<Track> canciones, int cuantos, ArtistAliases? alias = null,
+                                                               Func<string, bool>? excluido = null)
     {
         alias ??= ArtistAliases.Current;
         if (cuantos <= 0 || canciones.Count == 0) return Array.Empty<ArtistaBiblioteca>();
@@ -79,7 +95,7 @@ public static class ArtistasDeLaBiblioteca
             clavesPorCancion[i] = suyas;
         }
 
-        var elegidos = cuenta.Where(kv => kv.Value >= MinimoCanciones)
+        var elegidos = cuenta.Where(kv => kv.Value >= MinimoCanciones && excluido?.Invoke(kv.Key) != true)
                              .OrderByDescending(kv => kv.Value)
                              .ThenBy(kv => kv.Key, StringComparer.Ordinal)
                              .Take(cuantos)
@@ -124,7 +140,7 @@ public static class ArtistasDeLaBiblioteca
     private static (string Clave, string Nombre)? ClaveDeParte(string parte, ArtistAliases alias)
     {
         var p = parte.Trim();
-        if (p.Count(char.IsLetter) < 2 || LimpiezaPacks.ArtistaEsPublicidad(p)) return null;
+        if (p.Count(char.IsLetter) < 2 || LimpiezaPacks.ArtistaEsPublicidad(p) || DescribeEdiciones.IsMatch(p)) return null;
         var canonico = alias.Canonical(TextUtils.Nk(TextUtils.ToAscii(p)));
         var nombre = canonico ?? p;
         var clave = IndiceArtistas.Clave(nombre);

@@ -1,0 +1,162 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Etiquetador.App.ViewModels"
+             xmlns:views="using:Etiquetador.App.Views"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="560"
+             x:Class="Etiquetador.App.Views.NovedadesView"
+             x:CompileBindings="False">
+
+    <!-- Página Novedades (equipo «novedades», tanda 4, P5). -->
+    <DockPanel Margin="8">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="6">
+            <TextBlock Classes="titulo" Text="Novedades" />
+            <TextBlock Classes="desc"
+                       Text="Lanzamientos recientes en Deezer de los artistas con más canciones en la biblioteca, cruzados con ella para ver cuáles están ya y cuáles no. Cuentan todos los artistas de cada canción, con los alias unidos y sin record pools ni usuarios («@…»). Deezer solo devuelve los lanzamientos en los que el artista figura como principal: sus colaboraciones en lanzamientos de otros artistas no aparecen." />
+
+            <WrapPanel ItemSpacing="8" LineSpacing="6">
+                <TextBlock Text="Artistas:" VerticalAlignment="Center" />
+                <ComboBox ItemsSource="{Binding OpcionesArtistas}" SelectedItem="{Binding NumArtistas}" IsEnabled="{Binding !Buscando}" MinWidth="80"
+                          ToolTip.Tip="Cuántos de los artistas con más canciones de la biblioteca se consultan. La primera vez se tarda alrededor de 1 minuto con 100 artistas y 2 o 3 minutos con 200; las siguientes, bastante menos, porque quién es cada artista en Deezer queda guardado." />
+                <TextBlock Text="Lanzamientos de los últimos" VerticalAlignment="Center" Margin="8,0,0,0" />
+                <ComboBox ItemsSource="{Binding OpcionesDias}" SelectedItem="{Binding Dias}" IsEnabled="{Binding !Buscando}" MinWidth="70" />
+                <TextBlock Text="días" VerticalAlignment="Center" />
+                <Button Content="Buscar novedades" Command="{Binding BuscarCommand}" IsEnabled="{Binding PuedeBuscar}"
+                        Background="#7C3AED" Foreground="White" FontWeight="SemiBold" Margin="8,0,0,0"
+                        ToolTip.Tip="Consulta en Deezer los lanzamientos de cada artista (álbumes, EP y singles) y lee las canciones de los publicados en el plazo elegido. Va en segundo plano: mientras tanto se puede seguir trabajando en otras páginas." />
+                <Button Content="Cancelar" Command="{Binding CancelCommand}" IsEnabled="{Binding Buscando}" />
+                <ProgressBar Minimum="0" Maximum="100" Value="{Binding Avance}" Width="200" Height="8" VerticalAlignment="Center"
+                             IsVisible="{Binding Buscando}" />
+            </WrapPanel>
+
+            <!-- Lo que dio la última búsqueda: artistas, lanzamientos, avisos. -->
+            <TextBlock Classes="desc" Text="{Binding ResumenBusqueda}"
+                       IsVisible="{Binding ResumenBusqueda, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+        </StackPanel>
+
+        <TabControl Margin="0,4,0,0">
+
+            <!-- ============================ CANCIONES ============================ -->
+            <TabItem Header="Canciones">
+                <DockPanel Margin="0,6,0,0">
+                    <WrapPanel DockPanel.Dock="Top" ItemSpacing="8" LineSpacing="6" Margin="0,0,0,6">
+                        <ComboBox ItemsSource="{Binding Tipos}" SelectedItem="{Binding Tipo}" MinWidth="140"
+                                  ToolTip.Tip="El tipo de lanzamiento, según Deezer. Los recopilatorios cuentan como álbumes." />
+                        <CheckBox Content="Solo las que no están en la biblioteca" IsChecked="{Binding SoloQueFaltan}" VerticalAlignment="Center" />
+                        <CheckBox Content="Solo estrenos" IsChecked="{Binding SoloEstrenos}" VerticalAlignment="Center"
+                                  ToolTip.Tip="Quita las canciones que ya se habían publicado antes del plazo (un álbum que recoge singles de meses anteriores) y las reediciones o remasterizaciones." />
+                        <CheckBox Content="Incluir artistas sin confirmar" IsChecked="{Binding IncluirSinConfirmar}" VerticalAlignment="Center"
+                                  ToolTip.Tip="Un artista queda sin confirmar cuando ninguno de los artistas de Deezer con su nombre tiene al menos dos canciones que estén en la biblioteca con él: el elegido puede ser otro artista que se llama igual. Revísalo en «Artistas consultados»." />
+                    </WrapPanel>
+                    <WrapPanel DockPanel.Dock="Top" ItemSpacing="8" LineSpacing="6" Margin="0,0,0,6">
+                        <Button Content="Guardar como lista (M3U8)" Click="ExportM3u_Click"
+                                Background="#0D9488" Foreground="White" FontWeight="SemiBold"
+                                ToolTip.Tip="Guarda las canciones de la lista que ya están en la biblioteca como una lista M3U8, de la más reciente a la más antigua. Se abre directamente en rekordbox, Engine DJ o Serato, sin copiar archivos." />
+                        <Button Content="Crear carpeta con las disponibles" Click="CreateFolder_Click" IsEnabled="{Binding PuedeActuar}"
+                                Background="#16A34A" Foreground="White" FontWeight="SemiBold"
+                                ToolTip.Tip="Copia (no mueve) a una carpeta nueva las canciones de la lista que ya están en la biblioteca, numeradas por su posición." />
+                        <Button Content="Ordenar para mezclar" Command="{Binding OrdenarParaMezclarCommand}" IsEnabled="{Binding PuedeActuar}"
+                                Background="#2563EB" Foreground="White" FontWeight="SemiBold"
+                                ToolTip.Tip="Ordena las canciones de la lista que están en la biblioteca para pincharlas seguidas, con las mismas reglas que el Asistente: tonos compatibles en la rueda Camelot, tempo y, si tienen ficha de DJ, energía y momentos de la sesión." />
+                        <Button Content="Añadir a pendientes ▾"
+                                ToolTip.Tip="Guarda en la lista de Pendientes las canciones que no están en la biblioteca, con el lanzamiento del que salen. Se tachan solas cuando aparecen en ella.">
+                            <Button.Flyout>
+                                <MenuFlyout>
+                                    <MenuItem Header="Las seleccionadas que faltan" Click="AnadirSeleccionadas_Click" />
+                                    <MenuItem Header="Todas las que faltan" Click="AnadirTodas_Click" />
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
+                        <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Opacity="0.8" Margin="8,0,0,0" />
+                    </WrapPanel>
+
+                    <Grid>
+                        <DataGrid Name="RowsGrid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
+                                  AutoGenerateColumns="False" IsReadOnly="True" IsVisible="{Binding !VerOrdenMezcla}"
+                                  CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
+                                  DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed" SelectionChanged="Grid_SelectionChanged">
+                            <DataGrid.Styles>
+                                <Style Selector="DataGridRow">
+                                    <Setter Property="Background" Value="{Binding StateBrush}" />
+                                </Style>
+                            </DataGrid.Styles>
+                            <DataGrid.ContextMenu>
+                                <ContextMenu>
+                                    <!-- El orden común de las tablas con canciones: ver AccionesCancion.Puesto. -->
+                                    <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
+                                    <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding FilaDelMenu}" ToolTip.Tip="Abre la canción en el Editor. Sale desactivada si la canción no está en la biblioteca o mientras haya un proceso en marcha (espera a que termine)." ToolTip.ShowOnDisabled="True" />
+                                    <Separator />
+                                    <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding FilaDelMenu}" />
+                                    <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding FilaDelMenu}" />
+                                    <Separator />
+                                    <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                                    <Separator />
+                                    <MenuItem Header="Añadir a pendientes" Click="AnadirSeleccionadas_Click" />
+                                    <MenuItem Header="Buscar en mi pool" Command="{Binding BuscarEnPoolCommand}" />
+                                    <MenuItem Header="Abrir en Deezer" Command="{Binding AbrirEnDeezerCommand}" />
+                                </ContextMenu>
+                            </DataGrid.ContextMenu>
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="#" Binding="{Binding Position}" Width="45" MinWidth="40" />
+                                <DataGridTextColumn Header="Fecha" Binding="{Binding Detalle.FechaTexto}" SortMemberPath="Detalle.Fecha" Width="90" MinWidth="80" />
+                                <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="160" MinWidth="100" />
+                                <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="200" MinWidth="120" />
+                                <DataGridTextColumn Header="Lanzamiento" Binding="{Binding Detalle.Lanzamiento}" Width="170" MinWidth="100" />
+                                <DataGridTextColumn Header="Tipo" Binding="{Binding Detalle.Tipo}" Width="75" MinWidth="60" />
+                                <DataGridTextColumn Header="Dur." Binding="{Binding DurText}" Width="55" MinWidth="50" />
+                                <DataGridTextColumn Header="Disponibilidad" Binding="{Binding Estado}" Width="110" MinWidth="90" />
+                                <DataGridTextColumn Header="Artista consultado" Binding="{Binding Detalle.Por}" Width="130" MinWidth="90" />
+                                <DataGridTextColumn Header="Aviso" Binding="{Binding Detalle.Aviso}" Width="200" MinWidth="80" />
+                                <DataGridTextColumn Header="Versión" Binding="{Binding Version}" Width="100" MinWidth="80" />
+                                <DataGridTextColumn Header="Archivo en la biblioteca" Binding="{Binding FileName}" Width="*" MinWidth="140" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <views:OrdenMezclaPanel IsVisible="{Binding VerOrdenMezcla}" />
+                    </Grid>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ============================ ARTISTAS ============================ -->
+            <TabItem Header="Artistas consultados">
+                <DockPanel Margin="0,6,0,0">
+                    <TextBlock DockPanel.Dock="Top" Classes="desc" Margin="0,0,0,6"
+                               Text="Cada artista de la biblioteca se busca en Deezer por su nombre. Si hay varios que se llaman igual, se elige el que tiene canciones que también están en la biblioteca con ese artista; con dos o más en común queda confirmado. Si ninguno tiene, se toma el de más seguidores y queda sin confirmar. Lo averiguado se guarda y no se vuelve a buscar, salvo los artistas sin confirmar, que se revisan cada 30 días." />
+
+                    <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,6,0,0">
+                        <TextBlock Classes="desc"
+                                   Text="Si el artista elegido no es el correcto (otro que se llama igual), pega el enlace de su página en Deezer o su número y pulsa «Corregir». La corrección se guarda y no se vuelve a buscar." />
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Content="Corregir" Command="{Binding CorregirArtistaCommand}" IsEnabled="{Binding PuedeTocarArtista}" Margin="6,0,0,0" />
+                            <TextBox Text="{Binding Correccion}" KeyDown="Correccion_KeyDown" IsEnabled="{Binding PuedeTocarArtista}"
+                                     PlaceholderText="https://www.deezer.com/artist/…   o   el número del artista" />
+                        </DockPanel>
+                        <WrapPanel ItemSpacing="8" LineSpacing="6">
+                            <Button Content="Abrir en Deezer" Command="{Binding AbrirArtistaEnDeezerCommand}" IsEnabled="{Binding PuedeTocarArtista}"
+                                    ToolTip.Tip="Abre en el navegador la página del artista de Deezer asociado, para comprobar que es el correcto." />
+                            <Button Content="{Binding TextoExcluir}" Command="{Binding ExcluirArtistaCommand}" IsEnabled="{Binding PuedeTocarArtista}"
+                                    ToolTip.Tip="Deja de buscar las novedades de este artista (por ejemplo, un editor que firma ediciones y no publica en Deezer). Su sitio lo ocupa el siguiente artista con más canciones." />
+                            <Button Content="Volver a identificar" Command="{Binding VolverAIdentificarCommand}" IsEnabled="{Binding PuedeTocarArtista}"
+                                    ToolTip.Tip="Olvida a qué artista de Deezer corresponde, también una corrección hecha a mano, para que la próxima búsqueda lo identifique de nuevo con las canciones que haya entonces en la biblioteca." />
+                        </WrapPanel>
+                    </StackPanel>
+
+                    <DataGrid Name="ArtistasGrid" ItemsSource="{Binding Artistas}" SelectedItem="{Binding ArtistaElegido}"
+                              AutoGenerateColumns="False" IsReadOnly="True" CanUserResizeColumns="True" CanUserSortColumns="True"
+                              GridLinesVisibility="Horizontal" DoubleTapped="Grid_DoubleTapped">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Artista" Binding="{Binding Nombre}" Width="180" MinWidth="100" />
+                            <DataGridTextColumn Header="Canciones" Binding="{Binding CancionesTexto}" SortMemberPath="Canciones" Width="90" MinWidth="70" />
+                            <DataGridTextColumn Header="En Deezer" Binding="{Binding DeezerNombre}" Width="180" MinWidth="100" />
+                            <DataGridTextColumn Header="Seguidores" Binding="{Binding FansTexto}" SortMemberPath="Fans" Width="110" MinWidth="80" />
+                            <DataGridTextColumn Header="Estado" Binding="{Binding EstadoTexto}" Width="280" MinWidth="120" />
+                            <DataGridTextColumn Header="Lanzamientos en el plazo" Binding="{Binding RecientesTexto}" SortMemberPath="Recientes" Width="*" MinWidth="120" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</UserControl>

@@ -111,6 +111,21 @@ public sealed class AlmacenArtistasDeezer
         lock (_cerrojo) return _porClave.TryGetValue(clave, out var a) ? a.Copia() : null;
     }
 
+    /// <summary>El usuario ha pedido no buscar las novedades de ese artista.</summary>
+    public bool EstaExcluido(string clave)
+    {
+        lock (_cerrojo) return _porClave.TryGetValue(clave, out var a) && a.Excluido;
+    }
+
+    /// <summary>Copias de los artistas excluidos, por nombre.</summary>
+    public List<ArtistaDeezerGuardado> Excluidos()
+    {
+        lock (_cerrojo)
+            return _porClave.Values.Where(a => a.Excluido)
+                            .OrderBy(a => a.Nombre, StringComparer.CurrentCultureIgnoreCase)
+                            .Select(a => a.Copia()).ToList();
+    }
+
     /// <summary>
     /// Guarda lo que se ha averiguado de un artista. Conserva la exclusión que hubiera puesto el usuario,
     /// y nunca pisa una corrección suya con una búsqueda automática.

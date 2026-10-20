@@ -82,7 +82,9 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
     {
         var tengo = SoloLasQueTengo;
         var nuevas = SoloNuevas;
-        RowsView.Filter = !tengo && !nuevas ? null : o => o is TrendRow r && (!tengo || r.Tengo) && (!nuevas || r.EsNueva);
+        var propio = TieneFiltroPropio;   // el de la página (Novedades: «solo las que no están»)
+        RowsView.Filter = !tengo && !nuevas && !propio ? null
+            : o => o is TrendRow r && (!tengo || r.Tengo) && (!nuevas || r.EsNueva) && (!propio || PasaFiltroPropio(r));
         RowsView.Refresh();
     }
 
@@ -136,6 +138,7 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
             {
                 Position = t.Position, Artist = t.Artist, Title = t.Title,
                 DurText = t.DurText, FilePath = rutas[i], SpotifyId = t.SpotifyId, Enlace = t.Link ?? "",
+                Detalle = DetalleDeFila(t),
             });
         }
         RowsView.Refresh();
@@ -376,7 +379,7 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
             return;
         }
         var origen = DescribirLista()?.Nombre ?? Etiqueta;
-        var r = Seguimiento.AnadirPendientes(faltan.Select(f => new NuevaPendiente(f.Artist, f.Title, origen, f.Enlace)));
+        var r = Seguimiento.AnadirPendientes(faltan.Select(f => new NuevaPendiente(f.Artist, f.Title, OrigenPendiente(f, origen), f.Enlace)));
         Status = TextoAlta(r.Hechas, r.Otras) + (r.Error.Length > 0 ? $" No se ha podido guardar: {r.Error}" : "");
     }
 
@@ -744,6 +747,29 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
             texto += " Sin fichas de DJ, el orden sale solo por tono y BPM.";
         return texto;
     }
+
+    // =================================================================================================
+    // Puntos de extensión para páginas con más datos por canción (equipo «novedades», tanda 4, P5)
+    // =================================================================================================
+    //
+    // Novedades enseña de cada canción su lanzamiento, la fecha y el tipo, filtra por «solo las que no
+    // están en la biblioteca» y apunta en Pendientes de qué lanzamiento salió cada una. Tendencias y
+    // Playlists no los usan: los valores por defecto dejan su comportamiento como estaba.
+
+    /// <summary>Lo que la página quiere enseñar de esa canción además de lo común (<see cref="TrendRow.Detalle"/>).</summary>
+    protected virtual object? DetalleDeFila(ChartTrack pista) => null;
+
+    /// <summary>El origen que se apunta en Pendientes para esa fila; por defecto, el de la lista entera.</summary>
+    protected virtual string OrigenPendiente(TrendRow fila, string origenLista) => origenLista;
+
+    /// <summary>La página tiene ahora un filtro propio activo, que se suma a los comunes.</summary>
+    protected virtual bool TieneFiltroPropio => false;
+
+    /// <summary>¿Pasa la fila el filtro propio de la página? Solo se pregunta si <see cref="TieneFiltroPropio"/>.</summary>
+    protected virtual bool PasaFiltroPropio(TrendRow fila) => true;
+
+    /// <summary>Vuelve a aplicar los filtros de la tabla, tras cambiar el propio de la página.</summary>
+    protected void ReaplicarFiltro() => AplicarFiltro();
 }
 
 /// <summary>

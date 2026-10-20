@@ -86,6 +86,9 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>Pendientes y listas seguidas (equipo «listas», tanda 3).</summary>
     public PendientesViewModel Pendientes { get; }
 
+    /// <summary>Novedades de los artistas de la biblioteca (equipo «novedades», tanda 4, P5).</summary>
+    public NovedadesViewModel Novedades { get; }
+
     [ObservableProperty] private int _selectedTabIndex;
 
     /// <summary>
@@ -166,6 +169,7 @@ public partial class MainViewModel : ViewModelBase
         // Nace con el shell y no al abrir su página: las pendientes se tachan al cambiar la biblioteca
         // aunque nadie la abra (equipo «listas», tanda 3).
         Pendientes = new PendientesViewModel(engine);
+        Novedades = new NovedadesViewModel(engine);   // equipo «novedades», tanda 4 (P5)
 
         // El ÍNDICE de cada página es su hueco en el contenido de MainWindow.axaml; el ORDEN en que
         // aparecen aquí es el de la barra lateral, y no tiene por qué ser el mismo.
@@ -227,6 +231,10 @@ public partial class MainViewModel : ViewModelBase
                             Cancelar = () => Playlists.CancelCommand.Execute(null) },
                     // «Actualizar todas» no cuenta: solo lee de la red y no toca la música (equipo «listas», tanda 3).
                     new() { Indice = 18, Icono = "📝", Nombre = "Pendientes", Vm = Pendientes, Ocupada = () => Pendientes.IsBusy },
+                    // La búsqueda de novedades va en segundo plano y no cuenta: solo lee de la red. Sí cuentan copiar
+                    // a una carpeta y ordenar para mezclar, como en Playlists (equipo «novedades», tanda 4, P5).
+                    new() { Indice = 20, Icono = "🆕", Nombre = "Novedades", Vm = Novedades, Ocupada = () => Novedades.IsBusy,
+                            Cancelar = () => Novedades.CancelCommand.Execute(null) },
                 },
             },
             new()
@@ -260,6 +268,7 @@ public partial class MainViewModel : ViewModelBase
                  { Library, Enrich, Editor, Duplicates, Quality, Incomplete, NotFound, Identify, Stats, Trends, Playlists, Loudness, Settings, Bandeja, Fichas, Colecciones, Asistente })
             vm.PropertyChanged += OnChildChanged;
         Pendientes.PropertyChanged += OnChildChanged;   // equipo «listas», tanda 3
+        Novedades.PropertyChanged += OnChildChanged;    // equipo «novedades», tanda 4 (P5)
 
         // La biblioteca avisa al escanearse y al cambiar las carpetas: es lo que abre el resto de
         // pestañas. Folders es una ObservableCollection, así que también hay que seguirla: quitar

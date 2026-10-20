@@ -60,6 +60,13 @@ public sealed partial class TrendRow : ObservableObject
     private string _novedad = "";
 
     public bool EsNueva => Novedad.Length > 0;
+
+    /// <summary>
+    /// Lo que una página enseña de la canción además de lo común (Novedades: el lanzamiento, su fecha
+    /// y su tipo, ver Core.Providers.DetalleNovedad). Null en Tendencias y Playlists. Equipo
+    /// «novedades», tanda 4 (P5).
+    /// </summary>
+    public object? Detalle { get; init; }
 }
 
 /// <summary>
