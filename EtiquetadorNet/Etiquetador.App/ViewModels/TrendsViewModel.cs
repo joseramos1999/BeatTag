@@ -66,7 +66,7 @@ public sealed partial class TrendRow : ObservableObject
     /// y su tipo, ver Core.Providers.DetalleNovedad). Null en Tendencias y Playlists. Equipo
     /// «novedades», tanda 4 (P5).
     /// </summary>
-    public object? Detalle { get; init; }
+    public DetalleNovedad? Detalle { get; init; }
 }
 
 /// <summary>

@@ -11,8 +11,19 @@ public partial class NovedadesView : UserControl
     public NovedadesView()
     {
         InitializeComponent();
-        GridBehaviors.EnableWidthMemory(this, "Novedades");
+        // Dos tablas con columnas distintas, cada una en su pestaña: cada una recuerda sus anchos por
+        // separado. Se nombran porque la de la pestaña que no se ve no aparece al buscar en el árbol.
+        AttachedToVisualTree += (_, _) =>
+        {
+            var engine = Services.AppEngine.Current;
+            if (engine == null || _anchosPreparados) return;
+            _anchosPreparados = true;
+            GridBehaviors.RememberColumnWidths(RowsGrid, "Novedades", engine.Config, engine.SaveConfig);
+            GridBehaviors.RememberColumnWidths(ArtistasGrid, "NovedadesArtistas", engine.Config, engine.SaveConfig);
+        };
     }
+
+    private bool _anchosPreparados;
 
     private void Grid_DoubleTapped(object? sender, TappedEventArgs e) => GridBehaviors.AutoFitOnHeaderDoubleTap(sender, e);
 

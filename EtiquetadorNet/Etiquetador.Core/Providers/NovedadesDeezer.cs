@@ -129,8 +129,11 @@ public sealed class NovedadesDeezer
     /// <summary>
     /// Canciones en común con la biblioteca para dar a un artista de Deezer por confirmado. Con una sola
     /// no basta: MEDIDO con los 200 artistas de una biblioteca real, «Manu» casó por UNA canción con un
-    /// homónimo brasileño que en 90 días había publicado 28 canciones de otro estilo. Los demás con una
-    /// sola coincidencia eran buenos, pero con un título común el azar basta para casar.
+    /// homónimo brasileño que en 90 días había publicado 28 lanzamientos de otro estilo. Con un título
+    /// común, el azar basta para casar por una canción. Con dos o más, de los 15 artistas confirmados por
+    /// solo 2 o 3 canciones, 13 eran el bueno; los otros 2 eran un editor de mashups («Try It») y una
+    /// página de Deezer que parece mezclar a dos artistas que se llaman igual («MVRK»). Los dos se
+    /// corrigen o se excluyen en la tabla de artistas.
     /// </summary>
     public const int MinimoCoincidencias = 2;
 
@@ -155,8 +158,8 @@ public sealed class NovedadesDeezer
     /// (<see cref="DeezerProvider.BadRe"/>), sin las de reedición, que van aparte, y con las formas que
     /// usan los lanzamientos recientes. MEDIDO en 934 canciones de 200 artistas (90 días): con solo
     /// «slowed» y «sped up» se marcaban 2; se escapaban «[SUPERSLOWED]», «[ULTRASLOWED]», «(Slow Remix)»,
-    /// «(Ultra Slow Remix)», «(Speed Remix)», «SLOW VERSION» y 6 instrumentales. Ahora son 14, y «Slow
-    /// Burn» (un título) no se marca.
+    /// «(Ultra Slow Remix)», «(Speed Remix)», «SLOW VERSION», 6 instrumentales y 2 «a cappella». Ahora
+    /// se marcan 16, todas de verdad, y «Slow Burn» (un título) no.
     /// </summary>
     internal static readonly Regex VersionAlterada = new(
         @"\b(?:sped\s*up|speed\s*up|speed\s+remix|(?:super|ultra)?\s*slowed|(?:ultra\s+|super\s+)?slow\s+(?:remix|version)|nightcore|reverb|8d\s*audio|karaoke|tribute|made\s+famous|cover\s+version|instrumental|a\s*capp?ella)\b", IC);
@@ -406,11 +409,12 @@ public sealed class NovedadesDeezer
     /// ¿Merece la pena preguntar a Deezer si la grabación ya se publicó antes? Sí cuando su ISRC es de dos
     /// años o más antes del lanzamiento.
     ///
-    /// El año del ISRC NO basta por sí solo para decir que es antigua. MEDIDO en 932 canciones de los
-    /// últimos 90 días de 200 artistas: 149 tenían un ISRC de dos o más años antes; de una muestra de 38,
-    /// solo 15 se habían publicado de verdad antes. Las demás eran estrenos con códigos de distribuidora
-    /// que no siguen el año («QZDYA18…» en canciones de 2026, incluso «…88…» y «…86…»). Por eso solo se usa
-    /// para decidir a qué canciones preguntar, y lo que se enseña es lo que contesta Deezer.
+    /// El año del ISRC NO basta por sí solo para decir que es antigua. MEDIDO en 934 canciones de los
+    /// últimos 90 días de 200 artistas: 119 tenían un ISRC de dos o más años antes del lanzamiento, y al
+    /// preguntar a Deezer por cada uno, solo 61 se habían publicado antes. Las otras 58 eran estrenos con
+    /// códigos de distribuidora que no siguen el año («QZDYA18…» en canciones de 2026, incluso «…88…» y
+    /// «…86…»). Por eso solo se usa para decidir a qué canciones preguntar, y lo que se enseña es lo que
+    /// contesta Deezer.
     /// </summary>
     public static bool MerecePreguntarPorIsrc(PistaNovedad p)
         => p.PublicadaAntes == null && p.AnioIsrc > 0 && p.AnioIsrc <= p.Lanzamiento.Fecha.Year - 2;
@@ -675,7 +679,9 @@ public sealed class NovedadesDeezer
                         var deEste = await PistasAsync(v.Lanzamiento, tok).ConfigureAwait(false);
                         if (deEste == null) Interlocked.Increment(ref sinLeer);
                         var por = v.Por.ToList();
-                        var nombres = string.Join(", ", por.Select(p => p.Por).Distinct(StringComparer.OrdinalIgnoreCase));
+                        // Por orden alfabético: llegan en el orden en que terminó cada consulta, que cambia de una vez a otra.
+                        var nombres = string.Join(", ", por.Select(p => p.Por).Distinct(StringComparer.OrdinalIgnoreCase)
+                                                           .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase));
                         var dudoso = por.All(p => p.Dudoso);
                         var suyos = por.Select(p => p.ArtistaId).Distinct()
                                        .SelectMany(id => catalogos.TryGetValue(id, out var c) ? c : Array.Empty<LanzamientoDeezer>())

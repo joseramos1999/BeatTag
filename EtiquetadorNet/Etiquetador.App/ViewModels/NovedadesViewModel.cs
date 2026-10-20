@@ -73,7 +73,7 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
     /// Con las canciones de artistas que no se han podido confirmar en Deezer. Desactivado por defecto:
     /// MEDIDO con los 200 artistas de una biblioteca real (90 días), 9 quedaron sin confirmar y casi
     /// todos eran homónimos (un «Manu» brasileño con 28 lanzamientos, un «Kike» con 34 seguidores);
-    /// aportaban 97 de 932 canciones, ninguna del artista de la biblioteca.
+    /// aportaban 97 de 934 canciones.
     /// </summary>
     [ObservableProperty] private bool _incluirSinConfirmar;
 
@@ -193,6 +193,16 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
             var r = await Task.Run(() => deezer.BuscarAsync(artistas, almacen, dias, hoy, progreso, ct, AlGuardar, guardarCada: 10),
                                    CancellationToken.None);
 
+            // Cancelada antes de tener ninguna canción: la tabla sigue con la búsqueda anterior, que es
+            // mejor que dejarla vacía. Lo averiguado de cada artista ya se ha guardado.
+            if (r.Cancelada && r.Pistas.Count == 0)
+            {
+                Status = "Búsqueda cancelada. Lo averiguado de cada artista queda guardado"
+                       + (_resultado != null ? "; la tabla sigue mostrando la búsqueda anterior." : ".");
+                _engine.Logger.Sum($"Novedades: cancelada tras consultar {r.Artistas.Count} artistas.");
+                return;
+            }
+
             _resultado = r;
             _diasResultado = dias;
             _pistas = r.Pistas;
@@ -236,10 +246,10 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
     /// <summary>Las fichas de cada fila de la tabla, por la fila de la lista (por referencia: dos filas pueden ser iguales).</summary>
     private Dictionary<ChartTrack, DetalleNovedad> _detalles = new(ReferenceEqualityComparer.Instance);
 
-    protected override object? DetalleDeFila(ChartTrack pista) => _detalles.GetValueOrDefault(pista);
+    protected override DetalleNovedad? DetalleDeFila(ChartTrack pista) => _detalles.GetValueOrDefault(pista);
 
     protected override string OrigenPendiente(TrendRow fila, string origenLista)
-        => fila.Detalle is DetalleNovedad d ? PresentacionNovedades.Origen(d.Pista) : origenLista;
+        => fila.Detalle is { } d ? PresentacionNovedades.Origen(d.Pista) : origenLista;
 
     private bool _mostrando, _otraVez;
 
@@ -249,7 +259,7 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
     /// </summary>
     private async Task MostrarAsync()
     {
-        if (_resultado is not { } r) return;
+        if (_resultado == null) return;
         if (_mostrando) { _otraVez = true; return; }
         _mostrando = true;
         try
@@ -257,6 +267,8 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
             do
             {
                 _otraVez = false;
+                // Se vuelve a leer en cada vuelta: la repetición puede venir de una búsqueda recién terminada.
+                if (_resultado is not { } r) break;
                 var filtro = Filtro;
                 var visibles = PresentacionNovedades.Filtrar(_pistas, filtro);
                 var filas = PresentacionNovedades.ComoFilas(visibles);
@@ -268,9 +280,8 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
 
                 var ocultas = filtro.IncluirSinConfirmar ? 0 : _pistas.Count(p => p.DeArtistaDudoso);
                 ResumenBusqueda = PresentacionNovedades.Resumen(r, _diasResultado, ocultas);
-                Status = Rows.Count == 0
-                    ? "Ninguna canción con estos filtros."
-                    : $"{Resumen}. {TextoFaltan(Rows.Count - tengo)}";
+                Status = PresentacionNovedades.TextoTabla(_pistas.Count, Rows.Count, Resumen, TextoFaltan(Rows.Count - tengo),
+                                                          ResumenBusqueda, r.Cancelada);
             } while (_otraVez);
         }
         catch (Exception e)

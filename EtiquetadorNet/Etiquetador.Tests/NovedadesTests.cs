@@ -255,7 +255,7 @@ public class NovedadesTests
     public void El_anio_del_isrc_va_en_sus_cifras_seis_y_siete(string isrc, int anioLanzamiento, int esperado)
         => Assert.Equal(esperado, NovedadesDeezer.AnioDeIsrc(isrc, anioLanzamiento));
 
-    // El año del ISRC no basta para decir que es antigua (MEDIDO: 15 de 38); solo decide a cuáles preguntar.
+    // El año del ISRC no basta para decir que es antigua (MEDIDO: solo 61 de 119 habían salido antes); solo decide a cuáles preguntar.
     [Fact]
     public void Se_pregunta_por_el_isrc_solo_si_es_de_dos_anios_antes_o_mas_y_no_se_sabe_ya()
     {
@@ -734,6 +734,16 @@ public class NovedadesTests
         Assert.Equal("3 artistas consultados: ningún lanzamiento en los últimos 60 días. 2 artistas sin confirmar en Deezer (5 canciones que no se muestran). "
                    + "1 artista no está en Deezer con ese nombre. No se pudieron leer las canciones de 2 lanzamientos.",
                      PresentacionNovedades.Resumen(varios, 60, 5));
+    }
+
+    [Fact]
+    public void Lo_que_se_dice_al_rellenar_la_tabla_explica_por_que_esta_vacia()
+    {
+        Assert.Equal("1 artista consultado: ningún lanzamiento en los últimos 30 días.",
+                     PresentacionNovedades.TextoTabla(0, 0, "", "", "1 artista consultado: ningún lanzamiento en los últimos 30 días.", false));
+        Assert.StartsWith("Ninguna canción pasa los filtros", PresentacionNovedades.TextoTabla(5, 0, "", "", "x", false));
+        Assert.Equal("1 de 3 en la biblioteca (33 %). Faltan 2.", PresentacionNovedades.TextoTabla(3, 3, "1 de 3 en la biblioteca (33 %)", "Faltan 2.", "x", false));
+        Assert.EndsWith("Búsqueda cancelada: es lo encontrado hasta ese momento.", PresentacionNovedades.TextoTabla(3, 3, "a", "b", "x", true));
     }
 
     [Theory]

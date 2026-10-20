@@ -48,9 +48,11 @@ public static class PresentacionNovedades
 {
     /// <summary>
     /// Artistas que se pueden consultar. 100 por defecto: en una biblioteca real de 13.590 canciones
-    /// el artista número 100 ya solo tenía 39, y la consulta de 200 tardó 2 min 24 s la primera vez
-    /// (con la caché de red vacía). Con 100 es la mitad, y cubre a quienes más se pinchan en cualquier
-    /// biblioteca, sea del estilo que sea.
+    /// el artista número 100 ya solo tenía 39. MEDIDO con la caché de red vacía: 100 artistas (30 días),
+    /// 57 s y 501 peticiones; 200 artistas (90 días), 2 min 25 s y 1.291 peticiones. Las marca el límite
+    /// de Deezer, unas 9 por segundo. Repetir la de 100, con los artistas ya identificados, 19 s. Con 100
+    /// la espera es razonable y se cubre a quienes más se pinchan en cualquier biblioteca, sea del estilo
+    /// que sea.
     /// </summary>
     public static readonly int[] OpcionesArtistas = { 50, 100, 200, 300 };
 
@@ -223,9 +225,26 @@ public static class PresentacionNovedades
     }
 
     /// <summary>
+    /// Lo que se dice al rellenar la tabla. Sin ninguna canción en la búsqueda, el resumen de la búsqueda
+    /// (que explica por qué); con canciones pero ninguna que pase los filtros, eso; si no, cuántas hay en
+    /// la biblioteca y cuántas faltan.
+    /// </summary>
+    /// <param name="enLaBusqueda">Canciones de la búsqueda, antes de los filtros.</param>
+    /// <param name="enLaTabla">Las que han quedado en la tabla.</param>
+    /// <param name="cuantasHay">«120 de 932 en la biblioteca (12 %)».</param>
+    /// <param name="faltan">«Faltan 812.»</param>
+    public static string TextoTabla(int enLaBusqueda, int enLaTabla, string cuantasHay, string faltan, string resumenBusqueda, bool cancelada)
+    {
+        if (enLaBusqueda == 0) return resumenBusqueda;
+        if (enLaTabla == 0)
+            return "Ninguna canción pasa los filtros elegidos (tipo de lanzamiento, «Solo estrenos», «Incluir artistas sin confirmar»).";
+        return $"{cuantasHay}. {faltan}" + (cancelada ? " Búsqueda cancelada: es lo encontrado hasta ese momento." : "");
+    }
+
+    /// <summary>
     /// Avance de 0 a 100 de toda la búsqueda. La primera fase (identificar a cada artista y leer su
-    /// catálogo) es la larga: MEDIDO con 200 artistas, 1.287 peticiones, de ellas 769 en la primera
-    /// fase, 438 en la segunda y 80 en la tercera.
+    /// catálogo) es la larga: MEDIDO con 200 artistas y 90 días, 1.291 peticiones, de ellas 770 en la
+    /// primera fase, 440 en la segunda y 81 en la tercera.
     /// </summary>
     public static double Avance(ProgresoNovedades p)
     {

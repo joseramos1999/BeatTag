@@ -757,7 +757,7 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
     // Playlists no los usan: los valores por defecto dejan su comportamiento como estaba.
 
     /// <summary>Lo que la página quiere enseñar de esa canción además de lo común (<see cref="TrendRow.Detalle"/>).</summary>
-    protected virtual object? DetalleDeFila(ChartTrack pista) => null;
+    protected virtual DetalleNovedad? DetalleDeFila(ChartTrack pista) => null;
 
     /// <summary>El origen que se apunta en Pendientes para esa fila; por defecto, el de la lista entera.</summary>
     protected virtual string OrigenPendiente(TrendRow fila, string origenLista) => origenLista;
