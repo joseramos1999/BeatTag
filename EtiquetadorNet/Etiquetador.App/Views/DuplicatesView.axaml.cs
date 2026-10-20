@@ -12,6 +12,33 @@ public partial class DuplicatesView : UserControl
     {
         InitializeComponent();
         GridBehaviors.EnableWidthMemory(this, "Duplicados");
+        DataContextChanged += (_, _) => VigilarCriterio();
+    }
+
+    // ---- Columna Edición (A14) ----
+    // Solo dice algo al agrupar por audio: con los demás criterios un grupo son copias del mismo
+    // archivo y la columna saldría siempre vacía, quitando sitio a Archivo y Carpeta.
+
+    private ViewModels.DuplicatesViewModel? _vm;
+
+    private void VigilarCriterio()
+    {
+        if (_vm != null) _vm.PropertyChanged -= Vm_PropertyChanged;
+        _vm = DataContext as ViewModels.DuplicatesViewModel;
+        if (_vm != null) _vm.PropertyChanged += Vm_PropertyChanged;
+        MostrarColumnaEdicion();
+    }
+
+    private void Vm_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ViewModels.DuplicatesViewModel.EsPorHuella)) MostrarColumnaEdicion();
+    }
+
+    private void MostrarColumnaEdicion()
+    {
+        if (this.FindControl<DataGrid>("Grid") is not { } tabla) return;
+        foreach (var columna in tabla.Columns)
+            if (Equals(columna.Header, "Edición")) columna.IsVisible = _vm?.EsPorHuella == true;
     }
 
     private void ExpandAll_Click(object? sender, RoutedEventArgs e) => GridBehaviors.SetAllGroups(this.FindDescendantOfType<DataGrid>(), true);

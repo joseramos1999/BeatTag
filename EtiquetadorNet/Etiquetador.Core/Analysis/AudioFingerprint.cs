@@ -63,4 +63,38 @@ public static class AudioFingerprint
     /// <summary>true si las dos huellas corresponden a la misma grabación.</summary>
     public static bool SameRecording(int[]? a, int[]? b, double umbral = UmbralIgual)
         => Similarity(a, b) >= umbral;
+
+    // ---- Comparar en UN desfase concreto (hallazgo A14) ----
+
+    /// <summary>
+    /// Segundos de audio que separan dos elementos seguidos de la huella. Chromaprint remuestrea a
+    /// 11.025 Hz y avanza 4096/3 muestras por elemento: 1365,33 / 11025 = 0,1238 s.
+    /// </summary>
+    public const double SegundosPorElemento = 4096.0 / 3.0 / 11025.0;
+
+    /// <summary>Solape mínimo, en elementos, para que el parecido signifique algo (~2,5 s).</summary>
+    private const int MinimoSolape = 20;
+
+    /// <summary>
+    /// Parecido de dos huellas en UN desfase: compara A[i] con B[i + <paramref name="desfase"/>] en
+    /// todo el tramo que comparten. Un desfase positivo quiere decir que el audio común aparece
+    /// <paramref name="desfase"/> elementos más tarde en B (B trae más intro).
+    ///
+    /// <see cref="Similarity"/> prueba los 161 desfases de ±10 s y se queda con el mejor; cuando el
+    /// desfase ya se conoce (lo vota el índice de Duplicados), basta con mirar ese y sus vecinos, y
+    /// además sirve para desfases mucho mayores, como el de una edición con 30 s más de intro.
+    /// </summary>
+    /// <returns>El parecido (0-1) y cuántos elementos se han comparado. (0, n) si el solape no llega al mínimo.</returns>
+    public static (double Parecido, int Solape) SimilitudEnDesfase(int[] a, int[] b, int desfase)
+    {
+        var ini = Math.Max(0, -desfase);
+        var fin = Math.Min(a.Length, b.Length - desfase);
+        var n = fin - ini;
+        if (n < MinimoSolape) return (0.0, Math.Max(0, n));
+
+        var bitsIguales = 0L;
+        for (var i = ini; i < fin; i++)
+            bitsIguales += BitsPorElemento - BitOperations.PopCount((uint)(a[i] ^ b[i + desfase]));
+        return (bitsIguales / (double)(n * BitsPorElemento), n);
+    }
 }
