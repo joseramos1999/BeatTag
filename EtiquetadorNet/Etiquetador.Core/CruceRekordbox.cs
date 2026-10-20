@@ -130,11 +130,17 @@ public interface IArchivosCruce
 /// la biblioteca de octubre (13.590 archivos): de las 9.213 pistas que seguían en su sitio, solo
 /// 1.643 (17,8 %) tenían el mismo tamaño que en el disco, porque escribir etiquetas cambia el tamaño
 /// del archivo (BeatTag, Mp3tag o el propio rekordbox); la duración coincidía en 9.177 (99,6 %). De
-/// las 4.343 entradas rotas, el historial de BeatTag reparaba 610, el nombre y el tamaño 19 más, y el
-/// nombre y la duración otras 2.735 (carpetas renombradas, como «Mashups Reggaeton1 A-C» →
-/// «Mashups Reggaeton1 A-B»). Para medir el riesgo se buscó cada una de las 9.213 por nombre y
-/// duración como si se hubiera perdido: en 9.155 la única candidata era la buena, y en 22 había una
-/// copia del mismo nombre y la misma duración en otra carpeta (la misma canción repetida).
+/// las 4.343 entradas rotas, el historial de BeatTag reparaba 623, el nombre y el tamaño 19 más, y el
+/// nombre y la duración otras 2.733 (carpetas renombradas, como «Mashups Reggaeton1 A-C» →
+/// «Mashups Reggaeton1 A-B»): 3.375 en total, de las que 2.752 conservan el nombre de archivo.
+///
+/// EL RIESGO, MEDIDO. Buscar cada pista casada en una biblioteca que la contiene a ella misma no mide
+/// nada: la única candidata es siempre ella. Lo que lo mide es cuántas tienen OTRA copia con el mismo
+/// nombre y la misma duración, hacia la que se repararían si se perdieran: 22 de las 9.213 (0,24 %),
+/// la misma canción repetida en otra carpeta. Hay un riesgo que estos datos no miden: el mismo nombre
+/// y la misma duración (±1 s) pueden ser otra codificación o masterización del mismo tema, con otro
+/// silencio inicial, y entonces los cue points quedarían desplazados. Por eso la página pide escuchar
+/// las encontradas por nombre y duración antes de importarlas.
 /// </summary>
 public static class CruceRekordbox
 {
@@ -197,10 +203,10 @@ public static class CruceRekordbox
 
         // (a) Lo que no está en rekordbox, sin los archivos a los que apunta una entrada rota: esos SÍ
         // están, con la ruta antigua. MEDIDO con la colección real: de las 4.385 canciones que salían
-        // como «no están en rekordbox», 3.378 eran el archivo de una entrada rota; quien guardaba la
-        // tabla como M3U8 y la importaba antes de reparar creaba 3.378 pistas duplicadas sin cue
-        // points, y en el cruce siguiente esas entradas rotas ya no se reparaban (su archivo pasaba a
-        // estar en rekordbox).
+        // como «no están en rekordbox», 3.083 (70 %) eran el archivo de una entrada rota; quien
+        // guardaba la tabla como M3U8 y la importaba antes de reparar creaba 3.083 pistas duplicadas
+        // sin cue points, y en el cruce siguiente esas entradas rotas ya no se reparaban (su archivo
+        // pasaba a estar en rekordbox). Ahora la tabla tiene 1.302.
         var antiguas = EntradasAntiguas(clasificadas, enRekordbox);
         var faltan = new List<Track>();
         var conRutaAntigua = new List<Track>();

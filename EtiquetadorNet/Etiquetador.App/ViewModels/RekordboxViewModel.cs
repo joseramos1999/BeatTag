@@ -483,8 +483,9 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
     /// Un hot cue sin nombre en el primer tiempo puede ser el que deja una herramienta al analizar o el
     /// cue de entrada que pone a mano quien prepara la pista (ver <see cref="PistaRekordbox.SoloCueInicial"/>).
     /// Se dice cuántas pistas están en ese caso, para que quien lo hace a mano sepa que tiene que marcar
-    /// la casilla. MEDIDO en la colección real: 9.213 de las 9.213 pistas de la biblioteca, todas con el
-    /// «1.1Bars» del análisis.
+    /// la casilla. MEDIDO en la colección real: 9.211 de las 9.213 pistas de la biblioteca solo tenían
+    /// ese hot cue, siempre llamado «1.1Bars» (las otras 2, ninguno): por defecto salen las 9.213 como sin
+    /// preparar y, con la casilla, 2. En esa colección el aviso dice exactamente lo que pasa.
     /// </summary>
     internal static string TextoCueInicial(int n)
         => n == 0 ? ""
@@ -677,7 +678,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         if (reparadas == 0) return "No había ninguna ruta que reparar: los archivos ya están en su sitio o ya no existen.";
         var texto = (reparadas == 1 ? $"1 ruta reparada en «{archivo}». " : $"{reparadas:N0} rutas reparadas en «{archivo}». ")
                   + $"Para llevarlas a rekordbox, importa a la colección las pistas de la lista «{RekordboxRelocator.ListaReparadas}» "
-                  + "(los pasos están en esta pestaña). Entran como pistas nuevas, con sus cue points, su beatgrid y su valoración; "
+                  + "(los pasos están en la pestaña «Rutas rotas»). Entran como pistas nuevas, con sus cue points, su beatgrid y su valoración; "
                   + "tus listas de reproducción y tu historial siguen apuntando a las entradas antiguas, así que no las quites "
                   + "sin importar antes, desde esta copia, las listas que las contienen.";
         if (soloMovidas > 0)
@@ -894,7 +895,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
     /// POR QUÉ LA ANTIGUA. Con la ruta de hoy, rekordbox no reconoce la pista y, al importar la lista,
     /// la añade otra vez: un duplicado sin cue points, sin beatgrid y sin valoración, y en el cruce
     /// siguiente la entrada rota ya no se repararía (su archivo pasaría a estar en rekordbox). MEDIDO
-    /// con la colección real: 3.378 de las 13.590 canciones de la biblioteca solo estaban en rekordbox
+    /// con la colección real: 3.083 de las 13.590 canciones de la biblioteca solo estaban en rekordbox
     /// con una ruta antigua. Con la antigua, la lista apunta a la pista que ya tiene, con su
     /// preparación, que se ve como archivo no encontrado hasta que se repara.
     /// </summary>

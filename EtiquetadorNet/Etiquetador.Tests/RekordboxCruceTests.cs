@@ -274,7 +274,7 @@ public class RekordboxCruceTests
         Assert.Empty(r.Rotas);
     }
 
-    // MEDIDO en una colección real: 3.378 de las 4.385 que salían como «no están en rekordbox» eran el
+    // MEDIDO en una colección real: 3.083 de las 4.385 que salían como «no están en rekordbox» eran el
     // archivo de una entrada rota. Guardar esa tabla e importarla antes de reparar creaba otros tantos
     // duplicados sin cue points, y en el cruce siguiente esas entradas ya no se reparaban.
     [Fact]

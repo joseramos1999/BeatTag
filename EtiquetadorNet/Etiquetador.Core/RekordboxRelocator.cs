@@ -11,6 +11,7 @@ public sealed record RelocateResult(int Reparadas, int SinCambio, int NoEncontra
     /// <summary>
     /// De las reparadas, las que conservan el nombre de archivo y solo cambiaron de carpeta: esas las
     /// puede reubicar el propio rekordbox sin crear pistas nuevas (ver <see cref="PistaRota.MismoNombre"/>).
+    /// MEDIDO con la colección real: 2.752 de las 3.362 reparadas.
     /// </summary>
     public int SoloMovidas { get; init; }
 }
@@ -299,7 +300,8 @@ public static class RekordboxRelocator
                        // líneas: Comments="x&#10;y") se escriben como referencia. Con None salían tal
                        // cual, y al releer el XML un salto dentro de un atributo se convierte en un
                        // espacio: la copia perdía el formato de esos comentarios. Entitize conserva
-                       // exactamente lo que se leyó, también en el texto entre etiquetas.
+                       // exactamente lo que se leyó, también en el texto entre etiquetas. (En la
+                       // colección medida no había ninguno; los comentarios de rekordbox sí los admiten.)
                        NewLineHandling = NewLineHandling.Entitize,
                    }))
             {
