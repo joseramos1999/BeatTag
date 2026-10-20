@@ -30,10 +30,13 @@ public sealed class EspectroScanner
     /// </summary>
     public const int VersionMetodo = 1;
 
-    /// <summary>Nombre del archivo de caché, junto a las demás cachés de la aplicación.</summary>
-    public const string NombreCache = "espectro.json";
+    /// <summary>
+    /// Nombre del archivo de caché, junto a las demás cachés de la aplicación. Lo declara
+    /// <see cref="AppPaths"/> para que la copia de seguridad la reconozca como caché y la deje fuera.
+    /// </summary>
+    public const string NombreCache = AppPaths.EspectroCacheNombre;
 
-    public static string RutaCache(AppPaths paths) => Path.Combine(paths.DataDir, NombreCache);
+    public static string RutaCache(AppPaths paths) => paths.EspectroCachePath;
 
     private sealed class Entry
     {

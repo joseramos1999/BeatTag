@@ -78,7 +78,8 @@
                               ToolTip.Tip="Ajusta las seleccionadas que lo requieren, estén marcadas o no. Las excluidas no se tocan." />
                     <MenuItem Header="Excluir del ajuste" Click="ExcluirCanciones_Click" IsEnabled="{Binding !IsBusy}"
                               ToolTip.Tip="Las seleccionadas se siguen midiendo, pero no se ajustan nunca. Se puede quitar en «Exclusiones del ajuste»." />
-                    <MenuItem Header="Excluir esta carpeta del ajuste" Click="ExcluirCarpetas_Click" IsEnabled="{Binding !IsBusy}"
+                    <!-- El rótulo cambia con la selección («Excluir sus 3 carpetas del ajuste»): ver LoudnessView.axaml.cs. -->
+                    <MenuItem Header="Excluir esta carpeta del ajuste" Tag="ExcluirCarpetas" Click="ExcluirCarpetas_Click" IsEnabled="{Binding !IsBusy}"
                               ToolTip.Tip="Ninguna grabación de su carpeta ni de sus subcarpetas se ajusta. Se puede quitar en «Exclusiones del ajuste»." />
                 </ContextMenu>
             </DataGrid.ContextMenu>

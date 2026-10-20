@@ -272,41 +272,91 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
         IsBusy = true;
         _engine.ReleaseAudio();
         Status = $"Copiando {Canciones(tengo.Count)}…";
+        var cts = _ctsCopia = new CancellationTokenSource();
         try
         {
-            var (copiadas, saltadas, errores) = await Task.Run(() =>
-            {
-                int ok = 0, skip = 0, err = 0;
-                Directory.CreateDirectory(destino);
-                foreach (var r in tengo)
-                {
-                    try
-                    {
-                        // El número de posición delante mantiene el orden de la lista en el explorador
-                        // y en el CDJ, con las cifras que hagan falta (001…) en las listas largas.
-                        var nombre = NombreNumerado(r.Position, ancho, r.FilePath);
-                        var d = Path.Combine(destino, nombre);
-                        if (File.Exists(d)) { skip++; continue; }
-                        File.Copy(r.FilePath, d);   // COPIA: tu biblioteca no se toca
-                        ok++;
-                    }
-                    catch { err++; }
-                }
-                return (ok, skip, err);
-            });
+            // El número de posición delante mantiene el orden de la lista en el explorador y en el CDJ,
+            // con las cifras que hagan falta (001…) en las listas largas.
+            var archivos = tengo.Select(r => (r.FilePath, NombreNumerado(r.Position, ancho, r.FilePath))).ToList();
+            var r = await Task.Run(() => CopiarNumeradas(archivos, destino, cts.Token));
 
-            Status = $"Copiadas {copiadas} en «{Path.GetFileName(destino)}»"
-                   + (saltadas > 0 ? $" · {saltadas} ya estaban" : "")
-                   + (errores > 0 ? $" · {errores} con error" : "")
-                   + ". La biblioteca original no se modifica.";
-            _engine.Logger.Sum($"{Etiqueta}: copiadas {copiadas} a {destino}");
+            Status = TextoCopia(r, Path.GetFileName(destino));
+            _engine.Logger.Sum($"{Etiqueta}: copiadas {r.Copiadas} a {destino}{(r.Cancelada ? " (cancelada)" : "")}");
         }
         catch (Exception e) { Status = "No se pudo copiar: " + e.Message; }
-        finally { IsBusy = false; }
+        finally
+        {
+            IsBusy = false;
+            _ctsCopia = null;
+            cts.Dispose();
+        }
     }
 
+    /// <summary>La copia a una carpeta en marcha, para que «Cancelar» (y el cierre de la ventana) la detengan.</summary>
+    private CancellationTokenSource? _ctsCopia;
+
+    /// <summary>Lo que dejó la copia a una carpeta.</summary>
+    internal readonly record struct ResultadoCopia(int Copiadas, int Saltadas, int Errores, bool Cancelada);
+
+    /// <summary>
+    /// El estado tras copiar a una carpeta. Detrás de «Copia cancelada:» sigue en minúscula (antes salía
+    /// «Copia cancelada: Copiadas 3…»), y cada cifra concuerda en número con lo que cuenta.
+    /// </summary>
+    internal static string TextoCopia(ResultadoCopia r, string carpeta)
+    {
+        var copiadas = (r.Copiadas == 1 ? "copiada 1" : $"copiadas {r.Copiadas:N0}") + $" en «{carpeta}»";
+        var texto = r.Cancelada ? "Copia cancelada: " + copiadas : char.ToUpperInvariant(copiadas[0]) + copiadas[1..];
+        if (r.Saltadas > 0) texto += r.Saltadas == 1 ? " · 1 ya estaba" : $" · {r.Saltadas:N0} ya estaban";
+        if (r.Errores > 0) texto += $" · {r.Errores:N0} con error";
+        return texto + ". La biblioteca original no se modifica.";
+    }
+
+    /// <summary>Sufijo del archivo mientras se copia: solo al terminar toma su nombre definitivo.</summary>
+    internal const string SufijoParcial = ".beattag-parcial";
+
+    /// <summary>
+    /// Copia cada archivo con su nombre numerado, sin sustituir los que ya estén (COPIA: la biblioteca
+    /// no se toca). Se detiene entre un archivo y el siguiente si se cancela.
+    ///
+    /// Cada archivo se copia primero con <see cref="SufijoParcial"/> y se renombra al terminar. Antes se
+    /// copiaba directamente con el nombre final: un cierre a mitad de una copia (cerrar la ventana
+    /// espera como mucho 15 s) dejaba en el USB un archivo cortado con su nombre definitivo, y la copia
+    /// siguiente lo daba por bueno («ya estaban») y nunca lo reponía.
+    /// </summary>
+    internal static ResultadoCopia CopiarNumeradas(IReadOnlyList<(string Origen, string Nombre)> archivos, string destino,
+                                                   CancellationToken ct, Action<string, string>? copiar = null)
+    {
+        copiar ??= (o, d) => File.Copy(o, d, overwrite: true);
+        int ok = 0, skip = 0, err = 0;
+        Directory.CreateDirectory(destino);
+        foreach (var (origen, nombre) in archivos)
+        {
+            if (ct.IsCancellationRequested) return new ResultadoCopia(ok, skip, err, true);
+            var d = Path.Combine(destino, nombre);
+            var parcial = d + SufijoParcial;
+            try
+            {
+                if (File.Exists(d)) { skip++; continue; }
+                copiar(origen, parcial);   // sustituye el parcial que dejara una copia cortada antes
+                File.Move(parcial, d);
+                ok++;
+            }
+            catch
+            {
+                err++;
+                try { if (File.Exists(parcial)) File.Delete(parcial); } catch { /* se sustituye la próxima vez */ }
+            }
+        }
+        return new ResultadoCopia(ok, skip, err, false);
+    }
+
+    /// <summary>Detiene lo que esté en marcha en la página: la búsqueda y la copia a una carpeta.</summary>
     [RelayCommand]
-    private void Cancel() => _cts?.Cancel();
+    private void Cancel()
+    {
+        _cts?.Cancel();
+        _ctsCopia?.Cancel();
+    }
 
     [RelayCommand]
     private void PlayPreview()

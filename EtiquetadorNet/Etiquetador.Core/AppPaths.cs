@@ -28,6 +28,16 @@ public sealed class AppPaths
     public string LoudnessCachePath { get; }
     public string FingerprintCachePath { get; }
 
+    /// <summary>Nombre de la caché de la calidad real por espectro (P4).</summary>
+    public const string EspectroCacheNombre = "espectro.json";
+
+    /// <summary>
+    /// Caché de la calidad real por espectro (P4). Se declara aquí, y no solo en el escáner de la
+    /// aplicación, para que la copia de seguridad (Core) la reconozca como caché y la deje fuera: si no,
+    /// entraba como «Otros datos de BeatTag» y restaurar una copia antigua devolvía medidas viejas.
+    /// </summary>
+    public string EspectroCachePath { get; }
+
     /// <summary>Lo que resultó ser cada archivo al escuchar su audio. Cada entrada costó una consulta de pago.</summary>
     public string IdentificacionCachePath { get; }
 
@@ -66,6 +76,7 @@ public sealed class AppPaths
         AnalysisCachePath = Path.Combine(DataDir, "analysis-cache.json");
         LoudnessCachePath = Path.Combine(DataDir, "sonoridad.json");
         FingerprintCachePath = Path.Combine(DataDir, "huellas.json");
+        EspectroCachePath = Path.Combine(DataDir, EspectroCacheNombre);
         IdentificacionCachePath = Path.Combine(DataDir, "identificacion.json");
         AudioAceptadasPath = Path.Combine(DataDir, "audio-aceptadas.json");
         IgnoredPath = Path.Combine(DataDir, "descartadas.json");
@@ -119,12 +130,15 @@ public sealed class AppPaths
         Path.Combine(DataDir, Dj.AlmacenListasSeguidas.NombreArchivo),
         Dj.MapaGenerosCarpeta.RutaEn(this),
         Dj.AlmacenSustituciones.RutaEn(DataDir),
+        // Correcciones y exclusiones de artistas hechas a mano en Novedades (P5): sin rutas de música.
+        Path.Combine(DataDir, Providers.AlmacenArtistasDeezer.NombreArchivo),
     };
 
     /// <summary>
     /// Archivos .json de la carpeta de datos que NO entran en la copia: cachés que se regeneran solas
     /// (la de huellas pasa de 150 MB en una biblioteca grande) y el config.json de la versión en
-    /// PowerShell, que puede guardar claves.
+    /// PowerShell, que puede guardar claves. Además de excluirlos al crear la copia, se rechazan al
+    /// restaurar: así una copia hecha antes de que una caché figurase aquí tampoco la devuelve.
     /// </summary>
     public IReadOnlyList<string> FueraDeLaCopia() => new[]
     {
@@ -132,6 +146,7 @@ public sealed class AppPaths
         AnalysisCachePath,
         LoudnessCachePath,
         FingerprintCachePath,
+        EspectroCachePath,
         Path.Combine(DataDir, "config.json"),
     };
 

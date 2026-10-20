@@ -120,8 +120,8 @@
                             <ContextMenu>
                                 <MenuItem Header="Escuchar / Parar" Tag="Rotas" Click="Escuchar_Click"
                                           ToolTip.Tip="Escucha el archivo encontrado para esta entrada, para comprobar que es la misma pista." />
-                                <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding RotaElegida}"
-                                          ToolTip.Tip="Abre en el Editor el archivo encontrado. Sale desactivada si no se ha encontrado ninguno o mientras haya un proceso en marcha." ToolTip.ShowOnDisabled="True" />
+                                <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding RotaElegida.RutaEnBiblioteca}"
+                                          ToolTip.Tip="Abre en el Editor el archivo encontrado. Sale desactivada si no se ha encontrado ninguno, si el encontrado no está en la biblioteca o mientras haya un proceso en marcha (espera a que termine)." ToolTip.ShowOnDisabled="True" />
                                 <Separator />
                                 <MenuItem Header="Abrir carpeta contenedora" Tag="Rotas" Click="AbrirCarpeta_Click"
                                           ToolTip.Tip="Abre la carpeta del archivo encontrado." />
@@ -167,11 +167,11 @@
                         <DataGrid.ContextMenu>
                             <ContextMenu>
                                 <MenuItem Header="Escuchar / Parar" Tag="SinPreparar" Click="Escuchar_Click" />
-                                <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding SinPrepararElegida}"
-                                          ToolTip.Tip="Abre la canción en el Editor. Sale desactivada mientras haya un proceso en marcha (espera a que termine)." ToolTip.ShowOnDisabled="True" />
+                                <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding SinPrepararElegida.RutaEnBiblioteca}"
+                                          ToolTip.Tip="Abre la canción en el Editor. Sale desactivada si la canción no está en la biblioteca o mientras haya un proceso en marcha (espera a que termine)." ToolTip.ShowOnDisabled="True" />
                                 <Separator />
-                                <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding SinPrepararElegida}" />
-                                <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding SinPrepararElegida}" />
+                                <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding SinPrepararElegida.RutaEnBiblioteca}" />
+                                <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding SinPrepararElegida.RutaEnBiblioteca}" />
                                 <Separator />
                                 <MenuItem Header="Abrir carpeta contenedora" Tag="SinPreparar" Click="AbrirCarpeta_Click" />
                             </ContextMenu>
@@ -221,11 +221,11 @@
                         <DataGrid.ContextMenu>
                             <ContextMenu>
                                 <MenuItem Header="Escuchar / Parar" Tag="Nunca" Click="Escuchar_Click" />
-                                <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding NuncaElegida}"
-                                          ToolTip.Tip="Abre la canción en el Editor. Sale desactivada mientras haya un proceso en marcha (espera a que termine)." ToolTip.ShowOnDisabled="True" />
+                                <MenuItem Header="Editar etiquetas de esta canción" Command="{x:Static AccionesCancion.EditarEtiquetas}" CommandParameter="{Binding NuncaElegida.RutaEnBiblioteca}"
+                                          ToolTip.Tip="Abre la canción en el Editor. Sale desactivada si la canción no está en la biblioteca o mientras haya un proceso en marcha (espera a que termine)." ToolTip.ShowOnDisabled="True" />
                                 <Separator />
-                                <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding NuncaElegida}" />
-                                <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding NuncaElegida}" />
+                                <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding NuncaElegida.RutaEnBiblioteca}" />
+                                <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding NuncaElegida.RutaEnBiblioteca}" />
                                 <Separator />
                                 <MenuItem Header="Abrir carpeta contenedora" Tag="Nunca" Click="AbrirCarpeta_Click" />
                             </ContextMenu>
@@ -251,7 +251,7 @@
                                    Text="Escribe un único archivo XML de rekordbox con una carpeta «BeatTag» que contiene las listas elegidas. En rekordbox se importa la carpeta entera de una vez, en lugar de un M3U8 tras otro, y al volver a exportar al mismo archivo rekordbox ve las listas al día. Solo entran las canciones que están en la biblioteca. Abre antes la colección exportada de rekordbox: así cada canción que ya tiene se escribe con su misma ubicación, título y artista, también las que tiene con una ruta antigua, y no se añade otra vez." />
                         <CheckBox Content="Colecciones (en la subcarpeta «Colecciones»)" IsChecked="{Binding ExportarColecciones}" />
                         <CheckBox Content="Listas que sigues: se vuelven a leer de internet (en la subcarpeta «Listas»)" IsChecked="{Binding ExportarSeguidas}" />
-                        <CheckBox Content="Listas abiertas en Tendencias y Playlists y sus órdenes para mezclar, y el orden del Asistente" IsChecked="{Binding ExportarListasAbiertas}" />
+                        <CheckBox Content="Listas abiertas en Tendencias, Playlists y Novedades y sus órdenes para mezclar, y el orden del Asistente" IsChecked="{Binding ExportarListasAbiertas}" />
                         <CheckBox Content="Canciones pendientes ya conseguidas (lista «Pendientes conseguidas»)" IsChecked="{Binding ExportarPendientes}" />
                         <TextBlock Text="{Binding ResumenExportacion}" TextWrapping="Wrap" Opacity="0.85" />
                         <WrapPanel ItemSpacing="8" LineSpacing="6">

@@ -290,10 +290,10 @@ public class RekordboxPaginaTests
     {
         Assert.Equal("Con lo marcado no hay nada que exportar.", RekordboxViewModel.TextoResumenExportacion(0, 0, 0, 0));
         Assert.Equal("Se exportará: 1 colección.", RekordboxViewModel.TextoResumenExportacion(1, 0, 0, 0));
-        Assert.Equal("Se exportará: 3 colecciones, 1 lista abierta en Tendencias, Playlists o el Asistente, "
+        Assert.Equal("Se exportará: 3 colecciones, 1 lista abierta en Tendencias, Playlists, Novedades o el Asistente, "
                    + "2 listas que sigues (se vuelven a leer de internet) y la canción pendiente ya conseguida.",
                      RekordboxViewModel.TextoResumenExportacion(3, 1, 2, 1));
-        Assert.Equal("Se exportará: 2 listas abiertas en Tendencias, Playlists o el Asistente y las 4 canciones pendientes ya conseguidas.",
+        Assert.Equal("Se exportará: 2 listas abiertas en Tendencias, Playlists, Novedades o el Asistente y las 4 canciones pendientes ya conseguidas.",
                      RekordboxViewModel.TextoResumenExportacion(0, 2, 0, 4));
     }
 
@@ -335,7 +335,30 @@ public class RekordboxPaginaTests
     [InlineData("Tendencias Spain 2026-10-20", "Tendencias Spain")]
     [InlineData("REGUETÓN 2026 2026-10-20", "REGUETÓN 2026")]
     [InlineData("Sin fecha", "Sin fecha")]
+    [InlineData("Novedades 2026-10-20", "Novedades")]
     public void El_nombre_va_sin_la_fecha(string nombre, string esperado) => Assert.Equal(esperado, RekordboxViewModel.SinFecha(nombre));
+
+    // Toda página con una lista frente a la biblioteca (Tendencias, Playlists y Novedades, hecha en
+    // paralelo en la tanda 4) lleva su lista y su orden para mezclar a rekordbox. Novedades se quedó fuera
+    // sin que nadie lo decidiera; esto lo vigila para las páginas que vengan.
+    [Fact]
+    public void Llevar_listas_a_rekordbox_reune_todas_las_paginas_con_lista_frente_a_la_biblioteca()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Etiquetador.App", "ViewModels", "MainViewModel.cs"))) dir = dir.Parent;
+        Assert.NotNull(dir);
+        var codigo = File.ReadAllText(Path.Combine(dir!.FullName, "Etiquetador.App", "ViewModels", "MainViewModel.cs"));
+        var cuerpo = System.Text.RegularExpressions.Regex.Match(codigo, @"ListasAbiertasParaRekordbox\(\)\s*\{(.*?)\n    \}",
+                                                                System.Text.RegularExpressions.RegexOptions.Singleline);
+        Assert.True(cuerpo.Success, "no se encontró ListasAbiertasParaRekordbox");
+
+        var paginas = typeof(MainViewModel).GetProperties()
+                                           .Where(p => typeof(ListaFrenteBibliotecaViewModel).IsAssignableFrom(p.PropertyType))
+                                           .Select(p => p.Name).ToList();
+        Assert.Contains("Novedades", paginas);
+        foreach (var p in paginas)
+            Assert.Contains($"{p}.NombreSugerido", cuerpo.Groups[1].Value);
+    }
 
     // La misma lista vista en Tendencias y seguida no sale dos veces; se queda la primera (la seguida).
     [Fact]

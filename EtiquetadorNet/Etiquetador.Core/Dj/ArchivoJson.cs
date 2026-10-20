@@ -28,6 +28,15 @@ internal static class ArchivoJson
     /// <summary>Lo que se espera entre un intento y el siguiente.</summary>
     internal static readonly TimeSpan EsperaEntreIntentos = TimeSpan.FromMilliseconds(250);
 
+    /// <summary>
+    /// Solo para las pruebas: se llama en el hilo que lee tras cada intento fallido por un bloqueo, con
+    /// el número de intento. Permite soltar el bloqueo justo después del primer fallo, en lugar de
+    /// adivinar con una espera fija si ha llegado a fallar (con las pruebas en paralelo, una espera de
+    /// 100 ms podía pasar de los 500 ms de reintentos y la prueba fallaba de vez en cuando). Va por
+    /// hilo para que las demás pruebas que leen a la vez no lo vean.
+    /// </summary>
+    [ThreadStatic] internal static Action<string, int>? TrasIntentoFallido;
+
     public static T Leer<T>(string archivo, Func<T> vacio, out string aviso) => Leer(archivo, vacio, out aviso, out _);
 
     /// <summary>
@@ -60,6 +69,7 @@ internal static class ArchivoJson
             }
             catch (IOException) when (intento < IntentosLectura)
             {
+                TrasIntentoFallido?.Invoke(archivo, intento);
                 Thread.Sleep(EsperaEntreIntentos);
             }
             catch (Exception e)

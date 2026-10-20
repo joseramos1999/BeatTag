@@ -27,6 +27,15 @@ public partial class AsistenteViewModel : ViewModelBase, IEstadoPagina, IProgres
     internal readonly AppEngine Engine;
     private CancellationTokenSource? _cts;
 
+    /// <summary>Lo que se dice tras renombrar o completar nombres: se puede deshacer y dónde se repara rekordbox.</summary>
+    internal const string TrasRenombrar = ". Se puede deshacer desde Enriquecer; si usas rekordbox, repara después la colección "
+                                         + RekordboxViewModel.DondeSeRepara + ".";
+
+    /// <summary>La nota de las confirmaciones de renombrar con IA y completar nombres.</summary>
+    internal const string NotaRenombrar = "Solo cambia el nombre del archivo, no sus etiquetas. Si ya existe un archivo con el nombre nuevo, ese no se renombra. "
+                                        + "Se puede deshacer desde Enriquecer. Si usas rekordbox, repara después la colección "
+                                        + RekordboxViewModel.DondeSeRepara + " para no perder los cue points.";
+
     [ObservableProperty] private string _status = "";
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private double _progress;
@@ -1237,13 +1246,13 @@ public sealed partial class RenombrarIaViewModel : ObservableObject
         if (res.Hechos.Count > 0) await _p.Engine.Library.RefrescarAsync(res.Hechos.SelectMany(h => new[] { h.Origen, h.Destino }));
         if (res.Hechos.Count > 0) _p.Engine.AvisarFichasCambiadas();
 
-        var texto = $"{res.Hechos.Count} archivos renombrados";
+        var texto = res.Hechos.Count == 1 ? "1 archivo renombrado" : $"{res.Hechos.Count} archivos renombrados";
         if (res.Fallos.Count > 0) texto += $" · {res.Fallos.Count} no ({res.Fallos[0]})";
         if (res.Detenido.Length > 0) texto += " · ⚠ " + res.Detenido.TrimEnd('.');   // se paró sin poder anotar para deshacer
         else if (res.Cancelado) texto += " · cancelado a medias";
         texto += res.UndoErr.Length > 0
             ? $". ⚠ El cambio NO quedó anotado y no se podrá deshacer: {res.UndoErr}"
-            : res.Hechos.Count > 0 ? ". Se puede deshacer desde Enriquecer; si usas rekordbox, repara la colección en Ajustes." : ".";
+            : res.Hechos.Count > 0 ? AsistenteViewModel.TrasRenombrar : ".";
         _p.Status = texto;
     });
 }
@@ -1475,13 +1484,13 @@ public sealed partial class CompletarNombresViewModel : ObservableObject
             _p.Engine.AvisarFichasCambiadas();
         }
 
-        var texto = $"{res.Hechos.Count} nombres completados";
+        var texto = res.Hechos.Count == 1 ? "1 nombre completado" : $"{res.Hechos.Count} nombres completados";
         if (res.Fallos.Count > 0) texto += $" · {res.Fallos.Count} no ({res.Fallos[0]})";
         if (res.Detenido.Length > 0) texto += " · ⚠ " + res.Detenido.TrimEnd('.');   // se paró sin poder anotar para deshacer
         else if (res.Cancelado) texto += " · cancelado a medias";
         texto += res.UndoErr.Length > 0
             ? $". ⚠ El cambio NO quedó anotado y no se podrá deshacer: {res.UndoErr}"
-            : res.Hechos.Count > 0 ? ". Se puede deshacer desde Enriquecer; si usas rekordbox, repara la colección en Ajustes." : ".";
+            : res.Hechos.Count > 0 ? AsistenteViewModel.TrasRenombrar : ".";
         _p.Status = texto;
     });
 }

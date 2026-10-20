@@ -135,6 +135,14 @@ public static class CorteEspectral
     /// <summary>Por debajo, el origen es de 160 kbps o menos (LAME 160: 17,5 kHz nominales).</summary>
     public const double LimiteOrigenBajoHz = 17800.0;
 
+    /// <summary>
+    /// Por debajo, el origen es de unos 128 kbps o menos: los MP3 de 128 acaban como mucho hacia 16,8
+    /// kHz con este método, y uno de 160 hecho con LAME, hacia 17,1 (17,5 nominales, menos los ~0,4 kHz
+    /// en que el método sitúa el corte por debajo del nominal). Separa los dos en la estimación: antes,
+    /// un MP3 de 160 legítimo salía como «≈ 128 kbps o menos · Dudoso».
+    /// </summary>
+    public const double Limite128Hz = 16900.0;
+
     /// <summary>Entre <see cref="LimiteOrigenBajoHz"/> y esto, un origen de unos 192 kbps.</summary>
     public const double Limite192Hz = 19000.0;
 
@@ -274,21 +282,34 @@ public static class CorteEspectral
     ///               hace a veces el propio codificador de Windows a 320 (2 de 36 codificaciones, a
     ///               18,1 y 18,7 kHz), así que no basta para sospechar.
     ///               Declara sin pérdida y el corte está por debajo de 20,8 kHz (probable origen MP3).
-    ///               Declara 160-223 kbps y el audio acaba antes de 17,8 kHz (posible origen de 128).
+    ///               Declara 192-223 kbps y el audio acaba antes de 17,8 kHz (origen de 160 o menos).
+    ///               Declara 160-191 kbps y el audio acaba antes de 16,9 kHz (posible origen de 128): un
+    ///               160 legítimo acaba hacia 17,1 kHz y es coherente.
+    ///   SinValorar  sin medida, no concluyente, o sin corte con la frecuencia de muestreo por debajo de
+    ///               la habitual (<see cref="LimitadaPorElMuestreo"/>).
     ///   Coherente   el resto.
     /// </summary>
     public static ValoracionCalidad Valorar(MedidaEspectro m, bool sinPerdida, int kbps)
     {
-        if (m.AnchoReal is not double ancho) return ValoracionCalidad.SinValorar;
+        if (m.AnchoReal is not double ancho || LimitadaPorElMuestreo(m)) return ValoracionCalidad.SinValorar;
         if (sinPerdida)
             return ancho < LimiteOrigenBajoHz ? ValoracionCalidad.Sospechosa
                  : ancho < LimiteSinPerdidaHz && m.Estado == EstadoCorte.Corte ? ValoracionCalidad.Dudosa
                  : ValoracionCalidad.Coherente;
         if (kbps >= 224 && ancho < LimiteOrigenBajoHz) return ValoracionCalidad.Sospechosa;
         if (kbps >= 300 && ancho < Limite320Hz) return ValoracionCalidad.Dudosa;
-        if (kbps >= 160 && ancho < LimiteOrigenBajoHz) return ValoracionCalidad.Dudosa;
+        if (kbps >= 192 && ancho < LimiteOrigenBajoHz) return ValoracionCalidad.Dudosa;
+        if (kbps >= 160 && ancho < Limite128Hz) return ValoracionCalidad.Dudosa;
         return ValoracionCalidad.Coherente;
     }
+
+    /// <summary>
+    /// Sin corte, pero porque la frecuencia de muestreo no deja mirar más arriba (32 kHz o menos: el
+    /// techo queda por debajo de 20,8 kHz). Que no haya corte no dice nada del origen, y valorarlo por
+    /// el techo decía a la vez «Sin corte» y «≈ 128 kbps o menos · Sospechoso».
+    /// </summary>
+    public static bool LimitadaPorElMuestreo(MedidaEspectro m)
+        => m.Estado == EstadoCorte.SinCorte && m.TechoHz < LimiteSinPerdidaHz;
 
     /// <summary>La frecuencia medida, para la columna «Corte medido».</summary>
     public static string TextoCorte(MedidaEspectro m) => m.Estado switch
@@ -306,7 +327,9 @@ public static class CorteEspectral
     public static string TextoCalidadReal(MedidaEspectro m, bool sinPerdida)
     {
         if (m.AnchoReal is not double ancho) return "";
-        if (ancho < LimiteOrigenBajoHz) return "≈ 128 kbps o menos";
+        if (LimitadaPorElMuestreo(m)) return "Limitado por el muestreo";
+        if (ancho < Limite128Hz) return "≈ 128 kbps o menos";
+        if (ancho < LimiteOrigenBajoHz) return "≈ 160 kbps";
         if (ancho < Limite192Hz) return "≈ 192 kbps";
         if (ancho < Limite320Hz) return "≈ 256 kbps";
         if (m.Estado == EstadoCorte.SinCorte || ancho >= LimiteSinPerdidaHz)

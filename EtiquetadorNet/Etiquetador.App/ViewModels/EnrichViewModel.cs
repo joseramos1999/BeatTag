@@ -342,6 +342,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
             else if (e.PropertyName == nameof(RecuentoMarcadas.Renombran))
             {
                 OnPropertyChanged(nameof(RenombradosPendientes));
+                OnPropertyChanged(nameof(TextoRenombradosPendientes));
                 OnPropertyChanged(nameof(HayRenombrados));
             }
         };
@@ -759,10 +760,18 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
     /// <summary>
     /// Cuántas propuestas marcadas van a RENOMBRAR el archivo. Importa avisarlo: rekordbox guarda
     /// los cue points y el beatgrid en su base de datos ligados a la ruta, así que al renombrar los
-    /// da por perdidos. Se puede reparar después (Ajustes → Reparar colección de rekordbox), pero
+    /// da por perdidos. Se puede reparar después (página rekordbox, pestaña «Rutas rotas»), pero
     /// más vale saberlo antes que descubrirlo en cabina.
     /// </summary>
     public int RenombradosPendientes => Recuento.Renombran;
+
+    /// <summary>La banda que lo avisa, con el número bien puesto (antes decía «Se van a renombrar 1 archivos»).</summary>
+    public string TextoRenombradosPendientes => TextoRenombrados(RenombradosPendientes);
+
+    internal static string TextoRenombrados(int n)
+        => (n == 1 ? "Se va a renombrar 1 archivo." : $"Se van a renombrar {n} archivos.")
+         + " Si usas rekordbox, al cambiar el nombre pierde sus cue points y su beatgrid, porque los guarda ligados a la ruta. "
+         + $"Puedes devolvérselos después {RekordboxViewModel.DondeSeRepara}.";
 
     /// <summary>
     /// Cuántas filas están marcadas: es lo que aplica el botón, y lo dice en su texto. Antes ponía
@@ -857,7 +866,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
 
         var nota = "Se puede deshacer con «Deshacer última» o, más adelante, desde «Historial de cambios»."
                  + (p.Renombran > 0
-                     ? " Si usas rekordbox, los archivos renombrados pierden allí sus cue points y su beatgrid hasta que repares la colección (Ajustes → Reparar colección de rekordbox)."
+                     ? $" Si usas rekordbox, los archivos renombrados pierden allí sus cue points y su beatgrid hasta que repares la colección {RekordboxViewModel.DondeSeRepara}."
                      : "");
 
         if (p.Ocultas == 0)

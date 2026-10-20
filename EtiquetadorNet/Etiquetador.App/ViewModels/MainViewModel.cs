@@ -552,20 +552,23 @@ public partial class MainViewModel : ViewModelBase
 
     private void OnEstadoPaginaCambiado(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is "Status" or "Progress" or "IsBusy") RefrescarEstadoPagina();
+        if (e.PropertyName is "Status" or "Progress" or "IsBusy" or nameof(IProgresoPagina.ConAvance)) RefrescarEstadoPagina();
     }
 
     private void RefrescarEstadoPagina()
     {
         var vm = VmActual;
         EstadoPagina = vm is IEstadoPagina estado ? estado.Status : "";
-
-        // La barra solo aparece si la página está trabajando Y sabe decir por dónde va. Una barra
-        // parada en cero mientras algo ocurre es peor que no tener barra.
-        var trabajando = vm is IEstadoPagina e2 && e2.IsBusy;
-        HayBarraProgreso = trabajando && vm is IProgresoPagina;
+        HayBarraProgreso = HayBarra(vm);
         ProgresoPagina = vm is IProgresoPagina p ? p.Progress : 0;
     }
+
+    /// <summary>
+    /// La barra solo aparece si la página está trabajando Y lo que hace sabe decir por dónde va. Una
+    /// barra parada en cero mientras algo ocurre es peor que no tener barra.
+    /// </summary>
+    internal static bool HayBarra(object? vm)
+        => vm is IEstadoPagina { IsBusy: true } && vm is IProgresoPagina { ConAvance: true };
 
     partial void OnBusyTabIndexChanged(int value)
     {
@@ -594,6 +597,10 @@ public partial class MainViewModel : ViewModelBase
 
         // La barra lateral lee de aquí: la decisión sigue viviendo en un solo sitio.
         foreach (var p in Paginas) p.Habilitada = (EnabledTabs & (1 << p.Indice)) != 0;
+        // «Reparar colección de rekordbox» de Ajustes salta a esa página: sale desactivado, y dice por
+        // qué, cuando el salto no llegaría a abrirla.
+        if (Settings is { } ajustes)
+            ajustes.PonerDisponibilidadRekordbox((EnabledTabs & (1 << RekordboxTabIndex)) != 0, BusyTabIndex >= 0);
 
         // Si la pestaña abierta acaba de quedarse fuera, devolver a una que sí esté disponible.
         if ((EnabledTabs & (1 << SelectedTabIndex)) == 0)
@@ -679,6 +686,10 @@ public partial class MainViewModel : ViewModelBase
                                                         Trends.PasosMezcla.Select(p => p.FilePath).ToList()));
         res.AddRange(RekordboxViewModel.DeListaAbierta(Playlists.NombreSugerido, Playlists.Rows.ToList(),
                                                         Playlists.PasosMezcla.Select(p => p.FilePath).ToList()));
+        // Novedades es una lista frente a la biblioteca como Tendencias y Playlists (tanda 4, P5): sus
+        // estrenos que ya están en la biblioteca y su orden para mezclar van igual. Se nombra «Novedades».
+        res.AddRange(RekordboxViewModel.DeListaAbierta(Novedades.NombreSugerido, Novedades.Rows.ToList(),
+                                                        Novedades.PasosMezcla.Select(p => p.FilePath).ToList()));
         if (Asistente.Mezcla.Pasos.Count > 0)
             res.Add(new Etiquetador.Core.ListaParaRekordbox(RekordboxViewModel.CarpetaOrdenes,
                                                             Asistente.Mezcla.Coleccion?.Nombre is { Length: > 0 } c ? c : "Asistente",

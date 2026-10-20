@@ -175,9 +175,17 @@ public partial class SettingsViewModel
     }
 
     /// <summary>«Cancelar la restauración»: descarta la que estaba preparada. No toca los datos actuales.</summary>
+    /// <remarks>
+    /// No mientras se prepara otra restauración: preparar borra y vuelve a escribir la misma carpeta,
+    /// y cancelar a la vez la borraba a medias (la preparación fallaba, o el estado decía «preparada»
+    /// sin que existiera). El botón sale desactivado con <see cref="CopiaOcupada"/>, y la cancelación
+    /// la ocupa mientras dura.
+    /// </remarks>
     [RelayCommand]
     private async Task CancelarRestauracionAsync()
     {
+        if (CopiaOcupada) return;
+        CopiaOcupada = true;
         try
         {
             var habia = await Task.Run(() => CopiaSeguridad.CancelarPendiente(_engine.Paths));
@@ -185,6 +193,7 @@ public partial class SettingsViewModel
             if (habia) _engine.Logger.Log("Restauración de copia de seguridad cancelada.");
         }
         catch (Exception e) { Status = "No se pudo cancelar la restauración: " + e.Message; }
+        finally { CopiaOcupada = false; }
         await ActualizarCopiasAsync();
     }
 

@@ -238,6 +238,7 @@ public static class CopiaSeguridad
             _ when Igual(nombre, Dj.AlmacenListasSeguidas.NombreArchivo) => "Listas seguidas",
             _ when Igual(nombre, Dj.MapaGenerosCarpeta.NombreArchivo) => "Reglas de género por carpeta",
             _ when Igual(nombre, N(Dj.AlmacenSustituciones.RutaEn(p.DataDir))) => "Sustituciones de la Bandeja que se pueden deshacer",
+            _ when Igual(nombre, Providers.AlmacenArtistasDeezer.NombreArchivo) => "Artistas de Novedades: correcciones y exclusiones",
             _ => "Otros datos de BeatTag",
         };
     }
@@ -617,17 +618,39 @@ public static class CopiaSeguridad
     /// antepasado común. MEDIDO en una biblioteca real: 43 carpetas de «E:\Musica\COMERCIAL\…» y la de
     /// la Bandeja quedan en 2 raíces. Las rutas que no cuelgan de ninguna carpeta conocida aportan su
     /// propia carpeta.
+    ///
+    /// Esas rutas sueltas se agrupan aparte y nunca ensanchan una raíz de las carpetas de la música:
+    /// una ruta de los ajustes que no es música (la colección de rekordbox en Documentos, por ejemplo)
+    /// se juntaba con la Bandeja de Descargas por compartir «C:\Users», la raíz pasaba a ser la carpeta
+    /// del usuario y en otro equipo ya no se encontraba (MEDIDO: de 2 raíces encontradas a 1 perdida).
     /// </summary>
     public static List<RutaPartida> AgruparRaices(IEnumerable<string> carpetas, IEnumerable<string> rutas)
     {
-        var anclas = carpetas.Select(RutaPartida.De).Where(r => r != null).Cast<RutaPartida>().ToList();
+        var deCarpetas = carpetas.Select(RutaPartida.De).Where(r => r != null).Cast<RutaPartida>().ToList();
+        var principales = SinAnidadas(Agrupar(deCarpetas));
+
+        var sueltas = new List<RutaPartida>();
         foreach (var ruta in rutas.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var r = RutaPartida.De(ruta);
-            if (r == null || r.Tramos.Count == 0 || anclas.Any(a => r.EmpiezaPor(a))) continue;
-            anclas.Add(Prefijo(r, r.Tramos.Count - 1));   // su carpeta
+            if (r == null || r.Tramos.Count == 0 || deCarpetas.Any(a => r.EmpiezaPor(a)) || principales.Any(a => r.EmpiezaPor(a))) continue;
+            sueltas.Add(Prefijo(r, r.Tramos.Count - 1));   // su carpeta
         }
+        // Una raíz de rutas sueltas que queda dentro de una de las carpetas sobra; una que contiene a una
+        // de ellas se queda junto a ella (la más concreta manda al traducir, ver MapaRaices).
+        var deSueltas = SinAnidadas(Agrupar(sueltas)).Where(g => !principales.Any(p => g.EmpiezaPor(p)));
+        return principales.Concat(deSueltas).ToList();
+    }
 
+    /// <summary>Sin las raíces que quedan dentro de otra (un grupo de primer nivel dentro de una unidad entera).</summary>
+    private static List<RutaPartida> SinAnidadas(List<RutaPartida> grupos)
+        => grupos.Where(g => !grupos.Any(o => !ReferenceEquals(o, g) && g.EmpiezaPor(o) && !o.EmpiezaPor(g))).ToList();
+
+    /// <summary>
+    /// Agrupa carpetas por disco y carpeta de primer nivel y resume cada grupo en su antepasado común.
+    /// </summary>
+    private static List<RutaPartida> Agrupar(List<RutaPartida> anclas)
+    {
         var grupos = new List<RutaPartida>();
         foreach (var g in anclas.GroupBy(a =>
                  {
@@ -648,8 +671,7 @@ public static class CopiaSeguridad
             if (raiz.Estilo == EstiloRuta.Unix && raiz.Tramos.Count == 0) continue;   // «/» no es una raíz
             if (!grupos.Any(x => x.EmpiezaPor(raiz) && raiz.EmpiezaPor(x))) grupos.Add(raiz);
         }
-        // Si una raíz queda dentro de otra (un grupo de primer nivel dentro de una unidad entera), sobra.
-        return grupos.Where(g => !grupos.Any(o => !ReferenceEquals(o, g) && g.EmpiezaPor(o) && !o.EmpiezaPor(g))).ToList();
+        return grupos;
     }
 
     /// <summary>
@@ -665,20 +687,36 @@ public static class CopiaSeguridad
     public static List<RaizCopia> ProponerRaices(IReadOnlyList<string> carpetasCopia, IReadOnlyCollection<string> rutas,
                                                  Func<string, bool> existeCarpeta, IReadOnlyList<string> carpetasActuales,
                                                  IReadOnlyList<string> volumenes)
+        => ProponerRaices(carpetasCopia, rutas, existeCarpeta, carpetasActuales, volumenes,
+                          OperatingSystem.IsWindows() ? EstiloRuta.Windows : EstiloRuta.Unix);
+
+    /// <param name="estiloAqui">El estilo de las rutas de este sistema. Una ruta del otro estilo no puede
+    /// «existir aquí» aunque el sistema la resuelva: Windows lee «/Users/dj/Music» como
+    /// «C:\Users\dj\Music», y si el usuario se llama igual en los dos equipos la daba por encontrada y
+    /// dejaba las rutas en formato macOS.</param>
+    internal static List<RaizCopia> ProponerRaices(IReadOnlyList<string> carpetasCopia, IReadOnlyCollection<string> rutas,
+                                                   Func<string, bool> existeCarpeta, IReadOnlyList<string> carpetasActuales,
+                                                   IReadOnlyList<string> volumenes, EstiloRuta estiloAqui)
     {
         var raices = AgruparRaices(carpetasCopia, rutas);
         var partidas = rutas.Select(RutaPartida.De).Where(r => r != null).Cast<RutaPartida>().ToList();
         var actuales = carpetasActuales.Select(RutaPartida.De).Where(r => r != null).Cast<RutaPartida>().ToList();
         var anclas = carpetasCopia.Select(RutaPartida.De).Where(r => r != null).Cast<RutaPartida>().ToList();
+        // Cada ruta cuenta en la raíz más concreta que la contiene (una raíz de rutas sueltas puede
+        // contener a otra de las carpetas de la música, y al traducir manda la más concreta).
+        var cuenta = new Dictionary<RutaPartida, int>(ReferenceEqualityComparer.Instance);
+        foreach (var r in partidas)
+            if (raices.Where(x => r.EmpiezaPor(x)).OrderByDescending(x => x.Tramos.Count).FirstOrDefault() is { } suya)
+                cuenta[suya] = cuenta.TryGetValue(suya, out var n) ? n + 1 : 1;
 
         var res = new List<RaizCopia>();
         foreach (var raiz in raices)
         {
-            var cuantas = partidas.Count(r => r.EmpiezaPor(raiz));
+            var cuantas = cuenta.TryGetValue(raiz, out var c) ? c : 0;
             var texto = raiz.Texto();
             string propuesta = "", motivo;
             var porBib = PorLaBiblioteca(raiz, anclas, actuales);
-            if (SinFallo(() => existeCarpeta(texto)))
+            if (raiz.Estilo == estiloAqui && SinFallo(() => existeCarpeta(texto)))
             {
                 propuesta = texto;
                 motivo = "Existe en este equipo.";
@@ -907,12 +945,12 @@ public static class CopiaSeguridad
         var copias = CarpetaCopias(p);
         var avisosPrevia = new List<string>();
         var recogidos = Recoger(p, avisosPrevia, out var noLeidos);
+        // La restauración preparada se conserva: no se ha tocado nada, y el motivo suele ser pasajero (un
+        // antivirus que tiene abierto un archivo). Borrarla obligaba a elegir otra vez el ZIP y a volver a
+        // confirmar las ubicaciones de la música; si el problema sigue, se descarta desde Ajustes.
         string Abortar(string motivo)
-        {
-            try { Directory.Delete(dir, recursive: true); } catch { }
-            return $"No se ha restaurado la copia de seguridad: antes de sustituir nada se guarda una copia de lo actual, y no se pudo ({motivo}). "
-                 + "Vuelve a intentarlo desde Ajustes.";
-        }
+            => $"No se ha restaurado la copia de seguridad: antes de sustituir nada se guarda una copia de lo actual, y no se pudo ({motivo}). "
+             + "No se ha cambiado nada. Se volverá a intentar la próxima vez que se abra BeatTag; para descartarla, usa «Cancelar la restauración» en Ajustes.";
         if (noLeidos > 0)
             return new ResultadoRestauracion(marca.FechaCopia, 0, Array.Empty<string>(), "", Abortar(string.Join("; ", avisosPrevia)));
         // Sin nada que guardar (un equipo recién instalado) no hay copia previa, y no se dice que la haya.

@@ -54,6 +54,20 @@ public static class TagEditor
     public static Dictionary<string, Pipeline.FieldChange> ImportBpmKey(string path, uint bpm, string? key, bool overwrite)
     {
         using var f = Pipeline.Tagging.AbrirParaEscribir(path);
+        var log = PonerBpmKey(f, bpm, key, overwrite);
+        if (log.Count > 0) f.Save();
+        return log;
+    }
+
+    /// <summary>
+    /// Pone BPM y clave en la etiqueta de un archivo ya abierto, SIN guardarlo, y devuelve los cambios
+    /// por campo. Va aparte para que quien escribe en miles de archivos (importar de rekordbox) pueda
+    /// anotar el cambio en el historial para deshacer ANTES de guardar, y no guardar si no se pudo
+    /// anotar: guardar primero y anotar después deja el archivo cambiado sin forma de deshacerlo
+    /// cuando la anotación falla (hallazgo M10).
+    /// </summary>
+    public static Dictionary<string, Pipeline.FieldChange> PonerBpmKey(TagLib.File f, uint bpm, string? key, bool overwrite)
+    {
         var log = new Dictionary<string, Pipeline.FieldChange>();
         if (bpm > 0 && (overwrite || f.Tag.BeatsPerMinute == 0))
         {
@@ -65,7 +79,6 @@ public static class TagEditor
             log["Key"] = Pipeline.FieldChange.Str(f.Tag.InitialKey ?? "", key);
             f.Tag.InitialKey = key;
         }
-        if (log.Count > 0) f.Save();
         return log;
     }
 }

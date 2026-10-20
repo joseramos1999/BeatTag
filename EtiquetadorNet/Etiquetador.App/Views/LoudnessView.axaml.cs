@@ -14,6 +14,16 @@ public partial class LoudnessView : UserControl
     {
         InitializeComponent();
         GridBehaviors.EnableWidthMemory(this, "Volumen");
+
+        // La tabla admite selección múltiple, y la opción excluye la carpeta de CADA fila elegida: el
+        // rótulo dice cuántas son al abrir el menú, como «Ordenar para mezclar la selección (N)…».
+        if (this.FindControl<DataGrid>("RowsGrid")?.ContextMenu is { } menu)
+            menu.Opening += (_, _) =>
+            {
+                var rotulo = AjusteVolumenSeleccion.RotuloExcluirCarpetas(AjusteVolumenSeleccion.CarpetasDe(Seleccionadas()).Count);
+                foreach (var item in menu.Items.OfType<MenuItem>())
+                    if (Equals(item.Tag, "ExcluirCarpetas")) item.Header = rotulo;
+            };
     }
 
     private void Grid_DoubleTapped(object? sender, TappedEventArgs e) => GridBehaviors.AutoFitOnHeaderDoubleTap(sender, e);

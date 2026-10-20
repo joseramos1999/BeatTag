@@ -108,17 +108,26 @@ public class AlmacenesDjTests : IDisposable
     }
 
     // Un bloqueo de un momento no deja la sesión en solo lectura: se espera y se vuelve a intentar.
+    // El bloqueo se suelta justo después del primer intento fallido, no tras una espera fija: con las
+    // pruebas en paralelo, la espera podía alargarse más que los reintentos y la prueba fallaba a veces.
     [WindowsFact]
-    public async Task Un_bloqueo_pasajero_se_espera_y_se_lee()
+    public void Un_bloqueo_pasajero_se_espera_y_se_lee()
     {
         var archivo = ArchivoConFichas(5);
 
         var bloqueo = new FileStream(archivo, FileMode.Open, FileAccess.Read, FileShare.None);
-        var abrir = Task.Run(() => new AlmacenFichas(archivo));
-        await Task.Delay(100);
-        bloqueo.Dispose();
-        var almacen = await abrir;
+        var fallos = new List<int>();
+        AlmacenFichas almacen;
+        ArchivoJson.TrasIntentoFallido = (ruta, intento) =>
+        {
+            if (ruta != archivo) return;
+            fallos.Add(intento);
+            bloqueo.Dispose();
+        };
+        try { almacen = new AlmacenFichas(archivo); }
+        finally { ArchivoJson.TrasIntentoFallido = null; bloqueo.Dispose(); }
 
+        Assert.Equal(new[] { 1 }, fallos);   // falló una vez, de verdad bloqueado, y al siguiente lo leyó
         Assert.False(almacen.SoloLectura);
         Assert.Equal(5, almacen.Count);
         Assert.Equal("", almacen.Guardar());

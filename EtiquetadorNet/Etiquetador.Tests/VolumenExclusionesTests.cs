@@ -59,6 +59,29 @@ public class VolumenExclusionesTests
         Assert.Equal(l2, l3);
     }
 
+    // Con varias filas seleccionadas se excluye la carpeta de cada una: el aviso nombra y cuenta las que
+    // entran de verdad en la lista (antes nombraba la primera pedida, aunque ya estuviera excluida, y
+    // House\2024 seguida de House, que la sustituye, contaba «2 carpetas»).
+    [Fact]
+    public void Excluir_carpetas_nombra_y_cuenta_las_que_entran_de_verdad()
+    {
+        var (_, nuevas) = AjusteVolumenSeleccion.AnadirCarpetasConNombre(new[] { Acapellas }, new[] { Acapellas, Reggaeton });
+        Assert.Equal(new[] { Reggaeton }, nuevas);
+        Assert.StartsWith("Excluida del ajuste la carpeta «Reggaeton»:", AjusteVolumenSeleccion.TextoCarpetasExcluidas(nuevas, nuevas.Count, 0));
+
+        var house = Path.Combine(Raiz, "House");
+        var del2024 = Path.Combine(house, "2024");
+        var (lista, entran) = AjusteVolumenSeleccion.AnadirCarpetasConNombre(Array.Empty<string>(), new[] { del2024, house });
+        Assert.Equal(new[] { house }, lista);
+        Assert.Equal(new[] { house }, entran);
+        Assert.Equal(1, AjusteVolumenSeleccion.AnadirCarpetas(Array.Empty<string>(), new[] { del2024, house }).Anadidas);
+
+        var filas = new[] { Fila(Acapellas, "a.mp3", -14), Fila(Acapellas, "b.mp3", -14), Fila(Reggaeton, "c.mp3", -14) };
+        Assert.Equal(new[] { Acapellas, Reggaeton }, AjusteVolumenSeleccion.CarpetasDe(filas));
+        Assert.Equal("Excluir esta carpeta del ajuste", AjusteVolumenSeleccion.RotuloExcluirCarpetas(1));
+        Assert.Equal("Excluir sus 2 carpetas del ajuste", AjusteVolumenSeleccion.RotuloExcluirCarpetas(AjusteVolumenSeleccion.CarpetasDe(filas).Count));
+    }
+
     [Fact]
     public void Anadir_canciones_no_repite()
     {
