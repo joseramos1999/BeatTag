@@ -471,11 +471,11 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>
     /// Las propiedades de una página que pueden cambiar si está ocupada (<see cref="PaginaNav.Ocupada"/>).
-    /// «EnviandoAPapelera» es la de Duplicados, que envía en segundo plano sin pasar por IsBusy
-    /// (hallazgo interfaz-1).
+    /// El envío a la papelera de Duplicados no necesita una propia: pone IsBusy mientras dura y lo
+    /// suelta solo cuando no le queda ninguna tarea (DuplicatesViewModel.SoltarOcupada).
     /// </summary>
     internal static bool CambiaLaOcupacion(string? propiedad)
-        => propiedad is "IsBusy" or "AiBusy" or "LoadingCountries" or nameof(DuplicatesViewModel.EnviandoAPapelera);
+        => propiedad is "IsBusy" or "AiBusy" or "LoadingCountries";
 
     private void RecomputeBusy()
     {
@@ -553,6 +553,8 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(Busy));
         OnPropertyChanged(nameof(ComprobandoBiblioteca));
         RecomputeTabs();
+        // «Editar etiquetas de esta canción» de los menús sale desactivada mientras haya un proceso.
+        Acciones.AccionesCancion.OcupacionCambiada();
     }
 
     /// <summary>Decide qué pestañas quedan disponibles. Único sitio donde vive esa regla.</summary>

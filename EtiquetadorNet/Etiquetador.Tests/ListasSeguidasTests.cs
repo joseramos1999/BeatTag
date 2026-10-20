@@ -1,6 +1,7 @@
 using System.Text;
 using Etiquetador.App.Services;
 using Etiquetador.App.ViewModels;
+using Etiquetador.Core;
 using Etiquetador.Core.Dj;
 using Etiquetador.Core.Providers;
 
@@ -342,6 +343,29 @@ public class ListasSeguidasTests : IDisposable
         Assert.Equal(3, a.Buscar("chart:spotify:es:50")!.Ultima!.Canciones);
     }
 
+    // Ni las nuevas guardadas, ni la fecha de revisión, ni el aviso: una lectura vacía (una playlist de
+    // Deezer que llega bien con 0 canciones) no cambia nada de la lista. Antes se vaciaban las nuevas
+    // que «Añadir a pendientes las nuevas que faltan» tenía guardadas.
+    [Fact]
+    public void Una_lectura_vacia_no_borra_las_nuevas_guardadas()
+    {
+        const string clave = "chart:spotify:es:50";
+        var a = new AlmacenListasSeguidas(Archivo);
+        a.Seguir(Seguida(), Semana1, Lunes);
+        var martes = new List<PistaLista>(Semana1) { P("Quevedo", "Columbia", "id4") };
+        a.Registrar(clave, martes, Lunes.AddDays(1), completa: true, ahora: Lunes.AddDays(1), aviso: "Deezer tardó en responder");
+        Assert.Equal("Columbia", Assert.Single(a.Buscar(clave)!.Nuevas).Titulo);
+
+        var vacia = a.Registrar(clave, Array.Empty<PistaLista>(), Lunes.AddDays(2), completa: true, ahora: Lunes.AddDays(2));
+
+        Assert.Empty(vacia.Nuevas);
+        var l = a.Buscar(clave)!;
+        Assert.Equal("Columbia", Assert.Single(l.Nuevas).Titulo);   // siguen para mandarlas a pendientes
+        Assert.Equal(Lunes.AddDays(1), l.Revisada);                 // no cuenta como revisada hoy
+        Assert.Equal("Deezer tardó en responder", l.Aviso);
+        Assert.Equal(4, l.Ultima!.Canciones);
+    }
+
     // Lo que usan Tendencias y Playlists para ponerse al día cuando Pendientes revisa o deja de seguir
     // la lista abierta: compara con lo guardado sin apuntar nada.
     [Fact]
@@ -466,10 +490,27 @@ public class ListasSeguidasTests : IDisposable
     [Fact]
     public void Sin_biblioteca_no_se_cuenta_lo_que_falta()
     {
-        Assert.Contains("escanea la biblioteca", PendientesViewModel.MotivoSinBiblioteca(escaneada: false, canciones: 0));
-        Assert.Contains("escanea la biblioteca", PendientesViewModel.MotivoSinBiblioteca(escaneada: false, canciones: 500));
-        Assert.Contains("está vacía", PendientesViewModel.MotivoSinBiblioteca(escaneada: true, canciones: 0));
-        Assert.Equal("", PendientesViewModel.MotivoSinBiblioteca(escaneada: true, canciones: 500));
+        Assert.Contains("escanea la biblioteca", PendientesViewModel.MotivoSinBiblioteca(2, 2, escaneada: false, canciones: 0));
+        Assert.Contains("escanea la biblioteca", PendientesViewModel.MotivoSinBiblioteca(2, 1, escaneada: false, canciones: 500));
+        Assert.Contains("está vacía", PendientesViewModel.MotivoSinBiblioteca(2, 2, escaneada: true, canciones: 0));
+        Assert.Equal("", PendientesViewModel.MotivoSinBiblioteca(2, 2, escaneada: true, canciones: 500));
+    }
+
+    // Sin carpetas (o con todas desmarcadas) la biblioteca nunca está escaneada: pedir que se escanee
+    // no servía de nada; lo que falta es añadir carpetas o marcar alguna.
+    [Fact]
+    public void Sin_carpetas_pide_que_se_anadan_y_no_que_se_escanee()
+    {
+        var sin = PendientesViewModel.MotivoSinBiblioteca(0, 0, escaneada: false, canciones: 0);
+        Assert.StartsWith("Añade en la página Biblioteca las carpetas de tu música", sin);
+        Assert.DoesNotContain("Primero escanea", sin);
+        Assert.StartsWith("Todas las carpetas de la página Biblioteca están desmarcadas",
+                          PendientesViewModel.MotivoSinBiblioteca(3, 0, escaneada: false, canciones: 0));
+
+        // Con la biblioteca de verdad: sin carpetas, IsScanned es false y aun así pide carpetas.
+        var store = new LibraryStore(new AppConfig(), () => { }, new ScanCache(Path.Combine(_dir, "scan.json")));
+        Assert.False(store.IsScanned);
+        Assert.Equal(sin, PendientesViewModel.MotivoSinBiblioteca(store));
     }
 
     [Fact]

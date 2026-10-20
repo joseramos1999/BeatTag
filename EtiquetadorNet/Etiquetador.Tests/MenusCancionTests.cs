@@ -44,6 +44,7 @@ public class MenusCancionTests
     [InlineData("FichasView")]
     [InlineData("TrendsView")]
     [InlineData("PlaylistView")]
+    [InlineData("OrdenMezclaPanel")]   // la tabla del orden de Tendencias y Playlists, la misma que la de mezcla del Asistente
     public void Las_tablas_con_canciones_tienen_las_mismas_opciones_en_el_mismo_orden(string vista)
     {
         var menu = MenuXaml(vista);
@@ -58,8 +59,41 @@ public class MenusCancionTests
     [InlineData("CompatiblesDialog")]
     [InlineData("VersionesDialog")]
     [InlineData("MezclaDialog")]
-    public void Los_dialogos_de_mezcla_siguen_el_mismo_orden(string vista)
+    [InlineData("PendientesView")]   // sin escuchar ni editar (sus filas no suelen tener archivo), pero en el mismo orden
+    public void Los_dialogos_de_mezcla_y_Pendientes_siguen_el_mismo_orden(string vista)
         => EnElOrdenComun(vista, MenuXaml(vista));
+
+    // La tabla del orden en Tendencias y Playlists y la de mezcla del Asistente son la misma tabla:
+    // el mismo menú, con «Empezar por esta» detrás de compatibles y versiones (antes iba la segunda).
+    [Fact]
+    public void La_tabla_del_orden_tiene_el_mismo_menu_que_la_de_mezcla_del_asistente()
+        => Assert.Equal(new[] { AccionesCancion.TextoEscuchar, AccionesCancion.TextoEditar, AccionesCancion.TextoCompatibles,
+                                AccionesCancion.TextoVersiones, "Empezar por esta", AccionesCancion.TextoCarpeta },
+                        MenuXaml("OrdenMezclaPanel"));
+
+    // «Editar etiquetas de esta canción» sale desactivada mientras otra página trabaja, y el rótulo
+    // emergente lo dice también con la opción desactivada: antes el clic no hacía nada y no decía por qué.
+    [Theory]
+    [InlineData("ColeccionesView")]
+    [InlineData("TrendsView")]
+    [InlineData("PlaylistView")]
+    [InlineData("OrdenMezclaPanel")]
+    public void Editar_desactivada_dice_por_que(string vista)
+    {
+        var texto = File.ReadAllText(Fuente("Etiquetador.App", "Views", vista + ".axaml"));
+        var item = Regex.Match(texto, @"<MenuItem Header=""Editar etiquetas de esta canción""[^>]*/>", RegexOptions.Singleline);
+        Assert.True(item.Success, vista + " no tiene «Editar etiquetas de esta canción»");
+        Assert.Contains("ToolTip.ShowOnDisabled=\"True\"", item.Value);
+        Assert.Contains("proceso en marcha", item.Value);
+    }
+
+    [Fact]
+    public void Editar_se_puede_solo_con_archivo_y_sin_nada_en_marcha()
+    {
+        Assert.True(AccionesCancion.PuedeEditar(@"E:\Musica\a.mp3", ocupada: false));
+        Assert.False(AccionesCancion.PuedeEditar(@"E:\Musica\a.mp3", ocupada: true));
+        Assert.False(AccionesCancion.PuedeEditar("", ocupada: false));
+    }
 
     // El de Biblioteca se monta en el código (sus rótulos dependen de la selección): se leen los
     // rótulos de cada opción y el orden en que se añaden.

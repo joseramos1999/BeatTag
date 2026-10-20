@@ -48,6 +48,18 @@ public sealed class Pendiente
     /// </summary>
     public DateTime? ConseguidaAntes { get; set; }
 
+    /// <summary>
+    /// El archivo con el que estaba tachada cuando desapareció de la biblioteca (enviado a la
+    /// papelera, ver <see cref="AlmacenPendientes.Reabrir"/>), y la fecha en que se había conseguido.
+    /// Si ESE archivo vuelve (recuperado de la papelera y escaneado), se tacha otra vez con su fecha de
+    /// entonces y no como «Conseguida el» día de hoy, que no es la real. Vacío y null si no hay nada.
+    /// Son opcionales: un pendientes.json anterior se lee igual.
+    /// </summary>
+    public string ArchivoDesaparecido { get; set; } = "";
+
+    /// <inheritdoc cref="ArchivoDesaparecido"/>
+    public DateTime? ConseguidaConElDesaparecido { get; set; }
+
     [JsonIgnore] public bool EstaConseguida => Conseguida != null;
 
     public Pendiente Copia() => new()
@@ -55,6 +67,7 @@ public sealed class Pendiente
         Id = Id, Artista = Artista, Titulo = Titulo, Origen = Origen, Alta = Alta, Enlace = Enlace,
         Conseguida = Conseguida, Archivo = Archivo, Descartados = new List<string>(Descartados),
         ConseguidaAntes = ConseguidaAntes,
+        ArchivoDesaparecido = ArchivoDesaparecido, ConseguidaConElDesaparecido = ConseguidaConElDesaparecido,
     };
 }
 
@@ -190,6 +203,10 @@ public sealed class AlmacenPendientes
     /// <summary>
     /// Tacha las indicadas con su archivo, si siguen pendientes (pudo quitarlas el usuario mientras se
     /// cruzaba con la biblioteca). Devuelve cuántas.
+    ///
+    /// Si el archivo es el mismo con el que estaba tachada cuando desapareció (vuelve de la papelera),
+    /// la fecha es la de entonces (<see cref="Pendiente.ConseguidaConElDesaparecido"/>), no
+    /// <paramref name="cuando"/>.
     /// </summary>
     public int MarcarConseguidas(IEnumerable<(string Id, string Ruta)> conseguidas, DateTime cuando)
     {
@@ -200,8 +217,14 @@ public sealed class AlmacenPendientes
             {
                 var p = _todas.FirstOrDefault(x => x.Id == id);
                 if (p == null || p.EstaConseguida || string.IsNullOrWhiteSpace(ruta)) continue;
-                p.Conseguida = cuando;
+                var vuelve = p.ConseguidaConElDesaparecido != null
+                             && string.Equals(p.ArchivoDesaparecido, ruta, StringComparison.OrdinalIgnoreCase);
+                p.Conseguida = vuelve ? p.ConseguidaConElDesaparecido : cuando;
                 p.Archivo = ruta;
+                // Ya tachada: lo del archivo desaparecido no vuelve a servir (si fue con otra copia,
+                // su fecha es la de esa copia).
+                p.ArchivoDesaparecido = "";
+                p.ConseguidaConElDesaparecido = null;
                 n++;
             }
         }
@@ -275,6 +298,8 @@ public sealed class AlmacenPendientes
             {
                 p.Conseguida = p.ConseguidaAntes ?? DateTime.Now;
                 p.Archivo = ultimo;
+                p.ArchivoDesaparecido = "";
+                p.ConseguidaConElDesaparecido = null;
             }
             // La fecha guardada era la del último descartado: para los anteriores no se sabe.
             p.ConseguidaAntes = null;
@@ -286,7 +311,7 @@ public sealed class AlmacenPendientes
     /// Devuelve a pendiente las conseguidas cuyo archivo ya no existe (se envió a la papelera o se
     /// borró), si siguen tachadas con ese mismo archivo. No lo apunta como descartado: el archivo no
     /// era una copia equivocada, simplemente ya no está, y si vuelve (se recupera de la papelera) la
-    /// tachará otra vez. Devuelve cuántas.
+    /// tachará otra vez, con la fecha en que se consiguió (se guarda aquí). Devuelve cuántas.
     /// </summary>
     public int Reabrir(IEnumerable<(string Id, string Ruta)> sinArchivo)
     {
@@ -297,6 +322,8 @@ public sealed class AlmacenPendientes
             {
                 var p = _todas.FirstOrDefault(x => x.Id == id);
                 if (p == null || !p.EstaConseguida || !string.Equals(p.Archivo, ruta, StringComparison.Ordinal)) continue;
+                p.ArchivoDesaparecido = p.Archivo;
+                p.ConseguidaConElDesaparecido = p.Conseguida;
                 p.Conseguida = null;
                 p.Archivo = "";
                 n++;

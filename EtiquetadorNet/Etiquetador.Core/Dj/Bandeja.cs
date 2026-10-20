@@ -846,8 +846,9 @@ public static class SustitucionBandeja
                              + " Recupera la copia antigua desde la papelera si la necesitas.", viejaEnPapelera: true);
             }
 
-            // 4. Queda anotado para deshacer. Con su origen: el historial lo enseña como traslado (lo es:
-            // la descarga sale de la bandeja y deshacer la devuelve a ella).
+            // 4. Queda anotado para deshacer. Con su origen: el historial lo enseña como «Sustitución desde
+            // la Bandeja» y no como un traslado o un renombrado cualquiera (la descarga sale de la bandeja
+            // y ocupa el sitio de la copia antigua; deshacer la devuelve a la bandeja).
             string errAnotar;
             try
             {

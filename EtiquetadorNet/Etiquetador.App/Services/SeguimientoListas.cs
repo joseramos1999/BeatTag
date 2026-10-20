@@ -195,8 +195,15 @@ public sealed class SeguimientoListas
         var canciones = _engine.Library.Tracks.ToList();
         var rutas = await Task.Run(() => new HashSet<string>(canciones.Select(t => t.FilePath), StringComparer.OrdinalIgnoreCase));
 
-        // Nada que buscar: todas conseguidas y con su archivo en su sitio.
-        if (!lista.Any(p => !p.EstaConseguida || (p.Archivo.Length > 0 && !rutas.Contains(p.Archivo)))) return;
+        // Nada que buscar: todas conseguidas y con su archivo en su sitio. Aun así, los descartados ya
+        // buscados que han vuelto a la biblioteca salen de esa caché: si BeatTag los renombra ahora y
+        // después se reabre la canción, hay que buscarlos en los manifiestos, o el archivo renombrado
+        // volvería a tachar la canción que el usuario dijo que no era.
+        if (!lista.Any(p => !p.EstaConseguida || (p.Archivo.Length > 0 && !rutas.Contains(p.Archivo))))
+        {
+            _descartadosBuscados = SinLosQueHanVuelto(_descartadosBuscados, rutas.Contains);
+            return;
+        }
 
         // Antes de cruzar, los descartes siguen a los archivos que BeatTag ha renombrado: si no, el
         // remix descartado volvería a tachar la canción con su nombre nuevo.
@@ -228,6 +235,16 @@ public sealed class SeguimientoListas
     /// falta volver a leer los manifiestos por ellos (ver AppEngine.ReubicarFichas, que hace lo mismo).
     /// </summary>
     private IReadOnlySet<string> _descartadosBuscados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Los ya buscados sin los que han vuelto a la biblioteca (dentro, BeatTag sí puede renombrarlos).
+    /// Devuelve el mismo conjunto si no ha vuelto ninguno. Puro, para probarlo.
+    /// </summary>
+    internal static IReadOnlySet<string> SinLosQueHanVuelto(IReadOnlySet<string> buscados, Func<string, bool> enBiblioteca)
+    {
+        if (buscados.Count == 0 || !buscados.Any(enBiblioteca)) return buscados;
+        return new HashSet<string>(buscados.Where(r => !enBiblioteca(r)), StringComparer.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Lleva los descartes de <see cref="Pendiente.Descartados"/> a la ruta nueva de los archivos que

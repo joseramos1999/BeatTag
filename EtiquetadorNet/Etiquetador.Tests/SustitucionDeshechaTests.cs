@@ -237,7 +237,7 @@ public class SustitucionDeshechaTests : IDisposable
         var c = almacen.Conciliar(new AlmacenFichas(Ruta("fichas.json")), _ => false, _ => null, DateTime.Now);
 
         Assert.Equal(1, c.Olvidadas);
-        Assert.Contains(SustitucionesBandeja.TextosRegistro(c), t => t.Contains("1 sustitución deshecha"));
+        Assert.Contains(SustitucionesBandeja.TextosRegistro(c), t => t.Contains("se deja de vigilar 1 sustitución"));
     }
 
     // Mientras la descarga no vuelva a la bandeja (con su tamaño), la sustitución sigue hecha: un
@@ -256,6 +256,105 @@ public class SustitucionDeshechaTests : IDisposable
         Assert.False(almacen.Conciliar(fichas, _ => false, SustitucionesBandeja.Tamano, DateTime.Now).HayCambios);
         Assert.Equal(7, fichas.Obtener(Ruta("Musica", "A.mp3"))?.Energia);
         Assert.Equal(1, almacen.Count);
+    }
+
+    // ---------------------------------------------------------------- catalogo-3 y catalogo-4 · el historial manda, no el tamaño
+
+    // Se sustituye, se aplica la propuesta de Enriquecer (con carátula, otro tamaño) y se deshacen las
+    // dos. Antes se reconocía por el tamaño de la descarga en la bandeja, y así no se reconocía: la
+    // ficha fusionada se iba con la descarga. Ahora lo dice el propio deshacer (UndoEngine.AlDeshacer,
+    // que en la aplicación llega a AppEngine.SeguirArchivo).
+    [Fact]
+    public void El_deshacer_se_reconoce_por_el_historial_aunque_la_descarga_vuelva_con_otro_tamano()
+    {
+        var paths = new AppPaths(Ruta("datos"));
+        var nueva = Path.Combine(Directory.CreateDirectory(Ruta("Bandeja")).FullName, "fisher 320.mp3");
+        var vieja = Path.Combine(Directory.CreateDirectory(Ruta("Musica")).FullName, "Fisher - Losing It.mp3");
+        File.WriteAllText(nueva, "nueva, de 320");
+        File.WriteAllText(vieja, "vieja");
+        var fichas = new AlmacenFichas(Ruta("fichas.json"));
+        fichas.Poner(vieja, new FichaDj { Energia = 8 });
+        fichas.Poner(nueva, new FichaDj { Energia = 2 });
+        var d = new Decisiones(Ruta("datos"));
+        var almacen = new AlmacenSustituciones(AlmacenSustituciones.RutaEn(Ruta("datos")));
+        var (registro, man) = Sustituir(nueva, vieja, fichas, d, almacen, paths);
+
+        File.AppendAllText(registro.Destino, " + carátula");   // Enriquecer escribe en la descarga: otro tamaño
+        var deshacer = new UndoEngine(paths) { AlDeshacer = a => almacen.Seguir(a.Desde, a.Hasta) };
+        Assert.Equal(1, deshacer.UndoLastRun(man).Reverted);
+        Assert.NotEqual(registro.NuevaBytes, new FileInfo(nueva).Length);
+
+        var c = TrasCambiarLaBiblioteca(almacen, fichas, d, new HashSet<string>(), paths);
+
+        Assert.Single(c.Deshechas);
+        Assert.Equal(2, fichas.Obtener(nueva)?.Energia);   // la descarga, con SU ficha
+        Assert.Null(fichas.Obtener(vieja));
+    }
+
+    // El destino sigue a los renombrados de BeatTag: tras «Enriquecer» renombra la descarga, sigue en
+    // la biblioteca y no hay que mirar el disco con cada cambio de ella. Deshacer el renombrado y luego
+    // la sustitución se sigue igual.
+    [Fact]
+    public void El_destino_sigue_a_los_renombrados_y_no_se_mira_el_disco()
+    {
+        var almacen = new AlmacenSustituciones(Ruta("sust.json"));
+        var s = new SustitucionHecha
+        {
+            Fecha = DateTime.Now, Bandeja = Ruta("Bandeja", "a.mp3"), Destino = Ruta("Musica", "A.mp3"),
+            Vieja = Ruta("Musica", "A.mp3"), NuevaBytes = 5,
+        };
+        almacen.Anotar(s);
+        long? SinDisco(string r) => throw new InvalidOperationException("no debería mirar el disco: " + r);
+
+        Assert.True(almacen.Seguir(Ruta("Musica", "A.mp3"), Ruta("Musica", "Fisher - A.mp3")));   // Enriquecer renombra
+        Assert.Equal(Ruta("Musica", "Fisher - A.mp3"), s.Destino);
+        Assert.False(almacen.Seguir(Ruta("Otra", "x.mp3"), Ruta("Otra", "y.mp3")));
+        var fichas = new AlmacenFichas(Ruta("fichas.json"));
+        Assert.False(almacen.Conciliar(fichas, r => r == Ruta("Musica", "Fisher - A.mp3"), SinDisco, DateTime.Now).HayCambios);
+
+        almacen.Seguir(Ruta("Musica", "Fisher - A.mp3"), Ruta("Musica", "A.mp3"));   // se deshace el renombrado…
+        almacen.Seguir(Ruta("Musica", "A.mp3"), Ruta("Bandeja", "a.mp3"));            // …y la sustitución
+        Assert.True(s.VueltaALaBandeja);
+        var c = almacen.Conciliar(fichas, _ => false, SinDisco, DateTime.Now);
+        Assert.Single(c.Deshechas);
+        Assert.False(almacen.Seguir(Ruta("Musica", "A.mp3"), Ruta("Bandeja", "a.mp3")));   // deshecha: ya no se sigue
+    }
+
+    // Con las etiquetas copiadas no hay tamaño con que reconocerla (NuevaBytes = 0): antes bastaba con
+    // que llegara a la bandeja OTRA descarga con su nombre para darla por deshecha sin serlo.
+    [Fact]
+    public void Sin_tamano_fiable_otra_descarga_con_su_nombre_no_la_da_por_deshecha()
+    {
+        var bandeja = Ruta("Bandeja", "a.mp3");
+        Directory.CreateDirectory(Path.GetDirectoryName(bandeja)!);
+        File.WriteAllText(bandeja, "otra descarga con el mismo nombre");
+        var almacen = new AlmacenSustituciones(Ruta("sust.json"));
+        almacen.Anotar(new SustitucionHecha { Fecha = DateTime.Now, Bandeja = bandeja, Destino = Ruta("Musica", "A.mp3"), Vieja = Ruta("Musica", "A.mp3") });
+
+        Assert.False(almacen.Conciliar(new AlmacenFichas(Ruta("fichas.json")), _ => false, SustitucionesBandeja.Tamano, DateTime.Now).HayCambios);
+        Assert.Equal(1, almacen.Count);
+    }
+
+    // Una hecha cuyo destino ha salido de la biblioteca por otra vía se mira en disco una vez por
+    // sesión, no con cada cambio de la biblioteca; y pasado el plazo se olvida.
+    [Fact]
+    public void Una_hecha_fuera_de_la_biblioteca_se_mira_una_vez_y_acaba_caducando()
+    {
+        var almacen = new AlmacenSustituciones(Ruta("sust.json"));
+        almacen.Anotar(new SustitucionHecha
+        {
+            Fecha = DateTime.Now, Bandeja = Ruta("Bandeja", "a.mp3"), Destino = Ruta("Musica", "A.mp3"), Vieja = Ruta("Musica", "A.mp3"), NuevaBytes = 5,
+        });
+        var fichas = new AlmacenFichas(Ruta("fichas.json"));
+        var miradas = 0;
+        long? Contar(string r) { miradas++; return null; }
+
+        for (var i = 0; i < 5; i++) Assert.False(almacen.Conciliar(fichas, _ => false, Contar, DateTime.Now).HayCambios);
+        Assert.Equal(2, miradas);   // una sola vez el destino y la bandeja; antes, los dos con cada cambio (10)
+
+        var c = almacen.Conciliar(fichas, _ => false, Contar, DateTime.Now + AlmacenSustituciones.EsperaCopiaAntigua + TimeSpan.FromDays(1));
+        Assert.Equal(1, c.Olvidadas);
+        Assert.Equal(0, almacen.Count);
     }
 
     [Fact]
@@ -320,8 +419,8 @@ public class SustitucionDeshechaTests : IDisposable
 
     // ---------------------------------------------------------------- Origen
 
-    // El historial de deshacer enseña la sustitución como lo que es, un traslado de carpeta (la
-    // descarga sale de la bandeja), aunque la ruta sea la misma que la de la copia antigua.
+    // El historial de deshacer enseña la sustitución con su propio nombre, «Sustitución desde la
+    // Bandeja», y no como un traslado de carpeta, aunque la descarga salga de la bandeja.
     [Fact]
     public void El_historial_la_ensena_como_sustitucion()
     {

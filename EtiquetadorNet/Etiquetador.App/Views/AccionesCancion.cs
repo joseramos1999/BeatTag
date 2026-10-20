@@ -40,11 +40,28 @@ public static class AccionesCancion
 
     /// <summary>
     /// «Editar etiquetas de esta canción» para las tablas cuyo ViewModel no tiene su propio comando
-    /// (Colecciones, Tendencias, Playlists). Sin archivo (una canción de la lista que no tienes), sale
-    /// desactivada.
+    /// (Colecciones, Tendencias, Playlists y su tabla del orden). Sale desactivada sin archivo (una
+    /// canción de la lista que no está en la biblioteca) y mientras haya un proceso en marcha: saltar al
+    /// Editor no llegaría a abrirlo. Antes solo miraba el archivo, y con Tendencias o Playlists
+    /// trabajando el clic no hacía nada y no decía por qué; el rótulo emergente de la opción lo dice.
     /// </summary>
-    public static ICommand EditarEtiquetas { get; } =
-        new RelayCommand<object?>(fila => Editar(RutaDe(fila)), fila => RutaDe(fila).Length > 0);
+    public static ICommand EditarEtiquetas => _editarEtiquetas;
+
+    private static readonly RelayCommand<object?> _editarEtiquetas =
+        new(fila => Editar(RutaDe(fila)), fila => PuedeEditar(RutaDe(fila), AplicacionOcupada()));
+
+    /// <summary>Si se puede abrir una fila en el Editor. Puro, para probarlo.</summary>
+    internal static bool PuedeEditar(string ruta, bool ocupada) => ruta.Length > 0 && !ocupada;
+
+    /// <summary>
+    /// La aplicación ha empezado o terminado un proceso largo: las opciones que dependen de ello se
+    /// vuelven a evaluar (un menú abierto en ese momento se pone al día). Lo llama MainViewModel.
+    /// </summary>
+    public static void OcupacionCambiada() => _editarEtiquetas.NotifyCanExecuteChanged();
+
+    /// <summary>Hay un proceso largo en marcha en alguna página (el resto de la aplicación está bloqueado).</summary>
+    private static bool AplicacionOcupada()
+        => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime { MainWindow.DataContext: MainViewModel { Busy: true } };
 
     // --- El orden del menú contextual ---
     //

@@ -342,12 +342,19 @@ public sealed class AlmacenListasSeguidas
     /// <summary>
     /// Apunta una lectura de una lista seguida (ver <see cref="ListasSeguidas.Registrar"/>) y guarda las
     /// nuevas para poder mandarlas a pendientes más tarde. Si la lista no se sigue, no hace nada.
+    ///
+    /// Una lectura VACÍA tampoco toca nada: ni la fecha de revisión, ni el aviso, ni las nuevas
+    /// guardadas. Antes ListasSeguidas.Registrar ya no la apuntaba, pero aquí se vaciaban las nuevas
+    /// que «Añadir a pendientes las nuevas que faltan» tenía guardadas (y la lista salía revisada hoy).
+    /// La protección no puede depender de cada llamador: una playlist de Deezer vacía llega como
+    /// lectura correcta de 0 canciones.
     /// </summary>
     /// <param name="nombre">El nombre que trae ahora la lista; vacío para no cambiarlo.</param>
     /// <param name="aviso">Por qué la lectura puede estar incompleta, o vacío.</param>
     public NovedadesLista Registrar(string clave, IReadOnlyList<PistaLista> pistas, DateTime fecha, bool completa,
                                     DateTime ahora, string nombre = "", string aviso = "")
     {
+        if (pistas.Count == 0) return NovedadesLista.Ninguna;
         lock (_cerrojo)
         {
             var l = _todas.FirstOrDefault(x => x.Clave == clave);

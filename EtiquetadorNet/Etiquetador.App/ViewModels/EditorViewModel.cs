@@ -347,7 +347,7 @@ public static class EdicionManual
                                                                   uint anio, uint bpm)
     {
         var cambios = new Dictionary<string, FieldChange>();
-        using (var tf = TagLib.File.Create(ruta))
+        using (var tf = Tagging.AbrirParaEscribir(ruta))   // TagLib no escribe AIFF-C: así el motivo sale en español
         {
             var tag = tf.Tag;
             Texto(cambios, "Title", form.Title, cargado.Title, tag.Title, v => tag.Title = v);

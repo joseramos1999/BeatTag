@@ -674,7 +674,10 @@ public class AsistenteReglasTests : IDisposable
                                               new HistorialQueFalla(), "", null, null, null, CancellationToken.None, "prueba");
         var fallo = Assert.Single(res.Fallos);
         Assert.Equal("no-esta.mp3: " + EscrituraPorReglas.YaNoEsta, fallo);
-        Assert.Contains("1 no se pudo escribir (no-esta.mp3: ya no está", EscrituraPorReglas.Cola(res));
+        // Sin paréntesis dentro de paréntesis: la cola ya envuelve el fallo en unos.
+        Assert.Contains("1 no se pudo escribir (no-esta.mp3: ya no está en su carpeta: se ha movido, renombrado o enviado a la papelera).",
+                        EscrituraPorReglas.Cola(res));
+        Assert.DoesNotContain("(", EscrituraPorReglas.YaNoEsta);
     }
 
     [Fact]
@@ -854,6 +857,57 @@ public class AsistenteReglasTests : IDisposable
         var soloReggaeton = GeneroYPacks().Where(t => t.FilePath.Contains("Reggaeton")).ToList();
         var c = GeneroPorReglas.Carpetas(soloReggaeton, new[] { Rutas.De("M", "Reggaeton") });
         Assert.Equal(Rutas.De("M", "Reggaeton"), c[0].Ruta);   // 3 de 3 con género llevan Reggaeton
+    }
+
+    // Revisión de la unión: la protección era solo para la carpeta de la biblioteca. Una carpeta
+    // intermedia de varios estilos («COMERCIAL», con un pack de cada estilo) salía la primera, justo
+    // debajo de «Empieza por las carpetas de arriba».
+    [Fact]
+    public void P9_una_carpeta_intermedia_de_varios_estilos_no_sale_arriba()
+    {
+        var canciones = new List<Track>();
+        void Pack(string pack, string? genero, int sin, int con)
+        {
+            for (var i = 0; i < sin; i++) canciones.Add(T(Rutas.De("M", "COMERCIAL", pack, $"s{i}.mp3")));
+            for (var i = 0; i < con; i++) canciones.Add(T(Rutas.De("M", "COMERCIAL", pack, $"c{i}.mp3"), genero: genero));
+        }
+        Pack("Reggaeton 2025", "Reggaeton", sin: 6, con: 3);
+        Pack("Pop 2025", "Pop", sin: 5, con: 3);
+        canciones.Add(T(Rutas.De("M", "Salsa", "1.mp3")));
+        canciones.Add(T(Rutas.De("M", "Salsa", "2.mp3"), genero: "Salsa"));
+
+        var c = GeneroPorReglas.Carpetas(canciones, new[] { Rutas.De("M") });
+
+        // 3 Reggaeton y 3 Pop: un 50 %, varios estilos. No sale; sus packs, sí.
+        Assert.DoesNotContain(c, x => x.Ruta == Rutas.De("M", "COMERCIAL"));
+        Assert.Equal(Rutas.De("M", "COMERCIAL", "Reggaeton 2025"), c[0].Ruta);
+        Assert.Contains(c, x => x.Ruta == Rutas.De("M", "COMERCIAL", "Pop 2025"));
+
+        // Sin con qué juzgarla (sus packs no tienen género), sí sale: es la carpeta de un estilo con
+        // packs sin etiquetar, el caso para el que la lista sube a las carpetas que agrupan.
+        var sinEtiquetar = canciones.Where(t => t.Genre == null).ToList();
+        Assert.Contains(GeneroPorReglas.Carpetas(sinEtiquetar, new[] { Rutas.De("M") }), x => x.Ruta == Rutas.De("M", "COMERCIAL"));
+    }
+
+    // Con canciones sueltas propias y subcarpetas de varios estilos sale (las sueltas necesitan regla),
+    // pero detrás de las demás. Y la carpeta de la biblioteca con canciones sueltas tampoco sale arriba
+    // con las cifras de toda la música.
+    [Fact]
+    public void P9_una_carpeta_con_sueltas_y_subcarpetas_de_varios_estilos_va_al_final()
+    {
+        var canciones = new List<Track>();
+        for (var i = 0; i < 8; i++) canciones.Add(T(Rutas.De("M", "Mix", $"suelta{i}.mp3")));
+        for (var i = 0; i < 3; i++) canciones.Add(T(Rutas.De("M", "Mix", "House", $"h{i}.mp3"), genero: "House"));
+        for (var i = 0; i < 3; i++) canciones.Add(T(Rutas.De("M", "Mix", "Techno", $"t{i}.mp3"), genero: "Techno"));
+        canciones.Add(T(Rutas.De("M", "Mix", "Techno", "sin.mp3")));
+        canciones.Add(T(Rutas.De("M", "Salsa", "1.mp3")));
+        canciones.Add(T(Rutas.De("M", "suelta raiz.mp3")));
+
+        var c = GeneroPorReglas.Carpetas(canciones, new[] { Rutas.De("M") });
+
+        Assert.Equal(Rutas.De("M", "Mix"), c[^1].Ruta);   // 8 sin género, pero la última
+        Assert.True(c.Count > 1);
+        Assert.DoesNotContain(c, x => x.Ruta == Rutas.De("M"));   // la de la biblioteca, con sueltas, no sale
     }
 
     // Una subcarpeta que mezcla estilos («WarmUp» dentro de «Reggaeton») se excluye de la regla de

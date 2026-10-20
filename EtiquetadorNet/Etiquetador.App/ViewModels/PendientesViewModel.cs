@@ -38,16 +38,22 @@ public sealed class PendienteFila
     /// </summary>
     public bool TieneDescartados => P.Descartados.Count > 0;
 
-    /// <summary>«Conseguida el 12/10/2026», «Pendiente» o «Pendiente (1 descartado)».</summary>
+    /// <summary>
+    /// «Conseguida el 12/10/2026», «Pendiente» o «Pendiente (1 descartado)». Una conseguida con otra
+    /// copia también dice sus descartados («Conseguida el 12/10/2026 (1 descartado)»): «Volver a contar
+    /// el archivo descartado» se puede usar sobre ella, y sin verlo no se sabía sobre cuáles.
+    /// </summary>
     internal static string TextoEstado(Pendiente p)
     {
-        if (p.Conseguida is { } f) return "Conseguida el " + f.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
-        return p.Descartados.Count switch
+        var descartados = p.Descartados.Count switch
         {
-            0 => "Pendiente",
-            1 => "Pendiente (1 descartado)",
-            var n => $"Pendiente ({n} descartados)",
+            0 => "",
+            1 => " (1 descartado)",
+            var n => $" ({n} descartados)",
         };
+        return p.Conseguida is { } f
+            ? "Conseguida el " + f.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) + descartados
+            : "Pendiente" + descartados;
     }
 
     /// <summary>Para ordenar la columna Estado: primero las pendientes, después por fecha.</summary>
@@ -324,24 +330,31 @@ public partial class PendientesViewModel : ViewModelBase, IEstadoPagina
             Status = "Elige alguna canción con un archivo descartado: lo indica la columna Estado («Pendiente (1 descartado)»).";
             return;
         }
+        // Las que ya están conseguidas con otra copia: su descartado vuelve a contar, pero la canción ya
+        // estaba tachada y no hay nada que tachar (se dice aparte, no «tachará su canción»).
+        var yaConseguidas = conDescartes.Count(f => f.Conseguida);
         var r = await _seguimiento.RecuperarDescartadosAsync(conDescartes.Select(f => f.Id).ToList());
-        DecirError(TextoRecuperados(r.Hechas, r.Otras), r.Error);
+        DecirError(TextoRecuperados(r.Hechas, r.Otras, Math.Min(yaConseguidas, r.Hechas - r.Otras)), r.Error);
     }
 
-    /// <summary>«2 archivos descartados vuelven a contar; 1 canción se ha vuelto a tachar.»</summary>
-    internal static string TextoRecuperados(int recuperados, int tachadas)
+    /// <summary>
+    /// «2 archivos descartados vuelven a contar; 1 canción vuelve a estar conseguida.»
+    /// <paramref name="yaConseguidas"/> son las que ya estaban conseguidas con otra copia.
+    /// </summary>
+    internal static string TextoRecuperados(int recuperados, int tachadas, int yaConseguidas = 0)
     {
-        var texto = recuperados == 1 ? "El archivo descartado vuelve a contar" : $"{recuperados} archivos descartados vuelven a contar";
-        texto += tachadas switch
-        {
-            0 => recuperados == 1
-                ? ": si está o vuelve a estar en la biblioteca, tachará su canción."
-                : ": si están o vuelven a estar en la biblioteca, tacharán sus canciones.",
-            1 when recuperados == 1 => " y la canción vuelve a estar conseguida.",
-            1 => "; 1 canción vuelve a estar conseguida.",
-            var n => $"; {n} canciones vuelven a estar conseguidas.",
-        };
-        return texto;
+        if (recuperados == 1)
+            return tachadas == 1 ? "El archivo descartado vuelve a contar y la canción vuelve a estar conseguida."
+                 : yaConseguidas == 1 ? "El archivo descartado vuelve a contar. La canción sigue conseguida con otro archivo."
+                 : "El archivo descartado vuelve a contar: si está o vuelve a estar en la biblioteca, tachará su canción.";
+
+        var partes = new List<string>();
+        if (tachadas > 0) partes.Add(tachadas == 1 ? "1 canción vuelve a estar conseguida" : $"{tachadas} canciones vuelven a estar conseguidas");
+        if (yaConseguidas > 0) partes.Add(yaConseguidas == 1 ? "1 sigue conseguida con otro archivo" : $"{yaConseguidas} siguen conseguidas con otro archivo");
+        var texto = $"{recuperados} archivos descartados vuelven a contar";
+        return partes.Count == 0
+            ? texto + ": si están o vuelven a estar en la biblioteca, tacharán sus canciones."
+            : texto + "; " + string.Join("; ", partes) + ".";
     }
 
     /// <summary>Abre en el navegador la búsqueda de la canción elegida en el pool configurado en Ajustes.</summary>
@@ -403,7 +416,7 @@ public partial class PendientesViewModel : ViewModelBase, IEstadoPagina
     {
         if (Actualizando) return;
         if (Listas.Count == 0) { Status = "No sigues ninguna lista. Se siguen desde Tendencias o Playlists con «Seguir esta lista»."; return; }
-        if (MotivoSinBiblioteca(_engine.Library.IsScanned, _engine.Library.Tracks.Count) is { Length: > 0 } motivo) { Status = motivo; return; }
+        if (MotivoSinBiblioteca(_engine.Library) is { Length: > 0 } motivo) { Status = motivo; return; }
         Actualizando = true;
         _cts = new CancellationTokenSource();
         var avance = new Progress<string>(t => Status = t);
@@ -458,11 +471,20 @@ public partial class PendientesViewModel : ViewModelBase, IEstadoPagina
     /// (o vacía), todo saldría como que falta: «Añadir a pendientes las nuevas que faltan» las añadía
     /// todas, «Actualizar todas» las contaba en la columna Faltan y, al terminar el escaneo, se tachaban
     /// de golpe como «Conseguida el» día de hoy, una fecha que no es la real.
+    ///
+    /// Sin carpetas, o con todas desmarcadas, la biblioteca nunca está escaneada (no hay nada que
+    /// escanear): pedir «Primero escanea» no servía de nada, lo que falta es añadir o marcar carpetas.
     /// </summary>
-    internal static string MotivoSinBiblioteca(bool escaneada, int canciones)
-        => !escaneada ? "Primero escanea la biblioteca en la página Biblioteca: sin ella no se puede saber qué canciones faltan."
+    internal static string MotivoSinBiblioteca(int carpetas, int marcadas, bool escaneada, int canciones)
+        => carpetas == 0 ? "Añade en la página Biblioteca las carpetas de tu música y escanéalas: sin ellas no se puede saber qué canciones faltan."
+         : marcadas == 0 ? "Todas las carpetas de la página Biblioteca están desmarcadas: marca al menos una y escanéala para saber qué canciones faltan."
+         : !escaneada ? "Primero escanea la biblioteca en la página Biblioteca: sin ella no se puede saber qué canciones faltan."
          : canciones == 0 ? "La biblioteca está vacía: añade en la página Biblioteca las carpetas de tu música para saber qué canciones faltan."
          : "";
+
+    /// <summary>Lo mismo, con el estado actual de la biblioteca.</summary>
+    internal static string MotivoSinBiblioteca(LibraryStore biblioteca)
+        => MotivoSinBiblioteca(biblioteca.Folders.Count, biblioteca.Folders.Count(f => f.Enabled), biblioteca.IsScanned, biblioteca.Tracks.Count);
 
     /// <summary>
     /// Añade a pendientes las canciones nuevas que no están en la biblioteca, de las listas elegidas (o
@@ -471,7 +493,7 @@ public partial class PendientesViewModel : ViewModelBase, IEstadoPagina
     /// </summary>
     public async Task AnadirNuevasAPendientesAsync(IReadOnlyList<ListaSeguidaFila> elegidas)
     {
-        if (MotivoSinBiblioteca(_engine.Library.IsScanned, _engine.Library.Tracks.Count) is { Length: > 0 } motivo) { Status = motivo; return; }
+        if (MotivoSinBiblioteca(_engine.Library) is { Length: > 0 } motivo) { Status = motivo; return; }
         var listas = (elegidas.Count > 0 ? elegidas : Listas.ToList()).ToList();
         var candidatas = listas.SelectMany(l => l.L.Nuevas.Where(n => !n.LaTienes)
                                                      .Select(n => new NuevaPendiente(n.Artista, n.Titulo, l.Nombre, n.Enlace)))

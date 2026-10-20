@@ -188,7 +188,7 @@ public partial class AsistenteView : UserControl
         if (lista != null)
             foreach (var f in FilasDeArchivos(lista, res.Enviadas)) lista.Remove(f);
 
-        vm.Status = LibraryViewModel.TextoPapelera(res, rutas.Count)
+        vm.Status = Services.EnvioPapelera.Resumen(res, rutas.Count, Services.Sustantivo.Archivo)
                     + (res.Fallos.Count == 0 && !res.Interrumpido && ReferenceEquals(tabla, TablaMezcla)
                         ? " Vuelve a ordenar para recalcular las transiciones." : "");
     }

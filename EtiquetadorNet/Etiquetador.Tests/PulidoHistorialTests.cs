@@ -681,34 +681,10 @@ public class PulidoHistorialTests : IDisposable
         Assert.Equal(2, cambios);   // sin bajas, sin aviso
     }
 
-    // Al cerrar la ventana a mitad de un envío largo, se para entre un archivo y el siguiente y lo
-    // ya enviado sale de la biblioteca; antes se esperaban 15 s y el proceso se cortaba de golpe.
-    [Fact]
-    public async Task La_papelera_de_la_biblioteca_se_puede_parar_y_quita_lo_ya_enviado()
-    {
-        var store = Biblioteca(10);
-        var rutas = store.Tracks.Select(t => t.FilePath).ToList();
-        using var cts = new CancellationTokenSource();
-        var enviadas = 0;
-
-        var estado = await LibraryViewModel.PapeleraYQuitarAsync(store, rutas, _ =>
-        {
-            if (++enviadas == 3) cts.Cancel();   // el usuario cierra la ventana durante el tercero
-            return (true, "");
-        }, null, cts.Token);
-
-        Assert.Equal(3, enviadas);
-        Assert.Equal(7, store.Tracks.Count);
-        Assert.Equal("Cancelado: 3 de 10 enviados a la papelera; el resto no se ha tocado.", estado);
-    }
-
-    [Fact]
-    public void El_envio_a_la_papelera_de_Duplicados_cuenta_como_proceso()
-    {
-        Assert.True(MainViewModel.CambiaLaOcupacion(nameof(DuplicatesViewModel.EnviandoAPapelera)));
-        Assert.True(MainViewModel.CambiaLaOcupacion("IsBusy"));
-        Assert.False(MainViewModel.CambiaLaOcupacion(nameof(DuplicatesViewModel.PapeleraProgreso)));
-    }
+    // La papelera de la Biblioteca que se para al cerrar la ventana y el envío de Duplicados que cuenta
+    // como proceso se prueban ahora recorriendo las páginas de verdad (RevisionUnionTests): estas dos
+    // pruebas solo llamaban a PapeleraYQuitarAsync con su propio token (igual que DialogosCancionTests)
+    // y miraban una lista de nombres de propiedades.
 
     // ---------------------------------------------------------------- géneros con barra
 

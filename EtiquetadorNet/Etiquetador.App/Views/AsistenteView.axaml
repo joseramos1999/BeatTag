@@ -341,7 +341,7 @@
                         <Button Content="Poner a las seleccionadas" Click="PonerReglaCarpeta_Click" Margin="0,0,6,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
                                 ToolTip.Tip="Asigna el género a las carpetas seleccionadas en la lista. Puedes seleccionar varias con Ctrl o Mayús." />
                         <Button Content="Quitar la regla" Click="QuitarReglaCarpeta_Click" Margin="0,0,6,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
-                                ToolTip.Tip="Quita el género asignado a las carpetas seleccionadas (o que dejen de estar excluidas). Vuelve a valer el de su carpeta madre, si lo tiene." />
+                                ToolTip.Tip="Quita el género asignado a las carpetas seleccionadas o hace que dejen de estar excluidas. Vuelve a valer el de su carpeta madre, si lo tiene." />
                         <Button Content="Excluir de la regla de su carpeta madre" Click="ExcluirReglaCarpeta_Click" Margin="0,0,12,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
                                 ToolTip.Tip="Para una subcarpeta que mezcla estilos (por ejemplo, «WarmUp» dentro de «Reggaeton»): no recibe el género de su carpeta madre, y sus canciones solo dependen del artista." />
                         <Button Content="Añadir otra carpeta…" Click="AnadirCarpetaGenero_Click" Margin="0,0,12,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"

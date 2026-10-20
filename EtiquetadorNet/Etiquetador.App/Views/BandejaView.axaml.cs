@@ -79,20 +79,12 @@ public partial class BandejaView : UserControl
         }
         if (string.IsNullOrEmpty(vm.Destino)) { vm.Status = "Elige a qué carpeta de la biblioteca van."; return; }
 
-        var conAvisos = preparadas.Count(r => r.HayAvisos);
-        var nota = "Los archivos se mueven conservando su nombre. Si en el destino ya hay uno con el mismo nombre, esa canción se queda en la bandeja: nunca se sobrescribe nada. Se puede deshacer desde Enriquecer.";
-        if (conAvisos > 0)
-            nota = (preparadas.Count == 1 ? "⚠ Tiene avisos sin resolver"
-                    : conAvisos == 1 ? "⚠ 1 de ellas tiene avisos sin resolver"
-                    : $"⚠ {conAvisos} de ellas tienen avisos sin resolver")
-                 + " (duplicados, calidad baja o etiquetas incompletas). " + nota;
-
         var ok = await ConfirmDialog.AskAsync(owner,
             "Pasar a la biblioteca",
             preparadas.Count == 1
                 ? $"Se moverá 1 canción preparada a «{vm.Destino}»."
                 : $"Se moverán {preparadas.Count} canciones preparadas a «{vm.Destino}».",
-            nota,
+            BandejaViewModel.NotaPasar(preparadas.Count, preparadas.Count(r => r.HayAvisos)),
             "Mover");
         if (ok) await vm.PasarABibliotecaAsync();
     }

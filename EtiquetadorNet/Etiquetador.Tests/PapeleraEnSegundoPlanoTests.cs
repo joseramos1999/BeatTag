@@ -64,13 +64,15 @@ public class PapeleraEnSegundoPlanoTests : IDisposable
     [Fact]
     public void El_resumen_de_la_bandeja_habla_de_descargas_y_dice_el_motivo()
     {
-        Assert.Equal("25 descargas enviadas a la papelera.", EnvioPapelera.Resumen(25, Array.Empty<(string, string)>(), Sustantivo.Descarga));
+        var veinticinco = Enumerable.Range(0, 25).Select(i => $"d{i}.mp3").ToList();
+        Assert.Equal("25 descargas enviadas a la papelera.",
+                     EnvioPapelera.Resumen(new EnvioPapeleraResultado(veinticinco, Array.Empty<(string, string)>()), 25, Sustantivo.Descarga));
         var fallos = new List<(string, string)> { ("a.mp3", "Está en una unidad extraíble (F:)."), ("b.mp3", "Está en una unidad extraíble (F:).") };
         Assert.Equal("No se ha enviado ninguna descarga a la papelera: Está en una unidad extraíble (F:).",
-                     EnvioPapelera.Resumen(0, fallos, Sustantivo.Descarga));
-        // Duplicados sigue diciendo lo mismo que antes.
-        Assert.Equal("3 copias enviadas a la papelera · 2 no se han enviado: Está en una unidad extraíble (F:).",
-                     DuplicatesViewModel.ResumenPapelera(3, fallos));
+                     EnvioPapelera.Resumen(new EnvioPapeleraResultado(Array.Empty<string>(), fallos), 2, Sustantivo.Descarga));
+        // Duplicados dice lo mismo, con «copias».
+        Assert.Equal("3 copias enviadas a la papelera. 2 no se han enviado: Está en una unidad extraíble (F:).",
+                     EnvioPapelera.Resumen(new EnvioPapeleraResultado(new[] { "x.mp3", "y.mp3", "z.mp3" }, fallos), 5, Sustantivo.Copia));
     }
 
     // El Asistente envía con su botón Cancelar: se para entre un archivo y el siguiente y devuelve lo
@@ -98,6 +100,12 @@ public class PapeleraEnSegundoPlanoTests : IDisposable
     [InlineData(37, 120, "Enviando a la papelera: 37 de 120…")]
     public void El_estado_dice_por_donde_va(int hechas, int total, string esperado)
         => Assert.Equal(esperado, EnvioPapelera.TextoAvance(hechas, total));
+
+    // Con miles de archivos (Ctrl+A en la Biblioteca), con separador de miles como el resto de cifras
+    // de la aplicación: «1.200 de 15.000», no «1200 de 15000».
+    [Fact]
+    public void El_avance_lleva_separador_de_miles()
+        => Assert.Equal($"Enviando a la papelera: {1200:N0} de {15000:N0}…", EnvioPapelera.TextoAvance(1200, 15000));
 
     /// <summary>Progress&lt;T&gt; publica en el contexto de quien lo crea; este apunta en el acto, para la prueba.</summary>
     private sealed class ProgresoInmediato(List<(int, int)> destino) : IProgress<(int Hechas, int Total)>

@@ -313,10 +313,17 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         nameof(CoverMode), nameof(CoverPath), nameof(MinChangeIndex),
     };
 
-    public EnrichViewModel(AppEngine engine)
+    public EnrichViewModel(AppEngine engine) : this(engine, engine.Config, retirar => engine.ArchivosSustituidos += retirar) { }
+
+    /// <summary>
+    /// Con la configuración y el aviso de «Sustituir» por separado, para que una prueba recorra la
+    /// conexión entera (el aviso de la Bandeja retira la propuesta) sin montar el motor. En las
+    /// pruebas <paramref name="engine"/> es null y solo se usa lo que no lo necesita: la tabla.
+    /// </summary>
+    /// <param name="alSustituir">Cómo se suscribe la página al aviso de archivos sustituidos (<see cref="AppEngine.ArchivosSustituidos"/>).</param>
+    internal EnrichViewModel(AppEngine? engine, AppConfig c, Action<Action<IReadOnlyCollection<string>>> alSustituir)
     {
-        _engine = engine;
-        var c = engine.Config;
+        _engine = engine!;
         _useDeezer = c.UseDeezer; _useItunes = c.UseItunes; _useSpotify = c.UseSpotify;
         _useDiscogs = c.UseDiscogs; _useMusicBrainz = c.UseMusicBrainz; _useAcoustId = c.UseAcoustId; _useAi = c.UseAi;
         _writeTitle = c.WriteTitle; _writeArtist = c.WriteArtist; _writeAlbum = c.WriteAlbum;
@@ -341,7 +348,7 @@ public partial class EnrichViewModel : ViewModelBase, IEstadoPagina, IProgresoPa
         // I14 (equipo catalogo): «Sustituir» de la Bandeja pone otro archivo en la ruta de una copia
         // de la biblioteca. Su propuesta se calculó con el archivo anterior y, con la casilla marcada,
         // «Aplicar marcadas» la escribiría en la descarga: se retira, como tras deshacer.
-        engine.ArchivosSustituidos += rutas => RetirarFilasDe(rutas);
+        alSustituir(rutas => RetirarFilasDe(rutas));
     }
 
     /// <summary>Quita de la lista las propuestas de esas rutas y devuelve cuántas (I14, equipo catalogo).</summary>

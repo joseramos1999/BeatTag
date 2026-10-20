@@ -137,25 +137,24 @@ public partial class DuplicatesViewModel : ScanViewModelBase
 
         RowsView.Filter = o => o is DupRow r && grupos.Contains(r.Group);
         RowsView.Refresh();
-        FiltroInfo = $"{grupos.Count} grupos";
+        FiltroInfo = Cuenta(grupos.Count, "grupo", "grupos");   // «1 grupo», no «1 grupos»
     }
 
     /// <summary>
     /// Cabecera del desplegable de carpetas. Con muchas carpetas conviene poder ver de un vistazo
     /// qué hay configurado sin tener que abrirlo.
     /// </summary>
-    public string ResumenCarpetas
+    public string ResumenCarpetas => TextoCarpetas(Folders.Count, Folders.Count(f => f.Prioritaria), Folders.Count(f => f.Excluida));
+
+    /// <summary>El texto de <see cref="ResumenCarpetas"/>, concordando en número («1 carpeta, ninguna configurada»). Puro.</summary>
+    internal static string TextoCarpetas(int carpetas, int prioritarias, int excluidas)
     {
-        get
-        {
-            var p = Folders.Count(f => f.Prioritaria);
-            var x = Folders.Count(f => f.Excluida);
-            if (p == 0 && x == 0) return $"Carpetas prioritarias y excluidas  ·  {Folders.Count} carpetas, ninguna configurada";
-            var partes = new List<string>();
-            if (p > 0) partes.Add($"{p} prioritaria{(p == 1 ? "" : "s")}");
-            if (x > 0) partes.Add($"{x} excluida{(x == 1 ? "" : "s")}");
-            return $"Carpetas prioritarias y excluidas  ·  {string.Join(" · ", partes)}";
-        }
+        if (prioritarias == 0 && excluidas == 0)
+            return $"Carpetas prioritarias y excluidas  ·  {Cuenta(carpetas, "carpeta", "carpetas")}, ninguna configurada";
+        var partes = new List<string>();
+        if (prioritarias > 0) partes.Add(Cuenta(prioritarias, "prioritaria", "prioritarias"));
+        if (excluidas > 0) partes.Add(Cuenta(excluidas, "excluida", "excluidas"));
+        return $"Carpetas prioritarias y excluidas  ·  {string.Join(" · ", partes)}";
     }
 
     public DupModeOption[] ModeOptions { get; } =
@@ -174,7 +173,9 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     };
 
     private readonly AudioPreview _preview;
-    private readonly AppEngine _engine;
+    private readonly AppConfig _config;
+    private readonly Action _guardarConfig;
+    private readonly FingerprintScanner _huellas;
     private bool _cargando;
     private bool _agrupando;
 
@@ -185,14 +186,26 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     /// <summary>Cuántas copias hay marcadas ahora mismo (para el botón de la papelera).</summary>
     [ObservableProperty] private int _marcadas;
 
-    public DuplicatesViewModel(AppEngine engine) : base(engine.Library)
+    public DuplicatesViewModel(AppEngine engine)
+        : this(engine.Library, engine.Config, engine.SaveConfig, engine.Fingerprints, engine.Preview) { }
+
+    /// <summary>
+    /// La página con solo lo que usa del motor. Así las pruebas la montan sobre una biblioteca suelta
+    /// y recorren el envío a la papelera de verdad (con <see cref="EnviarUno"/> de mentira): que la
+    /// página siga ocupada mientras dura y que «Cancelar» lo pare. Antes solo se probaba un OR de
+    /// tres booleanos, y quitar la ocupación del envío no lo habría detectado ninguna prueba.
+    /// </summary>
+    internal DuplicatesViewModel(LibraryStore store, AppConfig config, Action guardarConfig,
+                                 FingerprintScanner huellas, AudioPreview preview) : base(store)
     {
-        _engine = engine;
-        _preview = engine.Preview;
+        _config = config;
+        _guardarConfig = guardarConfig;
+        _huellas = huellas;
+        _preview = preview;
         _selectedMode = ModeOptions[0];
-        _selectedKeep = KeepOptions.FirstOrDefault(k => k.Value.ToString() == engine.Config.DupKeepCriterion)
+        _selectedKeep = KeepOptions.FirstOrDefault(k => k.Value.ToString() == config.DupKeepCriterion)
                         ?? KeepOptions[0];
-        _excluirEdicionesDj = engine.Config.DupExcluirEdicionesDj;
+        _excluirEdicionesDj = config.DupExcluirEdicionesDj;
 
         RowsView = new DataGridCollectionView(Rows);
         RowsView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(DupRow.Group)));
@@ -208,7 +221,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         _cargando = true;
         try
         {
-            var cfg = _engine.Config;
+            var cfg = _config;
             Folders.Clear();
             foreach (var f in Store.Folders.Select(x => x.Path).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x))
             {
@@ -229,10 +242,10 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     private void GuardarCarpetasYRecalcular()
     {
         if (_cargando) return;
-        var cfg = _engine.Config;
+        var cfg = _config;
         cfg.PriorityFolders = Folders.Where(f => f.Prioritaria).Select(f => f.Path).ToList();
         cfg.ExcludedDupFolders = Folders.Where(f => f.Excluida).Select(f => f.Path).ToList();
-        _engine.SaveConfig();
+        _guardarConfig();
         OnPropertyChanged(nameof(ResumenCarpetas));
         if (Store.IsScanned) Recompute();
     }
@@ -249,8 +262,8 @@ public partial class DuplicatesViewModel : ScanViewModelBase
 
     partial void OnSelectedKeepChanged(DupKeepOption value)
     {
-        _engine.Config.DupKeepCriterion = value.Value.ToString();
-        _engine.SaveConfig();
+        _config.DupKeepCriterion = value.Value.ToString();
+        _guardarConfig();
         if (Store.IsScanned) Recompute();
     }
 
@@ -263,13 +276,13 @@ public partial class DuplicatesViewModel : ScanViewModelBase
 
     partial void OnExcluirEdicionesDjChanged(bool value)
     {
-        _engine.Config.DupExcluirEdicionesDj = value;
-        _engine.SaveConfig();
+        _config.DupExcluirEdicionesDj = value;
+        _guardarConfig();
         if (Store.IsScanned) Recompute();
     }
 
     private bool EsPrioritaria(string carpeta)
-        => _engine.Config.PriorityFolders.Contains(carpeta, StringComparer.OrdinalIgnoreCase);
+        => _config.PriorityFolders.Contains(carpeta, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Puntuación de una copia: la más alta del grupo es la que conviene conservar.</summary>
     private double Puntuar(Track t) => SelectedKeep.Value switch
@@ -349,7 +362,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     private int Recalcular(bool conservarMarcas)
     {
         Desactualizada = false;
-        var excluidas = _engine.Config.ExcludedDupFolders;
+        var excluidas = _config.ExcludedDupFolders;
         var fuente = excluidas.Count == 0
             ? Store.Tracks.AsEnumerable()
             : Store.Tracks.Where(t => !excluidas.Contains(t.Folder, StringComparer.OrdinalIgnoreCase));
@@ -392,7 +405,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     private int Pintar(IReadOnlyList<DuplicateGroup> groups, Marcas? conservar = null)
     {
         _grupos = groups;
-        var excluidas = _engine.Config.ExcludedDupFolders;
+        var excluidas = _config.ExcludedDupFolders;
         var porAudio = SelectedMode.Value == DuplicateMode.Fingerprint;
         var (filas, conPrioridad) = ConstruirFilas(groups, porAudio, Puntuar, MotivoDe,
                                                    t => EsPrioritaria(t.Folder), conservar?.Marcadas,
@@ -603,14 +616,6 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     }
 
     /// <summary>
-    /// El estado tras enviar a la papelera. Cuando todas fallan por el MISMO motivo (por ejemplo, una
-    /// unidad sin papelera, donde enviar sería borrar para siempre), se dice ese motivo una vez en
-    /// lugar de «0 enviadas, 120 con problemas» y el primero de la lista.
-    /// </summary>
-    internal static string ResumenPapelera(int enviadas, IReadOnlyList<(string Archivo, string Motivo)> fallos)
-        => EnvioPapelera.Resumen(enviadas, fallos, Sustantivo.Copia);   // la misma regla que la Bandeja (X15)
-
-    /// <summary>
     /// Descriptor de edición sacado del nombre del archivo ("Aca Out", "Melodic Intro"…). Vacío si
     /// es el original. Es lo que separa una copia sobrante de una edición que el usuario quiere.
     /// </summary>
@@ -680,13 +685,13 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         if (!EsPorHuella) return;
         var version = ++_resumenVersion;
         var rutas = Store.Tracks.Select(t => t.FilePath).ToList();
-        if (rutas.Count > 0 && _engine.Fingerprints.FpcalcDisponible)
-            ResumenHuellas = _engine.Fingerprints.EstaCargada
+        if (rutas.Count > 0 && _huellas.FpcalcDisponible)
+            ResumenHuellas = _huellas.EstaCargada
                 ? "Comprobando qué canciones tienen ya su huella…"
                 : "Leyendo las huellas guardadas…";
         try
         {
-            var texto = await CalcularResumenHuellasAsync(_engine.Fingerprints, rutas);
+            var texto = await CalcularResumenHuellasAsync(_huellas, rutas);
             if (version == _resumenVersion) ResumenHuellas = texto;
         }
         catch (Exception e)
@@ -705,7 +710,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     private async Task ScanFingerprintsAsync()
     {
         if (FpBusy) return;
-        if (!_engine.Fingerprints.FpcalcDisponible)
+        if (!_huellas.FpcalcDisponible)
         {
             Status = "No está disponible el analizador de audio (fpcalc). Se descarga solo al usar AcoustID en Enriquecer.";
             return;
@@ -722,7 +727,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
                 FpProgress = p.Total > 0 ? p.Hechas * 100.0 / p.Total : 0;
                 Status = $"Analizando el audio: {p.Hechas} de {p.Total}… {p.Archivo}";
             });
-            var motivo = await _engine.Fingerprints.ScanAsync(rutas, force: false, avance, _fpCts.Token);
+            var motivo = await _huellas.ScanAsync(rutas, force: false, avance, _fpCts.Token);
             _ = ActualizarResumenHuellasAsync();
             if (motivo.Length > 0) { Status = "No se ha analizado nada. " + motivo; return; }
             Status = _fpCts.IsCancellationRequested
@@ -757,6 +762,14 @@ public partial class DuplicatesViewModel : ScanViewModelBase
 
     private void SoltarOcupada() => IsBusy = SigueOcupada(FpBusy, _agrupando, EnviandoAPapelera);
 
+    /// <summary>
+    /// «Analizar» de la base también suelta la página al terminar, y en el modo por audio termina
+    /// ENSEGUIDA: la comparación de huellas se lanza aparte (<see cref="RecomputePorHuellaAsync"/>) y
+    /// sigue con millones de parejas. Si la base pusiera IsBusy a false, las demás pestañas se
+    /// desbloquearían y cerrar no preguntaría con la comparación en marcha; aquí se suelta solo si no
+    /// queda ninguna tarea de la página.
+    /// </summary>
+    protected override void SoltarOcupacion() => SoltarOcupada();
 
     /// <summary>
     /// Agrupa por audio FUERA del hilo de la interfaz. Con 12.927 huellas la comparación son
@@ -778,11 +791,11 @@ public partial class DuplicatesViewModel : ScanViewModelBase
 
             // Sin las huellas guardadas, comparar daría «0 grupos con el mismo audio», que es falso:
             // se dice por qué no se puede comparar y la tabla se queda como estaba.
-            await _engine.Fingerprints.CargarAsync();
-            if (_engine.Fingerprints.AvisoCarga is { Length: > 0 } aviso) { Status = aviso; return; }
+            await _huellas.CargarAsync();
+            if (_huellas.AvisoCarga is { Length: > 0 } aviso) { Status = aviso; return; }
 
             var groups = await Task.Run(
-                () => FingerprintDuplicates.Find(lista, t => _engine.Fingerprints.Get(t.FilePath),
+                () => FingerprintDuplicates.Find(lista, t => _huellas.Get(t.FilePath),
                                                  AudioFingerprint.UmbralIgual, avance, ct), ct);
 
             // El usuario puede haber cambiado de criterio mientras esto corría: no pisar la tabla.
@@ -887,13 +900,9 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         _preview.Stop();   // si suena, el archivo está abierto y no se puede mover a la papelera
         var res = await EnviarAPapeleraAsync(new[] { row.FilePath });
         if (res == null) return;
-        var ok = res.Enviadas.Count == 1;
-        var desmarcadas = ok ? QuitarDeLaTabla(res.Enviadas) : 0;
+        var desmarcadas = QuitarDeLaTabla(res.Enviadas);
         // El estado va después: QuitarDeLaTabla repinta y pone el resumen de grupos.
-        var err = ok ? "" : res.Fallos[0].Motivo;
-        Status = ok
-            ? $"Enviado a la papelera: {row.FileName}." + NotaDesmarcadas(desmarcadas)
-            : "No se pudo enviar a la papelera: " + (string.IsNullOrWhiteSpace(err) ? "motivo desconocido." : err);
+        Status = EnvioPapelera.Resumen(res, 1, Sustantivo.Copia) + NotaDesmarcadas(desmarcadas);
     }
 
     /// <summary>Envía a la papelera TODAS las copias marcadas. La vista confirma antes de llamar.</summary>
@@ -913,7 +922,8 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         // Con el envío cancelado también: lo que ya está en la papelera sale de la tabla y de la biblioteca.
         var desmarcadas = QuitarDeLaTabla(res.Enviadas);
 
-        Status = ResumenEnvio(res, objetivo.Count) + NotaDesmarcadas(desmarcadas);
+        // El mismo texto que las demás páginas que envían a la papelera (también al cancelar).
+        Status = EnvioPapelera.Resumen(res, objetivo.Count, Sustantivo.Copia) + NotaDesmarcadas(desmarcadas);
     }
 
     /// <summary>
@@ -943,7 +953,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
                 PapeleraProgreso = p.Total > 0 ? p.Hechas * 100.0 / p.Total : 0;
                 Status = EnvioPapelera.TextoAvance(p.Hechas, p.Total);
             });
-            return await EnvioPapelera.EnviarAsync(rutas, progreso: avance, ct: _papeleraCts.Token);
+            return await EnvioPapelera.EnviarAsync(rutas, EnviarUno, avance, _papeleraCts.Token);
         }
         finally
         {
@@ -957,27 +967,13 @@ public partial class DuplicatesViewModel : ScanViewModelBase
 
     private CancellationTokenSource? _papeleraCts;
 
+    /// <summary>
+    /// Cómo se envía cada copia: la papelera del sistema. Las pruebas ponen uno de mentira para
+    /// recorrer el envío entero, con su ocupación y su cancelación, sin tocar el disco.
+    /// </summary>
+    internal Func<string, (bool Ok, string Error)> EnviarUno { get; init; } = Papelera.Enviar;
+
     /// <summary>Para el envío a la papelera entre un archivo y el siguiente; lo ya enviado se queda en la papelera.</summary>
     [RelayCommand]
     private void CancelarPapelera() => _papeleraCts?.Cancel();
-
-    /// <summary>
-    /// El estado tras enviar las marcadas. Si se canceló, cuántas llegaron a la papelera de cuántas
-    /// se pidieron, y que el resto no se ha tocado. Puro, para probarlo.
-    /// </summary>
-    internal static string ResumenEnvio(EnvioPapeleraResultado res, int pedidas)
-    {
-        if (!res.Interrumpido) return ResumenPapelera(res.Enviadas.Count, res.Fallos);
-        var n = res.Enviadas.Count;
-        var texto = n switch
-        {
-            0 => "Cancelado: no se ha enviado ninguna copia a la papelera.",
-            1 => $"Cancelado: se ha enviado a la papelera 1 de las {pedidas} copias; el resto no se ha tocado.",
-            _ => $"Cancelado: se han enviado a la papelera {n} de las {pedidas} copias; el resto no se ha tocado.",
-        };
-        if (res.Fallos.Count > 0)
-            texto += $" {res.Fallos.Count} con problemas. La primera: {res.Fallos[0].Archivo}: "
-                   + (string.IsNullOrWhiteSpace(res.Fallos[0].Motivo) ? "motivo desconocido." : res.Fallos[0].Motivo);
-        return texto;
-    }
 }

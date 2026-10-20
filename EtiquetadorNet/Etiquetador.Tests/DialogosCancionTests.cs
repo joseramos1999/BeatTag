@@ -428,11 +428,11 @@ public class DialogosCancionTests
 
             Assert.Equal(new[] { b, c }, store.Tracks);                         // la rechazada se queda
             Assert.Equal(1, avisos);                                             // un solo aviso a las pestañas
-            Assert.Equal("1 archivo enviado a la papelera · 1 no se ha enviado. b.mp3: La unidad no tiene papelera.", estado);
+            Assert.Equal("1 archivo enviado a la papelera. No se ha enviado b.mp3: La unidad no tiene papelera.", estado);
             Assert.Equal(new[] { 1, 2 }, avance.Valores);                        // el avance, archivo a archivo
 
             Assert.Equal("Enviado a la papelera: c.mp3.", await LibraryViewModel.PapeleraYQuitarAsync(store, new[] { c.FilePath }, _ => (true, "")));
-            Assert.Equal("No se ha podido enviar a la papelera. b.mp3: motivo desconocido.",
+            Assert.Equal("No se ha podido enviar b.mp3 a la papelera: motivo desconocido.",
                          await LibraryViewModel.PapeleraYQuitarAsync(store, new[] { b.FilePath }, _ => (false, "")));
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
@@ -455,7 +455,7 @@ public class DialogosCancionTests
                 _ => { if (++enviadas == 2) cts.Cancel(); return (true, ""); }, ct: cts.Token);
 
             Assert.Equal(canciones.Skip(2), store.Tracks);                       // las no enviadas siguen
-            Assert.Equal("Cancelado: 2 de 5 enviados a la papelera; el resto no se ha tocado.", estado);
+            Assert.Equal("Cancelado: se han enviado 2 de los 5 archivos a la papelera; el resto no se ha tocado.", estado);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
@@ -466,14 +466,14 @@ public class DialogosCancionTests
         var unidad = "La unidad no tiene papelera.";
         var todas = new EnvioPapeleraResultado(Array.Empty<string>(), new[] { ("a.mp3", unidad), ("b.mp3", unidad) });
         Assert.Equal("No se ha enviado ningún archivo a la papelera: La unidad no tiene papelera.",
-                     LibraryViewModel.TextoPapelera(todas, 2));
+                     EnvioPapelera.Resumen(todas, 2, Sustantivo.Archivo));
 
         var mezcla = new EnvioPapeleraResultado(new[] { "x.mp3", "y.mp3" }, new[] { ("a.mp3", unidad), ("b.mp3", "En uso.") });
-        Assert.Equal("2 archivos enviados a la papelera · 2 no se han enviado. El primero, a.mp3: La unidad no tiene papelera.",
-                     LibraryViewModel.TextoPapelera(mezcla, 4));
+        Assert.Equal("2 archivos enviados a la papelera. 2 no se han enviado. El primero, a.mp3: La unidad no tiene papelera.",
+                     EnvioPapelera.Resumen(mezcla, 4, Sustantivo.Archivo));
 
         var bien = new EnvioPapeleraResultado(new[] { "x.mp3", "y.mp3", "z.mp3" }, Array.Empty<(string, string)>());
-        Assert.Equal("3 archivos enviados a la papelera.", LibraryViewModel.TextoPapelera(bien, 3));
+        Assert.Equal("3 archivos enviados a la papelera.", EnvioPapelera.Resumen(bien, 3, Sustantivo.Archivo));
     }
 
     [Fact]
@@ -513,33 +513,6 @@ public class DialogosCancionTests
             Assert.Empty(store.Tracks);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
-    }
-
-    /// <summary>Un contexto de sincronización de un solo hilo, como el de la interfaz, para las pruebas.</summary>
-    private sealed class UnSoloHilo : SynchronizationContext
-    {
-        private readonly System.Collections.Concurrent.BlockingCollection<(SendOrPostCallback, object?)> _cola = new();
-
-        public override void Post(SendOrPostCallback d, object? state) => _cola.Add((d, state));
-
-        public static Task Ejecutar(Func<Task> trabajo)
-        {
-            var listo = new TaskCompletionSource();
-            var hilo = new Thread(() =>
-            {
-                var ctx = new UnSoloHilo();
-                SetSynchronizationContext(ctx);
-                Task t;
-                try { t = trabajo(); }
-                catch (Exception e) { listo.SetException(e); return; }
-                t.ContinueWith(_ => ctx._cola.CompleteAdding(), TaskScheduler.Default);
-                foreach (var (d, s) in ctx._cola.GetConsumingEnumerable()) d(s);
-                if (t.IsFaulted) listo.SetException(t.Exception!.InnerExceptions);
-                else listo.SetResult();
-            }) { IsBackground = true };
-            hilo.Start();
-            return listo.Task;
-        }
     }
 
     // --- La opción de menú de las demás tablas ---
