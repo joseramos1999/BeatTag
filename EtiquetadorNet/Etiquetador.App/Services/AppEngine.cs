@@ -254,6 +254,7 @@ public sealed class AppEngine
         }
 
         IniciarGuardadoPeriodico();
+        RecuperarSustitucionesCortadas();   // I14 (equipo catalogo): una descarga que se quedó oculta al cerrarse a mitad
 
         Fase("");   // cierra la última fase en el log
         Logger.Detail($"Arranque · motor listo en {_arranque.ElapsedMilliseconds} ms");
@@ -1096,6 +1097,29 @@ public sealed class AppEngine
     }
 
     // --- Sustituir desde la Bandeja (I14, equipo catalogo) ---
+
+    /// <summary>
+    /// Al arrancar: si la aplicación se cerró a mitad de una sustitución, la descarga se quedó con un
+    /// nombre oculto («.beattag-sustituir-…») en la carpeta de la biblioteca, donde el escáner no la
+    /// ve. Antes solo se recogía al analizar la bandeja; quien no volvía a ella no la encontraba. Se
+    /// devuelve ahora a la bandeja y se dice en la ventana. En segundo plano (mover entre dos discos
+    /// puede tardar), y sin coste en el caso de siempre: la carpeta de lo apuntado está vacía.
+    /// </summary>
+    private void RecuperarSustitucionesCortadas()
+    {
+        var diario = SustitucionBandeja.CarpetaDiario(Paths.DataDir);
+        if (!SustitucionBandeja.HayQueRecuperar(diario)) return;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var avisos = SustitucionBandeja.Recuperar(diario);
+                foreach (var a in avisos) Logger.Err("Bandeja: " + a);
+                if (avisos.Count > 0) Avisos.Poner("bandeja:sustitucion-cortada", string.Join(" ", avisos));
+            }
+            catch (Exception e) { Logger.Error("No se pudo revisar si quedó alguna sustitución a medias", e); }
+        });
+    }
 
     private AlmacenSustituciones? _sustituciones;
 

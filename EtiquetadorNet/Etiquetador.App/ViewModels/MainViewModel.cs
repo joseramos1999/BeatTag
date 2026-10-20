@@ -201,7 +201,7 @@ public partial class MainViewModel : ViewModelBase
                 Paginas = new PaginaNav[]
                 {
                     new() { Indice = 3,  Icono = "👥", Nombre = "Duplicados",  Vm = Duplicates, Ocupada = () => Duplicates.IsBusy,
-                            Cancelar = () => Duplicates.CancelFingerprintsCommand.Execute(null) },
+                            Cancelar = Duplicates.CancelarTodo },   // huellas y papelera (rendimiento-1, equipo catalogo)
                     new() { Indice = 4,  Icono = "🎧", Nombre = "Calidad",     Vm = Quality, Ocupada = () => Quality.IsBusy },
                     new() { Indice = 5,  Icono = "⚠",  Nombre = "Incompletas", Vm = Incomplete, Ocupada = () => Incomplete.IsBusy },
                     new() { Indice = 10, Icono = "🔊", Nombre = "Volumen",     Vm = Loudness, Ocupada = () => Loudness.IsBusy,

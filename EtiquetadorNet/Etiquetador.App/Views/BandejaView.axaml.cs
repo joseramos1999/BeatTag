@@ -129,9 +129,14 @@ public partial class BandejaView : UserControl
         var sinPapelera = vm.MotivoParaNoSustituir(fila);
         if (sinPapelera.Length > 0) { vm.Status = sinPapelera; return; }
 
-        var (cuerpo, nota) = Etiquetador.Core.Dj.SustitucionBandeja.TextosConfirmacion(fila.Track, propuesta.Vieja);
-        var ok = await ConfirmDialog.AskAsync(owner, "Sustituir la copia de la biblioteca", cuerpo, nota, "Sustituir");
-        if (ok) await vm.SustituirAsync(fila);
+        // Si la copia antigua tiene etiquetas de DJ que la descarga no (comentario, tonalidad, BPM),
+        // se ofrece llevarlas: es un segundo botón, y sin él la sustitución hace lo de siempre.
+        var copiar = await vm.EtiquetasParaCopiarAsync(fila);
+        var (cuerpo, nota) = Etiquetador.Core.Dj.SustitucionBandeja.TextosConfirmacion(fila.Track, propuesta.Vieja, copiar);
+        var eleccion = await ConfirmDialog.ElegirAsync(owner, "Sustituir la copia de la biblioteca", cuerpo, nota, "Sustituir",
+                                                        copiar.Vacias ? "" : Etiquetador.Core.Dj.SustitucionBandeja.BotonCopiar);
+        if (eleccion == ConfirmDialog.Eleccion.Aceptar) await vm.SustituirAsync(fila);
+        else if (eleccion == ConfirmDialog.Eleccion.Alternativa) await vm.SustituirAsync(fila, copiar);
     }
 
     private async void Volcar_Click(object? sender, RoutedEventArgs e)

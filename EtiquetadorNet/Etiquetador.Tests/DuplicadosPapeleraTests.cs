@@ -173,7 +173,7 @@ public class DuplicadosPapeleraTests
 
         Assert.Equal(new[] { a1.FilePath, a2.FilePath }, filas.Where(f => f.Marcada).Select(f => f.FilePath));
         Assert.Equal(1, DuplicatesViewModel.SinNingunaCopia(filas));
-        Assert.Equal("Afecta a 1 grupo(s) de duplicados. Atención: 1 de ellas es la copia recomendada de su grupo. "
+        Assert.Equal("Afecta a 1 grupo de duplicados. Atención: 1 de ellas es la copia recomendada de su grupo. "
                      + "Hay 1 canción con TODAS sus copias marcadas: desaparecería de la biblioteca.",
                      DuplicatesViewModel.CuerpoConfirmarPapelera(filas));
     }
@@ -211,7 +211,7 @@ public class DuplicadosPapeleraTests
 
         Assert.Equal(filas[0].Group, filas[2].Group);
         Assert.Equal(2, DuplicatesViewModel.SinNingunaCopia(filas));
-        Assert.StartsWith("Afecta a 2 grupo(s) de duplicados.", DuplicatesViewModel.CuerpoConfirmarPapelera(filas));
+        Assert.StartsWith("Afecta a 2 grupos de duplicados.", DuplicatesViewModel.CuerpoConfirmarPapelera(filas));
         Assert.Contains("Hay 2 canciones con TODAS sus copias marcadas", DuplicatesViewModel.CuerpoConfirmarPapelera(filas));
     }
 
@@ -221,7 +221,7 @@ public class DuplicadosPapeleraTests
         var a1 = Pista(@"E:\Musica\Quevedo - Columbia.mp3");
         var a2 = Pista(@"E:\Musica\Pack\Quevedo - Columbia (1).mp3", kbps: 192);
         var (filas, _) = Filas(new[] { Grupo("Columbia", a1, a2) }, Rutas(a2));
-        Assert.Equal("Afecta a 1 grupo(s) de duplicados.", DuplicatesViewModel.CuerpoConfirmarPapelera(filas));
+        Assert.Equal("Afecta a 1 grupo de duplicados.", DuplicatesViewModel.CuerpoConfirmarPapelera(filas));
     }
 
     [Fact]

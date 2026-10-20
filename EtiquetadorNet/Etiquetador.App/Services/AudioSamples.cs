@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using NAudio.Wave;
 using NLayer.NAudioSupport;
+using Etiquetador.Core;
 
 namespace Etiquetador.App.Services;
 
@@ -115,83 +116,11 @@ public static class AudioSamples
     // de los procesadores Intel. Se leen aquí, con los otros tipos sin pérdida de Apple; el resto
     // (ulaw, ima4…, compresión con pérdida, raros en música para DJ) se rechaza con un texto claro.
 
-    /// <summary>Lo que dice la cabecera de un AIFF que hace falta para leer sus muestras.</summary>
-    /// <param name="Compresion">El tipo de AIFF-C («sowt», «twos»…), o «NONE» en un AIFF clásico.</param>
-    /// <param name="InicioDatos">Posición en el archivo de la primera muestra.</param>
-    /// <param name="LongitudDatos">Bytes de muestras.</param>
-    internal readonly record struct CabeceraAiff(bool EsAifc, string Compresion, int Canales, int Bits, int Frecuencia,
-                                                 long InicioDatos, long LongitudDatos);
-
     /// <summary>
-    /// Lee la cabecera de un AIFF o AIFF-C, o null si no lo es o le falta el COMM o el SSND. Solo
-    /// recorre las cabeceras de los bloques, sin leer el audio.
+    /// Lee la cabecera de un AIFF o AIFF-C, o null si no lo es o le falta el COMM o el SSND. La lectura
+    /// está en Core (<see cref="LectorAiff"/>) porque el escáner también la usa: TagLib no abre los AIFF-C.
     /// </summary>
-    internal static CabeceraAiff? LeerCabeceraAiff(Stream s)
-    {
-        try
-        {
-            var b = new byte[22];
-            if (!Leer(s, b, 12) || Texto(b, 0) != "FORM") return null;
-            var tipo = Texto(b, 8);
-            if (tipo is not ("AIFF" or "AIFC")) return null;
-            var aifc = tipo == "AIFC";
-
-            string? compresion = null;
-            int canales = 0, bits = 0, frecuencia = 0;
-            long inicio = -1, longitud = 0;
-            while (Leer(s, b, 8))
-            {
-                var id = Texto(b, 0);
-                long largo = Be32(b, 4);
-                var datos = s.Position;
-                if (id == "COMM" && largo >= 18 && Leer(s, b, (int)Math.Min(22, largo)))
-                {
-                    canales = Be16(b, 0);
-                    bits = Be16(b, 6);
-                    var hz = Extendido(b, 8);
-                    frecuencia = hz is >= 1 and <= 1_000_000 ? (int)Math.Round(hz) : 0;   // fuera de eso, cabecera dañada
-                    compresion = aifc && largo >= 22 ? Texto(b, 18) : "NONE";
-                }
-                else if (id == "SSND" && largo >= 8 && Leer(s, b, 8))
-                {
-                    var desplazamiento = Be32(b, 0);
-                    inicio = datos + 8 + desplazamiento;
-                    longitud = Math.Max(0, Math.Min(largo - 8 - desplazamiento, s.Length - inicio));
-                }
-                if (compresion != null && inicio >= 0) break;
-                s.Position = datos + largo + (largo & 1);   // los bloques de longitud impar llevan un byte de relleno
-            }
-            if (compresion == null || inicio < 0 || canales <= 0 || bits <= 0 || frecuencia <= 0) return null;
-            return new CabeceraAiff(aifc, compresion, canales, bits, frecuencia, inicio, longitud);
-        }
-        catch (IOException) { return null; }
-
-        static bool Leer(Stream s, byte[] b, int n)
-        {
-            var leidos = 0;
-            while (leidos < n)
-            {
-                var r = s.Read(b, leidos, n - leidos);
-                if (r == 0) return false;
-                leidos += r;
-            }
-            return true;
-        }
-        static string Texto(byte[] b, int i) => System.Text.Encoding.ASCII.GetString(b, i, 4);
-        static int Be16(byte[] b, int i) => (short)((b[i] << 8) | b[i + 1]);
-        static long Be32(byte[] b, int i) => (uint)((b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3]);
-    }
-
-    /// <summary>La frecuencia de muestreo, que AIFF guarda como número de coma flotante de 80 bits (IEEE 754 extendido).</summary>
-    private static double Extendido(byte[] b, int i)
-    {
-        var exponente = ((b[i] & 0x7F) << 8) | b[i + 1];
-        ulong mantisa = 0;
-        for (var k = 0; k < 8; k++) mantisa = (mantisa << 8) | b[i + 2 + k];
-        if (exponente == 0 && mantisa == 0) return 0;
-        var valor = mantisa * Math.Pow(2, exponente - 16383 - 63);
-        return (b[i] & 0x80) != 0 ? -valor : valor;
-    }
+    internal static CabeceraAiff? LeerCabeceraAiff(Stream s) => LectorAiff.LeerCabecera(s);
 
     /// <summary>
     /// Abre un AIFF. El clásico y el AIFF-C sin compresión, con el lector de NAudio; los AIFF-C sin

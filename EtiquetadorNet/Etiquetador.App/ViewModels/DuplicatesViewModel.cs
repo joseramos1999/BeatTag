@@ -407,11 +407,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         // su número de copias: se rehace para no esconder grupos que siguen coincidiendo.
         if (Busqueda.Trim().Length > 0) OnBusquedaChanged(Busqueda);
 
-        var excl = excluidas.Count > 0 ? $" · {excluidas.Count} carpeta(s) excluida(s)" : "";
-        var edic = _edicionesFuera > 0 ? $" · {_edicionesFuera} edición(es) de DJ fuera" : "";
-        var prio = conPrioridad > 0 ? $" · {conPrioridad} resueltos por carpeta prioritaria" : "";
-        var nota = porAudio ? " · cada versión conserva un ejemplar" : "";
-        Status = $"{groups.Count} grupo(s) de duplicados · {copies} archivos implicados{excl}{edic}{prio}{nota}.";
+        Status = TextoAgrupados(groups.Count, copies, excluidas.Count, _edicionesFuera, conPrioridad, porAudio);
 
         // Las desmarcadas por ConstruirFilas: las marcadas que siguen en la tabla y ya no lo están.
         return conservar == null ? 0 : filas.Count(f => !f.Marcada && conservar.Marcadas.Contains(f.FilePath));
@@ -496,6 +492,23 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         return (filas, conPrioridad);
     }
 
+    // Singular y plural (revisión de la tanda 3, interfaz-11): los textos de la página decían
+    // «1 grupo(s) de duplicados», «1 copia(s) marcadas» o «1 carpeta(s) excluida(s)».
+
+    /// <summary>«1 grupo», «3 grupos»; «1 archivo implicado», «2 archivos implicados»…</summary>
+    internal static string Cuenta(int n, string singular, string plural) => $"{n} {(n == 1 ? singular : plural)}";
+
+    /// <summary>El estado tras agrupar. Puro, para probarlo.</summary>
+    internal static string TextoAgrupados(int grupos, int copias, int excluidas, int edicionesFuera, int conPrioridad, bool porAudio)
+    {
+        var excl = excluidas > 0 ? " · " + Cuenta(excluidas, "carpeta excluida", "carpetas excluidas") : "";
+        var edic = edicionesFuera > 0 ? " · " + Cuenta(edicionesFuera, "edición de DJ fuera", "ediciones de DJ fuera") : "";
+        var prio = conPrioridad > 0 ? " · " + Cuenta(conPrioridad, "resuelto por carpeta prioritaria", "resueltos por carpeta prioritaria") : "";
+        var nota = porAudio ? " · cada versión conserva un ejemplar" : "";
+        return $"{Cuenta(grupos, "grupo", "grupos")} de duplicados · {Cuenta(copias, "archivo implicado", "archivos implicados")}"
+             + $"{excl}{edic}{prio}{nota}.";
+    }
+
     /// <summary>Lo que se añade al estado cuando el repintado ha desmarcado copias. Puro.</summary>
     internal static string NotaDesmarcadas(int desmarcadas) => desmarcadas switch
     {
@@ -523,7 +536,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     {
         var marcadas = filas.Where(r => r.Marcada).ToList();
         var grupos = marcadas.Select(r => r.GrupoId).Distinct().Count();
-        var texto = $"Afecta a {grupos} grupo(s) de duplicados.";
+        var texto = $"Afecta a {Cuenta(grupos, "grupo", "grupos")} de duplicados.";
 
         var mejores = marcadas.Count(r => r.EsMejor);
         if (mejores > 0)
@@ -718,11 +731,31 @@ public partial class DuplicatesViewModel : ScanViewModelBase
             if (SelectedMode.Value == DuplicateMode.Fingerprint) Recompute();
         }
         catch (Exception e) { Status = "No se pudo analizar el audio: " + e.Message; }
-        finally { FpBusy = false; IsBusy = false; FpProgress = 0; _fpCts?.Dispose(); _fpCts = null; }
+        finally { FpBusy = false; SoltarOcupada(); FpProgress = 0; _fpCts?.Dispose(); _fpCts = null; }
     }
 
     [RelayCommand]
     private void CancelFingerprints() => _fpCts?.Cancel();
+
+    /// <summary>
+    /// Para lo que esté haciendo la página: las huellas y el envío a la papelera. Es lo que usa el
+    /// cierre de la ventana; lo ya enviado se quita de la tabla y de la biblioteca antes de cerrar.
+    /// </summary>
+    public void CancelarTodo()
+    {
+        _fpCts?.Cancel();
+        _papeleraCts?.Cancel();
+    }
+
+    /// <summary>
+    /// La página queda ocupada mientras SIGA en marcha alguna de sus tareas: el análisis del audio, la
+    /// comparación de huellas o el envío a la papelera. Pueden solaparse (se puede enviar a la papelera
+    /// mientras se analiza el audio, que lleva horas), y la que termina antes no puede desbloquear la
+    /// aplicación con la otra todavía en marcha.
+    /// </summary>
+    internal static bool SigueOcupada(bool huellas, bool agrupando, bool papelera) => huellas || agrupando || papelera;
+
+    private void SoltarOcupada() => IsBusy = SigueOcupada(FpBusy, _agrupando, EnviandoAPapelera);
 
 
     /// <summary>
@@ -757,11 +790,11 @@ public partial class DuplicatesViewModel : ScanViewModelBase
 
             Pintar(groups);
             var copias = groups.Sum(g => g.Tracks.Count);
-            Status = $"{groups.Count} grupo(s) con el mismo audio · {copias} archivos implicados.";
+            Status = $"{Cuenta(groups.Count, "grupo", "grupos")} con el mismo audio · {Cuenta(copias, "archivo implicado", "archivos implicados")}.";
         }
         catch (OperationCanceledException) { Status = "Comparación cancelada."; }
         catch (Exception e) { Status = "No se pudo comparar el audio: " + e.Message; }
-        finally { _agrupando = false; IsBusy = false; }
+        finally { _agrupando = false; SoltarOcupada(); }
     }
 
     private void RecontarMarcadas() => Marcadas = Rows.Count(r => r.Marcada);
@@ -775,7 +808,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     {
         foreach (var r in Rows) r.Marcada = !r.EsMejor;
         RecontarMarcadas();
-        Status = $"{Marcadas} copia(s) marcadas. Se conserva una de cada canción.";
+        Status = $"{Cuenta(Marcadas, "copia marcada", "copias marcadas")}. Se conserva una de cada canción.";
     }
 
     [RelayCommand]
@@ -822,7 +855,21 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     // una negativa se lee en el estado.
 
     /// <summary>Se está enviando a la papelera: los botones que cambian las marcas o envían, apagados.</summary>
-    [ObservableProperty] private bool _enviandoAPapelera;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(OcupadaSinAvance))]
+    private bool _enviandoAPapelera;
+
+    /// <summary>
+    /// Ocupada en algo que no dice cuánto lleva (comparar huellas, escanear): la barra sin avance. El
+    /// envío a la papelera tiene la suya, con el avance, y no se enseñan las dos a la vez.
+    /// </summary>
+    public bool OcupadaSinAvance => IsBusy && !EnviandoAPapelera;
+
+    protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        if (e.PropertyName == nameof(IsBusy)) OnPropertyChanged(nameof(OcupadaSinAvance));
+    }
 
     /// <summary>Avance del envío a la papelera (0-100).</summary>
     [ObservableProperty] private double _papeleraProgreso;
@@ -863,21 +910,31 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         // De una sola vez: quitarlos uno a uno recalcularía la biblioteca entera por cada archivo.
         // Las que no se han podido enviar siguen en la tabla y marcadas, para reintentarlo o decidir.
         // Las marcas que se cambiaran mientras tanto también se respetan: se leen ahora, al quitar.
+        // Con el envío cancelado también: lo que ya está en la papelera sale de la tabla y de la biblioteca.
         var desmarcadas = QuitarDeLaTabla(res.Enviadas);
 
-        Status = ResumenPapelera(res.Enviadas.Count, res.Fallos) + NotaDesmarcadas(desmarcadas);
+        Status = ResumenEnvio(res, objetivo.Count) + NotaDesmarcadas(desmarcadas);
     }
 
     /// <summary>
     /// El envío en sí, fuera del hilo de la interfaz, con el avance en el estado y en la barra.
     /// Devuelve null si ya había otro envío en marcha.
+    ///
+    /// Mientras dura, la página está OCUPADA (revisión de la tanda 3, rendimiento-1): antes solo se
+    /// apagaban sus propios botones, y el resto de la aplicación seguía abierta. Un escaneo de la
+    /// biblioteca o un «Aplicar» lanzado entonces desde otra pestaña podía publicar después una lista
+    /// leída antes del envío y devolver a la biblioteca copias que ya estaban en la papelera; y cerrar
+    /// la ventana no preguntaba ni esperaba, y dejaba el envío a medias sin quitar lo enviado. Ahora
+    /// el resto de pestañas espera, cerrar pregunta, y se puede cancelar entre un archivo y el siguiente.
     /// </summary>
     private async Task<EnvioPapeleraResultado?> EnviarAPapeleraAsync(IReadOnlyList<string> rutas)
     {
         if (EnviandoAPapelera) return null;
         EnviandoAPapelera = true;
+        IsBusy = true;
         PapeleraProgreso = 0;
         Status = EnvioPapelera.TextoAvance(0, rutas.Count);
+        _papeleraCts = new CancellationTokenSource();
         try
         {
             var avance = new Progress<(int Hechas, int Total)>(p =>
@@ -886,12 +943,41 @@ public partial class DuplicatesViewModel : ScanViewModelBase
                 PapeleraProgreso = p.Total > 0 ? p.Hechas * 100.0 / p.Total : 0;
                 Status = EnvioPapelera.TextoAvance(p.Hechas, p.Total);
             });
-            return await EnvioPapelera.EnviarAsync(rutas, progreso: avance);
+            return await EnvioPapelera.EnviarAsync(rutas, progreso: avance, ct: _papeleraCts.Token);
         }
         finally
         {
             EnviandoAPapelera = false;
+            SoltarOcupada();
             PapeleraProgreso = 0;
+            _papeleraCts.Dispose();
+            _papeleraCts = null;
         }
+    }
+
+    private CancellationTokenSource? _papeleraCts;
+
+    /// <summary>Para el envío a la papelera entre un archivo y el siguiente; lo ya enviado se queda en la papelera.</summary>
+    [RelayCommand]
+    private void CancelarPapelera() => _papeleraCts?.Cancel();
+
+    /// <summary>
+    /// El estado tras enviar las marcadas. Si se canceló, cuántas llegaron a la papelera de cuántas
+    /// se pidieron, y que el resto no se ha tocado. Puro, para probarlo.
+    /// </summary>
+    internal static string ResumenEnvio(EnvioPapeleraResultado res, int pedidas)
+    {
+        if (!res.Interrumpido) return ResumenPapelera(res.Enviadas.Count, res.Fallos);
+        var n = res.Enviadas.Count;
+        var texto = n switch
+        {
+            0 => "Cancelado: no se ha enviado ninguna copia a la papelera.",
+            1 => $"Cancelado: se ha enviado a la papelera 1 de las {pedidas} copias; el resto no se ha tocado.",
+            _ => $"Cancelado: se han enviado a la papelera {n} de las {pedidas} copias; el resto no se ha tocado.",
+        };
+        if (res.Fallos.Count > 0)
+            texto += $" {res.Fallos.Count} con problemas. La primera: {res.Fallos[0].Archivo}: "
+                   + (string.IsNullOrWhiteSpace(res.Fallos[0].Motivo) ? "motivo desconocido." : res.Fallos[0].Motivo);
+        return texto;
     }
 }

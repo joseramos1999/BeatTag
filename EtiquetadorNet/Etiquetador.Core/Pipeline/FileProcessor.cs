@@ -164,7 +164,17 @@ public sealed class FileProcessor
             if (tagArtist.Length == 0) tagArtist = (tf.Tag.JoinedAlbumArtists ?? "").Trim();
             try { localDur = (int)Math.Round(tf.Properties.Duration.TotalSeconds); } catch { }
         }
-        catch { }
+        catch
+        {
+            // Un AIFF-C, que TagLib no abre: la duración y las etiquetas salen de su cabecera y de su
+            // bloque ID3. Sin la duración, Deezer no podría distinguir la extended de la radio edit.
+            if (LectorAiff.EsAiff(filePath) && LectorAiff.LeerPista(filePath) is { } aifc)
+            {
+                tagTitle = (aifc.Title ?? "").Trim();
+                tagArtist = (aifc.Artist ?? "").Trim();
+                localDur = aifc.DurationSeconds;
+            }
+        }
 
         // Las palabras del nombre del artista no cuentan como descriptor: «Born Dirty», «James Hype» o
         // «Clean Bandit» no hacen del archivo una edición, y con isEdit activo Deezer deja de castigar

@@ -99,10 +99,14 @@
                        Text="⚠ La biblioteca ha cambiado desde el último análisis, así que estos grupos pueden estar desfasados. Pulsa Analizar para volver a comparar el audio." />
         </Border>
 
-        <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="4" Margin="0,0,0,6" />
-        <!-- Envío a la papelera en segundo plano: cuánto lleva (el detalle va en el estado). -->
-        <ProgressBar DockPanel.Dock="Top" Minimum="0" Maximum="100" Value="{Binding PapeleraProgreso}"
-                     IsVisible="{Binding EnviandoAPapelera}" Height="4" Margin="0,0,0,6" />
+        <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" IsVisible="{Binding OcupadaSinAvance}" Height="4" Margin="0,0,0,6" />
+        <!-- Envío a la papelera en segundo plano: cuánto lleva (el detalle va en el estado) y cómo pararlo. -->
+        <DockPanel DockPanel.Dock="Top" IsVisible="{Binding EnviandoAPapelera}" Margin="0,0,0,6">
+            <Button DockPanel.Dock="Right" Content="Cancelar" Command="{Binding CancelarPapeleraCommand}" Margin="8,0,0,0"
+                    Background="#DC2626" Foreground="White" FontWeight="SemiBold"
+                    ToolTip.Tip="Para el envío entre un archivo y el siguiente. Lo ya enviado se queda en la papelera y el resto no se toca." />
+            <ProgressBar Minimum="0" Maximum="100" Value="{Binding PapeleraProgreso}" Height="4" VerticalAlignment="Center" />
+        </DockPanel>
 
         <!-- IsReadOnly="False" solo para que la casilla se pueda pulsar; las columnas de datos van
              marcadas una a una como solo lectura. Es el mismo montaje que usa Enriquecer. -->

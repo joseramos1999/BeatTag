@@ -303,7 +303,7 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
         // Conserva la elección anterior si sigue instalada; si no, la primera disponible.
         AiModel = previo.Length > 0 && EstaInstalado(previo) ? previo : Core.Ai.OllamaClient.Automatico(modelos);
         RefrescarOpciones();
-        AiStatus = $"Preparada. {modelos.Count} modelo(s) instalado(s).";
+        AiStatus = modelos.Count == 1 ? "Preparada. 1 modelo instalado." : $"Preparada. {modelos.Count} modelos instalados.";
     }
 
     /// <summary>
@@ -675,7 +675,7 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
         // Las cachés viven además en memoria: sin esto seguirían sirviendo datos ya borrados.
         try { _engine.Library.ClearScanCache(); _engine.ClearAnalysisCache(); } catch { }
 
-        Status = $"Carpeta de datos limpiada: {borrados} archivo(s). Se conservan ajustes, listas de artista y el historial de deshacer.";
+        Status = $"Carpeta de datos limpiada: {borrados} {(borrados == 1 ? "archivo" : "archivos")}. Se conservan ajustes, listas de artista y el historial de deshacer.";
     }
 
     /// <summary>

@@ -47,7 +47,7 @@ public partial class DuplicatesView : UserControl
         // Aviso claro si alguna marcada es la que se recomendaba conservar, o si alguna canción se
         // quedaría sin ninguna copia: puede ser deliberado, pero conviene que no pase inadvertido.
         var ok = await ConfirmDialog.AskAsync(owner,
-            $"Se van a enviar {objetivo.Count} archivos a la papelera",
+            objetivo.Count == 1 ? "Se va a enviar 1 archivo a la papelera" : $"Se van a enviar {objetivo.Count} archivos a la papelera",
             ViewModels.DuplicatesViewModel.CuerpoConfirmarPapelera(vm.Rows),
             Services.Papelera.NotaConfirmacion(objetivo.Select(r => r.FilePath)),
             "Enviar a la papelera");

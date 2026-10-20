@@ -17,7 +17,8 @@ public static class Tagging
     public static Dictionary<string, FieldChange> ApplyTags(ProcessResult info, bool overwrite, FieldFlags fields, TagLib.Picture? coverPic,
         string? carpetaPortadas = null)
     {
-        var f = TagLib.File.Create(info.FilePath);
+        // Con «using»: si algo falla a mitad, el archivo no se queda abierto (y bloqueado en Windows).
+        using var f = AbrirParaEscribir(info.FilePath);
         var tag = f.Tag;
         var log = new Dictionary<string, FieldChange>();
 
@@ -85,8 +86,22 @@ public static class Tagging
         EscribirIsrc(tag, info, fields, log);
 
         f.Save();
-        f.Dispose();
         return log;
+    }
+
+    /// <summary>
+    /// Abre el archivo con TagLib para cambiar sus etiquetas. Un AIFF-C, que TagLib no sabe abrir,
+    /// se rechaza con un texto claro (<see cref="LectorAiff.TextoNoSeEscribe"/>): antes llegaba a la
+    /// lista de Enriquecer el «File form type is not AIFF» de TagLib, en inglés y sin decir qué hacer.
+    /// Lo demás lanza lo mismo que TagLib.
+    /// </summary>
+    public static TagLib.File AbrirParaEscribir(string ruta)
+    {
+        try { return TagLib.File.Create(ruta); }
+        catch (Exception e) when (e is not IOException and not UnauthorizedAccessException && LectorAiff.EsAifc(ruta))
+        {
+            throw new NotSupportedException(LectorAiff.TextoNoSeEscribe, e);
+        }
     }
 
     /// <summary>Clave del ISRC en el manifiesto de deshacer (la restaura UndoEngine).</summary>

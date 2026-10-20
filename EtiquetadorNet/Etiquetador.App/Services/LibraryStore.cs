@@ -95,6 +95,7 @@ public sealed class LibraryStore
         var removed = false;
         for (int i = Tracks.Count - 1; i >= 0; i--)
             if (string.Equals(Tracks[i].FilePath, filePath, StringComparison.OrdinalIgnoreCase)) { Tracks.RemoveAt(i); removed = true; }
+        PedirOtraVueltaSiSeEscanea();
         if (removed) Changed?.Invoke();
     }
 
@@ -113,8 +114,20 @@ public sealed class LibraryStore
         for (int i = Tracks.Count - 1; i >= 0; i--)
             if (quitar.Contains(Tracks[i].FilePath)) { Tracks.RemoveAt(i); quitados++; }
 
+        PedirOtraVueltaSiSeEscanea();
         if (quitados > 0) Changed?.Invoke();
         return quitados;
+    }
+
+    /// <summary>
+    /// Se acaban de quitar canciones (enviadas a la papelera) con un escaneo en marcha. Lo que ese
+    /// escaneo leyó ANTES de que salieran las devolvería al publicar, sin archivo detrás (revisión de
+    /// la tanda 3, rendimiento-1, equipo catalogo): se pide otra vuelta, que ya no las encuentra.
+    /// Igual que <see cref="ScanAsync"/> a mitad: si se está publicando, lo publicado ya es posterior.
+    /// </summary>
+    private void PedirOtraVueltaSiSeEscanea()
+    {
+        if (_escaneo is { IsCompleted: false } && !_publicando) _otraVuelta = true;
     }
 
     /// <summary>Vacía la caché de escaneo (memoria + archivo), para que el próximo escaneo relea todo.</summary>
