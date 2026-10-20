@@ -66,6 +66,15 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      # Restaurar y compilar en pasos propios, como la CI, y probar sin recompilar. Con todo en un
+      # solo «dotnet test», macOS perdía el equipo de GitHub a los 46 minutos en cada Release
+      # (tres de tres en octubre de 2026), mientras la CI, con los pasos separados, pasaba en 2.
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
       - name: Test
         shell: bash
         timeout-minutes: 25
@@ -75,7 +84,7 @@ jobs:
           # en cuando algo dejaba el equipo de GitHub sin responder y a los 46 minutos se daba por
           # perdido, sin dejar ningún dato. Si se dispara, se cortan las pruebas ANTES de que el
           # equipo caiga y se publica qué estaba en marcha (xUnit avisa de las que pasan de 20 s).
-          dotnet test -c Release --verbosity normal --blame-hang-timeout 10m --blame-hang-dump-type none \
+          dotnet test -c Release --no-build --verbosity normal --blame-hang-timeout 10m --blame-hang-dump-type none \
             -- xUnit.LongRunningTestSeconds=20 xUnit.DiagnosticMessages=true > test.log 2>&1 &
           pid=$!
           motivo=""
@@ -160,6 +169,15 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      # Restaurar y compilar en pasos propios, como la CI, y probar sin recompilar. Con todo en un
+      # solo «dotnet test», macOS perdía el equipo de GitHub a los 46 minutos en cada Release
+      # (tres de tres en octubre de 2026), mientras la CI, con los pasos separados, pasaba en 2.
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
       - name: Test
         shell: bash
         timeout-minutes: 25
@@ -169,7 +187,7 @@ jobs:
           # en cuando algo dejaba el equipo de GitHub sin responder y a los 46 minutos se daba por
           # perdido, sin dejar ningún dato. Si se dispara, se cortan las pruebas ANTES de que el
           # equipo caiga y se publica qué estaba en marcha (xUnit avisa de las que pasan de 20 s).
-          dotnet test -c Release --verbosity normal --blame-hang-timeout 10m --blame-hang-dump-type none \
+          dotnet test -c Release --no-build --verbosity normal --blame-hang-timeout 10m --blame-hang-dump-type none \
             -- xUnit.LongRunningTestSeconds=20 xUnit.DiagnosticMessages=true > test.log 2>&1 &
           pid=$!
           motivo=""
