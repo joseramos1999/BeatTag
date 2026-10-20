@@ -67,9 +67,22 @@ jobs:
           dotnet-version: '9.0.x'
 
       - name: Test
-        # Una prueba colgada se corta a los 10 minutos y se dice cuál era (ver ci.yml).
+        # Igual que en ci.yml: una prueba colgada se corta a los 10 minutos y los fallos (también la
+        # prueba que estaba en marcha al cortarla) se publican como anotación, que se puede leer
+        # sin permisos de administrador.
+        shell: bash
         timeout-minutes: 25
-        run: dotnet test -c Release --blame-hang-timeout 10m --blame-hang-dump-type none
+        run: |
+          if dotnet test -c Release --verbosity normal --blame-hang-timeout 10m --blame-hang-dump-type none > test.log 2>&1; then
+            tail -3 test.log
+          else
+            echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
+            fallos=$( { grep -E "^[[:space:]]*(Failed|Con error) [A-Za-z]" test.log; grep -iE -A6 "hang|were running|se estaban ejecutando|aborted|anul" test.log; } | sed 's/^[[:space:]]*//' | sort -u)
+            total=$(printf '%s\n' "$fallos" | grep -c . || true)
+            cuerpo=$(printf '%s\n' "$fallos" | head -60 | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Tests que fallan ($total)::$cuerpo"
+            exit 1
+          fi
 
       - name: Publish single-file exe
         run: >
@@ -111,9 +124,22 @@ jobs:
           dotnet-version: '9.0.x'
 
       - name: Test
-        # Una prueba colgada se corta a los 10 minutos y se dice cuál era (ver ci.yml).
+        # Igual que en ci.yml: una prueba colgada se corta a los 10 minutos y los fallos (también la
+        # prueba que estaba en marcha al cortarla) se publican como anotación, que se puede leer
+        # sin permisos de administrador.
+        shell: bash
         timeout-minutes: 25
-        run: dotnet test -c Release --blame-hang-timeout 10m --blame-hang-dump-type none
+        run: |
+          if dotnet test -c Release --verbosity normal --blame-hang-timeout 10m --blame-hang-dump-type none > test.log 2>&1; then
+            tail -3 test.log
+          else
+            echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
+            fallos=$( { grep -E "^[[:space:]]*(Failed|Con error) [A-Za-z]" test.log; grep -iE -A6 "hang|were running|se estaban ejecutando|aborted|anul" test.log; } | sed 's/^[[:space:]]*//' | sort -u)
+            total=$(printf '%s\n' "$fallos" | grep -c . || true)
+            cuerpo=$(printf '%s\n' "$fallos" | head -60 | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Tests que fallan ($total)::$cuerpo"
+            exit 1
+          fi
 
       # Mismo script que la CI: universal (arm64 + Intel), con icono y en .tar.gz para no perder
       # el permiso de ejecución por el camino.
