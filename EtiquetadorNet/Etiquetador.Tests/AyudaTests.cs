@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Etiquetador.Core;
 using Etiquetador.Core.Dj;
+using Etiquetador.Core.Pipeline;
 
 namespace Etiquetador.Tests;
 
@@ -87,6 +88,9 @@ public class AyudaTests
             AlmacenListasSeguidas.NombreArchivo,
             MapaGenerosCarpeta.NombreArchivo,
             Path.GetFileName(SustitucionBandeja.CarpetaDiario("datos")),
+            // Pulido de la tanda 3: guarda la ficha y lo decidido sobre la copia antigua mientras
+            // está en la papelera. Perderlo deja sin ficha la canción al deshacer la sustitución.
+            Path.GetFileName(AlmacenSustituciones.RutaEn("datos")),
         };
 
         var ayuda = TodaLaAyuda();
@@ -176,6 +180,19 @@ public class AyudaTests
     [InlineData("Enviar marcadas a la papelera", "Views/DuplicatesView.axaml")]
     [InlineData("Código ISRC", "Views/SettingsView.axaml")]
     [InlineData("Escribir el ISRC al aplicar propuestas", "Views/SettingsView.axaml")]
+    // Los del pulido de la tanda 3 (los rótulos nuevos y los que cambiaron de nombre).
+    [InlineData("Cancelar el envío", "Views/LibraryView.axaml")]
+    [InlineData("Cancelar el proceso", "Views/AsistenteView.axaml")]
+    [InlineData("Comprobar la IA", "Views/AsistenteView.axaml")]
+    [InlineData("Excluir de la regla de su carpeta madre", "Views/AsistenteView.axaml")]
+    [InlineData("Quitar la regla", "Views/AsistenteView.axaml")]
+    [InlineData("Empezar por esta", "Views/OrdenMezclaPanel.axaml")]
+    [InlineData("Las seleccionadas que faltan", "Views/TrendsView.axaml")]
+    [InlineData("Todas las que faltan", "Views/TrendsView.axaml")]
+    [InlineData("Volver a contar el archivo descartado", "Views/PendientesView.axaml")]
+    [InlineData("Faltan", "Views/PendientesView.axaml")]
+    [InlineData("Al revisarla otro día", "ViewModels/PendientesViewModel.cs")]
+    [InlineData("Pendiente (1 descartado)", "ViewModels/PendientesViewModel.cs")]
     public void Lo_que_cita_la_Ayuda_existe_en_la_pantalla(string rotulo, string archivo)
     {
         var fuente = Fuente(new[] { "Etiquetador.App" }.Concat(archivo.Split('/')).ToArray());
@@ -201,5 +218,56 @@ public class AyudaTests
     {
         Assert.False(TodaLaAyuda().Contains(expresion, StringComparison.OrdinalIgnoreCase), $"la Ayuda dice «{expresion}»");
         Assert.False(Readme().Contains(expresion, StringComparison.OrdinalIgnoreCase), $"el README dice «{expresion}»");
+    }
+
+    // Rótulos que no están en una vista sino en el código: el botón de copiar etiquetas lo crea el
+    // diálogo con una constante, y los tipos del historial salen de HistorialDeshacer.Texto. Se toman
+    // de ahí para que un cambio de nombre en el código haga fallar esta prueba y no la Ayuda en silencio.
+    [Fact]
+    public void La_Ayuda_cita_los_rotulos_que_salen_del_codigo()
+    {
+        var ayuda = TodaLaAyuda();
+        var rotulos = new[]
+        {
+            SustitucionBandeja.BotonCopiar,
+            HistorialDeshacer.Texto(TipoEjecucion.LimpiezaPacks),
+            HistorialDeshacer.Texto(TipoEjecucion.GeneroPorReglas),
+            HistorialDeshacer.Texto(TipoEjecucion.Sustitucion),
+        };
+        foreach (var r in rotulos)
+            Assert.True(ayuda.Contains("«" + r + "»", StringComparison.Ordinal), $"la Ayuda no cita «{r}»");
+    }
+
+    // No es la Ayuda, pero es el mismo fallo: un aviso que pide pulsar un botón por su nombre. La banda
+    // de la IA del Asistente rotula «Comprobar la IA» desde el pulido de la tanda 3, y el aviso de la IA
+    // perdida a mitad de una herramienta seguía diciendo «Pulsa «Comprobar»».
+    [Fact]
+    public void El_aviso_de_la_IA_perdida_nombra_el_boton_como_se_ve()
+    {
+        var vista = Fuente("Etiquetador.App", "Views", "AsistenteView.axaml");
+        var boton = Regex.Match(vista, @"Content=""(Comprobar[^""]*)""\s+Command=""\{Binding ComprobarIaCommand\}""");
+        Assert.True(boton.Success, "no se encontró el botón de ComprobarIaCommand en AsistenteView.axaml");
+
+        var aviso = Etiquetador.App.ViewModels.AsistenteViewModel.TextoIaPerdida("Ollama no responde.");
+        Assert.StartsWith("Ollama no responde.", aviso);
+        Assert.Contains("«" + boton.Groups[1].Value + "»", aviso);
+        Assert.Contains("«" + boton.Groups[1].Value + "»", TodaLaAyuda());
+    }
+
+    // Lo que estos textos llegaron a decir y el código ya no hace (pulido de la tanda 3). Si alguien
+    // copia de una versión anterior de la Ayuda, esta prueba lo frena.
+    [Theory]
+    [InlineData("puedes seguir usando la aplicación", "el envío a la papelera de la Biblioteca bloquea las demás pestañas")]
+    [InlineData("sin artista, título ni duración", "los AIFF-C entran con su duración, su calidad y su bloque ID3")]
+    [InlineData("sus etiquetas todavía no se leen", "las etiquetas ID3 de un AIFF-C sí se leen; lo que no se puede es escribirlas")]
+    [InlineData("siguen funcionando solo con reglas", "«Renombrar con IA» necesita la IA")]
+    [InlineData("a partir del día siguiente", "las novedades llegan cuando se revisa la lista otro día, no necesariamente mañana")]
+    [InlineData("a partir de mañana", "las novedades llegan cuando se revisa la lista otro día, no necesariamente mañana")]
+    [InlineData("la próxima vez que analices la bandeja", "una sustitución cortada se recoge también al arrancar")]
+    [InlineData("la próxima vez que la analices", "una sustitución cortada se recoge también al arrancar")]
+    public void La_Ayuda_y_el_README_no_dicen_lo_que_el_codigo_ya_no_hace(string expresion, string motivo)
+    {
+        Assert.False(TodaLaAyuda().Contains(expresion, StringComparison.OrdinalIgnoreCase), $"la Ayuda dice «{expresion}», y {motivo}");
+        Assert.False(Readme().Contains(expresion, StringComparison.OrdinalIgnoreCase), $"el README dice «{expresion}», y {motivo}");
     }
 }
