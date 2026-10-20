@@ -781,7 +781,8 @@ public class CopiaSeguridadTests : IDisposable
         Assert.Equal("1 ruta guardada", TextosCopia.Rutas(1));
         Assert.Equal("2.597 rutas guardadas", TextosCopia.Rutas(2597));
 
-        var hecha = TextosCopia.CopiaHecha(new ResultadoCopia(@"D:\copias\BeatTag-copia.zip", 1, 2048, "", Array.Empty<string>()));
+        // Con el separador del sistema: en macOS «\» no separa carpetas y el nombre salía con la ruta entera.
+        var hecha = TextosCopia.CopiaHecha(new ResultadoCopia(Path.Combine("copias", "BeatTag-copia.zip"), 1, 2048, "", Array.Empty<string>()));
         Assert.StartsWith("Copia de seguridad guardada en «BeatTag-copia.zip»: 1 archivo, 2 KB.", hecha);
     }
 
