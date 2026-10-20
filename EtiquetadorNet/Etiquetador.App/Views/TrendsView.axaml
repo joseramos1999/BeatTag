@@ -13,7 +13,7 @@
         <StackPanel DockPanel.Dock="Top" Spacing="6">
             <TextBlock Classes="titulo" Text="Listas de éxitos por país" />
             <TextBlock Classes="desc"
-                       Text="Qué se está escuchando ahora mismo en cada país. Se marca lo que ya tienes en la biblioteca, de modo que se ve de un vistazo lo que te falta." />
+                       Text="Qué se está escuchando ahora mismo en cada país. Se marcan las canciones que ya están en la biblioteca, para ver de un vistazo cuáles faltan." />
 
             <!-- Qué lista: fuente, país y tamaño. Con una ventana estrecha los botones pasan a la línea siguiente. -->
             <WrapPanel ItemSpacing="8" LineSpacing="6">
@@ -39,7 +39,7 @@
                         ToolTip.Tip="Vuelve a descargar la lista aunque la guardada sea reciente. Las listas se guardan unas horas para no pedirlas en cada consulta." />
                 <Button Content="Cancelar" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
                 <Button Content="{Binding TextoSeguir}" Command="{Binding SeguirListaCommand}" IsEnabled="{Binding !IsBusy}"
-                        ToolTip.Tip="Guarda lo que tiene hoy este chart (con su país y su tamaño). A partir de mañana, al volver a verlo o con «Actualizar todas» en Pendientes, se marcan las canciones que hayan entrado." />
+                        ToolTip.Tip="Guarda lo que tiene hoy este chart (con su país y su tamaño). Cuando se revise otro día, al volver a verlo o con «Actualizar todas» en Pendientes, se marcan las canciones que hayan entrado." />
             </WrapPanel>
 
             <!-- Qué hacer con ella. -->
@@ -49,16 +49,16 @@
                           ToolTip.Tip="Solo las canciones que han entrado desde la última vez que se revisó el chart en un día anterior. Hace falta seguirlo." />
                 <Button Content="Guardar como lista (M3U8)" Click="ExportM3u_Click"
                         Background="#0D9488" Foreground="White" FontWeight="SemiBold"
-                        ToolTip.Tip="Guarda las canciones que ya tienes como una lista M3U8, en el orden del top. Se abre directamente en rekordbox, Engine DJ o Serato, sin copiar archivos." />
+                        ToolTip.Tip="Guarda las canciones que ya están en la biblioteca como una lista M3U8, en el orden del top. Se abre directamente en rekordbox, Engine DJ o Serato, sin copiar archivos." />
                 <Button Content="Crear carpeta con las disponibles" Click="CreateFolder_Click"
                         IsEnabled="{Binding !IsBusy}"
                         Background="#16A34A" Foreground="White" FontWeight="SemiBold"
                         ToolTip.Tip="Copia (no mueve) a una carpeta nueva las grabaciones de la lista que ya están en la biblioteca, numeradas por su posición." />
                 <Button Content="Ordenar para mezclar" Command="{Binding OrdenarParaMezclarCommand}" IsEnabled="{Binding !IsBusy}"
                         Background="#2563EB" Foreground="White" FontWeight="SemiBold"
-                        ToolTip.Tip="Ordena las canciones que tienes para pincharlas seguidas: tonos compatibles en la rueda Camelot, tempo (contando doble y mitad) y, si tienen ficha de DJ, energía que no baja. Usa el BPM y la tonalidad de las etiquetas." />
+                        ToolTip.Tip="Ordena las canciones de la lista que están en la biblioteca para pincharlas seguidas, con las mismas reglas que el Asistente: tonos compatibles en la rueda Camelot, tempo (contando doble y mitad) y, si tienen ficha de DJ, energía que no baja y el orden de los momentos de la sesión (apertura, subida, pico, cierre). Usa el BPM y la tonalidad de las etiquetas. En la tabla del orden, con clic derecho, se elige la canción con la que empezar." />
                 <Button Content="Añadir a pendientes ▾" IsEnabled="{Binding !IsBusy}"
-                        ToolTip.Tip="Guarda en la lista de Pendientes las canciones que te faltan. Se tachan solas cuando aparecen en la biblioteca.">
+                        ToolTip.Tip="Guarda en la lista de Pendientes las canciones que no están en la biblioteca. Se tachan solas cuando aparecen en ella.">
                     <Button.Flyout>
                         <MenuFlyout>
                             <MenuItem Header="Las seleccionadas que faltan" Click="AnadirSeleccionadas_Click" />
@@ -80,7 +80,7 @@
             <DataGrid Name="RowsGrid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
                       AutoGenerateColumns="False" IsReadOnly="True" IsVisible="{Binding !VerOrdenMezcla}"
                       CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
-                      DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
+                      DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed" SelectionChanged="Grid_SelectionChanged">
                 <DataGrid.Styles>
                     <Style Selector="DataGridRow">
                         <Setter Property="Background" Value="{Binding StateBrush}" />
@@ -90,8 +90,8 @@
                     <ContextMenu>
                         <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
                         <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
-                        <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding SelectedRow}" />
-                        <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding SelectedRow}" />
+                        <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding FilaDelMenu}" />
+                        <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding FilaDelMenu}" />
                         <Separator />
                         <MenuItem Header="Añadir a pendientes" Click="AnadirSeleccionadas_Click" />
                         <MenuItem Header="Buscar en mi pool" Command="{Binding BuscarEnPoolCommand}" />

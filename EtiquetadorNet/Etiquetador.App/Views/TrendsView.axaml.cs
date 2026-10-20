@@ -21,9 +21,13 @@ public partial class TrendsView : UserControl
 
     private void Grid_DoubleTapped(object? sender, TappedEventArgs e) => GridBehaviors.AutoFitOnHeaderDoubleTap(sender, e);
 
-    // Clic derecho: selecciona la fila bajo el puntero para que el menú actúe sobre ella. Sobre una fila
-    // que ya está elegida no cambia nada, para no perder una selección de varias antes de «Añadir a pendientes».
-    private void Grid_PointerPressed(object? sender, PointerPressedEventArgs e) => TeclaEnergia.SeleccionarConClicDerecho(sender, e);
+    // Clic derecho: selecciona la fila bajo el puntero sin perder una selección de varias (para «Añadir a
+    // pendientes»), y las opciones de una sola canción del menú actúan sobre la fila pulsada.
+    private void Grid_PointerPressed(object? sender, PointerPressedEventArgs e)
+        => AccionesLista.ClicEnTabla(sender, e, DataContext as ListaFrenteBibliotecaViewModel);
+
+    private void Grid_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+        => AccionesLista.SeleccionCambiada(sender, DataContext as ListaFrenteBibliotecaViewModel);
 
     // Copia a una carpeta las canciones del chart que ya tienes.
     private async void CreateFolder_Click(object? sender, RoutedEventArgs e)

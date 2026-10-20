@@ -112,6 +112,48 @@ public sealed class SeguimientoListas
         return new Resultado(n, 0, error);
     }
 
+    /// <summary>
+    /// Deshace el último «Volver a pendiente» de cada una (<see cref="AlmacenPendientes.RecuperarDescartado"/>).
+    /// <see cref="Resultado.Hechas"/> son las que tenían un archivo descartado; <see cref="Resultado.Otras"/>,
+    /// las que se han vuelto a tachar con él porque sigue en la biblioteca. Mirar la biblioteca va fuera
+    /// del hilo de la interfaz.
+    /// </summary>
+    public async Task<Resultado> RecuperarDescartadosAsync(IReadOnlyList<string> ids)
+    {
+        if (ids.Count == 0) return new Resultado(0, 0, "");
+        var canciones = _engine.Library.Tracks.ToList();   // instantánea en el hilo de la interfaz
+        var rutas = await Task.Run(() => new HashSet<string>(canciones.Select(t => t.FilePath), StringComparer.OrdinalIgnoreCase));
+
+        int hechas = 0, tachadas = 0;
+        foreach (var id in ids)
+        {
+            var (ruta, tachada) = Pendientes.RecuperarDescartado(id, rutas.Contains);
+            if (ruta.Length == 0) continue;
+            hechas++;
+            if (tachada) tachadas++;
+        }
+        if (hechas == 0) return new Resultado(0, 0, "");
+        var error = GuardarPendientes();
+        _engine.Logger.Detail($"Pendientes: {hechas} archivos descartados vuelven a contar ({tachadas} tachadas otra vez).");
+        PendientesCambiadas?.Invoke();
+        // Las que no se han vuelto a tachar puede tacharlas ahora otra copia, o un descartado anterior.
+        _ = SinEsperar.Lanzar(TacharAsync, e => _engine.Logger.Error("Pendientes: no se pudieron cruzar con la biblioteca", e));
+        return new Resultado(hechas, tachadas, error);
+    }
+
+    /// <summary>
+    /// Una lista que se siguió con su enlace corto pasa a la clave del enlace largo (ver
+    /// <see cref="AlmacenListasSeguidas.CambiarClave"/>), y se guarda. Devuelve si ha cambiado algo.
+    /// </summary>
+    public bool ReconocerClave(string antigua, string nueva, string enlace)
+    {
+        if (!Seguidas.CambiarClave(antigua, nueva, enlace)) return false;
+        GuardarSeguidas();
+        _engine.Logger.Detail($"Listas seguidas: «{antigua}» pasa a identificarse como «{nueva}».");
+        SeguidasCambiadas?.Invoke();
+        return true;
+    }
+
     private bool _tachando;
     private bool _otraVez;
 
@@ -156,16 +198,21 @@ public sealed class SeguimientoListas
         if (!lista.Any(p => !p.EstaConseguida || (p.Archivo.Length > 0 && !rutas.Contains(p.Archivo)))) return;
 
         var indice = (await IndiceBibliotecaCompartido.De(_engine.Library).ObtenerAsync(canciones)).Indice;
-        var cambios = await Task.Run(() => CrucePendientes.Calcular(lista, indice.Buscar, rutas.Contains));
+        // Mirar si existe el archivo de una conseguida que ha salido de la biblioteca toca el disco:
+        // va dentro del Task.Run, y solo para esas, que son pocas.
+        var cambios = await Task.Run(() => CrucePendientes.Calcular(lista, indice.Buscar, rutas.Contains,
+                                                                    CrucePendientes.ArchivoDesaparecido));
         Cruces++;
         if (cambios.Vacio) return;
 
         var tachadas = Pendientes.MarcarConseguidas(cambios.Conseguidas, DateTime.Now);
         var movidas = Pendientes.CambiarArchivos(cambios.Movidas);
-        if (tachadas + movidas == 0) return;
+        var reabiertas = Pendientes.Reabrir(cambios.SinArchivo);
+        if (tachadas + movidas + reabiertas == 0) return;
         GuardarPendientes();
         if (tachadas > 0) _engine.Logger.Sum($"Pendientes: {tachadas} conseguida(s) al aparecer en la biblioteca.");
         if (movidas > 0) _engine.Logger.Detail($"Pendientes: {movidas} conseguida(s) siguen a su archivo, que cambió de nombre o de carpeta.");
+        if (reabiertas > 0) _engine.Logger.Sum($"Pendientes: {reabiertas} vuelve(n) a pendiente porque su archivo ya no existe (papelera o borrado) y no hay otra copia.");
         PendientesCambiadas?.Invoke();
     }
 
@@ -258,7 +305,7 @@ public sealed class SeguimientoListas
                     var faltan = nov.Nuevas.Count(k => !pistas[k].LaTienes);
                     res.Add(new Revision(l.Id, lectura.Nombre.Length > 0 ? lectura.Nombre : l.Nombre, pistas.Count,
                                          nov.Nuevas.Count, faltan, nov.Desde, lectura.Aviso, ""));
-                    _engine.Logger.Detail($"Listas seguidas: «{l.Nombre}»: {pistas.Count} canciones, {nov.Nuevas.Count} nuevas ({faltan} no las tienes).");
+                    _engine.Logger.Detail($"Listas seguidas: «{l.Nombre}»: {pistas.Count} canciones, {nov.Nuevas.Count} nuevas ({faltan} no están en la biblioteca).");
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception e)

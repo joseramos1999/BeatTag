@@ -15,6 +15,9 @@ public partial class PendientesView : UserControl
     public PendientesView()
     {
         InitializeComponent();
+        // Cambiar la selección (clic, Ctrl+clic, teclado) devuelve las opciones de una canción a la fila
+        // elegida hasta el próximo clic derecho.
+        TablaPendientes.SelectionChanged += (_, _) => _pulsada = null;
         // Dos tablas con columnas distintas: cada una recuerda sus anchos por separado.
         AttachedToVisualTree += (_, _) =>
         {
@@ -33,28 +36,63 @@ public partial class PendientesView : UserControl
 
     private void Grid_DoubleTapped(object? sender, TappedEventArgs e) => GridBehaviors.AutoFitOnHeaderDoubleTap(sender, e);
 
-    // Clic derecho: sin perder una selección de varias filas.
-    private void Grid_PointerPressed(object? sender, PointerPressedEventArgs e) => TeclaEnergia.SeleccionarConClicDerecho(sender, e);
+    /// <summary>La última fila de pendientes pulsada con el botón derecho (ver <see cref="UnaFila"/>).</summary>
+    private PendienteFila? _pulsada;
+
+    // Clic derecho: sin perder una selección de varias filas, y recordando cuál se pulsó.
+    private void Grid_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        TeclaEnergia.SeleccionarConClicDerecho(sender, e);
+        if (ReferenceEquals(sender, TablaPendientes) && AccionesLista.FilaPulsadaConDerecho<PendienteFila>(sender, e) is { } fila)
+            _pulsada = fila;
+    }
+
+    /// <summary>
+    /// La canción sobre la que actúan las opciones de una sola canción: con varias elegidas, la pulsada
+    /// con el botón derecho, no la primera de la selección (que podía ser otra).
+    /// </summary>
+    private PendienteFila? UnaFila() => AccionesLista.FilaParaUnaCancion(_pulsada, Vm?.Seleccionada, Elegidas());
 
     // --- Canciones pendientes ---
 
     private async void BuscarEnPool_Click(object? sender, RoutedEventArgs e)
     {
         // Una sola: abrir de golpe una pestaña del navegador por cada canción elegida no ayuda a nadie.
-        if (Vm is { } vm) await vm.BuscarEnPoolAsync(Elegidas().FirstOrDefault() ?? vm.Seleccionada);
+        if (Vm is { } vm) await vm.BuscarEnPoolAsync(UnaFila());
     }
 
     private async void AbrirEnlace_Click(object? sender, RoutedEventArgs e)
     {
-        if (Vm is { } vm) await vm.AbrirEnlaceAsync(Elegidas().FirstOrDefault() ?? vm.Seleccionada);
+        if (Vm is { } vm) await vm.AbrirEnlaceAsync(UnaFila());
     }
 
     private async void AbrirCarpeta_Click(object? sender, RoutedEventArgs e)
     {
-        if (Vm is { } vm) await vm.AbrirCarpetaAsync(Elegidas().FirstOrDefault() ?? vm.Seleccionada);
+        if (Vm is { } vm) await vm.AbrirCarpetaAsync(UnaFila());
     }
 
-    private void VolverAPendiente_Click(object? sender, RoutedEventArgs e) => Vm?.VolverAPendiente(Elegidas());
+    // Pide confirmación: ese archivo deja de contar para la canción. Antes se hacía sin preguntar y, pulsado
+    // por error sobre una conseguida correcta, no había forma de deshacerlo.
+    private async void VolverAPendiente_Click(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm || TopLevel.GetTopLevel(this) is not Window owner) return;
+        var conseguidas = Elegidas().Where(f => f.Conseguida).ToList();
+        if (conseguidas.Count == 0) { vm.Status = "Elige alguna canción conseguida: las pendientes ya lo están."; return; }
+        var ok = await ConfirmDialog.AskAsync(owner,
+            "Volver a pendiente",
+            conseguidas.Count == 1
+                ? $"«{conseguidas[0].Artista} - {conseguidas[0].Titulo}» volverá a pendiente y el archivo «{conseguidas[0].Archivo}» dejará de contar como esa canción."
+                : $"{conseguidas.Count} canciones volverán a pendiente y los archivos con los que se tacharon dejarán de contar como ellas.",
+            "Úsalo cuando el archivo no es la canción (un remix con otro nombre, otra canción con el mismo título). No se toca ningún archivo. "
+            + "Se deshace con «Volver a contar el archivo descartado», en el menú del botón derecho.",
+            "Volver a pendiente");
+        if (ok) vm.VolverAPendiente(conseguidas);
+    }
+
+    private async void RecuperarDescartado_Click(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is { } vm) await vm.RecuperarDescartadosAsync(Elegidas());
+    }
 
     private async void Quitar_Click(object? sender, RoutedEventArgs e)
     {
@@ -65,7 +103,7 @@ public partial class PendientesView : UserControl
             "Quitar de pendientes",
             filas.Count == 1 ? $"Se quitará «{filas[0].Artista} - {filas[0].Titulo}» de la lista de pendientes."
                              : $"Se quitarán {filas.Count} canciones de la lista de pendientes.",
-            "No se toca ningún archivo. Si te vuelven a faltar, puedes añadirlas otra vez desde Tendencias o Playlists.",
+            "No se toca ningún archivo. Se pueden volver a añadir desde Tendencias o Playlists.",
             "Quitar");
         if (ok) vm.Quitar(filas);
     }

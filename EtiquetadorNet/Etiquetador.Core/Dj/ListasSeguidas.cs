@@ -117,16 +117,31 @@ public static class ListasSeguidas
 {
     /// <summary>
     /// La misma playlist pegada de formas distintas («…/intl-es/playlist/ID?si=…», «spotify:playlist:ID»)
-    /// es la misma lista. Un enlace corto que no se puede reconocer sin seguirlo se identifica por sí mismo.
+    /// es la misma lista. Un enlace corto que no se puede reconocer sin seguirlo se identifica por sí
+    /// mismo: quien lo ha leído ya resuelto debe usar <see cref="ClavePlaylist(PlaylistLink)"/>.
     /// </summary>
     public static string ClavePlaylist(string? enlace)
     {
         var e = (enlace ?? "").Trim();
-        // El ID de Spotify distingue mayúsculas: no se pasa a minúsculas.
-        return PlaylistLinkParser.Parse(e) is { } l
-            ? $"{(l.Plataforma == PlataformaLista.Deezer ? "deezer" : "spotify")}:{l.Tipo}:{l.Id}"
-            : "enlace:" + e;
+        return PlaylistLinkParser.Parse(e) is { } l ? ClavePlaylist(l) : "enlace:" + e;
     }
+
+    /// <summary>
+    /// La clave de una lista ya reconocida (o resuelta desde un enlace corto). Es la misma que da el
+    /// enlace largo: «spotify.link/…» y «open.spotify.com/playlist/ID» son la misma lista seguida.
+    /// </summary>
+    public static string ClavePlaylist(PlaylistLink l)
+        // El ID de Spotify distingue mayúsculas: no se pasa a minúsculas.
+        => $"{(l.Plataforma == PlataformaLista.Deezer ? "deezer" : "spotify")}:{l.Tipo}:{l.Id}";
+
+    /// <summary>
+    /// El enlace largo de una lista, para guardarlo en vez del corto que se pegó: los enlaces cortos
+    /// de «Compartir» caducan, y así «Actualizar todas» no tiene que seguirlos cada vez.
+    /// </summary>
+    public static string EnlaceCanonico(PlaylistLink l)
+        => l.Plataforma == PlataformaLista.Deezer
+            ? $"https://www.deezer.com/{l.Tipo}/{l.Id}"
+            : $"https://open.spotify.com/{l.Tipo}/{l.Id}";
 
     /// <summary>
     /// Un chart es su fuente, su país y su tamaño: el Top 100 contra una lectura del Top 50 daría
@@ -192,17 +207,31 @@ public static class ListasSeguidas
     ///
     /// Con <paramref name="completa"/> a false (Deezer dejó de responder a mitad) se compara pero no se
     /// apunta: la próxima lectura entera daría por nuevas las canciones que faltaron esta vez.
+    ///
+    /// Una lectura VACÍA nunca se apunta, la marque quien la marque como completa. Visto en la revisión:
+    /// sin red y sin copia guardada, Tendencias recibía un chart de 0 canciones y lo apuntaba como la
+    /// última lectura; al día siguiente era la referencia, las 50 canciones del chart salían como
+    /// nuevas y «Añadir a pendientes las nuevas que faltan» llenaba Pendientes de canciones que no lo eran.
     /// </summary>
     public static NovedadesLista Registrar(ListaSeguida lista, IReadOnlyList<PistaLista> pistas, DateTime fecha, bool completa)
     {
-        if (completa && (lista.Ultima == null || fecha > lista.Ultima.Fecha))
+        if (completa && pistas.Count > 0 && (lista.Ultima == null || fecha > lista.Ultima.Fecha))
         {
             if (lista.Ultima != null && lista.Ultima.Fecha.Date < fecha.Date) lista.Referencia = lista.Ultima;
             lista.Ultima = Instantanea(pistas, fecha);
         }
-        var nuevas = Nuevas(lista.Referencia, pistas);
-        return lista.Referencia == null ? NovedadesLista.Ninguna : new NovedadesLista(lista.Referencia.Fecha, nuevas);
+        return Comparar(lista, pistas);
     }
+
+    /// <summary>
+    /// Qué canciones de <paramref name="pistas"/> son nuevas según lo que la lista seguida ya tiene
+    /// guardado, sin apuntar nada. Sirve para poner al día una lista que se está viendo cuando otra
+    /// página la revisa («Actualizar todas» en Pendientes). Sin lista o sin referencia, ninguna.
+    /// </summary>
+    public static NovedadesLista Comparar(ListaSeguida? lista, IReadOnlyList<PistaLista> pistas)
+        => lista?.Referencia is { } referencia
+            ? new NovedadesLista(referencia.Fecha, Nuevas(referencia, pistas))
+            : NovedadesLista.Ninguna;
 }
 
 /// <summary>Las listas que el usuario sigue, en el orden en que empezó a seguirlas.</summary>
@@ -280,6 +309,26 @@ public sealed class AlmacenListasSeguidas
             l.Revisada = fecha;
             _todas.Add(l);
             return l.Copia();
+        }
+    }
+
+    /// <summary>
+    /// Pasa una lista seguida de una clave a otra, con su enlace nuevo. Es para las playlists que se
+    /// siguieron pegando un enlace corto («spotify.link/…»): antes se identificaban por ese texto y no
+    /// se reconocían al pegar el enlace largo de la misma lista. Si ya se sigue con la clave nueva, o
+    /// no se sigue con la antigua, no cambia nada. Devuelve si la ha cambiado.
+    /// </summary>
+    public bool CambiarClave(string antigua, string nueva, string enlace)
+    {
+        if (string.IsNullOrWhiteSpace(nueva) || antigua == nueva) return false;
+        lock (_cerrojo)
+        {
+            if (_todas.Any(l => l.Clave == nueva)) return false;
+            var l = _todas.FirstOrDefault(x => x.Clave == antigua);
+            if (l == null) return false;
+            l.Clave = nueva;
+            if (!string.IsNullOrWhiteSpace(enlace)) l.Enlace = enlace.Trim();
+            return true;
         }
     }
 

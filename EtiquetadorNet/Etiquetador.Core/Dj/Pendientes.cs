@@ -41,12 +41,20 @@ public sealed class Pendiente
     /// </summary>
     public List<string> Descartados { get; set; } = new();
 
+    /// <summary>
+    /// La fecha en que se había tachado con el último archivo descartado. Con ella, «Volver a contar el
+    /// archivo descartado» deshace un «Volver a pendiente» pulsado por error y la deja como estaba, con
+    /// su fecha de entonces y no con la de hoy. Null si no hay nada que deshacer.
+    /// </summary>
+    public DateTime? ConseguidaAntes { get; set; }
+
     [JsonIgnore] public bool EstaConseguida => Conseguida != null;
 
     public Pendiente Copia() => new()
     {
         Id = Id, Artista = Artista, Titulo = Titulo, Origen = Origen, Alta = Alta, Enlace = Enlace,
         Conseguida = Conseguida, Archivo = Archivo, Descartados = new List<string>(Descartados),
+        ConseguidaAntes = ConseguidaAntes,
     };
 }
 
@@ -231,12 +239,70 @@ public sealed class AlmacenPendientes
         {
             var p = _todas.FirstOrDefault(x => x.Id == id);
             if (p == null || !p.EstaConseguida) return false;
-            if (p.Archivo.Length > 0 && !p.Descartados.Contains(p.Archivo, StringComparer.OrdinalIgnoreCase))
+            if (p.Archivo.Length > 0)
+            {
+                // Al final de la lista: «Volver a contar el archivo descartado» deshace el último.
+                p.Descartados.RemoveAll(d => string.Equals(d, p.Archivo, StringComparison.OrdinalIgnoreCase));
                 p.Descartados.Add(p.Archivo);
+                p.ConseguidaAntes = p.Conseguida;
+            }
             p.Conseguida = null;
             p.Archivo = "";
             return true;
         }
+    }
+
+    /// <summary>
+    /// Deshace el último «Volver a pendiente» de la canción: el último archivo descartado vuelve a
+    /// contar. Si sigue pendiente y ese archivo está en la biblioteca (<paramref name="enBiblioteca"/>),
+    /// se tacha otra vez con él y con la fecha de entonces. Si no está, sigue pendiente y el próximo
+    /// cruce con la biblioteca decide. Devuelve el archivo que vuelve a contar ("" si no había ninguno
+    /// descartado) y si la canción se ha vuelto a tachar con él.
+    ///
+    /// Sin esto, un «Volver a pendiente» pulsado por error sobre una conseguida correcta la dejaba
+    /// pendiente para siempre: ese archivo ya no la tachaba y no había forma de sacarlo de la lista.
+    /// </summary>
+    public (string Archivo, bool Tachada) RecuperarDescartado(string id, Func<string, bool> enBiblioteca)
+    {
+        lock (_cerrojo)
+        {
+            var p = _todas.FirstOrDefault(x => x.Id == id);
+            if (p == null || p.Descartados.Count == 0) return ("", false);
+            var ultimo = p.Descartados[^1];
+            p.Descartados.RemoveAt(p.Descartados.Count - 1);
+            var tachada = !p.EstaConseguida && enBiblioteca(ultimo);
+            if (tachada)
+            {
+                p.Conseguida = p.ConseguidaAntes ?? DateTime.Now;
+                p.Archivo = ultimo;
+            }
+            // La fecha guardada era la del último descartado: para los anteriores no se sabe.
+            p.ConseguidaAntes = null;
+            return (ultimo, tachada);
+        }
+    }
+
+    /// <summary>
+    /// Devuelve a pendiente las conseguidas cuyo archivo ya no existe (se envió a la papelera o se
+    /// borró), si siguen tachadas con ese mismo archivo. No lo apunta como descartado: el archivo no
+    /// era una copia equivocada, simplemente ya no está, y si vuelve (se recupera de la papelera) la
+    /// tachará otra vez. Devuelve cuántas.
+    /// </summary>
+    public int Reabrir(IEnumerable<(string Id, string Ruta)> sinArchivo)
+    {
+        var n = 0;
+        lock (_cerrojo)
+        {
+            foreach (var (id, ruta) in sinArchivo)
+            {
+                var p = _todas.FirstOrDefault(x => x.Id == id);
+                if (p == null || !p.EstaConseguida || !string.Equals(p.Archivo, ruta, StringComparison.Ordinal)) continue;
+                p.Conseguida = null;
+                p.Archivo = "";
+                n++;
+            }
+        }
+        return n;
     }
 
     /// <summary>Devuelve "" si fue bien, o el motivo del fallo. En solo lectura no escribe nada.</summary>
@@ -249,11 +315,16 @@ public sealed class AlmacenPendientes
     }
 }
 
-/// <summary>Qué pendientes tachar, y qué conseguidas cambiaron de archivo, frente a la biblioteca.</summary>
+/// <summary>
+/// Qué pendientes tachar, qué conseguidas cambiaron de archivo y cuáles se quedaron sin él, frente a
+/// la biblioteca.
+/// </summary>
+/// <param name="SinArchivo">Conseguidas cuyo archivo ya no existe y no tienen otra copia: vuelven a pendiente.</param>
 public sealed record CambiosPendientes(IReadOnlyList<(string Id, string Ruta)> Conseguidas,
-                                       IReadOnlyList<(string Id, string Ruta)> Movidas)
+                                       IReadOnlyList<(string Id, string Ruta)> Movidas,
+                                       IReadOnlyList<(string Id, string Ruta)> SinArchivo)
 {
-    public bool Vacio => Conseguidas.Count == 0 && Movidas.Count == 0;
+    public bool Vacio => Conseguidas.Count == 0 && Movidas.Count == 0 && SinArchivo.Count == 0;
 }
 
 /// <summary>El cruce de las pendientes con la biblioteca. Puro: se ejecuta fuera del hilo de la interfaz.</summary>
@@ -265,25 +336,53 @@ public static class CrucePendientes
     /// mashups). Un archivo que el usuario descartó para esa canción no la tacha.
     ///
     /// Las conseguidas cuyo archivo ya no está en la biblioteca (BeatTag lo renombró, o se movió de
-    /// carpeta) se vuelven a buscar para que la ruta siga al archivo. Si no aparece, la ruta se queda
-    /// como estaba: puede ser un disco desconectado, y deshacer la tachadura por eso sería un error.
+    /// carpeta) se vuelven a buscar para que la ruta siga al archivo. Si no aparece otra copia y
+    /// <paramref name="sinArchivo"/> confirma que el archivo ya no existe (se envió a la papelera o se
+    /// borró), vuelve a pendiente: seguir diciendo «Conseguida» con un archivo que ya no está engaña.
+    /// Si existe (se desmarcó su carpeta en Biblioteca) o no se puede saber, se queda como estaba.
     /// </summary>
-    /// <param name="buscar">Artista y título → ruta de la mejor copia, o "" si no la tienes.</param>
+    /// <param name="buscar">Artista y título → ruta de la mejor copia, o "" si no está en la biblioteca.</param>
     /// <param name="enBiblioteca">La ruta está en la biblioteca escaneada.</param>
+    /// <param name="sinArchivo">
+    /// El archivo ya no existe con seguridad (ver <see cref="ArchivoDesaparecido"/>). Toca el disco: solo
+    /// se pregunta por las conseguidas que han salido de la biblioteca. Sin él, nunca se destacha.
+    /// </param>
     public static CambiosPendientes Calcular(IReadOnlyList<Pendiente> pendientes, Func<string, string, string> buscar,
-                                             Func<string, bool> enBiblioteca)
+                                             Func<string, bool> enBiblioteca, Func<string, bool>? sinArchivo = null)
     {
         var conseguidas = new List<(string, string)>();
         var movidas = new List<(string, string)>();
+        var perdidas = new List<(string, string)>();
         foreach (var p in pendientes)
         {
             if (p.EstaConseguida && (p.Archivo.Length == 0 || enBiblioteca(p.Archivo))) continue;
             var ruta = buscar(p.Artista, p.Titulo);
-            if (ruta.Length == 0 || p.Descartados.Contains(ruta, StringComparer.OrdinalIgnoreCase)) continue;
+            if (ruta.Length == 0 || p.Descartados.Contains(ruta, StringComparer.OrdinalIgnoreCase))
+            {
+                if (p.EstaConseguida && sinArchivo != null && sinArchivo(p.Archivo)) perdidas.Add((p.Id, p.Archivo));
+                continue;
+            }
             if (p.EstaConseguida) movidas.Add((p.Id, ruta));
             else conseguidas.Add((p.Id, ruta));
         }
-        return new CambiosPendientes(conseguidas, movidas);
+        return new CambiosPendientes(conseguidas, movidas, perdidas);
+    }
+
+    /// <summary>
+    /// El archivo ya no existe Y su carpeta sí: se envió a la papelera o se borró. Si tampoco está la
+    /// carpeta, puede ser un disco externo desconectado o una unidad de red sin conexión, y eso no
+    /// quiere decir que la canción se haya perdido: no se da por desaparecido. Toca el disco: fuera del
+    /// hilo de la interfaz.
+    /// </summary>
+    public static bool ArchivoDesaparecido(string ruta)
+    {
+        if (string.IsNullOrWhiteSpace(ruta)) return false;
+        try
+        {
+            var carpeta = Path.GetDirectoryName(ruta);
+            return !string.IsNullOrEmpty(carpeta) && Directory.Exists(carpeta) && !File.Exists(ruta);
+        }
+        catch { return false; }   // una ruta ilegible no es motivo para destachar nada
     }
 }
 

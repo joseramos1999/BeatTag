@@ -8,8 +8,12 @@
 
     <!--
         El orden para mezclar de una lista de Tendencias o Playlists. Sustituye a la tabla de la lista
-        mientras se ve, con la misma idea que «Ordenar para mezclar» del Asistente: cada canción con
-        cómo entra desde la anterior. Las transiciones que chocan de tono se resaltan.
+        mientras se ve, con la misma idea y el mismo menú que «Ordenar para mezclar» del Asistente: cada
+        canción con cómo entra desde la anterior, «Empezar por esta», «Buscar compatibles» y «Ver sus
+        versiones». Las transiciones que chocan de tono se resaltan.
+
+        La tabla solo deja elegir una fila: ninguna opción actúa sobre varias, y así el clic derecho
+        siempre deja elegida la fila pulsada, que es sobre la que actúa el menú.
     -->
     <DockPanel>
         <WrapPanel DockPanel.Dock="Top" ItemSpacing="8" LineSpacing="6" Margin="0,6,0,6">
@@ -18,11 +22,14 @@
                     Background="#0D9488" Foreground="White" FontWeight="SemiBold"
                     ToolTip.Tip="Guarda las canciones en el orden para mezclar como una lista M3U8, con su duración. Se abre en rekordbox, Engine DJ o Serato sin copiar archivos." />
         </WrapPanel>
-        <TextBlock DockPanel.Dock="Top" Text="{Binding ResumenMezcla}" TextWrapping="Wrap" Margin="0,0,0,6"
+        <TextBlock DockPanel.Dock="Top" Text="{Binding ResumenMezcla}" TextWrapping="Wrap" Margin="0,0,0,2"
                    Foreground="{DynamicResource TextoSecundario}" />
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6" FontSize="12"
+                   Foreground="{DynamicResource TextoSecundario}"
+                   Text="Empieza por lo más tranquilo y encadena cada canción con la que mejor entra: tono, tempo y, si tienen ficha de DJ, energía y momento de la sesión. Con clic derecho se puede elegir la canción con la que empezar." />
 
         <DataGrid Name="TablaMezcla" ItemsSource="{Binding PasosMezcla}" SelectedItem="{Binding SelectedPaso}"
-                  AutoGenerateColumns="False" IsReadOnly="True"
+                  AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
                   CanUserResizeColumns="True" CanUserSortColumns="False" GridLinesVisibility="Horizontal"
                   DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
             <DataGrid.Styles>
@@ -33,6 +40,12 @@
             <DataGrid.ContextMenu>
                 <ContextMenu>
                     <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
+                    <MenuItem Header="Empezar por esta" Command="{Binding EmpezarPorEstaCommand}"
+                              ToolTip.Tip="Rehace el orden abriendo con esta canción." />
+                    <Separator />
+                    <MenuItem Header="Buscar compatibles…" Command="{x:Static AccionesCancion.BuscarCompatibles}" CommandParameter="{Binding SelectedPaso}" />
+                    <MenuItem Header="Ver sus versiones…" Command="{x:Static AccionesCancion.VerVersiones}" CommandParameter="{Binding SelectedPaso}" />
+                    <Separator />
                     <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
                 </ContextMenu>
             </DataGrid.ContextMenu>

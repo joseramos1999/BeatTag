@@ -77,12 +77,15 @@ public partial class PlaylistViewModel : ListaFrenteBibliotecaViewModel
             _engine.SaveConfig();
 
             var tengo = await CruzarAsync(lista.Pistas, _cts.Token);
-            _enlaceCargado = enlace;
+            _cargada = DescribirPlaylist(enlace, lista.Nombre, lista.Lista);
+            // Una lista que se empezó a seguir pegando su enlace corto se identificaba por ese texto:
+            // pasa a la clave del enlace largo, para que se reconozca se pegue como se pegue.
+            Seguimiento.ReconocerClave(ListasSeguidas.ClavePlaylist(enlace), _cargada.Clave, _cargada.Enlace);
             AnotarLectura(lista.Pistas, DateTime.Now, SeguimientoListas.LecturaCompleta(lista), SeguimientoListas.AvisoLectura(lista));
-            Status = $"«{lista.Nombre}» ({lista.Plataforma}): {Rows.Count} canciones. {Resumen}. Faltan {Rows.Count - tengo}."
+            Status = $"«{lista.Nombre}» ({lista.Plataforma}): {Canciones(Rows.Count)}. {Resumen}. {TextoFaltan(Rows.Count - tengo)}"
                    + (lista.Recortada ? " " + lista.Aviso : "")
                    + (Novedades.Length > 0 ? " " + Novedades : "");
-            _engine.Logger.Sum($"Playlists «{lista.Nombre}» ({lista.Plataforma}): tienes {tengo} de {Rows.Count}"
+            _engine.Logger.Sum($"Playlists «{lista.Nombre}» ({lista.Plataforma}): {tengo} de {Rows.Count} en la biblioteca"
                              + (lista.Recortada ? $" (incompleta: {lista.Aviso})" : ""));
         }
         catch (OperationCanceledException) { Status = "Consulta cancelada."; }
@@ -92,19 +95,22 @@ public partial class PlaylistViewModel : ListaFrenteBibliotecaViewModel
 
     // --- Seguir la lista (P7) ---
 
-    /// <summary>El enlace de la lista que se está viendo (el que se cargó, no lo que haya ahora en el cuadro).</summary>
-    private string _enlaceCargado = "";
+    /// <summary>La lista que se está viendo (la que se cargó, no lo que haya ahora en el cuadro del enlace).</summary>
+    private ListaSeguida? _cargada;
 
-    protected override ListaSeguida? DescribirLista()
-        => _enlaceCargado.Length == 0 ? null : DescribirPlaylist(_enlaceCargado, NombreLista);
+    protected override ListaSeguida? DescribirLista() => _cargada?.Copia();
 
-    /// <summary>Una playlist como lista seguida: la identifica su enlace, se pegue como se pegue.</summary>
-    internal static ListaSeguida DescribirPlaylist(string enlace, string nombre) => new()
+    /// <summary>
+    /// Una playlist como lista seguida: la identifica su enlace, se pegue como se pegue. Con
+    /// <paramref name="resuelta"/> (la lista a la que apuntaba el enlace, ya leída), un enlace corto
+    /// de «Compartir» da la misma clave que el largo y se guarda el largo, que no caduca.
+    /// </summary>
+    internal static ListaSeguida DescribirPlaylist(string enlace, string nombre, PlaylistLink? resuelta = null) => new()
     {
         Tipo = TipoListaSeguida.Playlist,
-        Clave = ListasSeguidas.ClavePlaylist(enlace),
+        Clave = resuelta is { } l ? ListasSeguidas.ClavePlaylist(l) : ListasSeguidas.ClavePlaylist(enlace),
         Nombre = string.IsNullOrWhiteSpace(nombre) ? "Playlist" : nombre.Trim(),
-        Enlace = enlace.Trim(),
+        Enlace = resuelta is { } r ? ListasSeguidas.EnlaceCanonico(r) : enlace.Trim(),
     };
 
     /// <summary>Las playlists que sigues, para volver a abrirlas sin pegar el enlace.</summary>

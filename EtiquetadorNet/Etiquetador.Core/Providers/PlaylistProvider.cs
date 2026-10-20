@@ -16,6 +16,13 @@ public sealed record PlaylistLeida(
     /// </summary>
     public string Aviso { get; init; } = "";
 
+    /// <summary>
+    /// La lista que se ha leído, ya reconocida: si se pegó un enlace corto («spotify.link/…»), la lista
+    /// a la que apuntaba. Con ella, el enlace corto y el largo de la misma playlist se siguen como una
+    /// sola lista. Null si no se llegó a reconocer el enlace.
+    /// </summary>
+    public PlaylistLink? Lista { get; init; }
+
     public static PlaylistLeida Fallo(PlataformaLista p, string error) => new("", p, Array.Empty<ChartTrack>(), false, error);
 }
 
@@ -56,9 +63,10 @@ public sealed class PlaylistProvider
                 ? "Enlace no reconocido. Pega el enlace de una playlist (o un álbum) de Spotify o Deezer: el de «Compartir → Copiar enlace»."
                 : "Eso no parece un enlace.");
 
-        return l.Plataforma == PlataformaLista.Deezer
+        var leida = l.Plataforma == PlataformaLista.Deezer
             ? await DeezerAsync(l, ct).ConfigureAwait(false)
             : await SpotifyAsync(l, ct).ConfigureAwait(false);
+        return leida with { Lista = l };
     }
 
     // ---------------------------------------------------------------- Deezer

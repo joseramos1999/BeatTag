@@ -182,6 +182,20 @@ public partial class TrendsViewModel : ListaFrenteBibliotecaViewModel
             // guardada, y esa es de antes de este momento.
             var pedidaEn = DateTime.Now;
             var chart = await _engine.Charts.GetChartAsync(fuente, pais, ListSize, _cts.Token, forzarRed);
+            if (chart.Count == 0)
+            {
+                // Sin red y sin copia guardada (caché desactivada o vaciada), o la fuente cambió su
+                // página. Antes se seguía como si nada: la tabla quedaba vacía con «Top 0 de…» y, en un
+                // chart seguido, esa lectura vacía se apuntaba como la última y al día siguiente todo
+                // el chart salía como nuevo.
+                OlvidarListaAnterior();
+                _cargado = null;
+                Resumen = "";
+                FechaLista = "";
+                Status = TextoChartVacio(ListSize, pais.Name);
+                _engine.Logger.Detail($"Tendencias: no se ha recibido ninguna canción del Top {ListSize} de {pais.Name}.");
+                return;
+            }
             // Con la caché desactivada no hay archivo del que sacar la fecha: la lista acaba de llegar.
             var descargada = _engine.Api.CacheOn ? _engine.Charts.FechaDeLaLista(fuente, pais, ListSize)
                            : chart.Count > 0 ? DateTime.Now : (DateTime?)null;
@@ -194,11 +208,11 @@ public partial class TrendsViewModel : ListaFrenteBibliotecaViewModel
             // durante el cruce quedaba la fecha de la lista nueva junto a la tabla anterior.
             FechaLista = fecha;
             _cargado = (fuente, pais, ListSize);
-            AnotarLectura(chart, descargada ?? DateTime.Now, completa: true, aviso: "");
+            AnotarLectura(chart, descargada ?? DateTime.Now, completa: chart.Count > 0, aviso: "");
             Status = (sinActualizar ? "No se ha podido descargar de nuevo: se enseña la lista guardada. " : "")
-                   + $"Top {Rows.Count} de {pais.Name}. {Resumen}. Faltan {Rows.Count - tengo}."
+                   + $"Top {Rows.Count} de {pais.Name}. {Resumen}. {TextoFaltan(Rows.Count - tengo)}"
                    + (Novedades.Length > 0 ? " " + Novedades : "");
-            _engine.Logger.Sum($"Tendencias {pais.Name}: tienes {tengo} de {Rows.Count}");
+            _engine.Logger.Sum($"Tendencias {pais.Name}: {tengo} de {Rows.Count} en la biblioteca");
         }
         catch (OperationCanceledException) { Status = "Consulta cancelada."; }
         catch (Exception e) { Status = "No se pudieron cargar las tendencias: " + e.Message; }
@@ -242,6 +256,11 @@ public partial class TrendsViewModel : ListaFrenteBibliotecaViewModel
     /// </summary>
     internal static bool NoSeActualizo(DateTime? descargada, DateTime pedidaEn)
         => descargada is not { } f || f < pedidaEn - MargenReloj;
+
+    /// <summary>Lo que se dice cuando el chart llega sin ninguna canción.</summary>
+    internal static string TextoChartVacio(int tamano, string pais)
+        => $"No se ha recibido ninguna canción del Top {tamano} de {pais} y no hay una copia guardada que enseñar. "
+         + "Comprueba la conexión a internet y pulsa «Actualizar» para volver a intentarlo; si sigue igual, prueba con la otra fuente.";
 
     // --- Seguir el chart (P7) ---
 

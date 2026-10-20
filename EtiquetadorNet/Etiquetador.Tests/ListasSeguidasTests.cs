@@ -209,7 +209,7 @@ public class ListasSeguidasTests : IDisposable
         // La tabla de Pendientes lo cuenta así.
         var fila = new ListaSeguidaFila(l);
         Assert.Equal("2 desde 19/10", fila.Nuevas);
-        Assert.Equal("1", fila.TeFaltan);
+        Assert.Equal("1", fila.Faltan);
     }
 
     [Fact]
@@ -288,7 +288,7 @@ public class ListasSeguidasTests : IDisposable
     [Fact]
     public void Los_textos_de_novedades()
     {
-        Assert.StartsWith("La sigues desde hoy", ListaFrenteBibliotecaViewModel.TextoNovedades(NovedadesLista.Ninguna, true));
+        Assert.StartsWith("Aún no hay con qué comparar", ListaFrenteBibliotecaViewModel.TextoNovedades(NovedadesLista.Ninguna, true));
         Assert.Equal("Ninguna canción nueva desde el 19/10.", ListaFrenteBibliotecaViewModel.TextoNovedades(new NovedadesLista(Lunes, Array.Empty<int>()), true));
         Assert.Equal("1 canción nueva desde el 19/10.", ListaFrenteBibliotecaViewModel.TextoNovedades(new NovedadesLista(Lunes, new[] { 4 }), true));
         Assert.Contains("no se leyó entera", ListaFrenteBibliotecaViewModel.TextoNovedades(new NovedadesLista(Lunes, new[] { 1, 2 }), false));
@@ -303,7 +303,7 @@ public class ListasSeguidasTests : IDisposable
             new SeguimientoListas.Revision("b", "Mi lista", 120, 4, 3, Lunes, "", ""),
             new SeguimientoListas.Revision("c", "Rota", 0, 0, 0, null, "", "Esa lista no existe en Deezer o es privada."),
         });
-        Assert.StartsWith("2 listas revisadas: 7 canciones nuevas, 5 que no tienes.", texto);
+        Assert.StartsWith("2 listas revisadas: 7 canciones nuevas, 5 no están en la biblioteca.", texto);
         Assert.Contains("1 no se pudo leer", texto);
         Assert.Contains("Añadir a pendientes", texto);
 
@@ -311,12 +311,181 @@ public class ListasSeguidasTests : IDisposable
             PendientesViewModel.TextoRevision(new[] { new SeguimientoListas.Revision("a", "Top 50", 50, 0, 0, Lunes, "", "") }));
     }
 
+    // --- Pulido de la tanda 3 ---
+
+    // Revisión: sin red y sin copia guardada, Tendencias recibía un chart vacío y lo apuntaba como la
+    // última lectura. Al día siguiente era la referencia, y TODO el chart salía como nuevo.
+    [Fact]
+    public void Una_lectura_vacia_nunca_se_apunta()
+    {
+        var l = Seguida();
+        ListasSeguidas.Registrar(l, Semana1, Lunes, completa: true);
+
+        var vacia = ListasSeguidas.Registrar(l, Array.Empty<PistaLista>(), Lunes.AddDays(1), completa: true);
+        Assert.Empty(vacia.Nuevas);
+        Assert.Equal(Lunes, l.Ultima!.Fecha);
+        Assert.Equal(3, l.Ultima.Canciones);
+        Assert.Null(l.Referencia);
+
+        // El miércoles se compara con lo del lunes, no con la lectura vacía del martes.
+        var miercoles = ListasSeguidas.Registrar(l, Semana1, Lunes.AddDays(2), completa: true);
+        Assert.Equal(Lunes, miercoles.Desde);
+        Assert.Empty(miercoles.Nuevas);
+    }
+
+    [Fact]
+    public void El_almacen_tampoco_apunta_una_lectura_vacia()
+    {
+        var a = new AlmacenListasSeguidas(Archivo);
+        a.Seguir(Seguida(), Semana1, Lunes);
+        a.Registrar("chart:spotify:es:50", Array.Empty<PistaLista>(), Lunes.AddDays(1), completa: true, ahora: Lunes.AddDays(1));
+        Assert.Equal(3, a.Buscar("chart:spotify:es:50")!.Ultima!.Canciones);
+    }
+
+    // Lo que usan Tendencias y Playlists para ponerse al día cuando Pendientes revisa o deja de seguir
+    // la lista abierta: compara con lo guardado sin apuntar nada.
+    [Fact]
+    public void Comparar_con_lo_guardado_no_apunta_nada()
+    {
+        var l = Seguida();
+        ListasSeguidas.Registrar(l, Semana1, Lunes, completa: true);
+        var martes = new List<PistaLista>(Semana1) { P("Quevedo", "Columbia", "id4") };
+        ListasSeguidas.Registrar(l, martes, Lunes.AddDays(1), completa: true);
+        var ultima = l.Ultima;
+
+        var nov = ListasSeguidas.Comparar(l, martes);
+        Assert.Equal(Lunes, nov.Desde);
+        Assert.Equal(new[] { 3 }, nov.Nuevas);
+        Assert.Same(ultima, l.Ultima);
+
+        Assert.Equal(NovedadesLista.Ninguna, ListasSeguidas.Comparar(null, martes));                 // ya no se sigue
+        Assert.Equal(NovedadesLista.Ninguna, ListasSeguidas.Comparar(Seguida(), martes));             // sin referencia
+    }
+
+    [Fact]
+    public void La_columna_novedad_marca_solo_filas_de_la_tabla()
+    {
+        var marcas = ListaFrenteBibliotecaViewModel.MarcasNovedad(new NovedadesLista(Lunes, new[] { 0, 2, 9 }), filas: 3).ToList();
+        Assert.Equal(new[] { (0, "Nueva desde 19/10"), (2, "Nueva desde 19/10") }, marcas);
+        Assert.Empty(ListaFrenteBibliotecaViewModel.MarcasNovedad(NovedadesLista.Ninguna, 3));
+    }
+
+    // «A partir de mañana» era inexacto: la comparación llega con la próxima revisión hecha otro día.
+    [Fact]
+    public void Los_textos_no_prometen_novedades_para_manana()
+    {
+        var textos = new[]
+        {
+            ListaFrenteBibliotecaViewModel.TextoNovedades(NovedadesLista.Ninguna, true),
+            ListaFrenteBibliotecaViewModel.TextoAlSeguir("Top 50 de Spain (Spotify)"),
+            new ListaSeguidaFila(new ListaSeguida { Clave = "x" }).Nuevas,
+        };
+        foreach (var t in textos)
+        {
+            Assert.DoesNotContain("mañana", t);
+            Assert.DoesNotContain("desde hoy", t);
+            Assert.Contains("otro día", t);
+        }
+    }
+
+    // Un enlace corto de «Compartir» y el largo de la misma playlist son la misma lista seguida.
+    [Fact]
+    public void Un_enlace_corto_ya_resuelto_da_la_clave_del_largo()
+    {
+        const string id = "37i9dQZF1DXcBWIGoYBM5M";
+        var resuelta = new PlaylistLink(PlataformaLista.Spotify, "playlist", id);
+
+        var corta = PlaylistViewModel.DescribirPlaylist("https://spotify.link/AbCdEf", "Mi lista", resuelta);
+        var larga = PlaylistViewModel.DescribirPlaylist($"https://open.spotify.com/intl-es/playlist/{id}?si=x", "Mi lista");
+
+        Assert.Equal($"spotify:playlist:{id}", corta.Clave);
+        Assert.Equal(larga.Clave, corta.Clave);
+        // Se guarda el largo: los cortos caducan, y «Actualizar todas» no tiene que seguirlo cada vez.
+        Assert.Equal($"https://open.spotify.com/playlist/{id}", corta.Enlace);
+
+        // Sin resolver (no se llegó a leer), el corto se identifica por sí mismo, como antes.
+        Assert.Equal("enlace:https://spotify.link/AbCdEf", PlaylistViewModel.DescribirPlaylist("https://spotify.link/AbCdEf", "").Clave);
+    }
+
+    [Theory]
+    [InlineData(PlataformaLista.Deezer, "playlist", "1234", "https://www.deezer.com/playlist/1234")]
+    [InlineData(PlataformaLista.Deezer, "album", "987", "https://www.deezer.com/album/987")]
+    [InlineData(PlataformaLista.Spotify, "album", "4aawyAB9vmqN3uQ7FjRGTy", "https://open.spotify.com/album/4aawyAB9vmqN3uQ7FjRGTy")]
+    public void El_enlace_canonico_vuelve_a_dar_la_misma_lista(PlataformaLista p, string tipo, string id, string esperado)
+    {
+        var l = new PlaylistLink(p, tipo, id);
+        Assert.Equal(esperado, ListasSeguidas.EnlaceCanonico(l));
+        Assert.Equal(ListasSeguidas.ClavePlaylist(l), ListasSeguidas.ClavePlaylist(ListasSeguidas.EnlaceCanonico(l)));
+    }
+
+    // Una lista seguida antes con su enlace corto pasa a la clave del largo al volver a abrirla.
+    [Fact]
+    public void Una_lista_seguida_por_su_enlace_corto_pasa_a_la_clave_del_largo()
+    {
+        var a = new AlmacenListasSeguidas(Archivo);
+        var vieja = PlaylistViewModel.DescribirPlaylist("https://spotify.link/AbCdEf", "Mi lista");
+        a.Seguir(vieja, Semana1, Lunes);
+
+        const string nueva = "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M";
+        Assert.True(a.CambiarClave(vieja.Clave, nueva, "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"));
+        Assert.True(a.Sigue(nueva));
+        Assert.False(a.Sigue(vieja.Clave));
+        Assert.Equal("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M", a.Buscar(nueva)!.Enlace);
+        Assert.Equal(3, a.Buscar(nueva)!.Ultima!.Canciones);   // conserva lo que tenía
+
+        // Ya está con la clave nueva, o la vieja no se sigue: no cambia nada.
+        Assert.False(a.CambiarClave(vieja.Clave, nueva, ""));
+        a.Seguir(PlaylistViewModel.DescribirPlaylist("https://spotify.link/Otra", "Otra"), Semana1, Lunes);
+        Assert.False(a.CambiarClave("enlace:https://spotify.link/Otra", nueva, ""));
+        Assert.Equal(2, a.Count);
+    }
+
+    [Fact]
+    public void Las_revisiones_concuerdan_en_numero_y_sin_posesivos()
+    {
+        Assert.Equal("1 lista revisada: 1 canción nueva, ya en la biblioteca.",
+            PendientesViewModel.TextoRevision(new[] { new SeguimientoListas.Revision("a", "Top", 50, 1, 0, Lunes, "", "") }));
+        Assert.Equal("1 lista revisada: 3 canciones nuevas, todas ya en la biblioteca.",
+            PendientesViewModel.TextoRevision(new[] { new SeguimientoListas.Revision("a", "Top", 50, 3, 0, Lunes, "", "") }));
+        var una = PendientesViewModel.TextoRevision(new[] { new SeguimientoListas.Revision("a", "Top", 50, 3, 1, Lunes, "", "") });
+        Assert.StartsWith("1 lista revisada: 3 canciones nuevas, 1 no está en la biblioteca.", una);
+        Assert.Contains("Se puede añadir con", una);
+        Assert.DoesNotContain("tienes", una);
+    }
+
+    [Theory]
+    [InlineData(1, 1, true, "La lista elegida no tiene canciones nuevas que falten en la biblioteca.")]
+    [InlineData(2, 2, true, "Las listas elegidas no tienen canciones nuevas que falten en la biblioteca.")]
+    [InlineData(0, 3, true, "Las listas que sigues no tienen canciones nuevas que falten en la biblioteca.")]
+    [InlineData(0, 1, false, "Todavía no hay novedades: cada lista se compara con su revisión de un día anterior, y esta aún no se ha revisado otro día.")]
+    [InlineData(0, 2, false, "Todavía no hay novedades: cada lista se compara con su revisión de un día anterior, y estas aún no se han revisado otro día.")]
+    public void Por_que_no_se_anade_ninguna_nueva(int elegidas, int listas, bool conReferencia, string esperado)
+        => Assert.Equal(esperado, PendientesViewModel.TextoSinNuevas(elegidas, listas, conReferencia));
+
+    // Sin la biblioteca escaneada todo saldría como que falta, y al escanear se tacharía con la fecha de hoy.
+    [Fact]
+    public void Sin_biblioteca_no_se_cuenta_lo_que_falta()
+    {
+        Assert.Contains("escanea la biblioteca", PendientesViewModel.MotivoSinBiblioteca(escaneada: false, canciones: 0));
+        Assert.Contains("escanea la biblioteca", PendientesViewModel.MotivoSinBiblioteca(escaneada: false, canciones: 500));
+        Assert.Contains("está vacía", PendientesViewModel.MotivoSinBiblioteca(escaneada: true, canciones: 0));
+        Assert.Equal("", PendientesViewModel.MotivoSinBiblioteca(escaneada: true, canciones: 500));
+    }
+
+    [Fact]
+    public void Un_chart_vacio_lo_dice_y_ofrece_reintentar()
+    {
+        var texto = TrendsViewModel.TextoChartVacio(50, "Spain");
+        Assert.StartsWith("No se ha recibido ninguna canción del Top 50 de Spain", texto);
+        Assert.Contains("«Actualizar»", texto);
+    }
+
     [Fact]
     public void Sin_referencia_la_tabla_dice_desde_cuando_habra_novedades()
     {
         var fila = new ListaSeguidaFila(new ListaSeguida { Clave = "spotify:playlist:x", Nombre = "Mi lista" });
-        Assert.Equal("A partir de mañana", fila.Nuevas);
-        Assert.Equal("", fila.TeFaltan);
+        Assert.Equal("Al revisarla otro día", fila.Nuevas);
+        Assert.Equal("", fila.Faltan);
         Assert.Equal("Playlist de Spotify", fila.Tipo);
         Assert.Equal("Fallo", new ListaSeguidaFila(new ListaSeguida(), "Fallo").Aviso);
     }
