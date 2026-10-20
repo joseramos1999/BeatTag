@@ -14,7 +14,7 @@
         <StackPanel DockPanel.Dock="Top" Spacing="6">
             <TextBlock Classes="titulo" Text="Novedades" />
             <TextBlock Classes="desc"
-                       Text="Lanzamientos recientes en Deezer de los artistas con más canciones en la biblioteca, cruzados con ella para ver cuáles están ya y cuáles no. Cuentan todos los artistas de cada canción, con los alias unidos y sin record pools ni usuarios («@…»). Deezer solo devuelve los lanzamientos en los que el artista figura como principal: sus colaboraciones en lanzamientos de otros artistas no aparecen." />
+                       Text="Lanzamientos recientes en Deezer de los artistas con más canciones en la biblioteca, cruzados con ella para ver cuáles están ya y cuáles no. Cuentan todos los artistas de cada canción, con los alias unidos y sin record pools ni usuarios («@…»). Deezer devuelve los lanzamientos en los que el artista figura como principal: sus colaboraciones como invitado en lanzamientos de otros artistas normalmente no aparecen." />
 
             <WrapPanel ItemSpacing="8" LineSpacing="6">
                 <TextBlock Text="Artistas:" VerticalAlignment="Center" />

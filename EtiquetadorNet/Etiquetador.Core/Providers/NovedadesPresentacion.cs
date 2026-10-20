@@ -122,7 +122,7 @@ public static class PresentacionNovedades
                 ? $"Publicada antes, el {antes.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)} en «{p.PublicadaEn}»"
                 : $"Publicada antes, el {antes.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)}");
         else if (p.EsReedicion) partes.Add("Reedición o remasterización");
-        if (p.EsVersionAlterada) partes.Add("Versión acelerada, ralentizada o similar");
+        if (p.EsVersionAlterada) partes.Add("Versión acelerada, ralentizada, instrumental o similar");
         if (p.DeArtistaDudoso) partes.Add("Artista sin confirmar en Deezer");
         return string.Join(" · ", partes);
     }

@@ -50,7 +50,7 @@ public sealed record PistaNovedad(string Artista, string Titulo, int Duracion, s
     /// <summary>Se publica por primera vez en este lanzamiento: ni había salido antes ni es una reedición.</summary>
     public bool EsEstreno => PublicadaAntes == null && !EsReedicion;
 
-    /// <summary>Versión acelerada, ralentizada, karaoke o similar (lo mismo que el catálogo descarta al identificar).</summary>
+    /// <summary>Versión acelerada, ralentizada, instrumental, karaoke o similar (ver <see cref="NovedadesDeezer.VersionAlterada"/>).</summary>
     public bool EsVersionAlterada => NovedadesDeezer.VersionAlterada.IsMatch(Titulo) || NovedadesDeezer.VersionAlterada.IsMatch(Lanzamiento.Titulo);
 
     /// <summary>
@@ -98,8 +98,12 @@ public sealed record ResultadoNovedades(IReadOnlyList<PistaNovedad> Pistas, IRea
 /// de Spotify con credenciales de aplicación ya no da el contenido de las listas (ver
 /// <see cref="PlaylistProvider"/>), y no se depende de ella.
 ///
-/// LÍMITE CONOCIDO: «/artist/{id}/albums» solo trae los lanzamientos en los que el artista figura como
-/// principal. Una colaboración en la que es invitado («feat.») en el single de otro no aparece.
+/// LÍMITE CONOCIDO: «/artist/{id}/albums» trae los lanzamientos en los que el artista figura como
+/// principal; una colaboración en la que es invitado («feat.») en el single de otro casi nunca aparece.
+/// MEDIDO con 200 artistas y 90 días: de 19 canciones que nombran como invitado («feat.», «with») a uno
+/// de los artistas consultados, 15 solo salieron por la página del artista principal. Sí aparecen los
+/// lanzamientos firmados a medias (138 de 837 canciones de artistas confirmados tenían otro artista
+/// principal: dúos, remezclas de otros con el artista acreditado).
 ///
 /// MEDIDO antes de construirlo (octubre de 2026):
 ///   · La búsqueda de artista devuelve homónimos, y no siempre el bueno primero: «bad bunny» da primero un
@@ -146,11 +150,16 @@ public sealed class NovedadesDeezer
     internal static readonly Regex Reedicion = new(@"\b(remaster(?:ed)?|remasterizad[oa]|anniversary|aniversario|reissue|reedici[oó]n)\b", IC);
 
     /// <summary>
-    /// Versiones que no son la canción para pinchar: aceleradas, ralentizadas, karaoke, homenajes. Las
-    /// mismas palabras con que el catálogo las descarta al identificar (<see cref="DeezerProvider.BadRe"/>),
-    /// sin las de reedición, que van aparte.
+    /// Versiones que no son la canción para pinchar: aceleradas, ralentizadas, karaoke, homenajes,
+    /// instrumentales y acapellas. Parte de las palabras con que el catálogo las descarta al identificar
+    /// (<see cref="DeezerProvider.BadRe"/>), sin las de reedición, que van aparte, y con las formas que
+    /// usan los lanzamientos recientes. MEDIDO en 934 canciones de 200 artistas (90 días): con solo
+    /// «slowed» y «sped up» se marcaban 2; se escapaban «[SUPERSLOWED]», «[ULTRASLOWED]», «(Slow Remix)»,
+    /// «(Ultra Slow Remix)», «(Speed Remix)», «SLOW VERSION» y 6 instrumentales. Ahora son 14, y «Slow
+    /// Burn» (un título) no se marca.
     /// </summary>
-    internal static readonly Regex VersionAlterada = new(@"\b(sped\s*up|speed\s*up|slowed|nightcore|reverb|8d\s*audio|karaoke|tribute|made\s+famous|cover\s+version)\b", IC);
+    internal static readonly Regex VersionAlterada = new(
+        @"\b(?:sped\s*up|speed\s*up|speed\s+remix|(?:super|ultra)?\s*slowed|(?:ultra\s+|super\s+)?slow\s+(?:remix|version)|nightcore|reverb|8d\s*audio|karaoke|tribute|made\s+famous|cover\s+version|instrumental|a\s*capp?ella)\b", IC);
 
     private readonly ApiClient _api;
 
@@ -621,7 +630,7 @@ public sealed class NovedadesDeezer
                             guardado = almacen.Buscar(a.Clave);   // con la exclusión que tuviera
                             leidos = (id.Artista?.Id ?? 0, id.Lanzamientos);
                             if (guardarCada > 0 && Interlocked.Increment(ref identificados) % guardarCada == 0)
-                                alGuardar?.Invoke(almacen.Guardar());
+                                Guardar(almacen, alGuardar);
                         }
                     }
 
@@ -709,8 +718,20 @@ public sealed class NovedadesDeezer
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { cancelada = true; }
         }
 
-        alGuardar?.Invoke(almacen.Guardar());
+        Guardar(almacen, alGuardar);
         return new ResultadoNovedades(unidas, consultas.Where(c => c != null).Select(c => c!).ToList(),
                                       lanzamientos.Count, sinLeer, cancelada, reloj.Elapsed);
+    }
+
+    /// <summary>
+    /// Guarda el almacén y avisa del resultado. Guardar va aparte a propósito: escrito como
+    /// «alGuardar?.Invoke(almacen.Guardar())», sin nadie que escuchara no se guardaba nada, porque el
+    /// operador «?.» se salta también los argumentos. MEDIDO al repetir una búsqueda de 100 artistas:
+    /// volvía a identificarlos a todos (210 catálogos pedidos de nuevo en vez de 100).
+    /// </summary>
+    private static void Guardar(AlmacenArtistasDeezer almacen, Action<string>? alGuardar)
+    {
+        var error = almacen.Guardar();
+        alGuardar?.Invoke(error);
     }
 }
