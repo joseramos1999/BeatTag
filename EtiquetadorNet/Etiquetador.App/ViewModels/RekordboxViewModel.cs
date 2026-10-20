@@ -195,20 +195,26 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         set
         {
             var antes = _recalculo.Visible;
+            if (value && !antes)
+            {
+                // Si se ha vuelto a exportar la colección desde rekordbox al mismo archivo, se lee la
+                // nueva (y con ella se rehace el cruce, aunque la biblioteca también haya cambiado).
+                var ruta = _engine.Config.RekordboxXml ?? "";
+                if (_coleccion != null && !IsBusy && ruta.Length > 0 && File.Exists(ruta) && File.GetLastWriteTimeUtc(ruta) != _leidaEn)
+                    _ = AbrirAsync(ruta);
+            }
             _recalculo.CambiarVisible(value);
-            if (!value || antes) return;
             // Lo que se exportaría depende de otras páginas (la lista abierta en Tendencias, las
             // colecciones): se recuenta cada vez que se vuelve aquí, sin leer nada de la red.
-            ActualizarResumenExportacion();
-            // Si se ha vuelto a exportar la colección desde rekordbox al mismo archivo, se lee la nueva.
-            var ruta = _engine.Config.RekordboxXml ?? "";
-            if (_coleccion != null && !IsBusy && ruta.Length > 0 && File.Exists(ruta) && File.GetLastWriteTimeUtc(ruta) != _leidaEn)
-                _ = AbrirAsync(ruta);
+            if (value && !antes) ActualizarResumenExportacion();
         }
     }
 
     /// <summary>Fecha de modificación del XML cuando se leyó, para notar que se ha vuelto a exportar.</summary>
     private DateTime _leidaEn;
+
+    /// <summary>Se está leyendo el XML: al terminar se cruza, así que no hace falta pedir otro cruce.</summary>
+    private bool _leyendo;
 
     /// <summary>
     /// Al abrir la página: la primera vez se vuelve a leer la última colección abierta; después, si la
@@ -216,7 +222,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
     /// </summary>
     private void AlMostrarse()
     {
-        if (_coleccion != null) { _ = CruzarAsync(); return; }
+        if (_coleccion != null) { if (!_leyendo) _ = CruzarAsync(); return; }
         if (_intentoInicial) return;
         _intentoInicial = true;
         var ruta = _engine.Config.RekordboxXml ?? "";
@@ -232,6 +238,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
     {
         if (IsBusy) return;
         IsBusy = true;
+        _leyendo = true;
         Status = $"Leyendo «{Path.GetFileName(ruta)}»…";
         var reloj = System.Diagnostics.Stopwatch.StartNew();
         try
@@ -265,7 +272,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
             _engine.Logger.Error("rekordbox: no se pudo leer la colección", e);
             return;
         }
-        finally { IsBusy = false; }
+        finally { IsBusy = false; _leyendo = false; }
 
         await CruzarAsync();
     }
