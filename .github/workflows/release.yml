@@ -15,6 +15,11 @@ name: Release
 #   - Se publican las sumas SHA-256 de lo que se adjunta, comprobadas contra las que calculó cada
 #     trabajo al compilar: los binarios no están firmados y es la forma de verificar la descarga.
 #   - La etiqueta tiene que coincidir con AppInfo.Version: de ahí sacan la versión el .exe y el .app.
+#
+# Empuja la etiqueta SOLA, cuando la CI de main ya haya terminado. Visto con la 1.10.0 (octubre de
+# 2026): empujando main y la etiqueta a la vez, la CI y la Release arrancaban dos equipos macOS a
+# la vez y el de la Release, que empieza unos segundos después, se perdía a los 46 minutos en mitad
+# de las pruebas (cinco de cinco), mientras la CI pasaba en 2. Empujada sola, pasó a la primera.
 on:
   push:
     tags: [ 'v*' ]
@@ -66,9 +71,7 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
-      # Restaurar y compilar en pasos propios, como la CI, y probar sin recompilar. Con todo en un
-      # solo «dotnet test», macOS perdía el equipo de GitHub a los 46 minutos en cada Release
-      # (tres de tres en octubre de 2026), mientras la CI, con los pasos separados, pasaba en 2.
+      # Restaurar y compilar en pasos propios, como la CI, y probar sin recompilar.
       - name: Restore
         run: dotnet restore
 
@@ -169,9 +172,7 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
-      # Restaurar y compilar en pasos propios, como la CI, y probar sin recompilar. Con todo en un
-      # solo «dotnet test», macOS perdía el equipo de GitHub a los 46 minutos en cada Release
-      # (tres de tres en octubre de 2026), mientras la CI, con los pasos separados, pasaba en 2.
+      # Restaurar y compilar en pasos propios, como la CI, y probar sin recompilar.
       - name: Restore
         run: dotnet restore
 
