@@ -370,4 +370,260 @@ public class PendientesTests : IDisposable
     [InlineData(12, 5, "12 pendientes · 5 conseguidas")]
     public void El_resumen_cuenta_pendientes_y_conseguidas(int pendientes, int conseguidas, string esperado)
         => Assert.Equal(esperado, PendientesViewModel.TextoResumen(pendientes, conseguidas));
+
+    // =============================================================================================
+    // Pulido de la tanda 3
+    // =============================================================================================
+
+    /// <summary>Una pendiente tachada el lunes con <paramref name="archivo"/>. Devuelve su Id.</summary>
+    private static string Tachada(AlmacenPendientes a, Track archivo, string artista = "Karol G", string titulo = "Provenza")
+    {
+        a.Anadir(new[] { new NuevaPendiente(artista, titulo, "Top") }, Lunes);
+        var id = a.Todas().Single(p => p.Titulo == titulo).Id;
+        Assert.Equal(1, a.MarcarConseguidas(new[] { (id, archivo.FilePath) }, Lunes));
+        return id;
+    }
+
+    // --- «Volver a pendiente» se puede deshacer ---
+
+    // Revisión: pulsado por error sobre una conseguida correcta, la dejaba pendiente para siempre: ese
+    // archivo ya no la tachaba y no había forma de sacarlo de Descartados.
+    [Fact]
+    public void Volver_a_pendiente_se_deshace_con_la_fecha_de_entonces()
+    {
+        var a = Almacen();
+        var buena = Cancion("Karol G - Provenza.mp3");
+        var id = Tachada(a, buena);
+
+        Assert.True(a.VolverAPendiente(id));
+        var p = a.Todas()[0];
+        Assert.False(p.EstaConseguida);
+        Assert.Equal(new[] { buena.FilePath }, p.Descartados);
+        Assert.Equal(Lunes, p.ConseguidaAntes);
+
+        var (archivo, tachada) = a.RecuperarDescartado(id, ruta => ruta == buena.FilePath);
+        Assert.Equal(buena.FilePath, archivo);
+        Assert.True(tachada);
+        p = a.Todas()[0];
+        Assert.Equal(Lunes, p.Conseguida);          // la de entonces, no la de hoy
+        Assert.Equal(buena.FilePath, p.Archivo);
+        Assert.Empty(p.Descartados);
+        Assert.Null(p.ConseguidaAntes);
+    }
+
+    // Si el archivo ya no está en la biblioteca, deja de estar descartado y el próximo cruce decide.
+    [Fact]
+    public void Recuperar_un_descartado_que_no_esta_en_la_biblioteca_la_deja_pendiente()
+    {
+        var a = Almacen();
+        var falsa = Cancion("Karol G - Provenza (Tech House Remix).mp3");
+        var id = Tachada(a, falsa);
+        a.VolverAPendiente(id);
+
+        var (archivo, tachada) = a.RecuperarDescartado(id, _ => false);
+        Assert.Equal(falsa.FilePath, archivo);
+        Assert.False(tachada);
+        Assert.False(a.Todas()[0].EstaConseguida);
+        Assert.Empty(a.Todas()[0].Descartados);
+
+        // Ese archivo vuelve a contar: si reaparece en la biblioteca, la tacha.
+        Assert.Equal(falsa.FilePath, Assert.Single(Cruzar(a, falsa).Conseguidas).Ruta);
+        // Sin descartados no hay nada que deshacer.
+        Assert.Equal(("", false), a.RecuperarDescartado(id, _ => true));
+        Assert.Equal(("", false), a.RecuperarDescartado("no-existe", _ => true));
+    }
+
+    // Se deshace del último al primero, y el mismo archivo descartado dos veces está una sola.
+    [Fact]
+    public void Se_deshace_el_ultimo_descartado_y_no_se_repiten()
+    {
+        var a = Almacen();
+        var uno = Cancion("Karol G - Provenza (Remix).mp3");
+        var dos = Cancion("Karol G - Provenza (Edit).mp3");
+        var id = Tachada(a, uno);
+        a.VolverAPendiente(id);
+        a.MarcarConseguidas(new[] { (id, dos.FilePath) }, Lunes.AddDays(2));
+        a.VolverAPendiente(id);
+        a.MarcarConseguidas(new[] { (id, uno.FilePath) }, Lunes.AddDays(3));
+        a.VolverAPendiente(id);
+
+        Assert.Equal(new[] { dos.FilePath, uno.FilePath }, a.Todas()[0].Descartados);
+        Assert.Equal(uno.FilePath, a.RecuperarDescartado(id, _ => true).Archivo);
+        Assert.Equal(Lunes.AddDays(3), a.Todas()[0].Conseguida);
+    }
+
+    [Fact]
+    public void La_fecha_para_deshacer_se_guarda_en_el_archivo()
+    {
+        var a = Almacen();
+        var id = Tachada(a, Cancion("Karol G - Provenza.mp3"));
+        a.VolverAPendiente(id);
+        Assert.Equal("", a.Guardar());
+
+        var b = Almacen();
+        Assert.Equal(Lunes, b.Todas()[0].ConseguidaAntes);
+        Assert.True(b.RecuperarDescartado(id, _ => true).Tachada);
+        Assert.Equal(Lunes, b.Todas()[0].Conseguida);
+    }
+
+    [Theory]
+    [InlineData(0, "Pendiente")]
+    [InlineData(1, "Pendiente (1 descartado)")]
+    [InlineData(3, "Pendiente (3 descartados)")]
+    public void El_estado_dice_si_hay_descartados(int descartados, string esperado)
+    {
+        var p = new Pendiente { Descartados = Enumerable.Range(0, descartados).Select(i => $"x{i}.mp3").ToList() };
+        Assert.Equal(esperado, PendienteFila.TextoEstado(p));
+        Assert.Equal(descartados > 0, new PendienteFila(p).TieneDescartados);
+        p.Conseguida = Lunes;
+        Assert.Equal("Conseguida el 19/10/2026", PendienteFila.TextoEstado(p));
+    }
+
+    [Fact]
+    public void Los_textos_de_volver_a_pendiente_dicen_como_deshacerlo()
+    {
+        Assert.StartsWith("1 canción vuelve a pendientes. El archivo con el que se tachó ya no cuenta para ella.",
+                          PendientesViewModel.TextoVueltaAPendiente(1));
+        Assert.StartsWith("3 canciones vuelven a pendientes.", PendientesViewModel.TextoVueltaAPendiente(3));
+        Assert.Contains("«Volver a contar el archivo descartado»", PendientesViewModel.TextoVueltaAPendiente(2));
+
+        Assert.Equal("El archivo descartado vuelve a contar y la canción vuelve a estar conseguida.", PendientesViewModel.TextoRecuperados(1, 1));
+        Assert.Equal("3 archivos descartados vuelven a contar; 1 canción vuelve a estar conseguida.", PendientesViewModel.TextoRecuperados(3, 1));
+        Assert.Equal("3 archivos descartados vuelven a contar; 2 canciones vuelven a estar conseguidas.", PendientesViewModel.TextoRecuperados(3, 2));
+        Assert.StartsWith("El archivo descartado vuelve a contar: si está", PendientesViewModel.TextoRecuperados(1, 0));
+        Assert.StartsWith("2 archivos descartados vuelven a contar: si están", PendientesViewModel.TextoRecuperados(2, 0));
+    }
+
+    // --- Un descartado que BeatTag renombra sigue descartado ---
+
+    // Revisión: el descarte se compara por ruta; si Enriquecer renombraba después el remix descartado,
+    // volvía a tachar la canción con su nombre nuevo.
+    [Fact]
+    public void Un_descartado_renombrado_sigue_descartado()
+    {
+        var a = Almacen();
+        var falsa = Cancion("karol g - provenza (tech house remix).mp3");
+        var id = Tachada(a, falsa);
+        a.VolverAPendiente(id);
+
+        var renombrada = Cancion("Karol G - Provenza (Tech House Remix) [Extended].mp3");
+        var biblioteca = new HashSet<string>(new[] { renombrada.FilePath }, StringComparer.OrdinalIgnoreCase);
+        var renombres = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [falsa.FilePath] = renombrada.FilePath };
+
+        // Sin seguir el renombrado, el mismo remix con su nombre nuevo volvía a tacharla.
+        Assert.Single(Cruzar(a, renombrada).Conseguidas);
+        Assert.Equal(new[] { falsa.FilePath }, CrucePendientes.DescartadosFuera(a.Todas(), biblioteca.Contains));
+        var cambios = CrucePendientes.SeguirDescartados(a.Todas(), renombres, biblioteca.Contains);
+        Assert.Equal((id, falsa.FilePath, renombrada.FilePath), Assert.Single(cambios));
+        Assert.Equal(1, a.CambiarDescartados(cambios));
+
+        Assert.Equal(new[] { renombrada.FilePath }, a.Todas()[0].Descartados);
+        Assert.True(Cruzar(a, renombrada).Vacio);
+        Assert.Empty(CrucePendientes.DescartadosFuera(a.Todas(), biblioteca.Contains));
+        // Y «Volver a contar el archivo descartado» deshace con el nombre nuevo.
+        Assert.Equal(renombrada.FilePath, a.RecuperarDescartado(id, biblioteca.Contains).Archivo);
+    }
+
+    [Fact]
+    public void Solo_se_sigue_un_descartado_que_salio_de_la_biblioteca_hacia_ella()
+    {
+        var a = Almacen();
+        var falsa = Cancion("Karol G - Provenza (Remix).mp3");
+        var id = Tachada(a, falsa);
+        a.VolverAPendiente(id);
+        var otra = Cancion("Karol G - Provenza (Remix) (1).mp3");
+        var renombres = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [falsa.FilePath] = otra.FilePath };
+
+        // Sigue en la biblioteca con su nombre: no se toca.
+        Assert.Empty(CrucePendientes.SeguirDescartados(a.Todas(), renombres, r => r == falsa.FilePath || r == otra.FilePath));
+        // La ruta nueva tampoco está: no puede tacharla, no hace falta seguirla.
+        Assert.Empty(CrucePendientes.SeguirDescartados(a.Todas(), renombres, _ => false));
+        Assert.Empty(CrucePendientes.SeguirDescartados(a.Todas(), new Dictionary<string, string>(), _ => true));
+
+        // Si la ruta nueva ya estaba descartada, la vieja sobra.
+        a.MarcarConseguidas(new[] { (id, otra.FilePath) }, Lunes);
+        a.VolverAPendiente(id);
+        Assert.Equal(1, a.CambiarDescartados(new[] { (id, falsa.FilePath, otra.FilePath) }));
+        Assert.Equal(new[] { otra.FilePath }, a.Todas()[0].Descartados);
+        Assert.Equal(0, a.CambiarDescartados(new[] { (id, falsa.FilePath, otra.FilePath) }));
+    }
+
+    // --- interfaz-10: una conseguida cuyo archivo se envía a la papelera vuelve a pendiente ---
+
+    [Fact]
+    public void Una_conseguida_cuyo_archivo_ya_no_existe_vuelve_a_pendiente()
+    {
+        var a = Almacen();
+        var tema = Cancion("Karol G - Provenza.mp3");
+        var id = Tachada(a, tema);
+        var otra = Cancion("Otro - Tema.mp3");
+
+        // Enviada a la papelera desde Biblioteca o el Asistente: sale de la biblioteca y ya no existe.
+        var indice = IndiceBiblioteca.Construir(new[] { otra });
+        var cambios = CrucePendientes.Calcular(a.Todas(), indice.Buscar, r => r == otra.FilePath, sinArchivo: r => r == tema.FilePath);
+        Assert.False(cambios.Vacio);
+        Assert.Equal((id, tema.FilePath), Assert.Single(cambios.SinArchivo));
+        Assert.Equal(1, a.Reabrir(cambios.SinArchivo));
+
+        var p = a.Todas()[0];
+        Assert.False(p.EstaConseguida);
+        Assert.Equal("", p.Archivo);
+        Assert.Empty(p.Descartados);   // no era una copia equivocada: si vuelve de la papelera, la tacha
+        Assert.Equal(tema.FilePath, Assert.Single(Cruzar(a, tema).Conseguidas).Ruta);
+    }
+
+    [Fact]
+    public void Una_conseguida_no_se_destacha_si_su_archivo_existe_o_hay_otra_copia()
+    {
+        var a = Almacen();
+        var tema = Cancion("Karol G - Provenza.mp3");
+        var id = Tachada(a, tema);
+
+        // Carpeta desmarcada en Biblioteca o disco desconectado: el archivo no consta como desaparecido.
+        var vacia = IndiceBiblioteca.Construir(Array.Empty<Track>());
+        Assert.True(CrucePendientes.Calcular(a.Todas(), vacia.Buscar, _ => false, sinArchivo: _ => false).Vacio);
+        Assert.True(CrucePendientes.Calcular(a.Todas(), vacia.Buscar, _ => false).Vacio);
+
+        // «Sustituir» con otra extensión: hay otra copia, la sigue en vez de destacharse.
+        var nueva = Cancion("Karol G - Provenza.aiff");
+        var conNueva = IndiceBiblioteca.Construir(new[] { nueva });
+        var cambios = CrucePendientes.Calcular(a.Todas(), conNueva.Buscar, r => r == nueva.FilePath, sinArchivo: _ => true);
+        Assert.Empty(cambios.SinArchivo);
+        Assert.Equal((id, nueva.FilePath), Assert.Single(cambios.Movidas));
+
+        // Si entre el cruce y el resultado ya se tachó con otro archivo, el resultado no la destacha.
+        a.CambiarArchivos(cambios.Movidas);
+        Assert.Equal(0, a.Reabrir(new[] { (id, tema.FilePath) }));
+        Assert.True(a.Todas()[0].EstaConseguida);
+    }
+
+    [Fact]
+    public void Un_archivo_solo_ha_desaparecido_si_su_carpeta_sigue_ahi()
+    {
+        var carpeta = Path.Combine(_dir, "musica");
+        Directory.CreateDirectory(carpeta);
+        var archivo = Path.Combine(carpeta, "tema.mp3");
+        File.WriteAllText(archivo, "x");
+
+        Assert.False(CrucePendientes.ArchivoDesaparecido(archivo));
+        File.Delete(archivo);
+        Assert.True(CrucePendientes.ArchivoDesaparecido(archivo));
+        // Sin la carpeta puede ser un disco desconectado: no se da por perdido.
+        Assert.False(CrucePendientes.ArchivoDesaparecido(Path.Combine(_dir, "no-montado", "tema.mp3")));
+        Assert.False(CrucePendientes.ArchivoDesaparecido(""));
+    }
+
+    // --- El menú de una sola canción actúa sobre la fila pulsada ---
+
+    [Fact]
+    public void Una_opcion_de_una_cancion_actua_sobre_la_fila_pulsada()
+    {
+        var elegidas = new[] { "a", "b", "c" };
+        Assert.Equal("c", Etiquetador.App.Views.AccionesLista.FilaParaUnaCancion("c", "a", elegidas));
+        // La pulsada ya no está elegida (se cambió la selección después): manda la elegida.
+        Assert.Equal("a", Etiquetador.App.Views.AccionesLista.FilaParaUnaCancion("z", "a", elegidas));
+        Assert.Equal("a", Etiquetador.App.Views.AccionesLista.FilaParaUnaCancion(null, "a", elegidas));
+        Assert.Equal("b", Etiquetador.App.Views.AccionesLista.FilaParaUnaCancion<string>(null, null, new[] { "b" }));
+        Assert.Null(Etiquetador.App.Views.AccionesLista.FilaParaUnaCancion<string>(null, null, Array.Empty<string>()));
+    }
 }

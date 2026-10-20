@@ -15,8 +15,13 @@ public partial class PlaylistView : UserControl
 
     private void Grid_DoubleTapped(object? sender, TappedEventArgs e) => GridBehaviors.AutoFitOnHeaderDoubleTap(sender, e);
 
-    // Clic derecho: selecciona la fila bajo el puntero para que el menú actúe sobre ella.
-    private void Grid_PointerPressed(object? sender, PointerPressedEventArgs e) => TeclaEnergia.SeleccionarConClicDerecho(sender, e);
+    // Clic derecho: selecciona la fila bajo el puntero sin perder una selección de varias (para «Añadir a
+    // pendientes»), y las opciones de una sola canción del menú actúan sobre la fila pulsada.
+    private void Grid_PointerPressed(object? sender, PointerPressedEventArgs e)
+        => AccionesLista.ClicEnTabla(sender, e, DataContext as ListaFrenteBibliotecaViewModel);
+
+    private void Grid_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+        => AccionesLista.SeleccionCambiada(sender, DataContext as ListaFrenteBibliotecaViewModel);
 
     // Intro en el cuadro del enlace hace lo mismo que el botón: pegar y pulsar Intro es lo natural.
     private void Enlace_KeyDown(object? sender, KeyEventArgs e)

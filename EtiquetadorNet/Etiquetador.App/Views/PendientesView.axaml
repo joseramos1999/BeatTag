@@ -11,7 +11,7 @@
         <StackPanel DockPanel.Dock="Top" Spacing="6">
             <TextBlock Classes="titulo" Text="Pendientes" />
             <TextBlock Classes="desc"
-                       Text="Las canciones que te faltan y quieres conseguir. Se añaden desde Tendencias y Playlists con «Añadir a pendientes» y se tachan solas cuando aparecen en la biblioteca: al escanear, al pasar canciones desde la Bandeja de entrada o al cambiar las carpetas. Una acapella o un mashup no cuentan como tener la canción." />
+                       Text="Las canciones que faltan en la biblioteca y quieres conseguir. Se añaden desde Tendencias y Playlists con «Añadir a pendientes» y se tachan solas cuando aparecen en la biblioteca: al escanear, al pasar canciones desde la Bandeja de entrada o al cambiar las carpetas. Una acapella o un mashup no cuentan como la canción. Si el archivo con el que se tachó una canción se envía a la papelera y no hay otra copia, vuelve a pendiente." />
         </StackPanel>
 
         <!-- ============================ LISTAS QUE SIGUES ============================ -->
@@ -28,7 +28,7 @@
                     <Button Content="Cancelar" Command="{Binding CancelarActualizacionCommand}" IsVisible="{Binding Actualizando}" />
                     <Button Content="Añadir a pendientes las nuevas que faltan" Click="AnadirNuevas_Click" IsEnabled="{Binding NoActualizando}"
                             Background="#0D9488" Foreground="White" FontWeight="SemiBold"
-                            ToolTip.Tip="Las canciones nuevas que no tienes, de las listas elegidas en la tabla (o de todas, si no hay ninguna elegida). Antes se vuelve a mirar la biblioteca." />
+                            ToolTip.Tip="Las canciones nuevas que no están en la biblioteca, de las listas elegidas en la tabla (o de todas, si no hay ninguna elegida). Antes se vuelve a mirar la biblioteca." />
                     <Button Content="Dejar de seguir" Click="DejarDeSeguir_Click" IsEnabled="{Binding NoActualizando}"
                             ToolTip.Tip="Deja de seguir las listas elegidas. No toca las canciones que ya estén en pendientes." />
                     <TextBlock Text="{Binding ResumenListas}" VerticalAlignment="Center" Opacity="0.8" />
@@ -43,7 +43,7 @@
                         <DataGridTextColumn Header="Tipo" Binding="{Binding Tipo}" Width="140" MinWidth="90" />
                         <DataGridTextColumn Header="Revisada" Binding="{Binding Revisada}" Width="130" MinWidth="90" />
                         <DataGridTextColumn Header="Nuevas" Binding="{Binding Nuevas}" Width="130" MinWidth="80" />
-                        <DataGridTextColumn Header="Te faltan" Binding="{Binding TeFaltan}" Width="80" MinWidth="60" />
+                        <DataGridTextColumn Header="Faltan" Binding="{Binding Faltan}" Width="80" MinWidth="60" />
                         <DataGridTextColumn Header="Aviso" Binding="{Binding Aviso}" Width="*" MinWidth="120" />
                     </DataGrid.Columns>
                 </DataGrid>
@@ -63,7 +63,7 @@
                 <Button Content="Exportar…" Click="Exportar_Click"
                         ToolTip.Tip="Guarda las canciones que se ven ahora (con el filtro aplicado) en texto, una «Artista - Título» por línea, o en CSV con todas las columnas." />
                 <Button Content="Volver a pendiente" Click="VolverAPendiente_Click"
-                        ToolTip.Tip="Para una conseguida que no es la canción (un remix con otro nombre, otra canción con el mismo título): vuelve a pendiente y ese archivo ya no la tachará." />
+                        ToolTip.Tip="Para una conseguida que no es la canción (un remix con otro nombre, otra canción con el mismo título): vuelve a pendiente y ese archivo ya no la tachará. Se deshace con «Volver a contar el archivo descartado», en el menú del botón derecho." />
                 <Button Content="Quitar" Click="Quitar_Click"
                         ToolTip.Tip="Quita de la lista las canciones elegidas. No toca ningún archivo." />
                 <Button Content="Quitar las conseguidas" Click="QuitarConseguidas_Click"
@@ -88,6 +88,8 @@
                     <MenuItem Header="Abrir carpeta contenedora" Click="AbrirCarpeta_Click" />
                     <Separator />
                     <MenuItem Header="Volver a pendiente" Click="VolverAPendiente_Click" />
+                    <MenuItem Header="Volver a contar el archivo descartado" Click="RecuperarDescartado_Click"
+                              ToolTip.Tip="Deshace «Volver a pendiente»: el último archivo descartado vuelve a contar y, si sigue en la biblioteca, la canción vuelve a estar conseguida con su fecha de entonces." />
                     <MenuItem Header="Quitar" Click="Quitar_Click" />
                 </ContextMenu>
             </DataGrid.ContextMenu>

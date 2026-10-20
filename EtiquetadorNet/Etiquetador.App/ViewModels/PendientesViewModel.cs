@@ -30,7 +30,25 @@ public sealed class PendienteFila
     public string Titulo => P.Titulo;
     public string Origen => P.Origen;
     public bool Conseguida => P.EstaConseguida;
-    public string Estado => P.Conseguida is { } f ? "Conseguida el " + f.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) : "Pendiente";
+    public string Estado => TextoEstado(P);
+
+    /// <summary>
+    /// Hay algún archivo descartado con «Volver a pendiente» que puede volver a contar. Se dice en la
+    /// columna Estado para que deshacerlo no dependa de recordar a cuál se le hizo.
+    /// </summary>
+    public bool TieneDescartados => P.Descartados.Count > 0;
+
+    /// <summary>«Conseguida el 12/10/2026», «Pendiente» o «Pendiente (1 descartado)».</summary>
+    internal static string TextoEstado(Pendiente p)
+    {
+        if (p.Conseguida is { } f) return "Conseguida el " + f.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+        return p.Descartados.Count switch
+        {
+            0 => "Pendiente",
+            1 => "Pendiente (1 descartado)",
+            var n => $"Pendiente ({n} descartados)",
+        };
+    }
 
     /// <summary>Para ordenar la columna Estado: primero las pendientes, después por fecha.</summary>
     public DateTime EstadoOrden => P.Conseguida ?? DateTime.MinValue;
@@ -73,13 +91,18 @@ public sealed class ListaSeguidaFila
 
     public string Revisada => L.Revisada?.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture) ?? "";
 
-    /// <summary>«3 desde 12/10». Hasta que no se revisa un día distinto del de la primera lectura, no hay con qué comparar.</summary>
+    /// <summary>
+    /// «3 desde 12/10». Hasta que no se revisa un día distinto del de la lectura anterior no hay con qué
+    /// comparar, y eso llega con la próxima revisión hecha otro día, que no tiene por qué ser mañana:
+    /// una lista seguida hace una semana y no revisada desde entonces tampoco tiene referencia.
+    /// </summary>
     public string Nuevas => L.Referencia == null
-        ? "A partir de mañana"
+        ? "Al revisarla otro día"
         : $"{L.Nuevas.Count} desde {L.Referencia.Fecha.ToString("dd/MM", CultureInfo.InvariantCulture)}";
 
+    /// <summary>Las nuevas que no estaban en la biblioteca cuando se revisó la lista.</summary>
     public int NuevasQueFaltan => L.Nuevas.Count(n => !n.LaTienes);
-    public string TeFaltan => L.Referencia == null ? "" : NuevasQueFaltan.ToString(CultureInfo.InvariantCulture);
+    public string Faltan => L.Referencia == null ? "" : NuevasQueFaltan.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>El error de la última revisión o, si fue bien, por qué la lectura puede estar incompleta.</summary>
     public string Aviso => Error.Length > 0 ? Error : L.Aviso;
@@ -280,7 +303,45 @@ public partial class PendientesViewModel : ViewModelBase, IEstadoPagina
         var conseguidas = filas.Where(f => f.Conseguida).ToList();
         if (conseguidas.Count == 0) { Status = "Elige alguna canción conseguida: las pendientes ya lo están."; return; }
         var r = _seguimiento.VolverAPendiente(conseguidas.Select(f => f.Id));
-        DecirError((r.Hechas == 1 ? "1 canción vuelve" : $"{r.Hechas} canciones vuelven") + " a pendientes. El archivo con el que se tacharon ya no cuenta para ellas.", r.Error);
+        DecirError(TextoVueltaAPendiente(r.Hechas), r.Error);
+    }
+
+    /// <summary>Lo que se dice tras «Volver a pendiente», con cómo deshacerlo.</summary>
+    internal static string TextoVueltaAPendiente(int n)
+        => (n == 1 ? "1 canción vuelve a pendientes. El archivo con el que se tachó ya no cuenta para ella."
+                   : $"{n} canciones vuelven a pendientes. El archivo con el que se tachó cada una ya no cuenta para ella.")
+         + " Para deshacerlo, usa «Volver a contar el archivo descartado».";
+
+    /// <summary>
+    /// Deshace «Volver a pendiente» en las elegidas: el último archivo descartado de cada una vuelve a
+    /// contar y, si sigue en la biblioteca, la tacha otra vez con la fecha de entonces.
+    /// </summary>
+    public async Task RecuperarDescartadosAsync(IReadOnlyList<PendienteFila> filas)
+    {
+        var conDescartes = filas.Where(f => f.TieneDescartados).ToList();
+        if (conDescartes.Count == 0)
+        {
+            Status = "Elige alguna canción con un archivo descartado: lo indica la columna Estado («Pendiente (1 descartado)»).";
+            return;
+        }
+        var r = await _seguimiento.RecuperarDescartadosAsync(conDescartes.Select(f => f.Id).ToList());
+        DecirError(TextoRecuperados(r.Hechas, r.Otras), r.Error);
+    }
+
+    /// <summary>«2 archivos descartados vuelven a contar; 1 canción se ha vuelto a tachar.»</summary>
+    internal static string TextoRecuperados(int recuperados, int tachadas)
+    {
+        var texto = recuperados == 1 ? "El archivo descartado vuelve a contar" : $"{recuperados} archivos descartados vuelven a contar";
+        texto += tachadas switch
+        {
+            0 => recuperados == 1
+                ? ": si está o vuelve a estar en la biblioteca, tachará su canción."
+                : ": si están o vuelven a estar en la biblioteca, tacharán sus canciones.",
+            1 when recuperados == 1 => " y la canción vuelve a estar conseguida.",
+            1 => "; 1 canción vuelve a estar conseguida.",
+            var n => $"; {n} canciones vuelven a estar conseguidas.",
+        };
+        return texto;
     }
 
     /// <summary>Abre en el navegador la búsqueda de la canción elegida en el pool configurado en Ajustes.</summary>
@@ -321,7 +382,7 @@ public partial class PendientesViewModel : ViewModelBase, IEstadoPagina
             // El CSV, con la marca de UTF-8 al principio: sin ella, Excel lee mal los acentos y las eñes.
             File.WriteAllText(destino, csv ? ExportacionPendientes.Csv(pendientes) : ExportacionPendientes.Texto(pendientes),
                               new UTF8Encoding(encoderShouldEmitUTF8Identifier: csv));
-            Status = $"{pendientes.Count} canciones exportadas a {Path.GetFileName(destino)}.";
+            Status = (pendientes.Count == 1 ? "1 canción exportada" : $"{pendientes.Count} canciones exportadas") + $" a {Path.GetFileName(destino)}.";
             return "";
         }
         catch (Exception e)
@@ -342,6 +403,7 @@ public partial class PendientesViewModel : ViewModelBase, IEstadoPagina
     {
         if (Actualizando) return;
         if (Listas.Count == 0) { Status = "No sigues ninguna lista. Se siguen desde Tendencias o Playlists con «Seguir esta lista»."; return; }
+        if (MotivoSinBiblioteca(_engine.Library.IsScanned, _engine.Library.Tracks.Count) is { Length: > 0 } motivo) { Status = motivo; return; }
         Actualizando = true;
         _cts = new CancellationTokenSource();
         var avance = new Progress<string>(t => Status = t);
@@ -370,7 +432,7 @@ public partial class PendientesViewModel : ViewModelBase, IEstadoPagina
     [RelayCommand]
     private void CancelarActualizacion() => _cts?.Cancel();
 
-    /// <summary>«4 listas revisadas: 7 canciones nuevas, 5 que no tienes. 1 no se pudo leer.»</summary>
+    /// <summary>«4 listas revisadas: 7 canciones nuevas, 5 no están en la biblioteca. 1 no se pudo leer.»</summary>
     internal static string TextoRevision(IReadOnlyList<SeguimientoListas.Revision> revisiones)
     {
         var bien = revisiones.Where(r => r.Error.Length == 0).ToList();
@@ -379,41 +441,72 @@ public partial class PendientesViewModel : ViewModelBase, IEstadoPagina
         var faltan = bien.Sum(r => r.NuevasQueFaltan);
         var texto = (bien.Count == 1 ? "1 lista revisada" : $"{bien.Count} listas revisadas")
                   + (nuevas == 0 ? ": ninguna canción nueva" : nuevas == 1 ? ": 1 canción nueva" : $": {nuevas} canciones nuevas")
-                  + (nuevas == 0 ? "" : faltan == 0 ? ", y ya las tienes todas" : faltan == 1 ? ", 1 que no tienes" : $", {faltan} que no tienes")
+                  + (nuevas == 0 ? ""
+                     : faltan == 0 ? (nuevas == 1 ? ", ya en la biblioteca" : ", todas ya en la biblioteca")
+                     : faltan == 1 ? ", 1 no está en la biblioteca"
+                     : $", {faltan} no están en la biblioteca")
                   + ".";
         if (mal > 0) texto += mal == 1 ? " 1 no se pudo leer: mira la columna Aviso." : $" {mal} no se pudieron leer: mira la columna Aviso.";
-        if (faltan > 0) texto += " Puedes añadirlas con «Añadir a pendientes las nuevas que faltan».";
+        if (faltan > 0) texto += faltan == 1
+            ? " Se puede añadir con «Añadir a pendientes las nuevas que faltan»."
+            : " Se pueden añadir con «Añadir a pendientes las nuevas que faltan».";
         return texto;
     }
 
     /// <summary>
-    /// Añade a pendientes las canciones nuevas que no tienes de las listas elegidas (o de todas, si no
-    /// hay ninguna elegida). Se vuelve a mirar la biblioteca: lo conseguido desde la revisión no entra.
+    /// Por qué no se puede saber qué canciones faltan, o "" si se puede. Sin la biblioteca escaneada
+    /// (o vacía), todo saldría como que falta: «Añadir a pendientes las nuevas que faltan» las añadía
+    /// todas, «Actualizar todas» las contaba en la columna Faltan y, al terminar el escaneo, se tachaban
+    /// de golpe como «Conseguida el» día de hoy, una fecha que no es la real.
+    /// </summary>
+    internal static string MotivoSinBiblioteca(bool escaneada, int canciones)
+        => !escaneada ? "Primero escanea la biblioteca en la página Biblioteca: sin ella no se puede saber qué canciones faltan."
+         : canciones == 0 ? "La biblioteca está vacía: añade en la página Biblioteca las carpetas de tu música para saber qué canciones faltan."
+         : "";
+
+    /// <summary>
+    /// Añade a pendientes las canciones nuevas que no están en la biblioteca, de las listas elegidas (o
+    /// de todas, si no hay ninguna elegida). Se vuelve a mirar la biblioteca: lo conseguido desde la
+    /// revisión no entra.
     /// </summary>
     public async Task AnadirNuevasAPendientesAsync(IReadOnlyList<ListaSeguidaFila> elegidas)
     {
+        if (MotivoSinBiblioteca(_engine.Library.IsScanned, _engine.Library.Tracks.Count) is { Length: > 0 } motivo) { Status = motivo; return; }
         var listas = (elegidas.Count > 0 ? elegidas : Listas.ToList()).ToList();
         var candidatas = listas.SelectMany(l => l.L.Nuevas.Where(n => !n.LaTienes)
                                                      .Select(n => new NuevaPendiente(n.Artista, n.Titulo, l.Nombre, n.Enlace)))
                                .ToList();
         if (candidatas.Count == 0)
         {
-            Status = listas.Any(l => l.L.Referencia != null)
-                ? "No hay canciones nuevas que te falten en " + (elegidas.Count > 0 ? "las listas elegidas." : "las listas que sigues.")
-                : "Todavía no hay novedades: las listas se comparan a partir del día siguiente a empezar a seguirlas.";
+            Status = TextoSinNuevas(elegidas.Count, listas.Count, listas.Any(l => l.L.Referencia != null));
             return;
         }
 
         var canciones = _engine.Library.Tracks.ToList();
         var indice = (await IndiceBibliotecaCompartido.De(_engine.Library).ObtenerAsync(canciones)).Indice;
         var faltan = await Task.Run(() => candidatas.Where(c => indice.Buscar(c.Artista, c.Titulo).Length == 0).ToList());
-        var yaLasTienes = candidatas.Count - faltan.Count;
-        if (faltan.Count == 0) { Status = "Ya tienes en la biblioteca todas las canciones nuevas de esas listas."; return; }
+        var yaEstan = candidatas.Count - faltan.Count;
+        if (faltan.Count == 0) { Status = "Todas las canciones nuevas de esas listas están ya en la biblioteca."; return; }
 
         var r = _seguimiento.AnadirPendientes(faltan);
         var texto = ListaFrenteBibliotecaViewModel.TextoAlta(r.Hechas, r.Otras);
-        if (yaLasTienes > 0) texto += yaLasTienes == 1 ? " 1 ya la has conseguido desde la revisión." : $" {yaLasTienes} ya las has conseguido desde la revisión.";
+        if (yaEstan > 0) texto += yaEstan == 1 ? " 1 ha llegado a la biblioteca desde la revisión." : $" {yaEstan} han llegado a la biblioteca desde la revisión.";
         DecirError(texto, r.Error);
+    }
+
+    /// <summary>
+    /// Por qué «Añadir a pendientes las nuevas que faltan» no añade nada: no hay nuevas que falten o,
+    /// si ninguna lista tiene todavía referencia, aún no hay con qué comparar.
+    /// </summary>
+    /// <param name="elegidas">Listas elegidas en la tabla (0: se miraron todas).</param>
+    /// <param name="listas">Listas que se miraron.</param>
+    internal static string TextoSinNuevas(int elegidas, int listas, bool algunaConReferencia)
+    {
+        if (algunaConReferencia)
+            return (elegidas == 1 ? "La lista elegida no tiene" : elegidas > 1 ? "Las listas elegidas no tienen" : "Las listas que sigues no tienen")
+                 + " canciones nuevas que falten en la biblioteca.";
+        return "Todavía no hay novedades: cada lista se compara con su revisión de un día anterior, y "
+             + (listas == 1 ? "esta aún no se ha revisado otro día." : "estas aún no se han revisado otro día.");
     }
 
     /// <summary>Deja de seguir las elegidas (ya confirmado en la vista).</summary>
