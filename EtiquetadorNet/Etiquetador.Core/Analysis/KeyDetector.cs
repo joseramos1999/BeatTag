@@ -136,7 +136,7 @@ public sealed record MusicalKey(int PitchClass, bool IsMinor, double Confidence)
 ///     en la muestra nueva, 87 de 300; en prueba y validación, 75 % en las de tonalidad mayor y 84 % en
 ///     las de menor, que son el 83 % de la biblioteca medida). Queda anotado para el día que
 ///     se quiera ofrecer como propuesta para las canciones sin tonalidad: en la biblioteca medida solo
-///     39 de 13.590 no la traen, porque los programas de DJ la ponen al analizar, y con un detector
+///     36 de 13.590 no la traen, porque los programas de DJ la ponen al analizar, y con un detector
 ///     mejor que este.
 ///   · Coste: 1,0 s por canción (mediana; 1,6 s el percentil 90), decodificándola entera, con 2 hilos.
 /// Como referencia, por debajo de un 70-75 % exacto una tonalidad propuesta no aporta frente a la que
