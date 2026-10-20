@@ -141,6 +141,49 @@ public class RekordboxExportacionTests : IDisposable
         Assert.Equal("7", (string?)lista.Element("TRACK")!.Attribute("Key"));
     }
 
+    // Name es el TÍTULO en rekordbox: con el título de la etiqueta (de la biblioteca), no entra el nombre
+    // del archivo con el artista delante. Si solo se movió de carpeta, se respeta el que tenía.
+    [Fact]
+    public void Al_reparar_un_renombrado_se_usa_el_titulo_de_la_etiqueta()
+    {
+        var vieja = Path.Combine(_dir, "pista01.mp3");
+        var nueva = Archivo("Bad Bunny - Titi Me Pregunto.mp3");
+        var movidaAntes = Path.Combine(_dir, "Antes", "Quieta.mp3");
+        var movida = Archivo(Path.Combine("Despues", "Quieta.mp3"));
+        var origen = Path.Combine(_dir, "collection.xml");
+        var destino = Path.Combine(_dir, "reparada.xml");
+        File.WriteAllText(origen, ColeccionCon(("7", vieja, "pista01"), ("8", movidaAntes, "Quieta (Edit)")));
+
+        var r = RekordboxRelocator.Repair(origen, destino, new Dictionary<string, string> { [vieja] = nueva, [movidaAntes] = movida },
+                                          tituloDe: ruta => ComparadorRutas.Instancia.Equals(ruta, nueva) ? "Tití Me Preguntó" : "Otro título");
+
+        Assert.Equal(2, r.Reparadas);
+        var pistas = XDocument.Load(destino).Root!.Element("COLLECTION")!.Elements("TRACK").ToList();
+        Assert.Equal("Tití Me Preguntó", (string?)pistas.Single(t => (string?)t.Attribute("TrackID") == "7").Attribute("Name"));
+        Assert.Equal("Quieta (Edit)", (string?)pistas.Single(t => (string?)t.Attribute("TrackID") == "8").Attribute("Name"));
+    }
+
+    // Antes de exportar encima de un archivo se mira qué es: una exportación anterior de BeatTag se
+    // sustituye sin más; la colección de rekordbox (o cualquier otra cosa) pide confirmación.
+    [Fact]
+    public void Se_distingue_una_exportacion_de_BeatTag_de_la_coleccion()
+    {
+        var nuestra = Path.Combine(_dir, "BeatTag.xml");
+        Assert.True(ExportadorRekordbox.Escribir(nuestra, new[] { new ListaParaRekordbox("", "L", new[] { Path.Combine(_dir, "uno.mp3") }) }, Datos).Ok);
+        var coleccion = Path.Combine(_dir, "collection.xml");
+        File.WriteAllText(coleccion, ColeccionCon(("1", Path.Combine(_dir, "a.mp3"), "a")));
+        var otro = Archivo("notas.xml", "<notas/>");
+        var roto = Archivo("roto.xml", "esto no es XML");
+
+        Assert.Equal(DestinoExportacion.DeBeatTag, ExportadorRekordbox.QueHayEn(nuestra));
+        Assert.Equal(DestinoExportacion.Otro, ExportadorRekordbox.QueHayEn(coleccion));
+        Assert.Equal(DestinoExportacion.Otro, ExportadorRekordbox.QueHayEn(otro));
+        Assert.Equal(DestinoExportacion.Otro, ExportadorRekordbox.QueHayEn(roto));
+        Assert.Equal(DestinoExportacion.NoExiste, ExportadorRekordbox.QueHayEn(Path.Combine(_dir, "nuevo.xml")));
+        // Y lo que escribe BeatTag lo reconoce la página como exportación, no como colección.
+        Assert.StartsWith(ExportadorRekordbox.CarpetaRaiz + " ", LectorRekordbox.Leer(nuestra).Producto);
+    }
+
     [Fact]
     public void No_se_puede_guardar_encima_de_la_exportada()
     {

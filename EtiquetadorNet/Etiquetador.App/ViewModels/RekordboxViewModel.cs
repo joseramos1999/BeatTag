@@ -286,7 +286,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         if (c.Producto.Length > 0) partes.Add(c.Producto);
         partes.Add($"exportada el {exportada.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)} ({cuando})");
         partes.Add(Cuenta(c.Pistas.Count, "pista", "pistas"));
-        if (c.SinArchivo > 0) partes.Add(Cuenta(c.SinArchivo, "de streaming", "de streaming"));
+        if (c.SinArchivo > 0) partes.Add(Cuenta(c.SinArchivo, "pista de streaming", "pistas de streaming"));
         return string.Join(" · ", partes);
     }
 
@@ -437,9 +437,6 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         Sumar(ComoReparar.RenombradaPorBeatTag, "renombrada o movida por BeatTag", "renombradas o movidas por BeatTag");
         Sumar(ComoReparar.MismoNombreYTamano, "encontrada por nombre y tamaño", "encontradas por nombre y tamaño");
         Sumar(ComoReparar.MismoNombreYDuracion, "encontrada por nombre y duración", "encontradas por nombre y duración");
-        var texto = reparables == 0
-            ? (rotas.Count == 1 ? "La entrada rota no se puede reparar desde aquí." : "Ninguna de las entradas rotas se puede reparar desde aquí.")
-            : $"Se pueden reparar {reparables:N0} de {rotas.Count:N0}: {string.Join(", ", detalle)}.";
 
         var resto = new List<string>();
         void Contar(ComoReparar como, string singular, string plural)
@@ -452,6 +449,11 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         Contar(ComoReparar.MismoDestino, "comparte archivo con otra entrada", "comparten archivo con otras entradas");
         Contar(ComoReparar.DiscoNoConectado, "está en un disco no conectado", "están en discos no conectados");
         Contar(ComoReparar.SinEncontrar, "no se encuentra en la biblioteca", "no se encuentran en la biblioteca");
+
+        if (reparables == 0)
+            return (rotas.Count == 1 ? "La entrada rota no se puede reparar desde aquí: " : $"Ninguna de las {rotas.Count:N0} entradas rotas se puede reparar desde aquí: ")
+                 + string.Join(", ", resto) + ".";
+        var texto = $"Se pueden reparar {reparables:N0} de {rotas.Count:N0}: {string.Join(", ", detalle)}.";
         if (resto.Count > 0) texto += " De las demás, " + string.Join(", ", resto) + ".";
         return texto;
     }
@@ -485,7 +487,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         Status = err.Length > 0
             ? "No se pudo guardar la lista: " + err
             : $"Lista guardada con {Cuenta(filas.Count, "canción", "canciones")}: {Path.GetFileName(destino)}."
-              + (t == Tabla.Faltan ? " En rekordbox, arrástrala a la colección o impórtala como lista de reproducción para añadir esas canciones." : "");
+              + (t == Tabla.Faltan ? " En rekordbox, impórtala como lista de reproducción (Archivo → Importar → Importar lista de reproducción) para añadir esas canciones a la colección." : "");
         return err;
     }
 
@@ -619,9 +621,9 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
                 listas.AddRange(PendientesConseguidas(SeguimientoListas.De(_engine).Pendientes.Todas(), canciones));
 
             ct.ThrowIfCancellationRequested();
-            listas = SinRepetidas(listas);
             var porRuta = new Dictionary<string, Track>(ComparadorRutas.Instancia);
             foreach (var t in canciones) porRuta.TryAdd(t.FilePath, t);
+            listas = SinRepetidas(SoloDeLaBiblioteca(listas, porRuta));
             var locations = LocationsConocidas();
 
             Status = "Escribiendo el XML para rekordbox…";
@@ -648,6 +650,14 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
             _ctsExportar = null;
         }
     }
+
+    /// <summary>
+    /// Cada lista, solo con los archivos que siguen en la biblioteca. La lista abierta en Tendencias o
+    /// el orden del Asistente se cruzaron cuando se abrieron: si desde entonces se envió un archivo a
+    /// la papelera o se renombró, en rekordbox entraría como una pista perdida.
+    /// </summary>
+    internal static List<ListaParaRekordbox> SoloDeLaBiblioteca(IEnumerable<ListaParaRekordbox> listas, IReadOnlyDictionary<string, Track> porRuta)
+        => listas.Select(l => l with { Rutas = l.Rutas.Where(porRuta.ContainsKey).ToList() }).ToList();
 
     /// <summary>
     /// La colección exportada de rekordbox que se ha abierto aquí no se sustituye nunca por las listas:
