@@ -26,7 +26,8 @@
                 <Button Content="Buscar novedades" Command="{Binding BuscarCommand}" IsEnabled="{Binding PuedeBuscar}"
                         Background="#7C3AED" Foreground="White" FontWeight="SemiBold" Margin="8,0,0,0"
                         ToolTip.Tip="Consulta en Deezer los lanzamientos de cada artista (álbumes, EP y singles) y lee las canciones de los publicados en el plazo elegido. Va en segundo plano: mientras tanto se puede seguir trabajando en otras páginas." />
-                <Button Content="Cancelar" Command="{Binding CancelCommand}" IsEnabled="{Binding Buscando}" />
+                <Button Content="Cancelar" Command="{Binding CancelCommand}" IsEnabled="{Binding PuedeCancelar}"
+                        ToolTip.Tip="Detiene la búsqueda o la copia a una carpeta que esté en marcha." />
                 <ProgressBar Minimum="0" Maximum="100" Value="{Binding Avance}" Width="200" Height="8" VerticalAlignment="Center"
                              IsVisible="{Binding Buscando}" />
             </WrapPanel>

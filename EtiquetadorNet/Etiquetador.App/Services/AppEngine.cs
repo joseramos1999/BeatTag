@@ -879,7 +879,7 @@ public sealed class AppEngine
     }
 
     /// <summary>El historial no se pudo ni abrir: no se ha tocado nada.</summary>
-    private static string SinHistorial(string error, Logger? log)
+    internal static string SinHistorial(string error, Logger? log)
     {
         var texto = $"No se ha tocado ningún archivo: no se pudo crear el historial para deshacer ({error}). " +
                     "Revisa que la carpeta de datos tenga espacio libre y permiso de escritura.";
@@ -888,7 +888,7 @@ public sealed class AppEngine
     }
 
     /// <summary>El historial dejó de poder escribirse a mitad: se para en ese archivo.</summary>
-    private static string Parada(string ruta, string error, Logger? log)
+    internal static string Parada(string ruta, string error, Logger? log)
     {
         var texto = $"Se ha detenido en «{Path.GetFileName(ruta)}»: no se pudo anotar en el historial para deshacer ({error}). " +
                     "Ese archivo y los siguientes se han quedado como estaban; lo anterior sí se puede deshacer. " +
@@ -1403,13 +1403,28 @@ public sealed class AppEngine
     private readonly object _cerrojoEspectro = new();
     private EspectroScanner? _espectro;
 
+    /// <summary>
+    /// Solo para cargar la caché: que dos peticiones a la vez no la lean dos veces. Va aparte de
+    /// <see cref="_cerrojoEspectro"/> porque la carga (leer y deserializar de 1,5 a 3 MB) tarda, y ese
+    /// otro cerrojo lo toman SeguirEspectro y EspectroCargado, a los que llama el Editor y Volumen desde
+    /// el hilo de la interfaz: con un solo cerrojo, un seguimiento que llegara justo durante la carga
+    /// dejaba la ventana esperando a que terminase.
+    /// </summary>
+    private readonly object _cerrojoCargaEspectro = new();
+
     /// <summary>Medidas del espectro (calidad real) con su caché. Se carga al pedirla por primera vez.</summary>
     public EspectroScanner Espectro
     {
         get
         {
-            lock (_cerrojoEspectro)
-                return _espectro ??= new EspectroScanner(EspectroScanner.RutaCache(Paths), Logger);
+            if (EspectroCargado is { } ya) return ya;
+            lock (_cerrojoCargaEspectro)
+            {
+                if (EspectroCargado is { } otraYa) return otraYa;   // la cargó otro mientras se esperaba
+                var cargada = new EspectroScanner(EspectroScanner.RutaCache(Paths), Logger);   // fuera de _cerrojoEspectro
+                lock (_cerrojoEspectro) _espectro = cargada;
+                return cargada;
+            }
         }
     }
 

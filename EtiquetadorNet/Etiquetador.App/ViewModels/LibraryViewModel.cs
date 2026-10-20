@@ -123,15 +123,16 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
             var canciones = _store.Tracks.Select(t => (t.FilePath, t.FileName)).ToList();
             var r = await Task.Run(() =>
             {
-                var res = ImportarBpmYTonalidad(xmlPath, canciones, overwrite, engine.Paths.NuevoManifiesto(),
-                                                (ruta, sello) => engine.SeguirArchivo(ruta, ruta, sello));
+                var res = ImportarConHistorial(xmlPath, canciones, overwrite, engine.Paths.NuevoManifiesto(),
+                                               (ruta, sello) => engine.SeguirArchivo(ruta, ruta, sello));
                 if (res.Actualizadas > 0) engine.GuardarCachesLigeras();
                 return res;
             });
 
             foreach (var f in r.Fallos) engine.Logger.Log("rekordbox: " + f, LogKind.Err);
+            if (r.Detenido.Length > 0) engine.Logger.Err("rekordbox: " + r.Detenido);
             await _store.ScanAsync();
-            Status = TextoImportacionRekordbox(r.Entradas, r.Coincidencias, r.Actualizadas, r.Fallos.Count);
+            Status = TextoImportacionRekordbox(r.Entradas, r.Coincidencias, r.Actualizadas, r.Fallos.Count, r.Detenido);
         }
         // Un XML cortado o que no es la colección se dice tal cual (antes salía «0 coincidencias»).
         catch (RekordboxXmlException e) { Status = "No se ha importado nada de rekordbox: " + e.Message; }
@@ -140,70 +141,94 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
     }
 
     /// <summary>Lo que dejó la importación de BPM y tonalidad: para el texto de estado y el registro.</summary>
-    internal sealed record ImportacionRekordbox(int Entradas, int Coincidencias, int Actualizadas, List<string> Fallos);
+    /// <param name="Detenido">Por qué se paró sin poder anotar en el historial para deshacer, o "".</param>
+    internal sealed record ImportacionRekordbox(int Entradas, int Coincidencias, int Actualizadas, List<string> Fallos, string Detenido = "");
+
+    /// <summary>
+    /// <see cref="ImportarBpmYTonalidad"/> con el historial de verdad: un manifiesto nuevo de esta
+    /// importación, abierto UNA vez de principio a fin (<see cref="ManifiestoDeshacer"/>). Si no llega a
+    /// anotarse nada, el propio manifiesto se borra al cerrarlo y no ensucia el historial.
+    /// </summary>
+    internal static ImportacionRekordbox ImportarConHistorial(string xmlPath, IReadOnlyList<(string Ruta, string Nombre)> canciones,
+                                                              bool overwrite, string manifiesto, Action<string, SelloArchivo> seguir)
+    {
+        using var historial = ManifiestoDeshacer.Abrir(manifiesto, out var error);
+        return ImportarBpmYTonalidad(xmlPath, canciones, overwrite, historial, error, seguir);
+    }
 
     /// <summary>
     /// Escribe el BPM y la tonalidad de la colección de rekordbox en las canciones de la biblioteca que
     /// casan por ruta. Fuera del hilo de la interfaz.
     ///
-    /// Cada canción escrita se anota en <paramref name="manifiesto"/> en cuanto se escribe (un cierre a
-    /// mitad de una importación de miles no deja cambios sin deshacer), y se avisa a
-    /// <paramref name="seguir"/> con el sello tomado JUSTO ANTES de escribir: el audio no cambia, así
-    /// que la calidad real, las huellas, la sonoridad y las identificaciones por audio (de pago) deben
-    /// seguir valiendo. Sin eso caducaban por la fecha: importar 9.213 canciones obligaba a volver a
-    /// medirlas todas y a mandar otra vez al servicio de pago las que AcoustID no reconoce.
+    /// Con las mismas garantías que el resto de escrituras en lote (hallazgo M10): cada cambio se anota
+    /// en <paramref name="historial"/> ANTES de guardar el archivo; si el historial no se pudo abrir
+    /// (null, con el motivo en <paramref name="errorHistorial"/>) no se toca ninguna canción, y si deja
+    /// de poder escribirse a mitad, se para ahí. Antes se guardaba primero y se anotaba después con un
+    /// StreamWriter propio: con la carpeta de datos llena a mitad de una importación de miles, el bucle
+    /// seguía escribiendo BPM y tonalidad en cientos de canciones que ya no se podían deshacer, y cada
+    /// una salía contada a la vez como actualizada y como fallo.
+    ///
+    /// A <paramref name="seguir"/> se le avisa con el sello tomado JUSTO ANTES de escribir: el audio no
+    /// cambia, así que la calidad real, las huellas, la sonoridad y las identificaciones por audio (de
+    /// pago) deben seguir valiendo. Sin eso caducaban por la fecha: importar 9.213 canciones obligaba a
+    /// volver a medirlas todas y a mandar otra vez al servicio de pago las que AcoustID no reconoce.
     /// </summary>
     internal static ImportacionRekordbox ImportarBpmYTonalidad(string xmlPath, IReadOnlyList<(string Ruta, string Nombre)> canciones,
-                                                               bool overwrite, string manifiesto, Action<string, SelloArchivo> seguir)
+                                                               bool overwrite, IHistorialDeshacer? historial, string errorHistorial,
+                                                               Action<string, SelloArchivo> seguir)
     {
         // Las rutas de un Mac pueden llegar con los acentos en otra forma Unicode (ComparadorRutas).
         var byPath = new Dictionary<string, RekordboxEntry>(ComparadorRutas.Instancia);
         foreach (var e in RekordboxImporter.Parse(xmlPath)) byPath[e.FilePath] = e;
-        int m = 0, u = 0;
         var fails = new List<string>();
-        System.IO.StreamWriter? anotar = null;
-        try
+        var aImportar = canciones.Where(c => byPath.ContainsKey(c.Ruta)).ToList();
+        // Sin historial no se toca nada. Si no hay ninguna coincidencia tampoco había nada que tocar, y
+        // el aviso que importa entonces es el de las rutas (TextoImportacionRekordbox).
+        if (historial == null)
+            return new ImportacionRekordbox(byPath.Count, aImportar.Count, 0, fails,
+                                            aImportar.Count > 0 ? AppEngine.SinHistorial(errorHistorial, null) : "");
+
+        int u = 0;
+        foreach (var (ruta, nombre) in aImportar)
         {
-            foreach (var (ruta, nombre) in canciones)
+            var e = byPath[ruta];
+            try
             {
-                if (!byPath.TryGetValue(ruta, out var e)) continue;
-                m++;
-                // El manifiesto se abre antes de la primera escritura: si no se puede, no se escribe nada
-                // (la excepción sale de aquí y la importación se da por fallida entera).
-                if (anotar == null)
+                SelloArchivo? sello = null;
+                using (var f = Tagging.AbrirParaEscribir(ruta))   // TagLib no escribe AIFF-C: así el motivo sale en español
                 {
-                    System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(manifiesto)!);
-                    anotar = new System.IO.StreamWriter(manifiesto, append: true) { AutoFlush = true };
+                    var cambios = TagEditor.PonerBpmKey(f, RekordboxImporter.ParseBpm(e.Bpm), e.Key, overwrite);
+                    if (cambios.Count == 0) continue;
+                    // Antes de guardar: si el historial ya no se puede escribir, esta canción y las
+                    // siguientes se quedan como estaban, y lo anterior sigue pudiéndose deshacer.
+                    var anotado = historial.Anotar(new UndoRecord
+                    {
+                        OrigPath = ruta, FinalPath = ruta, Renamed = false, Fields = cambios, Origen = nameof(TipoEjecucion.Rekordbox),
+                    });
+                    if (anotado.Length > 0)
+                        return new ImportacionRekordbox(byPath.Count, aImportar.Count, u, fails, AppEngine.Parada(ruta, anotado, null));
+
+                    sello = SelloArchivo.De(ruta);
+                    f.Save();
                 }
-                try
-                {
-                    var sello = SelloArchivo.De(ruta);
-                    var log = TagEditor.ImportBpmKey(ruta, RekordboxImporter.ParseBpm(e.Bpm), e.Key, overwrite);
-                    if (log.Count == 0) continue;
-                    u++;
-                    var rec = new UndoRecord { OrigPath = ruta, FinalPath = ruta, Renamed = false, Fields = log, Origen = nameof(TipoEjecucion.Rekordbox) };
-                    anotar.WriteLine(System.Text.Json.JsonSerializer.Serialize(rec));
-                    // Las cachés anotan sus propios fallos: no convierten en fallo una escritura hecha.
-                    try { seguir(ruta, sello); } catch { }
-                }
-                catch (Exception ex) { fails.Add(nombre + ": " + ex.Message); }
+                u++;
+                // Con el archivo ya cerrado, que es cuando su fecha queda al día. Las cachés anotan sus
+                // propios fallos: no convierten en fallo una escritura hecha.
+                try { if (sello is { } s) seguir(ruta, s); } catch { }
             }
+            catch (Exception ex) { fails.Add(nombre + ": " + ex.Message); }
         }
-        finally
-        {
-            anotar?.Dispose();
-            // Sin ningún cambio, un manifiesto vacío solo ensuciaría el historial.
-            if (anotar != null && u == 0) try { System.IO.File.Delete(manifiesto); } catch { }
-        }
-        return new ImportacionRekordbox(byPath.Count, m, u, fails);
+        return new ImportacionRekordbox(byPath.Count, aImportar.Count, u, fails);
     }
 
     /// <summary>
     /// Lo que se dice tras importar BPM y tonalidad de rekordbox (equipo «rekordbox», tanda 4). Con 0
     /// coincidencias se distingue una colección sin pistas de una cuyas rutas no son las de estas
     /// carpetas, y se remite a la página rekordbox, que enseña cuáles faltan y cuáles están rotas.
+    /// <paramref name="detenido"/> es el motivo por el que se paró sin poder anotar para deshacer: va en
+    /// el estado y no solo en el registro, porque a las canciones que quedan les sigue faltando el BPM.
     /// </summary>
-    internal static string TextoImportacionRekordbox(int entradas, int coincidencias, int actualizadas, int fallos)
+    internal static string TextoImportacionRekordbox(int entradas, int coincidencias, int actualizadas, int fallos, string detenido = "")
     {
         if (entradas == 0) return "La colección de rekordbox no trae ninguna pista con archivo en el disco: no hay nada que importar.";
         if (coincidencias == 0)
@@ -214,6 +239,7 @@ public partial class LibraryViewModel : ViewModelBase, IEstadoPagina
         var texto = $"rekordbox: {coincidencias:N0} " + (coincidencias == 1 ? "canción encontrada" : "canciones encontradas")
                   + $" · {actualizadas:N0} " + (actualizadas == 1 ? "actualizada" : "actualizadas");
         if (fallos > 0) texto += $" · {fallos:N0} " + (fallos == 1 ? "fallo" : "fallos") + " (el detalle está en el registro)";
+        if (detenido.Length > 0) texto += " · ⚠ " + detenido.TrimEnd('.');
         return texto + (actualizadas > 0 ? ". Se puede deshacer desde Enriquecer." : ".");
     }
 

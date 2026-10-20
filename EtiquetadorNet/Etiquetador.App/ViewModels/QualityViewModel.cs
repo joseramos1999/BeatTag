@@ -156,18 +156,26 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible, IProg
     }
 
     private void ContarFiltradas()
-        => FiltroInfo = TextoFiltro(!ConsultaTabla.De(Busqueda).Vacia, SoloSospechosos, RowsView.Count, Rows.Count, _medidas.Count > 0);
+        => FiltroInfo = TextoFiltro(!ConsultaTabla.De(Busqueda).Vacia, SoloSospechosos, RowsView.Count, Rows.Count, _medidas.Count > 0,
+                                    _leyendoMedidas);
 
     /// <summary>
     /// «N de M» mientras hay búsqueda o filtro de sospechosos. Con «Solo sospechosos» y nada medido,
     /// la tabla vacía no quiere decir que no haya sospechosos: se dice que hay que analizar antes
-    /// («0 de 15000» se leía como «ninguno»).
+    /// («0 de 15000» se leía como «ninguno»). Mientras se releen las medidas guardadas
+    /// (<paramref name="leyendoMedidas"/>) tampoco hay ninguna a la vista, pero analizar no hace falta:
+    /// con 15.000 archivos en un disco duro esa lectura dura varios segundos, y pedir que se analizara
+    /// lo que ya está medido confundía.
     /// </summary>
-    internal static string TextoFiltro(bool hayBusqueda, bool soloSospechosos, int vistas, int total, bool hayMedidas)
+    internal static string TextoFiltro(bool hayBusqueda, bool soloSospechosos, int vistas, int total, bool hayMedidas,
+                                       bool leyendoMedidas = false)
     {
         if (!hayBusqueda && !soloSospechosos) return "";
         var texto = $"{vistas} de {total}";
-        return soloSospechosos && !hayMedidas ? texto + " · Pulsa «Analizar calidad real» para medir los archivos." : texto;
+        if (!soloSospechosos || hayMedidas) return texto;
+        return texto + (leyendoMedidas
+            ? " · Leyendo las medidas guardadas…"
+            : " · Pulsa «Analizar calidad real» para medir los archivos.");
     }
 
     protected override void Recompute()
@@ -271,6 +279,7 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible, IProg
         var cts = _ctsCarga = new CancellationTokenSource();
         var ct = cts.Token;
         var rutas = Rows.Select(r => r.FilePath).ToList();
+        PonerLeyendoMedidas(true);
         Dictionary<string, MedidaEspectro> medidas;
         try
         {
@@ -286,12 +295,35 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible, IProg
                 return d;
             }, ct);
         }
+        // Abandonada por otra lectura más reciente: esa sigue leyendo y dirá cuándo termina.
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+        catch
+        {
+            // El fallo llega al registro (SinEsperar.Lanzar); el pie deja de decir que se está leyendo.
+            if (ReferenceEquals(_ctsCarga, cts)) PonerLeyendoMedidas(false);
+            throw;
+        }
         if (ct.IsCancellationRequested) return;
         _medidas = medidas;
+        _leyendoMedidas = false;   // AplicarFiltro vuelve a contar ya con las medidas puestas
         foreach (var r in Rows) r.PonerMedida(medidas.TryGetValue(r.FilePath, out var m) ? m : null);
         AplicarFiltro();
         ActualizarEstado();
+    }
+
+    /// <summary>
+    /// Se están releyendo las medidas guardadas (<see cref="CargarMedidasAsync"/>). Mientras tanto, con
+    /// «Solo sospechosos» el pie lo dice en vez de pedir que se analice: tras arrancar o cuando cambia la
+    /// biblioteca, la tabla se rehace sin medidas y se quedaba en «0 de N · Pulsa «Analizar calidad
+    /// real»…» durante los segundos que tarda la lectura, aunque todo estuviera medido.
+    /// </summary>
+    private bool _leyendoMedidas;
+
+    private void PonerLeyendoMedidas(bool leyendo)
+    {
+        if (_leyendoMedidas == leyendo) return;
+        _leyendoMedidas = leyendo;
+        ContarFiltradas();
     }
 
     /// <summary>

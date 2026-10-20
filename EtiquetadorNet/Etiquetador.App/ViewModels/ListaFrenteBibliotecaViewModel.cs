@@ -280,11 +280,7 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
             var archivos = tengo.Select(r => (r.FilePath, NombreNumerado(r.Position, ancho, r.FilePath))).ToList();
             var r = await Task.Run(() => CopiarNumeradas(archivos, destino, cts.Token));
 
-            Status = (r.Cancelada ? "Copia cancelada: " : "")
-                   + $"Copiadas {r.Copiadas} en «{Path.GetFileName(destino)}»"
-                   + (r.Saltadas > 0 ? $" · {r.Saltadas} ya estaban" : "")
-                   + (r.Errores > 0 ? $" · {r.Errores} con error" : "")
-                   + ". La biblioteca original no se modifica.";
+            Status = TextoCopia(r, Path.GetFileName(destino));
             _engine.Logger.Sum($"{Etiqueta}: copiadas {r.Copiadas} a {destino}{(r.Cancelada ? " (cancelada)" : "")}");
         }
         catch (Exception e) { Status = "No se pudo copiar: " + e.Message; }
@@ -301,6 +297,19 @@ public abstract partial class ListaFrenteBibliotecaViewModel : ViewModelBase, IE
 
     /// <summary>Lo que dejó la copia a una carpeta.</summary>
     internal readonly record struct ResultadoCopia(int Copiadas, int Saltadas, int Errores, bool Cancelada);
+
+    /// <summary>
+    /// El estado tras copiar a una carpeta. Detrás de «Copia cancelada:» sigue en minúscula (antes salía
+    /// «Copia cancelada: Copiadas 3…»), y cada cifra concuerda en número con lo que cuenta.
+    /// </summary>
+    internal static string TextoCopia(ResultadoCopia r, string carpeta)
+    {
+        var copiadas = (r.Copiadas == 1 ? "copiada 1" : $"copiadas {r.Copiadas:N0}") + $" en «{carpeta}»";
+        var texto = r.Cancelada ? "Copia cancelada: " + copiadas : char.ToUpperInvariant(copiadas[0]) + copiadas[1..];
+        if (r.Saltadas > 0) texto += r.Saltadas == 1 ? " · 1 ya estaba" : $" · {r.Saltadas:N0} ya estaban";
+        if (r.Errores > 0) texto += $" · {r.Errores:N0} con error";
+        return texto + ". La biblioteca original no se modifica.";
+    }
 
     /// <summary>Sufijo del archivo mientras se copia: solo al terminar toma su nombre definitivo.</summary>
     internal const string SufijoParcial = ".beattag-parcial";

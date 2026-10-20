@@ -106,7 +106,7 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
 
     /// <summary>Se está buscando en Deezer, en segundo plano.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(PuedeBuscar), nameof(PuedeActuar), nameof(PuedeTocarArtista))]
+    [NotifyPropertyChangedFor(nameof(PuedeBuscar), nameof(PuedeActuar), nameof(PuedeTocarArtista), nameof(PuedeCancelar))]
     private bool _buscando;
 
     /// <summary>Avance de la búsqueda, de 0 a 100.</summary>
@@ -134,6 +134,13 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
     /// </summary>
     public bool PuedeActuar => !Buscando && !IsBusy;
 
+    /// <summary>
+    /// «Cancelar» detiene la búsqueda y también la copia a una carpeta (Cancel, en la clase base). Iba
+    /// solo con <see cref="Buscando"/>: mientras se copiaba salía desactivado y, como la copia ocupa la
+    /// página y bloquea las demás, la única forma de detenerla era cerrar la ventana.
+    /// </summary>
+    public bool PuedeCancelar => Buscando || IsBusy;
+
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
@@ -141,6 +148,7 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
         {
             OnPropertyChanged(nameof(PuedeBuscar));
             OnPropertyChanged(nameof(PuedeActuar));
+            OnPropertyChanged(nameof(PuedeCancelar));
         }
     }
 

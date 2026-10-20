@@ -64,6 +64,7 @@ public class RevisionTanda4Tests : IDisposable
         Poner("_cerrojoHuellas", new object());
         Poner("_colaHuellas", Task.CompletedTask);
         Poner("_cerrojoEspectro", new object());
+        Poner("_cerrojoCargaEspectro", new object());
         Poner("_relojPunto", System.Diagnostics.Stopwatch.StartNew());
         if (biblioteca != null) Poner("<Library>k__BackingField", biblioteca);
         motor.EnLaInterfaz = a => a();   // en la aplicación, Dispatcher.UIThread.Post
@@ -127,8 +128,8 @@ public class RevisionTanda4Tests : IDisposable
             """);
         var manifiesto = motor.Paths.NuevoManifiesto();
 
-        var r = LibraryViewModel.ImportarBpmYTonalidad(xml, new[] { (tema, "Tema uno.mp3"), (otra, "Otra.mp3") }, overwrite: true,
-                                                       manifiesto, (ruta, sello) => motor.SeguirArchivo(ruta, ruta, sello));
+        var r = LibraryViewModel.ImportarConHistorial(xml, new[] { (tema, "Tema uno.mp3"), (otra, "Otra.mp3") }, overwrite: true,
+                                                      manifiesto, (ruta, sello) => motor.SeguirArchivo(ruta, ruta, sello));
         motor.GuardarCachesLigeras();
 
         Assert.Equal((1, 1, 1), (r.Entradas, r.Coincidencias, r.Actualizadas));
@@ -151,6 +152,141 @@ public class RevisionTanda4Tests : IDisposable
         Assert.Equal("La única pista de la colección de rekordbox no está en las carpetas de la biblioteca. "
                    + "En la página rekordbox se ve qué falta en cada lado y qué rutas están rotas.",
                      LibraryViewModel.TextoImportacionRekordbox(1, 0, 0, 0));
+    }
+
+    /// <summary>Un historial que deja de poder escribirse en la anotación número <c>fallaEn</c> (el disco, lleno a mitad).</summary>
+    private sealed class HistorialQueFalla : IHistorialDeshacer
+    {
+        private readonly int _fallaEn;
+        private int _llamadas;
+        public readonly List<UndoRecord> Anotados = new();
+        public HistorialQueFalla(int fallaEn) => _fallaEn = fallaEn;
+
+        public string Anotar(UndoRecord registro)
+        {
+            if (++_llamadas >= _fallaEn) return "No hay espacio suficiente en el disco.";
+            Anotados.Add(registro);
+            return "";
+        }
+    }
+
+    /// <summary>Canciones sin BPM ni tonalidad y una colección de rekordbox que trae ambos para todas.</summary>
+    private (string Xml, (string Ruta, string Nombre)[] Canciones) ColeccionDe(int cuantas)
+    {
+        var canciones = Enumerable.Range(1, cuantas).Select(i =>
+        {
+            var ruta = Ruta("Musica", $"Tema {i}.mp3");
+            Mp3Fixture.WriteMinMp3(ruta);
+            return (ruta, Path.GetFileName(ruta));
+        }).ToArray();
+        var pistas = string.Join("\n", canciones.Select((c, i) =>
+            $"""<TRACK TrackID="{i + 1}" Name="Tema {i + 1}" AverageBpm="124.00" Tonality="8A" Location="{RekordboxRelocator.PathToLocation(c.ruta)}"/>"""));
+        var xml = Ruta("coleccion.xml");
+        File.WriteAllText(xml, $"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <DJ_PLAYLISTS Version="1.0.0">
+              <COLLECTION Entries="{cuantas}">
+            {pistas}
+              </COLLECTION>
+            </DJ_PLAYLISTS>
+            """);
+        return (xml, canciones);
+    }
+
+    private static uint BpmDe(string ruta)
+    {
+        using var f = TagLib.File.Create(ruta);
+        return f.Tag.BeatsPerMinute;
+    }
+
+    // datos-2 (segunda revisión): la importación anotaba DESPUÉS de guardar, con un StreamWriter propio,
+    // y si una anotación fallaba seguía escribiendo en las canciones siguientes, que quedaban cambiadas
+    // sin poder deshacerse. Ahora anota antes de guardar y se para en la primera que no puede anotar.
+    [Fact]
+    public void Si_el_historial_deja_de_escribirse_a_mitad_la_importacion_se_para_y_no_toca_ninguna_cancion_mas()
+    {
+        var (xml, canciones) = ColeccionDe(5);
+        var historial = new HistorialQueFalla(fallaEn: 3);
+        var seguidas = new List<string>();
+
+        var r = LibraryViewModel.ImportarBpmYTonalidad(xml, canciones, overwrite: true, historial, "",
+                                                       (ruta, _) => seguidas.Add(ruta));
+
+        // Las dos primeras, escritas y anotadas; la tercera (la que no se pudo anotar) y las siguientes, intactas.
+        Assert.Equal(new uint[] { 124, 124, 0, 0, 0 }, canciones.Select(c => BpmDe(c.Ruta)).ToArray());
+        Assert.Equal(canciones.Take(2).Select(c => c.Ruta), historial.Anotados.Select(a => a.OrigPath));
+        Assert.Equal(canciones.Take(2).Select(c => c.Ruta), seguidas);
+        Assert.Equal((5, 5, 2), (r.Entradas, r.Coincidencias, r.Actualizadas));
+        // Ninguna sale contada a la vez como actualizada y como fallo.
+        Assert.Empty(r.Fallos);
+        Assert.Contains("Se ha detenido en «Tema 3.mp3»", r.Detenido);
+        Assert.Contains("No hay espacio suficiente en el disco.", r.Detenido);
+
+        var estado = LibraryViewModel.TextoImportacionRekordbox(r.Entradas, r.Coincidencias, r.Actualizadas, r.Fallos.Count, r.Detenido);
+        Assert.StartsWith("rekordbox: 5 canciones encontradas · 2 actualizadas · ⚠ Se ha detenido en «Tema 3.mp3»", estado);
+        Assert.Contains("lo anterior sí se puede deshacer", estado);
+        Assert.DoesNotContain("..", estado);
+    }
+
+    // Lo que sí se escribió antes de la parada queda anotado en el manifiesto de verdad y se deshace.
+    [Fact]
+    public void Lo_importado_antes_de_la_parada_se_puede_deshacer()
+    {
+        var (xml, canciones) = ColeccionDe(3);
+        var paths = new AppPaths(Path.GetDirectoryName(Ruta("datos", "x"))!);
+        var manifiesto = paths.NuevoManifiesto();
+        LibraryViewModel.ImportacionRekordbox r;
+        using (var m = ManifiestoDeshacer.Abrir(manifiesto, out var error))
+        {
+            Assert.NotNull(m);
+            // El manifiesto de verdad deja de aceptar anotaciones tras la primera (como si se llenara el disco).
+            var unaYNada = new HistorialTrasN(m!, 1);
+            r = LibraryViewModel.ImportarBpmYTonalidad(xml, canciones, overwrite: true, unaYNada, error, (_, _) => { });
+        }
+
+        Assert.Equal(1, r.Actualizadas);
+        Assert.NotEqual("", r.Detenido);
+        Assert.Equal(1, new UndoEngine(paths).UndoLastRun(manifiesto).Reverted);
+        Assert.All(canciones, c => Assert.Equal(0u, BpmDe(c.Ruta)));
+    }
+
+    /// <summary>Pasa las <c>n</c> primeras anotaciones al historial de verdad y rechaza las demás.</summary>
+    private sealed class HistorialTrasN(IHistorialDeshacer real, int n) : IHistorialDeshacer
+    {
+        private int _hechas;
+        public string Anotar(UndoRecord registro) => _hechas++ < n ? real.Anotar(registro) : "No hay espacio suficiente en el disco.";
+    }
+
+    // Si el historial no se puede ni abrir (carpeta de datos sin permiso o sin espacio), no se toca nada.
+    [Fact]
+    public void Sin_historial_para_deshacer_la_importacion_no_toca_ninguna_cancion()
+    {
+        var (xml, canciones) = ColeccionDe(2);
+        var ocupado = Ruta("soy-un-archivo");
+        File.WriteAllText(ocupado, "x");   // la «carpeta» del manifiesto es un archivo: no se puede crear dentro
+
+        var r = LibraryViewModel.ImportarConHistorial(xml, canciones, overwrite: true, Path.Combine(ocupado, "run.jsonl"), (_, _) => { });
+
+        Assert.All(canciones, c => Assert.Equal(0u, BpmDe(c.Ruta)));
+        Assert.Equal((2, 2, 0), (r.Entradas, r.Coincidencias, r.Actualizadas));
+        Assert.StartsWith("No se ha tocado ningún archivo: no se pudo crear el historial para deshacer", r.Detenido);
+        Assert.Contains("⚠ No se ha tocado ningún archivo",
+                        LibraryViewModel.TextoImportacionRekordbox(r.Entradas, r.Coincidencias, r.Actualizadas, r.Fallos.Count, r.Detenido));
+    }
+
+    // Una importación sin nada que cambiar no deja un manifiesto vacío en el historial.
+    [Fact]
+    public void Una_importacion_sin_cambios_no_deja_manifiesto()
+    {
+        var (xml, canciones) = ColeccionDe(1);
+        var paths = new AppPaths(Path.GetDirectoryName(Ruta("datos", "x"))!);
+        LibraryViewModel.ImportarConHistorial(xml, canciones, overwrite: true, paths.NuevoManifiesto(), (_, _) => { });
+        var segundo = paths.NuevoManifiesto();
+
+        var r = LibraryViewModel.ImportarConHistorial(xml, canciones, overwrite: false, segundo, (_, _) => { });
+
+        Assert.Equal(0, r.Actualizadas);
+        Assert.False(File.Exists(segundo));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -515,5 +651,142 @@ public class RevisionTanda4Tests : IDisposable
         Assert.Equal("12 de 15000", QualityViewModel.TextoFiltro(false, true, 12, 15000, hayMedidas: true));
         Assert.Equal("3 de 15000", QualityViewModel.TextoFiltro(true, false, 3, 15000, hayMedidas: false));
         Assert.Equal("", QualityViewModel.TextoFiltro(false, false, 15000, 15000, hayMedidas: false));
+        // Mientras se releen las medidas guardadas no se pide analizar lo que ya está medido.
+        Assert.Equal("0 de 15000 · Leyendo las medidas guardadas…",
+                     QualityViewModel.TextoFiltro(false, true, 0, 15000, hayMedidas: false, leyendoMedidas: true));
+        Assert.Equal("3 de 15000", QualityViewModel.TextoFiltro(true, false, 3, 15000, hayMedidas: false, leyendoMedidas: true));
+    }
+
+    // =============================================================================================
+    // Segunda revisión de la tanda 4
+    // =============================================================================================
+
+    /// <summary>
+    /// Retiene un cerrojo desde otro hilo hasta que se suelta: hace de «carga de la caché en marcha»
+    /// sin depender de lo que tarde de verdad leer espectro.json.
+    /// </summary>
+    private sealed class CerrojoRetenido : IDisposable
+    {
+        private readonly ManualResetEventSlim _tomado = new(), _soltar = new();
+        private readonly Thread _hilo;
+
+        public CerrojoRetenido(object cerrojo)
+        {
+            _hilo = new Thread(() => { lock (cerrojo) { _tomado.Set(); _soltar.Wait(TimeSpan.FromSeconds(30)); } }) { IsBackground = true };
+            _hilo.Start();
+            Assert.True(_tomado.Wait(TimeSpan.FromSeconds(10)), "no se pudo tomar el cerrojo");
+        }
+
+        public void Dispose()
+        {
+            _soltar.Set();
+            _hilo.Join(TimeSpan.FromSeconds(10));
+            _tomado.Dispose();
+            _soltar.Dispose();
+        }
+    }
+
+    private static object CerrojoDeCarga(AppEngine motor) => Campo(motor, "_cerrojoCargaEspectro")!;
+
+    private static EspectroScanner? EspectroCargado(AppEngine motor)
+        => (EspectroScanner?)typeof(AppEngine).GetProperty("EspectroCargado", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(motor);
+
+    // rendimiento-4: la carga de espectro.json ya no va bajo el cerrojo que toman SeguirEspectro y
+    // EspectroCargado. Un seguimiento del Editor o de Volumen (hilo de la interfaz) que llega mientras
+    // la página Calidad carga la caché vuelve al momento, y se aplica cuando la carga termina.
+    [Fact]
+    public async Task Mientras_se_carga_la_cache_del_espectro_seguir_un_archivo_no_espera_a_la_carga()
+    {
+        var motor = Motor(new Logger());
+        var a = Ruta("Musica", "a.mp3");
+        Mp3Fixture.WriteMinMp3(a);
+        MedidasGuardadas(motor.Paths, a);
+        var b = Ruta("Musica", "b.mp3");
+
+        EspectroScanner? deLaPagina = null;
+        Task carga;
+        using (new CerrojoRetenido(CerrojoDeCarga(motor)))   // la carga, en marcha
+        {
+            carga = Task.Run(() => deLaPagina = motor.Espectro);   // la página Calidad, esperando a esa carga
+            File.Move(a, b);
+            var seguir = Task.Run(() => motor.SeguirArchivo(a, b, default));
+            Assert.Same(seguir, await Task.WhenAny(seguir, Task.Delay(TimeSpan.FromSeconds(5))));   // no esperó a la carga
+            await seguir;
+            Assert.Null(EspectroCargado(motor));                   // tampoco espera: aún no hay nada cargado
+            Assert.False(carga.IsCompleted);
+        }
+
+        Assert.Same(carga, await Task.WhenAny(carga, Task.Delay(TimeSpan.FromSeconds(10))));
+        await carga;
+        motor.GuardarCachesLigeras();   // espera a la cola, donde quedó el seguimiento
+        Assert.Same(deLaPagina, motor.Espectro);   // una sola carga para los dos
+        Assert.NotNull(motor.Espectro.Get(b));
+        Assert.Null(motor.Espectro.Get(a));
+        Assert.NotNull(MedidaEnDisco(motor.Paths, b));
+    }
+
+    // menor-audio_medido-4: con «Solo sospechosos» marcada, mientras se releen las medidas guardadas el
+    // pie lo dice, en lugar de pedir que se analice lo que ya está medido.
+    [Fact]
+    public async Task Con_solo_sospechosos_mientras_se_releen_las_medidas_el_pie_no_pide_analizar()
+    {
+        var musica = Directory.CreateDirectory(Path.Combine(_dir, "Musica")).FullName;
+        var a = Path.Combine(musica, "a.mp3");
+        Mp3Fixture.WriteMinMp3(a);
+        var store = new LibraryStore(new AppConfig { Folders = new() { musica } }, () => { }, new ScanCache(Ruta("scan.json")));
+        var motor = Motor(new Logger(), store);
+        await store.ScanAsync();
+        MedidasGuardadas(motor.Paths, store.Tracks.Single().FilePath);
+        var vm = new QualityViewModel(motor) { SoloSospechosos = true };
+        var rehacer = typeof(QualityViewModel).GetMethod("Recompute", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        using (new CerrojoRetenido(CerrojoDeCarga(motor)))   // la lectura de las medidas tarda
+        {
+            rehacer.Invoke(vm, null);
+            Assert.Equal("0 de 1 · Leyendo las medidas guardadas…", vm.FiltroInfo);
+        }
+
+        var reloj = System.Diagnostics.Stopwatch.StartNew();
+        while (vm.FiltroInfo != "0 de 1" && reloj.Elapsed < TimeSpan.FromSeconds(10)) await Task.Delay(20);
+        Assert.Equal("0 de 1", vm.FiltroInfo);   // medida y coherente: ningún sospechoso, sin pedir que se analice
+        Assert.NotEqual("", vm.Rows.Single().CorteMedido);
+    }
+
+    // interfaz-7: «Cancelar» de Novedades también detiene la copia a una carpeta. Iba con Buscando, que
+    // es false mientras se copia: el botón salía desactivado y la copia bloqueaba la aplicación entera.
+    [Fact]
+    public void En_Novedades_se_puede_cancelar_la_copia_a_una_carpeta()
+    {
+        var motor = Motor(new Logger(), new LibraryStore(new AppConfig(), () => { }, new ScanCache(Ruta("scan.json"))));
+        var vm = new NovedadesViewModel(motor);
+        var avisos = new List<string?>();
+        vm.PropertyChanged += (_, e) => avisos.Add(e.PropertyName);
+        Assert.False(vm.PuedeCancelar);
+
+        vm.IsBusy = true;   // copiando a una carpeta (Buscando sigue en false)
+        Assert.False(vm.Buscando);
+        Assert.True(vm.PuedeCancelar);
+        Assert.Contains(nameof(vm.PuedeCancelar), avisos);
+
+        vm.IsBusy = false;
+        vm.Buscando = true;
+        Assert.True(vm.PuedeCancelar);
+
+        var vista = File.ReadAllText(Path.Combine(Fuentes(), "Views", "NovedadesView.axaml"));
+        Assert.Matches(@"<Button Content=""Cancelar"" Command=""\{Binding CancelCommand\}"" IsEnabled=""\{Binding PuedeCancelar\}""", vista);
+    }
+
+    // interfaz-7: el estado de la copia sigue en minúscula detrás de «Copia cancelada:» y concuerda en número.
+    [Fact]
+    public void El_estado_de_la_copia_a_una_carpeta_se_escribe_bien()
+    {
+        Assert.Equal("Copia cancelada: copiadas 3 en «USB» · 2 ya estaban. La biblioteca original no se modifica.",
+                     ListaFrenteBibliotecaViewModel.TextoCopia(new(3, 2, 0, true), "USB"));
+        Assert.Equal("Copiadas 12 en «USB» · 1 ya estaba · 2 con error. La biblioteca original no se modifica.",
+                     ListaFrenteBibliotecaViewModel.TextoCopia(new(12, 1, 2, false), "USB"));
+        Assert.Equal("Copiada 1 en «USB». La biblioteca original no se modifica.",
+                     ListaFrenteBibliotecaViewModel.TextoCopia(new(1, 0, 0, false), "USB"));
+        Assert.Equal("Copia cancelada: copiada 1 en «USB». La biblioteca original no se modifica.",
+                     ListaFrenteBibliotecaViewModel.TextoCopia(new(1, 0, 0, true), "USB"));
     }
 }

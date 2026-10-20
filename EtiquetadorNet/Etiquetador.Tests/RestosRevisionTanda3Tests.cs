@@ -174,6 +174,7 @@ public class RestosRevisionTanda3Tests : IDisposable
         Poner("_cerrojoHuellas", new object());
         Poner("_colaHuellas", Task.CompletedTask);
         Poner("_cerrojoEspectro", new object());   // la calidad real (P4) también sigue al archivo
+        Poner("_cerrojoCargaEspectro", new object());
         return motor;
     }
 
