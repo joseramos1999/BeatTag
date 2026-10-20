@@ -679,10 +679,22 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
     }
 
     /// <summary>
-    /// Cuántos renombrados anotados se pueden reparar en rekordbox: los que siguen vigentes. Se
-    /// calcula en segundo plano (lee todos los manifiestos y mira los archivos) al abrir Ajustes.
+    /// Cuántos renombrados de BeatTag siguen vigentes en el historial. Se calcula en segundo plano
+    /// (lee todos los manifiestos y mira los archivos) al abrir Ajustes.
     /// </summary>
-    [ObservableProperty] private int _renombradosAnotados;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TextoRenombradosAnotados))]
+    private int _renombradosAnotados;
+
+    /// <summary>
+    /// «1 renombrado anotado por BeatTag» / «N renombrados anotados por BeatTag». Antes decía «N
+    /// renombrados que se pueden reparar» («1 renombrados»), y la página rekordbox usa «se pueden
+    /// reparar» para otra cifra (las entradas rotas reparables de la colección abierta).
+    /// </summary>
+    public string TextoRenombradosAnotados => TextoRenombrados(RenombradosAnotados);
+
+    internal static string TextoRenombrados(int n)
+        => n == 1 ? "1 renombrado anotado por BeatTag" : $"{n:N0} renombrados anotados por BeatTag";
 
     public async Task ActualizarRenombradosAsync()
     {
@@ -743,12 +755,42 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
     /// La reparación de la colección de rekordbox se ha trasladado a la página rekordbox (equipo
     /// «rekordbox», tanda 4), que además de los renombrados de BeatTag encuentra los archivos movidos o
     /// renombrados fuera de BeatTag y no bloquea la ventana mientras copia el XML. Ajustes conserva el
-    /// apartado, con el recuento de renombrados, porque otros avisos de la aplicación remiten aquí.
+    /// acceso, con el recuento de renombrados anotados, para quien la busque donde estaba; los avisos de
+    /// la aplicación ya remiten a la página (<see cref="RekordboxViewModel.DondeSeRepara"/>).
     /// </summary>
     public event Action? AbrirRekordboxPedido;
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(RekordboxDisponible))]
     private void AbrirRekordbox() => AbrirRekordboxPedido?.Invoke();
+
+    /// <summary>
+    /// La página rekordbox se puede abrir ahora. La pone el shell al decidir qué pestañas están
+    /// disponibles: sin biblioteca preparada, o con un proceso en marcha, el salto se deshacía y se
+    /// acababa en Biblioteca (o no pasaba nada) sin explicar por qué.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(AbrirRekordboxCommand))]
+    [NotifyPropertyChangedFor(nameof(AyudaAbrirRekordbox))]
+    private bool _rekordboxDisponible = true;
+
+    /// <summary>Por qué no está disponible la página rekordbox ("" si lo está).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AyudaAbrirRekordbox))]
+    private string _motivoSinRekordbox = "";
+
+    /// <summary>El rótulo emergente del botón, también con el botón desactivado.</summary>
+    public string AyudaAbrirRekordbox => RekordboxDisponible || MotivoSinRekordbox.Length == 0
+        ? "Abre la página rekordbox, donde se comprueba y se repara la colección exportada."
+        : MotivoSinRekordbox;
+
+    /// <summary>Lo llama el shell cada vez que cambia qué pestañas están disponibles.</summary>
+    public void PonerDisponibilidadRekordbox(bool disponible, bool hayProceso)
+    {
+        RekordboxDisponible = disponible;
+        MotivoSinRekordbox = disponible ? ""
+            : hayProceso ? "La página rekordbox estará disponible cuando termine el proceso en marcha."
+            : "La página rekordbox estará disponible cuando la biblioteca esté preparada: añade tus carpetas de música en Biblioteca y pulsa «Escanear».";
+    }
 
     // --- Avisos de la configuración (T9) ---
     //

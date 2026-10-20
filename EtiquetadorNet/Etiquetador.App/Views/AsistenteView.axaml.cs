@@ -246,13 +246,14 @@ public partial class AsistenteView : UserControl
         if (marcadas.Count == 0) { vm.Status = "No hay ninguna propuesta marcada."; return; }
 
         var conAvisos = marcadas.Count(f => f.HayAvisos);
-        var nota = "Solo cambia el nombre del archivo, no sus etiquetas. Si ya existe un archivo con el nombre nuevo, ese no se renombra. "
-                 + "Se puede deshacer desde Enriquecer. Si usas rekordbox, después repara la colección en Ajustes para no perder los cue points.";
-        if (conAvisos > 0) nota = $"⚠ {conAvisos} de ellas tienen avisos: comprueba que las has revisado. " + nota;
+        var nota = AsistenteViewModel.NotaRenombrar;
+        if (conAvisos > 0) nota = (conAvisos == 1 ? "⚠ 1 de ellas tiene avisos: comprueba que la has revisado. " : $"⚠ {conAvisos} de ellas tienen avisos: comprueba que las has revisado. ") + nota;
 
         var ok = await ConfirmDialog.AskAsync(owner,
             "Renombrar con IA",
-            $"Se renombrarán {marcadas.Count} archivos con el nombre propuesto (o el que hayas corregido).",
+            marcadas.Count == 1
+                ? "Se renombrará 1 archivo con el nombre propuesto (o el que hayas corregido)."
+                : $"Se renombrarán {marcadas.Count} archivos con el nombre propuesto (o el que hayas corregido).",
             nota, "Renombrar");
         if (ok) await vm.Renombrar.RenombrarAsync();
     }
@@ -265,14 +266,17 @@ public partial class AsistenteView : UserControl
 
         var deIa = marcadas.Count(f => f.Origen.StartsWith("IA", StringComparison.Ordinal));
         var aMano = marcadas.Count(f => !f.TienePropuesta);
-        var nota = "Solo cambia el nombre del archivo, no sus etiquetas. Si ya existe un archivo con el nombre nuevo, ese no se renombra. "
-                 + "Se puede deshacer desde Enriquecer. Si usas rekordbox, después repara la colección en Ajustes para no perder los cue points.";
-        if (aMano > 0) nota = $"{aMano} los has escrito tú. " + nota;
-        if (deIa > 0) nota = $"⚠ {deIa} vienen de la IA y no de las etiquetas del archivo: comprueba que las has revisado. " + nota;
+        var nota = AsistenteViewModel.NotaRenombrar;
+        if (aMano > 0) nota = (aMano == 1 ? "1 lo has escrito tú. " : $"{aMano} los has escrito tú. ") + nota;
+        if (deIa > 0)
+            nota = (deIa == 1 ? "⚠ 1 viene de la IA y no de las etiquetas del archivo: comprueba que la has revisado. "
+                              : $"⚠ {deIa} vienen de la IA y no de las etiquetas del archivo: comprueba que las has revisado. ") + nota;
 
         var ok = await ConfirmDialog.AskAsync(owner,
             "Completar nombres cortados",
-            $"Se renombrarán {marcadas.Count} archivos con el nombre completo (o el que hayas corregido).",
+            marcadas.Count == 1
+                ? "Se renombrará 1 archivo con el nombre completo (o el que hayas corregido)."
+                : $"Se renombrarán {marcadas.Count} archivos con el nombre completo (o el que hayas corregido).",
             nota, "Completar");
         if (ok) await vm.Completar.RenombrarAsync();
     }

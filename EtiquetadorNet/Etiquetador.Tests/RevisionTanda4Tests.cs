@@ -279,6 +279,80 @@ public class RevisionTanda4Tests : IDisposable
     }
 
     // ---------------------------------------------------------------------------------------------
+    // interfaz-4, -5 y -6: los avisos remiten a la página rekordbox, y Ajustes lo explica
+    // ---------------------------------------------------------------------------------------------
+
+    private static string Fuentes()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Etiquetador.App", "Views", "MainWindow.axaml"))) dir = dir.Parent;
+        Assert.NotNull(dir);
+        return Path.Combine(dir!.FullName, "Etiquetador.App");
+    }
+
+    // La reparación se trasladó de Ajustes a la página rekordbox. Los avisos de Enriquecer, el
+    // historial y el Asistente seguían diciendo «Ajustes → Reparar colección de rekordbox». La Ayuda la
+    // pone al día su propio responsable.
+    [Fact]
+    public void Ningun_aviso_manda_a_reparar_la_coleccion_en_Ajustes()
+    {
+        var restos = Directory.EnumerateFiles(Fuentes(), "*.*", SearchOption.AllDirectories)
+            .Where(f => f.EndsWith(".cs", StringComparison.Ordinal) || f.EndsWith(".axaml", StringComparison.Ordinal))
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                        && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                        && Path.GetFileName(f) != "HelpView.axaml")
+            .Where(f =>
+            {
+                var t = File.ReadAllText(f);
+                return t.Contains("Ajustes → Reparar colección de rekordbox", StringComparison.Ordinal)
+                       || t.Contains("colección en Ajustes", StringComparison.Ordinal)
+                       || t.Contains("«Reparar colección de rekordbox», en Ajustes", StringComparison.Ordinal);
+            })
+            .Select(Path.GetFileName).ToList();
+        Assert.Empty(restos);
+        Assert.EndsWith("en la página rekordbox (pestaña «Rutas rotas»).", AsistenteViewModel.TrasRenombrar);
+        Assert.Contains(RekordboxViewModel.DondeSeRepara, AsistenteViewModel.NotaRenombrar);
+    }
+
+    [Fact]
+    public void La_banda_de_renombrados_de_Enriquecer_concuerda_en_numero()
+    {
+        Assert.StartsWith("Se va a renombrar 1 archivo. Si usas rekordbox", EnrichViewModel.TextoRenombrados(1));
+        Assert.StartsWith("Se van a renombrar 3 archivos. Si usas rekordbox", EnrichViewModel.TextoRenombrados(3));
+        Assert.EndsWith("Puedes devolvérselos después en la página rekordbox (pestaña «Rutas rotas»).", EnrichViewModel.TextoRenombrados(3));
+    }
+
+    [Fact]
+    public void Ajustes_dice_cuantos_renombrados_anota_BeatTag_sin_prometer_que_se_reparen()
+    {
+        Assert.Equal("1 renombrado anotado por BeatTag", SettingsViewModel.TextoRenombrados(1));
+        Assert.Equal("0 renombrados anotados por BeatTag", SettingsViewModel.TextoRenombrados(0));
+        Assert.Matches(@"^7.?412 renombrados anotados por BeatTag$", SettingsViewModel.TextoRenombrados(7412));
+    }
+
+    // Sin biblioteca preparada la página rekordbox no está disponible: el botón de Ajustes saltaba a
+    // ella, el salto se deshacía y se acababa en Biblioteca sin saber por qué.
+    [Fact]
+    public void Reparar_desde_Ajustes_sale_desactivado_y_dice_por_que_cuando_la_pagina_no_esta_disponible()
+    {
+        var ajustes = (SettingsViewModel)RuntimeHelpers.GetUninitializedObject(typeof(SettingsViewModel));
+
+        ajustes.PonerDisponibilidadRekordbox(disponible: false, hayProceso: false);
+        Assert.False(ajustes.AbrirRekordboxCommand.CanExecute(null));
+        Assert.Contains("cuando la biblioteca esté preparada", ajustes.AyudaAbrirRekordbox);
+
+        ajustes.PonerDisponibilidadRekordbox(disponible: false, hayProceso: true);
+        Assert.Contains("cuando termine el proceso en marcha", ajustes.AyudaAbrirRekordbox);
+
+        ajustes.PonerDisponibilidadRekordbox(disponible: true, hayProceso: false);
+        Assert.True(ajustes.AbrirRekordboxCommand.CanExecute(null));
+        Assert.StartsWith("Abre la página rekordbox", ajustes.AyudaAbrirRekordbox);
+
+        var vista = File.ReadAllText(Path.Combine(Fuentes(), "Views", "SettingsView.axaml"));
+        Assert.Matches(@"<Button Content=""Reparar colección de rekordbox""[^>]*ToolTip\.Tip=""\{Binding AyudaAbrirRekordbox\}"" ToolTip\.ShowOnDisabled=""True""", vista);
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // menor-audio_medido-2 y -4: la página Calidad
     // ---------------------------------------------------------------------------------------------
 

@@ -597,6 +597,10 @@ public partial class MainViewModel : ViewModelBase
 
         // La barra lateral lee de aquí: la decisión sigue viviendo en un solo sitio.
         foreach (var p in Paginas) p.Habilitada = (EnabledTabs & (1 << p.Indice)) != 0;
+        // «Reparar colección de rekordbox» de Ajustes salta a esa página: sale desactivado, y dice por
+        // qué, cuando el salto no llegaría a abrirla.
+        if (Settings is { } ajustes)
+            ajustes.PonerDisponibilidadRekordbox((EnabledTabs & (1 << RekordboxTabIndex)) != 0, BusyTabIndex >= 0);
 
         // Si la pestaña abierta acaba de quedarse fuera, devolver a una que sí esté disponible.
         if ((EnabledTabs & (1 << SelectedTabIndex)) == 0)

@@ -132,7 +132,7 @@
         <Border DockPanel.Dock="Top" IsVisible="{Binding HayRenombrados}" Margin="0,0,0,6" Padding="8,6"
                 Background="{DynamicResource AvisoFondo}" BorderBrush="{DynamicResource AvisoBorde}" BorderThickness="1" CornerRadius="4">
             <TextBlock Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap" FontSize="12"
-                       Text="{Binding RenombradosPendientes, StringFormat='Se van a renombrar {0} archivos. Si usas rekordbox, al cambiar el nombre pierde sus cue points y su beatgrid, porque los guarda ligados a la ruta. Puedes devolvérselos después con «Reparar colección de rekordbox», en Ajustes.'}" />
+                       Text="{Binding TextoRenombradosPendientes}" />
         </Border>
 
         <!-- La IA local puede desactivarse sola a mitad de análisis (Ollama parado, modelo sin

@@ -483,7 +483,7 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
         }
 
         var nota = "Un campo que hayas cambiado después a mano no se toca. Lo que se deshaga deja de contar como aplicado y vuelve a proponerse al analizar."
-                 + (renombran > 0 ? " Si usas rekordbox, repara después la colección (Ajustes → Reparar colección de rekordbox)." : "");
+                 + (renombran > 0 ? $" Si usas rekordbox, repara después la colección {RekordboxViewModel.DondeSeRepara}." : "");
 
         // La ejecución entera y sin nada apartado va como «todo»: así también se archivan las
         // líneas que no se dejan leer, igual que con «Deshacer última».

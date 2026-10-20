@@ -109,6 +109,13 @@ public sealed class FilaRota : IFilaConArchivo
 /// </summary>
 public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaVisible
 {
+    /// <summary>
+    /// Dónde se repara la colección tras renombrar, para los avisos de las demás páginas («repara
+    /// después la colección …»). La reparación pasó de Ajustes a esta página en la tanda 4; los avisos
+    /// seguían remitiendo a Ajustes y no concordaban con la Ayuda.
+    /// </summary>
+    public const string DondeSeRepara = "en la página rekordbox (pestaña «Rutas rotas»)";
+
     private readonly AppEngine _engine;
     private readonly Func<IReadOnlyList<ListaParaRekordbox>> _listasAbiertas;
     private readonly RecalculoDiferido _recalculo;
