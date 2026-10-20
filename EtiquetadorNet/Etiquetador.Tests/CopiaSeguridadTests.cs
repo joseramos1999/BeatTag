@@ -53,13 +53,16 @@ public class CopiaSeguridadTests : IDisposable
         Escribir(p.AppliedPath, """["E:\\Musica\\COMERCIAL\\Techno\\Pista.mp3"]""", bom: true);
         Escribir(p.IdentificacionCachePath, """{"E:\\Musica\\COMERCIAL\\House\\Tema.mp3":{"M":638000000000000000,"S":4096,"A":"Artista","T":"Tema"}}""");
         Escribir(AlmacenSustituciones.RutaEn(p.DataDir), "[]");
-        // Un archivo de datos que esta versión no conoce: entra igual (no se queda fuera por olvido).
+        // Correcciones y exclusiones de Novedades: archivo de trabajo conocido.
         Escribir(Path.Combine(p.DataDir, "novedades-artistas.json"), """{"E:\\Musica\\COMERCIAL":"x"}""");
+        // Un archivo de datos que esta versión no conoce: entra igual (no se queda fuera por olvido).
+        Escribir(Path.Combine(p.DataDir, "otra-pestana.json"), "[]");
         // Cachés y el config de la versión PowerShell: no entran.
         Escribir(p.FingerprintCachePath, "{}");
         Escribir(p.ScanCachePath, "{}");
         Escribir(p.AnalysisCachePath, "{}");
         Escribir(p.LoudnessCachePath, "{}");
+        Escribir(p.EspectroCachePath, """{"E:\\Musica\\COMERCIAL\\House\\Tema.mp3":{"M":1,"S":2,"E":1,"C":16000,"T":21000,"V":1}}""");
         Escribir(Path.Combine(p.DataDir, "config.json"), """{"SpotifySecret":"en-claro"}""");
         return p;
     }
@@ -83,11 +86,14 @@ public class CopiaSeguridadTests : IDisposable
         Assert.True(r.Ok, r.Error);
         var e = Entradas(zip);
         Assert.Contains(CopiaSeguridad.NombreManifiesto, e.Keys);
-        foreach (var n in new[] { "config.net.json", "fichas-dj.json", "aplicadas.json", "identificacion.json", "bandeja-sustituidas.json", "novedades-artistas.json" })
+        foreach (var n in new[] { "config.net.json", "fichas-dj.json", "aplicadas.json", "identificacion.json", "bandeja-sustituidas.json",
+                                  "novedades-artistas.json", "otra-pestana.json" })
             Assert.Contains(n, e.Keys);
-        foreach (var n in new[] { "huellas.json", "scan-cache.json", "analysis-cache.json", "sonoridad.json", "config.json" })
+        // La caché de la calidad real (espectro.json) se regenera como las demás: si viajara, restaurar
+        // una copia antigua devolvería medidas viejas y cada análisis haría una copia automática nueva.
+        foreach (var n in new[] { "huellas.json", "scan-cache.json", "analysis-cache.json", "sonoridad.json", "espectro.json", "config.json" })
             Assert.DoesNotContain(n, e.Keys);
-        Assert.Equal(6, r.Archivos);
+        Assert.Equal(7, r.Archivos);
 
         var cfg = JsonNode.Parse(e["config.net.json"])!.AsObject();
         Assert.False(cfg.ContainsKey("SpotifySecretEnc"));
@@ -141,6 +147,7 @@ public class CopiaSeguridadTests : IDisposable
                      AlmacenPendientes.NombreArchivo, AlmacenListasSeguidas.NombreArchivo, MapaGenerosCarpeta.NombreArchivo,
                      Path.GetFileName(AlmacenSustituciones.RutaEn("datos")), "descartadas.json", "aplicadas.json",
                      "marcas-aplicar.json", "ArtistAliases.json", "ArtistsExceptions.json", "identificacion.json", "config.net.json",
+                     Etiquetador.Core.Providers.AlmacenArtistasDeezer.NombreArchivo,
                  })
             Assert.Contains(n, nombres);
         Assert.DoesNotContain(p.ArchivosDeTrabajo(), r => p.FueraDeLaCopia().Contains(r));
@@ -217,6 +224,32 @@ public class CopiaSeguridadTests : IDisposable
         Assert.Equal("No está en la copia: se conserva el actual", filas.Single(f => f.Nombre == "colecciones.json").Accion);
         Assert.Equal("Canciones ya aplicadas en Enriquecer", filas.Single(f => f.Nombre == "aplicadas.json").Descripcion);
         Assert.Equal("No existe", filas.Single(f => f.Nombre == "aplicadas.json").ActualTexto);
+        // Las correcciones de Novedades se nombran: son trabajo hecho a mano, no «otros datos».
+        Assert.Equal("Artistas de Novedades: correcciones y exclusiones", filas.Single(f => f.Nombre == "novedades-artistas.json").Descripcion);
+        Assert.Equal("Otros datos de BeatTag", filas.Single(f => f.Nombre == "otra-pestana.json").Descripcion);
+    }
+
+    // Una copia hecha antes de que espectro.json figurase entre las cachés (70adb45) lo lleva dentro:
+    // al restaurarla no debe sustituir las medidas actuales por las de entonces.
+    [Fact]
+    public void La_cache_de_calidad_real_de_una_copia_antigua_no_se_restaura()
+    {
+        var p = Datos("x");
+        var zip = Path.Combine(_dir, "antigua.zip");
+        using (var a = ZipFile.Open(zip, ZipArchiveMode.Create))
+        {
+            using (var w = new StreamWriter(a.CreateEntry(CopiaSeguridad.NombreManifiesto).Open()))
+                w.Write("""{"Formato":1,"Aplicacion":"BeatTag"}""");
+            foreach (var n in new[] { "fichas-dj.json", "espectro.json" })
+                using (var w = new StreamWriter(a.CreateEntry(n).Open())) w.Write("{}");
+        }
+
+        var c = CopiaSeguridad.Leer(zip, p, out _);
+
+        Assert.NotNull(c);
+        Assert.Equal(new[] { "fichas-dj.json" }, c!.Archivos.Keys);
+        Assert.Equal("espectro.json: es una caché o de otra aplicación", Assert.Single(c.Descartados));
+        Assert.Contains(p.EspectroCachePath, p.FueraDeLaCopia());
     }
 
     [Fact]
@@ -414,7 +447,7 @@ public class CopiaSeguridadTests : IDisposable
 
         var res = CopiaSeguridad.ProponerRaices(carpetas, rutas, existen.Contains,
                                                 carpetasActuales: new[] { "/Volumes/USB/COMERCIAL/House" },
-                                                volumenes: new[] { "/Volumes/USB", "/Users/dj" });
+                                                volumenes: new[] { "/Volumes/USB", "/Users/dj" }, EstiloRuta.Windows);
 
         var comercial = res.Single(r => r.Origen == @"E:\Musica\COMERCIAL");
         Assert.Equal("/Volumes/USB/COMERCIAL", comercial.Propuesta);   // por la biblioteca de aquí
@@ -434,6 +467,64 @@ public class CopiaSeguridadTests : IDisposable
                                                 r => string.Equals(r, @"F:\Musica", StringComparison.OrdinalIgnoreCase),
                                                 Array.Empty<string>(), new[] { @"F:\" });
         Assert.Equal(@"F:\Musica", res.Single().Propuesta);
+    }
+
+    // MEDIDO con la colección de rekordbox en Documentos y la Bandeja en Descargas: la ruta de la
+    // colección (un ajuste que no es música) se juntaba con la Bandeja por compartir «C:\Users», la raíz
+    // pasaba a ser «C:\Users\joser» y en el equipo nuevo no se encontraba.
+    [Fact]
+    public void Una_ruta_de_los_ajustes_que_no_es_musica_no_ensancha_la_raiz_de_la_Bandeja()
+    {
+        var carpetas = new[] { @"C:\Users\joser\Downloads\MUSICA" };
+        var rutas = new[]
+        {
+            @"C:\Users\joser\Downloads\MUSICA", @"C:\Users\joser\Downloads\MUSICA\a.mp3", @"C:\Users\joser\Downloads\MUSICA\b.mp3",
+            @"C:\Users\joser\Documents\musica.xml",
+        };
+
+        var raices = CopiaSeguridad.AgruparRaices(carpetas, rutas).Select(r => r.Texto()).ToList();
+        Assert.Equal(new[] { @"C:\Users\joser\Downloads\MUSICA", @"C:\Users\joser\Documents" }, raices);
+
+        var existen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"C:\Users\jose\Downloads\MUSICA" };
+        var res = CopiaSeguridad.ProponerRaices(carpetas, rutas, existen.Contains, Array.Empty<string>(),
+                                                new[] { @"C:\", @"C:\Users\jose" }, EstiloRuta.Windows);
+        var bandeja = res.Single(r => r.Origen == @"C:\Users\joser\Downloads\MUSICA");
+        Assert.Equal(@"C:\Users\jose\Downloads\MUSICA", bandeja.Propuesta);
+        Assert.Equal(3, bandeja.Rutas);
+        Assert.Equal(1, res.Single(r => r.Origen == @"C:\Users\joser\Documents").Rutas);
+
+        // Dos rutas sueltas que se resumen en la carpeta del usuario no se tragan la de la Bandeja, y
+        // cada ruta se cuenta una vez, en la raíz más concreta.
+        var conEscritorio = rutas.Append(@"C:\Users\joser\Desktop\exportada.xml").ToList();
+        var dos = CopiaSeguridad.ProponerRaices(carpetas, conEscritorio, existen.Contains, Array.Empty<string>(),
+                                                new[] { @"C:\", @"C:\Users\jose" }, EstiloRuta.Windows);
+        Assert.Equal(new[] { @"C:\Users\joser\Downloads\MUSICA", @"C:\Users\joser" }, dos.Select(r => r.Origen));
+        Assert.Equal(new[] { 3, 2 }, dos.Select(r => r.Rutas));
+        Assert.Equal(@"C:\Users\jose\Downloads\MUSICA", dos[0].Propuesta);
+
+        // Una ruta suelta que cuelga de una raíz de las carpetas no añade ninguna.
+        Assert.Equal(new[] { @"E:\Musica" },
+                     CopiaSeguridad.AgruparRaices(new[] { @"E:\Musica\House", @"E:\Musica\Techno" }, new[] { @"E:\Musica\Otra\c.mp3" })
+                                   .Select(r => r.Texto()));
+    }
+
+    // Windows resuelve «/Users/dj/Music» contra la unidad actual (C:\Users\dj\Music): si el usuario se
+    // llama igual en los dos equipos, la raíz de macOS se daba por existente y las rutas se quedaban en
+    // formato macOS.
+    [Fact]
+    public void Una_raiz_de_otro_sistema_no_existe_aqui_aunque_el_sistema_la_resuelva()
+    {
+        var existe = (string r) => r == "/Users/dj/Music";
+
+        var enWindows = CopiaSeguridad.ProponerRaices(new[] { "/Users/dj/Music" }, new[] { "/Users/dj/Music/a.mp3" }, existe,
+                                                      Array.Empty<string>(), new[] { @"C:\" }, EstiloRuta.Windows).Single();
+        Assert.Equal("", enWindows.Propuesta);
+        Assert.StartsWith("No se ha encontrado", enWindows.Motivo);
+
+        var enMac = CopiaSeguridad.ProponerRaices(new[] { "/Users/dj/Music" }, new[] { "/Users/dj/Music/a.mp3" }, existe,
+                                                  Array.Empty<string>(), new[] { "/Volumes/USB" }, EstiloRuta.Unix).Single();
+        Assert.Equal("/Users/dj/Music", enMac.Propuesta);
+        Assert.Equal("Existe en este equipo.", enMac.Motivo);
     }
 
     // ------------------------------------------------------------------ restaurar
@@ -472,8 +563,8 @@ public class CopiaSeguridadTests : IDisposable
         });
         var prep = CopiaSeguridad.PrepararRestauracion(c, mac, mapa, existe: null, Fecha.AddDays(1));
         Assert.True(prep.Ok, prep.Error);
-        Assert.Equal(6, prep.Archivos);
-        Assert.Equal(7, prep.RutasReescritas);   // 3 de la configuración, 1 + 1 + 1 de los datos y la del archivo desconocido
+        Assert.Equal(7, prep.Archivos);
+        Assert.Equal(7, prep.RutasReescritas);   // 3 de la configuración, 1 + 1 + 1 de los datos y la de novedades-artistas.json
         Assert.NotNull(CopiaSeguridad.Pendiente(mac));
 
         // Nada cambia hasta el próximo arranque.
@@ -483,7 +574,7 @@ public class CopiaSeguridadTests : IDisposable
 
         Assert.NotNull(r);
         Assert.True(r!.Ok, r.Texto);
-        Assert.Equal(6, r.Restaurados);
+        Assert.Equal(7, r.Restaurados);
         Assert.Null(CopiaSeguridad.Pendiente(mac));
         Assert.False(Directory.Exists(CopiaSeguridad.CarpetaRestauracion(mac)));
 
@@ -508,7 +599,7 @@ public class CopiaSeguridadTests : IDisposable
         Assert.Equal(previa, r.CopiaPrevia);
         Assert.Contains("vieja.mp3", Entradas(previa)["fichas-dj.json"]);
         Assert.Contains(Path.GetFileName(previa), r.Texto);
-        Assert.StartsWith("Se ha restaurado la copia de seguridad del 17/10/2026 15:56 (6 archivos).", r.Texto);
+        Assert.StartsWith("Se ha restaurado la copia de seguridad del 17/10/2026 15:56 (7 archivos).", r.Texto);
     }
 
     // MEDIDO al restaurar los datos reales sobre una configuración con el secreto de Spotify y sin su
@@ -587,6 +678,16 @@ public class CopiaSeguridadTests : IDisposable
         Assert.StartsWith("No se ha restaurado la copia de seguridad", r.Texto);
         Assert.Equal(antes, File.ReadAllText(mac.FichasDjPath));
         Assert.Equal(0, r.Restaurados);
+
+        // Un bloqueo pasajero no obliga a repetirlo todo: la restauración sigue preparada, el aviso lo
+        // dice y se completa en el siguiente arranque.
+        Assert.Contains("Se volverá a intentar la próxima vez que se abra BeatTag", r.Texto);
+        Assert.Contains("«Cancelar la restauración»", r.Texto);
+        Assert.NotNull(CopiaSeguridad.Pendiente(mac));
+        var otra = CopiaSeguridad.AplicarRestauracionPendiente(mac, Fecha.AddMinutes(1))!;
+        Assert.True(otra.Ok, otra.Texto);
+        Assert.Null(CopiaSeguridad.Pendiente(mac));
+        Assert.Contains("Tema.mp3", File.ReadAllText(mac.FichasDjPath));
     }
 
     [Fact]
