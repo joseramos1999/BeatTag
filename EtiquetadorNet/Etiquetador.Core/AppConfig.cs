@@ -497,4 +497,16 @@ public sealed class AppConfig
     /// para que vea las listas al día.
     /// </summary>
     public string RekordboxExportacion { get; set; } = "";
+
+    // --- Novedades de tus artistas (equipo «novedades», tanda 4, P5) ---
+
+    /// <summary>
+    /// Cuántos de los artistas con más canciones de la biblioteca se consultan en Novedades (50, 100,
+    /// 200 o 300; ver Providers.PresentacionNovedades.OpcionesArtistas). Un valor fuera de esas opciones
+    /// se lleva a la más cercana al abrir la página.
+    /// </summary>
+    public int NovedadesArtistas { get; set; } = 100;
+
+    /// <summary>De cuántos días atrás son los lanzamientos que se enseñan en Novedades (30, 60 o 90).</summary>
+    public int NovedadesDias { get; set; } = 30;
 }
