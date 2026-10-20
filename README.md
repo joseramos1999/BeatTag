@@ -269,9 +269,11 @@ plano.
   original sea anterior. Solo se da por publicada antes si un lanzamiento anterior nombra esa misma
   versión o si Deezer lo confirma por su código ISRC.
 
-Cada artista se identifica en Deezer por las canciones que tiene en común con la biblioteca; si el
-elegido no es el correcto, se corrige con el enlace de su página, y el que no publica en Deezer se
-puede excluir. Esas correcciones y exclusiones se guardan en `novedades-artistas.json`.
+Cada artista se busca en Deezer por su nombre y, si hay varios que se llaman igual, se elige el que
+tiene canciones en común con la biblioteca; si no hay ninguno claro, queda sin confirmar y sus
+canciones se ocultan de serie. Si el elegido no es el correcto, se corrige con el enlace de su página,
+y el que no publica en Deezer se puede excluir. Esas correcciones y exclusiones se guardan en
+`novedades-artistas.json`.
 
 ## 🎛️ rekordbox y los cue points
 
@@ -279,8 +281,8 @@ rekordbox guarda los cue points y el beatgrid en su base de datos, **ligados a l
 Al renombrar o mover un archivo, los da por perdidos — y renombrar es justo lo que hace BeatTag.
 
 La página **rekordbox** lee la colección que exportas desde rekordbox (Archivo → Exportar colección en
-formato xml) y la cruza con la biblioteca. Solo lee ese XML: no toca la base de datos de rekordbox, ni
-el XML, ni tus archivos de música. El botón «Reparar colección de rekordbox» de **Ajustes** lleva a
+formato xml) y la cruza con la biblioteca. No modifica ese XML ni la base de datos de rekordbox, ni
+escribe en tus archivos de música. El botón «Reparar colección de rekordbox» de **Ajustes** lleva a
 esta página.
 
 - **No están en rekordbox**: canciones de la biblioteca que rekordbox no tiene, para guardarlas como
