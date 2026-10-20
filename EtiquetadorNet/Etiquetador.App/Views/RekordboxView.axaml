@@ -146,7 +146,7 @@
                 <DockPanel Margin="0,8,0,0">
                     <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,6">
                         <TextBlock Classes="desc"
-                                   Text="Pistas de rekordbox sin hot cues o sin beatgrid. Un único hot cue en el primer tiempo de compás, sin nombre o llamado «1.1Bars», no marca ninguna parte de la canción y suele dejarlo una herramienta al analizar: por eso no cuenta como preparación. Si tú pones ese cue como cue de entrada, marca la casilla. Un hot cue con otro nombre sí cuenta." />
+                                   Text="Pistas de rekordbox sin hot cues o sin beatgrid. Un único hot cue en el primer tiempo de compás, sin nombre o llamado «1.1Bars», no marca ninguna parte de la canción (es el que dejan algunas herramientas al analizar), así que no cuenta como preparación. Si tú pones ese cue como cue de entrada, marca la casilla. Un hot cue con otro nombre sí cuenta." />
                         <TextBlock Text="{Binding AvisoCueInicial}" IsVisible="{Binding HayAvisoCueInicial}" TextWrapping="Wrap" Opacity="0.85" />
                         <WrapPanel ItemSpacing="12" LineSpacing="6">
                             <CheckBox Content="Sin hot cues" IsChecked="{Binding SinHotCues}" VerticalAlignment="Center" />
