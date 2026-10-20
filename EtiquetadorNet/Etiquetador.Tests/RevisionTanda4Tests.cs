@@ -252,6 +252,33 @@ public class RevisionTanda4Tests : IDisposable
     }
 
     // ---------------------------------------------------------------------------------------------
+    // interfaz-1: la página rekordbox no ofrece editar lo que no está en la biblioteca
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void En_rekordbox_lo_que_no_esta_en_la_biblioteca_no_se_ofrece_para_editar()
+    {
+        // «Sin preparar» con «Solo canciones de la biblioteca» desmarcada: una pista de otra carpeta.
+        var fuera = new FilaRekordbox(@"D:\rekordbox\Sampler\loop.wav", "", "loop", 4, null, enBiblioteca: false);
+        var dentro = new FilaRekordbox(@"E:\Musica\a.mp3", "A", "a", 200, null, enBiblioteca: true);
+        Assert.Equal("", fuera.RutaEnBiblioteca);
+        Assert.Equal(@"D:\rekordbox\Sampler\loop.wav", fuera.RutaArchivo);   // escuchar y abrir la carpeta, sí
+        Assert.Equal(@"E:\Musica\a.mp3", dentro.RutaEnBiblioteca);
+        Assert.False(Etiquetador.App.Acciones.AccionesCancion.PuedeEditar(
+            Etiquetador.App.Acciones.AccionesCancion.RutaDe(fuera.RutaEnBiblioteca), ocupada: false));
+
+        // «Rutas rotas»: el destino del historial puede existir fuera de la biblioteca. Si está en ella,
+        // se da tal como la biblioteca lo tiene (con los acentos en su forma), que es lo que busca el Editor.
+        var biblioteca = RekordboxViewModel.RutasDeLaBiblioteca(new[] { "E:\\Musica\\Canci\u00F3n.mp3" });
+        var pista = new PistaRekordbox { Ruta = @"E:\Viejo\x.mp3", Nombre = "x" };
+        var enBiblioteca = RekordboxViewModel.FilaDeRota(new PistaRota(pista, ComoReparar.RenombradaPorBeatTag, "E:\\Musica\\Cancio\u0301n.mp3"), biblioteca);
+        var fueraDeElla = RekordboxViewModel.FilaDeRota(new PistaRota(pista, ComoReparar.RenombradaPorBeatTag, @"F:\Otra\x.mp3"), biblioteca);
+        Assert.Equal("E:\\Musica\\Canci\u00F3n.mp3", enBiblioteca.RutaEnBiblioteca);
+        Assert.Equal("", fueraDeElla.RutaEnBiblioteca);
+        Assert.Equal(@"F:\Otra\x.mp3", fueraDeElla.RutaArchivo);
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // menor-audio_medido-2 y -4: la página Calidad
     // ---------------------------------------------------------------------------------------------
 

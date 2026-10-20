@@ -22,13 +22,27 @@ public class MenusCancionTests
         return Path.Combine(dir!.FullName, Path.Combine(tramos));
     }
 
-    /// <summary>Los rótulos del menú contextual de la tabla de una vista XAML, en orden.</summary>
-    private static List<string> MenuXaml(string vista)
+    /// <summary>Los rótulos del menú contextual de la (primera) tabla de una vista XAML, en orden.</summary>
+    private static List<string> MenuXaml(string vista) => MenusXaml(vista)[0];
+
+    /// <summary>
+    /// Los rótulos de los menús contextuales de TODAS las tablas de una vista, cada uno en orden. La
+    /// página rekordbox tiene cuatro tablas: leyendo solo la primera, un menú desordenado en cualquiera
+    /// de las otras tres compilaba y pasaba las pruebas.
+    /// </summary>
+    private static List<List<string>> MenusXaml(string vista)
     {
         var texto = File.ReadAllText(Fuente("Etiquetador.App", "Views", vista + ".axaml"));
-        var bloque = Regex.Match(texto, @"<DataGrid\.ContextMenu>(.*?)</DataGrid\.ContextMenu>", RegexOptions.Singleline);
-        Assert.True(bloque.Success, vista + " no tiene menú contextual en su tabla");
-        return Regex.Matches(bloque.Groups[1].Value, @"<MenuItem\s+Header=""([^""]+)""").Select(m => m.Groups[1].Value).ToList();
+        var bloques = Regex.Matches(texto, @"<DataGrid\.ContextMenu>(.*?)</DataGrid\.ContextMenu>", RegexOptions.Singleline);
+        Assert.True(bloques.Count > 0, vista + " no tiene menú contextual en su tabla");
+        return bloques.Select(b => Regex.Matches(b.Groups[1].Value, @"<MenuItem\s+Header=""([^""]+)""").Select(m => m.Groups[1].Value).ToList())
+                      .ToList();
+    }
+
+    private static void TodosEnElOrdenComun(string vista)
+    {
+        var menus = MenusXaml(vista);
+        for (var i = 0; i < menus.Count; i++) EnElOrdenComun($"{vista} (tabla {i + 1})", menus[i]);
     }
 
     private static void EnElOrdenComun(string donde, IReadOnlyList<string> rotulos)
@@ -49,7 +63,7 @@ public class MenusCancionTests
     {
         var menu = MenuXaml(vista);
 
-        EnElOrdenComun(vista, menu);
+        TodosEnElOrdenComun(vista);
         foreach (var comun in new[] { AccionesCancion.TextoEscuchar, AccionesCancion.TextoEditar, AccionesCancion.TextoCompatibles,
                                       AccionesCancion.TextoVersiones, AccionesCancion.TextoCarpeta })
             Assert.Contains(comun, menu);
@@ -60,8 +74,22 @@ public class MenusCancionTests
     [InlineData("VersionesDialog")]
     [InlineData("MezclaDialog")]
     [InlineData("PendientesView")]   // sin escuchar ni editar (sus filas no suelen tener archivo), pero en el mismo orden
+    [InlineData("RekordboxView")]    // cuatro tablas; «Rutas rotas» sin compatibles ni versiones
+    [InlineData("LoudnessView")]     // escuchar y carpeta, y detrás lo propio del ajuste de volumen
+    [InlineData("NovedadesView")]
     public void Los_dialogos_de_mezcla_y_Pendientes_siguen_el_mismo_orden(string vista)
-        => EnElOrdenComun(vista, MenuXaml(vista));
+        => TodosEnElOrdenComun(vista);
+
+    // Las cuatro tablas de la página rekordbox tienen su menú (no solo la primera).
+    [Fact]
+    public void La_pagina_rekordbox_tiene_un_menu_en_cada_tabla()
+    {
+        var menus = MenusXaml("RekordboxView");
+        Assert.Equal(4, menus.Count);
+        Assert.All(menus, m => Assert.Equal(AccionesCancion.TextoEscuchar, m[0]));
+        Assert.All(menus, m => Assert.Contains(AccionesCancion.TextoEditar, m));
+        Assert.All(menus, m => Assert.Equal(AccionesCancion.TextoCarpeta, m[^1]));
+    }
 
     // La tabla del orden en Tendencias y Playlists y la de mezcla del Asistente son la misma tabla:
     // el mismo menú, con «Empezar por esta» detrás de compatibles y versiones (antes iba la segunda).
@@ -78,13 +106,39 @@ public class MenusCancionTests
     [InlineData("TrendsView")]
     [InlineData("PlaylistView")]
     [InlineData("OrdenMezclaPanel")]
+    [InlineData("RekordboxView")]
+    [InlineData("NovedadesView")]
     public void Editar_desactivada_dice_por_que(string vista)
     {
         var texto = File.ReadAllText(Fuente("Etiquetador.App", "Views", vista + ".axaml"));
-        var item = Regex.Match(texto, @"<MenuItem Header=""Editar etiquetas de esta canción""[^>]*/>", RegexOptions.Singleline);
-        Assert.True(item.Success, vista + " no tiene «Editar etiquetas de esta canción»");
-        Assert.Contains("ToolTip.ShowOnDisabled=\"True\"", item.Value);
-        Assert.Contains("proceso en marcha", item.Value);
+        var items = Regex.Matches(texto, @"<MenuItem Header=""Editar etiquetas de esta canción""[^>]*/>", RegexOptions.Singleline);
+        Assert.True(items.Count > 0, vista + " no tiene «Editar etiquetas de esta canción»");
+        foreach (Match item in items)
+        {
+            Assert.Contains("ToolTip.ShowOnDisabled=\"True\"", item.Value);
+            Assert.Contains("proceso en marcha", item.Value);
+        }
+    }
+
+    // En la página rekordbox, «Sin preparar», «Nunca pinchadas» y «Rutas rotas» pueden enseñar archivos
+    // que no están en la biblioteca: lo que trabaja con canciones de la biblioteca recibe la ruta solo si
+    // lo están (RutaEnBiblioteca), y su rótulo lo dice. Con la ruta de la fila, el Editor se abría con
+    // otra canción cargada.
+    [Fact]
+    public void En_rekordbox_editar_compatibles_y_versiones_solo_con_canciones_de_la_biblioteca()
+    {
+        var texto = File.ReadAllText(Fuente("Etiquetador.App", "Views", "RekordboxView.axaml"));
+        foreach (var elegida in new[] { "SinPrepararElegida", "NuncaElegida", "RotaElegida" })
+        {
+            var items = Regex.Matches(texto, $@"<MenuItem Header=""[^""]+"" Command=""\{{x:Static AccionesCancion\.\w+\}}"" CommandParameter=""\{{Binding {elegida}[^""]*\}}""[^>]*/>",
+                                      RegexOptions.Singleline);
+            Assert.NotEmpty(items);
+            foreach (Match m in items)
+            {
+                Assert.Contains($"{elegida}.RutaEnBiblioteca", m.Value);
+                if (m.Value.Contains(AccionesCancion.TextoEditar)) Assert.Contains("no está en la biblioteca", m.Value);
+            }
+        }
     }
 
     [Fact]

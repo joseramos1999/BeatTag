@@ -35,6 +35,15 @@ public sealed class FilaRekordbox : IFilaConArchivo
     public PistaRekordbox? Pista { get; }
     public bool EnBiblioteca { get; }
 
+    /// <summary>
+    /// La ruta solo si la canción está en la biblioteca; "" si no. Es lo que reciben «Editar etiquetas»,
+    /// «Buscar compatibles…» y «Ver sus versiones…», que trabajan con canciones de la biblioteca: con
+    /// «Solo canciones de la biblioteca» desmarcada salen pistas de rekordbox de otras carpetas, y con
+    /// su ruta el Editor se abría con OTRA canción cargada. Escuchar y abrir la carpeta siguen con
+    /// <see cref="RutaArchivo"/>.
+    /// </summary>
+    public string RutaEnBiblioteca => EnBiblioteca ? RutaArchivo : "";
+
     public string Archivo => Path.GetFileName(RutaArchivo);
     public string Carpeta => Path.GetDirectoryName(RutaArchivo) ?? "";
     public string Duracion => DuracionSegundos > 0 ? TimeSpan.FromSeconds(DuracionSegundos).ToString(@"m\:ss", CultureInfo.InvariantCulture) : "";
@@ -52,12 +61,23 @@ public sealed class FilaRekordbox : IFilaConArchivo
 /// <summary>Una entrada de rekordbox cuyo archivo no existe, con lo encontrado para ella.</summary>
 public sealed class FilaRota : IFilaConArchivo
 {
-    public FilaRota(PistaRota r) => R = r;
+    public FilaRota(PistaRota r, string rutaEnBiblioteca = "")
+    {
+        R = r;
+        RutaEnBiblioteca = rutaEnBiblioteca;
+    }
 
     public PistaRota R { get; }
 
     /// <summary>El archivo que sí existe (el encontrado), para escucharlo o abrir su carpeta. "" si no hay.</summary>
     public string RutaArchivo => R.NuevaRuta;
+
+    /// <summary>
+    /// El archivo encontrado tal como está en la biblioteca, o "" si no está en ella: el historial de
+    /// renombrados acepta destinos que existen en disco fuera de las carpetas de la biblioteca, y el
+    /// Editor no puede abrirlos (ver <see cref="FilaRekordbox.RutaEnBiblioteca"/>).
+    /// </summary>
+    public string RutaEnBiblioteca { get; }
 
     public string Nombre => R.Pista.Nombre;
     public string Artista => R.Pista.Artista;
@@ -186,7 +206,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
     public string TextoActualizarExportacion => $"Actualizar «{Path.GetFileName(UltimaExportacion)}»";
 
     /// <param name="listasAbiertas">
-    /// Las listas que hay abiertas en otras páginas (Tendencias, Playlists) y sus órdenes para mezclar,
+    /// Las listas que hay abiertas en otras páginas (Tendencias, Playlists, Novedades) y sus órdenes para mezclar,
     /// ya con las rutas de la biblioteca. Las da el shell, que es quien conoce esas páginas.
     /// </param>
     public RekordboxViewModel(AppEngine engine, Func<IReadOnlyList<ListaParaRekordbox>> listasAbiertas)
@@ -341,14 +361,16 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         var reloj = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            var cruce = await Task.Run(() =>
+            var (cruce, rutas) = await Task.Run(() =>
             {
                 var renombrados = RekordboxRelocator.ReadRenames(undoDir);
-                return CruceRekordbox.Cruzar(coleccion, canciones, renombrados, new ArchivosEnDisco(), cts.Token);
+                return (CruceRekordbox.Cruzar(coleccion, canciones, renombrados, new ArchivosEnDisco(), cts.Token),
+                        RutasDeLaBiblioteca(canciones.Select(t => t.FilePath)));
             }, cts.Token);
             if (vuelta != _vuelta) return;
             _cruce = cruce;
             _cruceDe = coleccion;
+            _rutasBiblioteca = rutas;
             Mostrar(cruce);
             Status = TextoCruce(cruce);
             _engine.Logger.Sum($"rekordbox: cruce en {reloj.ElapsedMilliseconds} ms · {cruce.FaltanEnRekordbox.Count} no están en rekordbox · "
@@ -441,9 +463,27 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
     private void MostrarRotas()
     {
         if (_cruce == null) return;
-        var rotas = _cruce.Rotas.Where(r => !SoloReparables || r.Reparable).Select(r => new FilaRota(r)).ToList();
+        var rotas = _cruce.Rotas.Where(r => !SoloReparables || r.Reparable)
+                          .Select(r => FilaDeRota(r, _rutasBiblioteca)).ToList();
         RotasView = VistaTabla.Nueva(rotas, RotasView);
     }
+
+    /// <summary>
+    /// Las canciones de la biblioteca del último cruce, de la ruta (sin distinguir la forma de los
+    /// acentos, como el cruce) a la ruta tal como está en la biblioteca, que es la que busca el Editor.
+    /// </summary>
+    private IReadOnlyDictionary<string, string> _rutasBiblioteca = new Dictionary<string, string>();
+
+    internal static Dictionary<string, string> RutasDeLaBiblioteca(IEnumerable<string> rutas)
+    {
+        var d = new Dictionary<string, string>(ComparadorRutas.Instancia);
+        foreach (var r in rutas) d.TryAdd(r, r);
+        return d;
+    }
+
+    /// <summary>La fila de una entrada rota, con el archivo encontrado como canción de la biblioteca si lo es.</summary>
+    internal static FilaRota FilaDeRota(PistaRota r, IReadOnlyDictionary<string, string> biblioteca)
+        => new(r, r.NuevaRuta.Length > 0 && biblioteca.TryGetValue(r.NuevaRuta, out var enBiblioteca) ? enBiblioteca : "");
 
     partial void OnSinHotCuesChanged(bool value) => AplicarFiltros();
     partial void OnSinBeatgridChanged(bool value) => AplicarFiltros();
@@ -716,7 +756,7 @@ public partial class RekordboxViewModel : ViewModelBase, IEstadoPagina, IPaginaV
         var partes = new List<string>();
         if (colecciones > 0) partes.Add(Cuenta(colecciones, "colección", "colecciones"));
         // Un orden para mezclar también es una lista para rekordbox: se cuentan juntos.
-        if (abiertas > 0) partes.Add(abiertas == 1 ? "1 lista abierta en Tendencias, Playlists o el Asistente" : $"{abiertas} listas abiertas en Tendencias, Playlists o el Asistente");
+        if (abiertas > 0) partes.Add(abiertas == 1 ? "1 lista abierta en Tendencias, Playlists, Novedades o el Asistente" : $"{abiertas} listas abiertas en Tendencias, Playlists, Novedades o el Asistente");
         if (seguidas > 0) partes.Add(seguidas == 1 ? "1 lista que sigues (se vuelve a leer de internet)" : $"{seguidas} listas que sigues (se vuelven a leer de internet)");
         if (conseguidas > 0) partes.Add(conseguidas == 1 ? "la canción pendiente ya conseguida" : $"las {conseguidas} canciones pendientes ya conseguidas");
         if (partes.Count == 0) return "Con lo marcado no hay nada que exportar.";

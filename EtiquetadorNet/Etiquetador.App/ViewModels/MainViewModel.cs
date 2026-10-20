@@ -682,6 +682,10 @@ public partial class MainViewModel : ViewModelBase
                                                         Trends.PasosMezcla.Select(p => p.FilePath).ToList()));
         res.AddRange(RekordboxViewModel.DeListaAbierta(Playlists.NombreSugerido, Playlists.Rows.ToList(),
                                                         Playlists.PasosMezcla.Select(p => p.FilePath).ToList()));
+        // Novedades es una lista frente a la biblioteca como Tendencias y Playlists (tanda 4, P5): sus
+        // estrenos que ya están en la biblioteca y su orden para mezclar van igual. Se nombra «Novedades».
+        res.AddRange(RekordboxViewModel.DeListaAbierta(Novedades.NombreSugerido, Novedades.Rows.ToList(),
+                                                        Novedades.PasosMezcla.Select(p => p.FilePath).ToList()));
         if (Asistente.Mezcla.Pasos.Count > 0)
             res.Add(new Etiquetador.Core.ListaParaRekordbox(RekordboxViewModel.CarpetaOrdenes,
                                                             Asistente.Mezcla.Coleccion?.Nombre is { Length: > 0 } c ? c : "Asistente",
