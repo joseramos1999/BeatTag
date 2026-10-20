@@ -1,5 +1,3 @@
-using System.Xml.Linq;
-
 namespace Etiquetador.Core;
 
 /// <summary>Una pista del XML de rekordbox: ruta local + BPM + clave musical (Tonality).</summary>
@@ -8,29 +6,22 @@ public sealed record RekordboxEntry(string FilePath, string Bpm, string Key);
 /// <summary>
 /// Lee un XML de biblioteca de rekordbox (DJ_PLAYLISTS) y extrae, por pista, su ruta local,
 /// BPM (AverageBpm) y clave musical (Tonality) para importarlos a los tags.
+///
+/// La lectura es la de <see cref="LectorRekordbox"/>: sin cargar el archivo entero en memoria y, si no
+/// se puede leer, con una <see cref="RekordboxXmlException"/> que dice por qué. Antes cualquier error
+/// del XML se tragaba y devolvía una lista vacía, y quien importaba solo veía «0 coincidencias», que
+/// hace pensar en rutas que no casan y no en un archivo cortado o equivocado.
 /// </summary>
 public static class RekordboxImporter
 {
-    public static IReadOnlyList<RekordboxEntry> Parse(string xmlPath)
-        => ParseContent(File.ReadAllText(xmlPath));
+    public static IReadOnlyList<RekordboxEntry> Parse(string xmlPath, CancellationToken ct = default)
+        => Entradas(LectorRekordbox.Leer(xmlPath, ct));
 
     public static IReadOnlyList<RekordboxEntry> ParseContent(string xml)
-    {
-        var list = new List<RekordboxEntry>();
-        XDocument doc;
-        try { doc = XDocument.Parse(xml); } catch { return list; }
-        foreach (var tr in doc.Descendants("TRACK"))
-        {
-            var loc = (string?)tr.Attribute("Location");
-            if (string.IsNullOrEmpty(loc)) continue;      // los TRACK de PLAYLISTS son referencias sin Location
-            var path = LocationToPath(loc);
-            if (string.IsNullOrEmpty(path)) continue;
-            var bpm = ((string?)tr.Attribute("AverageBpm"))?.Trim() ?? "";
-            var key = ((string?)tr.Attribute("Tonality"))?.Trim() ?? "";
-            list.Add(new RekordboxEntry(path, bpm, key));
-        }
-        return list;
-    }
+        => Entradas(LectorRekordbox.LeerTexto(xml));
+
+    private static IReadOnlyList<RekordboxEntry> Entradas(ColeccionRekordbox c)
+        => c.Pistas.Select(p => new RekordboxEntry(p.Ruta, p.Bpm, p.Tonalidad)).ToList();
 
     /// <summary>
     /// Convierte la Location de rekordbox en ruta local:

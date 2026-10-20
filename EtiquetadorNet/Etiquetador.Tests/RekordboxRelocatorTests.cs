@@ -350,8 +350,9 @@ public class RekordboxRelocatorTests
     // al escribir y «Users\jose\…» al leer: Importar daba 0 coincidencias y Reparar no encontraba nada.
     [Theory]
     [InlineData("/Users/jose/Music/x.mp3", "file://localhost/Users/jose/Music/x.mp3")]
-    [InlineData("/Users/x/Música/tema con espacios.mp3", "file://localhost/Users/x/M%C3%BAsica/tema%20con%20espacios.mp3")]
-    [InlineData("/Volumes/USB DJ/Bad Bunny - Titi Me Pregunto (Intro).mp3", "file://localhost/Volumes/USB%20DJ/Bad%20Bunny%20-%20Titi%20Me%20Pregunto%20%28Intro%29.mp3")]
+    [InlineData("/Users/x/Música/tema con espacios.mp3", "file://localhost/Users/x/M%c3%basica/tema%20con%20espacios.mp3")]
+    // Los paréntesis y las comas, sin escapar, como los deja rekordbox (ver Escapa_como_rekordbox).
+    [InlineData("/Volumes/USB DJ/Bad Bunny - Titi Me Pregunto (Intro).mp3", "file://localhost/Volumes/USB%20DJ/Bad%20Bunny%20-%20Titi%20Me%20Pregunto%20(Intro).mp3")]
     public void Las_rutas_de_macOS_se_escriben_y_se_leen_bien(string ruta, string location)
     {
         Assert.Equal(location, RekordboxRelocator.PathToLocation(ruta));
@@ -376,7 +377,7 @@ public class RekordboxRelocatorTests
         if (OperatingSystem.IsWindows()) return;   // en Windows sí es un separador
         var ruta = "/Users/jose/Music/AC\\DC - Thunderstruck.mp3";
         var loc = RekordboxRelocator.PathToLocation(ruta);
-        Assert.Contains("%5C", loc);
+        Assert.Contains("%5c", loc);
         Assert.Equal(ruta, RekordboxImporter.LocationToPath(loc));
     }
 
