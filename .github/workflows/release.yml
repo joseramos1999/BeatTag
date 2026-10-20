@@ -77,9 +77,9 @@ jobs:
             tail -3 test.log
           else
             echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
-            fallos=$( { grep -E "^[[:space:]]*(Failed|Con error) [A-Za-z]" test.log; grep -iE -A6 "hang|were running|se estaban ejecutando|aborted|anul" test.log; } | sed 's/^[[:space:]]*//' | sort -u)
+            fallos=$( { grep -E "^[[:space:]]*(Failed|Con error) [A-Za-z]" test.log; grep -iE -A6 "hang|were running|se estaban ejecutando|aborted|anul" test.log || true; } | sed 's/^[[:space:]]*//' | sort -u) || true
             total=$(printf '%s\n' "$fallos" | grep -c . || true)
-            cuerpo=$(printf '%s\n' "$fallos" | head -60 | awk '{printf "%s%%0A", $0}')
+            cuerpo=$(printf '%s\n' "$fallos" | head -60 | awk '{printf "%s%%0A", $0}') || true
             echo "::error title=Tests que fallan ($total)::$cuerpo"
             exit 1
           fi
@@ -134,9 +134,9 @@ jobs:
             tail -3 test.log
           else
             echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
-            fallos=$( { grep -E "^[[:space:]]*(Failed|Con error) [A-Za-z]" test.log; grep -iE -A6 "hang|were running|se estaban ejecutando|aborted|anul" test.log; } | sed 's/^[[:space:]]*//' | sort -u)
+            fallos=$( { grep -E "^[[:space:]]*(Failed|Con error) [A-Za-z]" test.log; grep -iE -A6 "hang|were running|se estaban ejecutando|aborted|anul" test.log || true; } | sed 's/^[[:space:]]*//' | sort -u) || true
             total=$(printf '%s\n' "$fallos" | grep -c . || true)
-            cuerpo=$(printf '%s\n' "$fallos" | head -60 | awk '{printf "%s%%0A", $0}')
+            cuerpo=$(printf '%s\n' "$fallos" | head -60 | awk '{printf "%s%%0A", $0}') || true
             echo "::error title=Tests que fallan ($total)::$cuerpo"
             exit 1
           fi
