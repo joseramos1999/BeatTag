@@ -469,4 +469,19 @@ public sealed class AppConfig
     /// catálogo (ver FileProcessor.IsrcDelArchivo).
     /// </summary>
     public bool WriteIsrc { get; set; }
+
+    // --- rekordbox: cruce y exportación (equipo «rekordbox», tanda 4, P3 y P11) ---
+
+    /// <summary>
+    /// La última colección exportada de rekordbox que se abrió en la página rekordbox, para volver a
+    /// cruzarla al abrir la página sin tener que buscarla. Solo se lee: BeatTag nunca la modifica.
+    /// </summary>
+    public string RekordboxXml { get; set; } = "";
+
+    /// <summary>
+    /// Dónde se guardó la última exportación de listas para rekordbox. rekordbox lee siempre el mismo
+    /// archivo (Preferencias → Avanzado → rekordbox xml), así que volver a exportar al mismo sitio basta
+    /// para que vea las listas al día.
+    /// </summary>
+    public string RekordboxExportacion { get; set; } = "";
 }
