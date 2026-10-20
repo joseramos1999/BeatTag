@@ -144,6 +144,12 @@ public sealed class AppEngine
         var pruned = Logger.PruneOldLogs(Paths.LogsDir);
         if (pruned > 0) Logger.Detail($"Limpieza de logs: {pruned} antiguos borrados (>30 días).");
 
+        // --- Copia de seguridad (equipo «volumen_copias», tanda 4, T15) ---
+        // Una restauración preparada en Ajustes se completa AQUÍ, antes de leer ningún archivo de
+        // datos; después, la copia automática del estado con que se cerró, en un hilo de fondo.
+        CopiasAlArrancar.CompletarRestauracion(Paths, Logger, Avisos);
+        CopiasAlArrancar.IniciarCopiaAutomatica(Paths, Logger);
+
         Fase("Leyendo los ajustes…");
         Config = AppConfig.Load(Paths, out var cfgErr);
         if (cfgErr.Length > 0)

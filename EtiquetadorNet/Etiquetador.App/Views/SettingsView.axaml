@@ -187,6 +187,33 @@
                 <TextBlock Text="{Binding AvisoPoolBusqueda}" Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap" FontSize="12"
                            IsVisible="{Binding AvisoPoolBusqueda, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
+                <!-- ================= COPIA DE SEGURIDAD (equipo «volumen_copias», tanda 4, T15) ================= -->
+                <TextBlock Classes="sec" Text="Copia de seguridad" />
+                <TextBlock Classes="ayuda"
+                           Text="Guarda en un archivo ZIP el trabajo que no se puede regenerar: ajustes, fichas de DJ, colecciones, lo aplicado y descartado en Enriquecer, identificaciones por audio, pendientes, listas seguidas, reglas de género y nombres de artista. Sirve para recuperarlo o para llevarlo a otro equipo, también de Windows a macOS. No incluye las claves de API, que se vuelven a introducir en cada equipo, ni las cachés, que se regeneran solas. Además, cada vez que se abre BeatTag se guarda una copia automática en la carpeta «copias» si hay cambios, y se conservan las 5 últimas." />
+                <WrapPanel Orientation="Horizontal" ItemSpacing="8" LineSpacing="6">
+                    <Button Content="Copia de seguridad…" Click="HacerCopia_Click" IsEnabled="{Binding !CopiaOcupada}"
+                            Background="#0D9488" Foreground="White" FontWeight="SemiBold"
+                            ToolTip.Tip="Elige dónde guardar el archivo ZIP. No se toca ningún archivo de música." />
+                    <Button Content="Restaurar copia…" Click="RestaurarCopia_Click" IsEnabled="{Binding !CopiaOcupada}" Classes="gris"
+                            ToolTip.Tip="Enseña antes qué se va a sustituir y, si la música está en otra carpeta o en otro sistema, deja indicar dónde está ahora." />
+                    <Button Content="📂 Copias automáticas" Command="{Binding AbrirCarpetaCopiasCommand}" Classes="gris"
+                            ToolTip.Tip="Abre la carpeta «copias». Para volver a una de ellas, usa «Restaurar copia…» y elígela." />
+                </WrapPanel>
+                <TextBlock Text="{Binding TextoCopiasAutomaticas}" Foreground="{DynamicResource TextoSecundario}" TextWrapping="Wrap" FontSize="12" />
+                <Border IsVisible="{Binding RestauracionPendiente, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" Padding="8,6"
+                        Background="{DynamicResource AvisoFondo}" BorderBrush="{DynamicResource AvisoBorde}" BorderThickness="1" CornerRadius="4">
+                    <StackPanel Spacing="6">
+                        <TextBlock Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap" FontSize="12" Text="{Binding RestauracionPendiente}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Cerrar BeatTag ahora" Click="CerrarParaRestaurar_Click" Classes="gris"
+                                    ToolTip.Tip="Cierra la aplicación guardando lo pendiente, como al cerrar la ventana. La restauración se completa al volver a abrirla." />
+                            <Button Content="Cancelar la restauración" Command="{Binding CancelarRestauracionCommand}" Classes="gris"
+                                    ToolTip.Tip="Descarta la restauración preparada. Los datos actuales no cambian." />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
                 <!-- ================= ACCIONES ================= -->
                 <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,14,0,0">
                     <Button Content="Guardar" Command="{Binding SaveCommand}"

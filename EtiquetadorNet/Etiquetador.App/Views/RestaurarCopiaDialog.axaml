@@ -1,0 +1,78 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="860" d:DesignHeight="640"
+        x:Class="Etiquetador.App.Views.RestaurarCopiaDialog"
+        x:CompileBindings="False"
+        Title="Restaurar copia de seguridad"
+        Width="860" Height="660" MinWidth="620" MinHeight="460"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+
+    <!-- T15 (equipo «volumen_copias», tanda 4): vista previa de qué se sustituye y ubicación de la
+         música en este equipo. No restaura nada: devuelve las ubicaciones confirmadas. -->
+    <DockPanel Margin="18" LastChildFill="True">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,8">
+            <TextBlock Text="Restaurar copia de seguridad" FontSize="16" FontWeight="Bold" />
+            <TextBlock x:Name="DescripcionText" TextWrapping="Wrap" FontWeight="SemiBold" />
+            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextoSecundario}" FontSize="12"
+                       Text="Revisa qué archivos de datos se van a sustituir. Los archivos de música no se tocan. Antes de sustituir nada, BeatTag guarda una copia de lo que hay ahora en la carpeta «copias», para poder volver atrás. Las claves de API de este equipo se conservan." />
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,10,0,0">
+            <TextBlock x:Name="DescartadosText" TextWrapping="Wrap" Foreground="{DynamicResource TextoSecundario}" FontSize="11" IsVisible="False" />
+            <TextBlock x:Name="ErrorText" TextWrapping="Wrap" Foreground="{DynamicResource AvisoTexto}" IsVisible="False" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button Content="Cancelar" Click="Cancelar_Click" MinWidth="100" IsCancel="True" />
+                <Button Content="Continuar…" Click="Continuar_Click" MinWidth="120"
+                        Background="#16A34A" Foreground="White" FontWeight="SemiBold" IsDefault="True"
+                        ToolTip.Tip="Pide confirmación y deja la restauración preparada para la próxima vez que se abra BeatTag." />
+            </StackPanel>
+        </StackPanel>
+
+        <Grid RowDefinitions="*,Auto">
+            <!-- Archivos de datos -->
+            <DataGrid Grid.Row="0" x:Name="Archivos" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="140"
+                      CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Contenido" Binding="{Binding Descripcion}" Width="2*" MinWidth="160" />
+                    <DataGridTextColumn Header="Archivo" Binding="{Binding Nombre}" Width="1.4*" MinWidth="120" />
+                    <DataGridTextColumn Header="En la copia" Binding="{Binding CopiaTexto}" Width="150" MinWidth="110" />
+                    <DataGridTextColumn Header="Ahora en este equipo" Binding="{Binding ActualTexto}" Width="160" MinWidth="110" />
+                    <DataGridTextColumn Header="Al restaurar" Binding="{Binding Accion}" Width="1.6*" MinWidth="130" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- Ubicación de la música -->
+            <StackPanel Grid.Row="1" x:Name="RaicesPanel" Spacing="6" Margin="0,12,0,0">
+                <TextBlock Text="Ubicación de la música" FontWeight="Bold" FontSize="14" />
+                <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextoSecundario}" FontSize="12"
+                           Text="Las fichas, lo aplicado y descartado en Enriquecer, las identificaciones por audio y el resto del trabajo se guardan con la ruta de cada canción. Si en este equipo la música está en otra carpeta u otro disco (por ejemplo, D:\Musica en Windows y /Volumes/USB/Musica en macOS), indica dónde está ahora y las rutas se reescribirán al restaurar. Deja la casilla vacía para conservar la ruta como está en la copia." />
+                <ScrollViewer MaxHeight="200" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl x:Name="Raices">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnDefinitions="*,*,Auto" RowDefinitions="Auto,Auto" Margin="0,0,0,8">
+                                    <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,8,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Origen}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                                   ToolTip.Tip="{Binding Origen}" />
+                                        <TextBlock Text="{Binding RutasTexto}" Foreground="{DynamicResource TextoSecundario}" FontSize="11" />
+                                    </StackPanel>
+                                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Destino}" VerticalAlignment="Center"
+                                             PlaceholderText="Sin cambios: se conserva la ruta de la copia"
+                                             ToolTip.Tip="La carpeta de este equipo que corresponde a la de la copia." />
+                                    <Button Grid.Row="0" Grid.Column="2" Content="Elegir…" Margin="6,0,0,0" VerticalAlignment="Center"
+                                            Click="ElegirCarpeta_Click" />
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Motivo}" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextoSecundario}" FontSize="11" Margin="0,2,0,0" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </StackPanel>
+        </Grid>
+    </DockPanel>
+</Window>

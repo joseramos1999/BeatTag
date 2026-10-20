@@ -90,6 +90,51 @@ public sealed class AppPaths
         return ruta;
     }
 
+    // --- Copia de seguridad (equipo «volumen_copias», tanda 4, T15) ---
+
+    /// <summary>
+    /// Los archivos de trabajo del usuario: lo que NO se regenera solo y entra en la copia de
+    /// seguridad (Ajustes → «Copia de seguridad…» y la copia automática de cada arranque). Decisiones
+    /// tomadas a mano canción a canción, fichas, listas, nombres de artista, ajustes y las
+    /// identificaciones por audio, que costaron una consulta de pago cada una.
+    ///
+    /// Un archivo de datos nuevo en la raíz de la carpeta de datos entra igualmente aunque no esté
+    /// aquí (ver <see cref="Copias.CopiaSeguridad.ArchivosAIncluir"/>); esta lista le pone nombre en
+    /// la vista previa y fija que los conocidos entren siempre.
+    /// </summary>
+    public IReadOnlyList<string> ArchivosDeTrabajo() => new[]
+    {
+        ConfigPath,
+        FichasDjPath,
+        ColeccionesPath,
+        BandejaPath,
+        IgnoredPath,
+        AppliedPath,
+        ApplyMarksPath,
+        AudioAceptadasPath,
+        ArtistAliasesPath,
+        ArtistExceptionsPath,
+        IdentificacionCachePath,
+        Path.Combine(DataDir, Dj.AlmacenPendientes.NombreArchivo),
+        Path.Combine(DataDir, Dj.AlmacenListasSeguidas.NombreArchivo),
+        Dj.MapaGenerosCarpeta.RutaEn(this),
+        Dj.AlmacenSustituciones.RutaEn(DataDir),
+    };
+
+    /// <summary>
+    /// Archivos .json de la carpeta de datos que NO entran en la copia: cachés que se regeneran solas
+    /// (la de huellas pasa de 150 MB en una biblioteca grande) y el config.json de la versión en
+    /// PowerShell, que puede guardar claves.
+    /// </summary>
+    public IReadOnlyList<string> FueraDeLaCopia() => new[]
+    {
+        ScanCachePath,
+        AnalysisCachePath,
+        LoudnessCachePath,
+        FingerprintCachePath,
+        Path.Combine(DataDir, "config.json"),
+    };
+
     /// <summary>Crea las carpetas de datos si no existen (idempotente).</summary>
     public void EnsureDirectories()
     {
