@@ -86,7 +86,7 @@
                         <WrapPanel ItemSpacing="8" LineSpacing="6">
                             <Button Content="Guardar colección reparada…" Click="Reparar_Click"
                                     Background="#0D9488" Foreground="White" FontWeight="SemiBold"
-                                    ToolTip.Tip="Escribe un XML NUEVO con las rutas corregidas y una lista «Rutas reparadas por BeatTag». Ni el XML exportado ni la base de datos de rekordbox se tocan.">
+                                    ToolTip.Tip="Escribe un XML nuevo con las rutas corregidas y una lista «Rutas reparadas por BeatTag». Ni el XML exportado ni la base de datos de rekordbox se tocan.">
                                 <Button.IsEnabled>
                                     <MultiBinding Converter="{x:Static BoolConverters.And}">
                                         <Binding Path="HayReparables" />

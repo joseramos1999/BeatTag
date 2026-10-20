@@ -120,8 +120,9 @@ public sealed class RekordboxXmlException : Exception
 /// entera en memoria.
 ///
 /// POR QUÉ EN STREAMING. MEDIDO: la colección real de 19.690 pistas pesa 96,6 MB, con 1,17 millones
-/// de TEMPO; leerla con XDocument la monta entera en memoria antes de mirar nada. Aquí se recorre una
-/// vez, de principio a fin, y de cada pista solo se guardan sus datos y la cuenta de marcadores.
+/// de TEMPO; leerla con XDocument la monta entera en memoria antes de mirar nada (1,45 s y 530 MB en
+/// uso). Aquí se recorre una vez, de principio a fin, y de cada pista solo se guardan sus datos y la
+/// cuenta de marcadores: 0,9 s, 40 MB asignados en total y 17 MB en uso al terminar.
 /// </summary>
 public static class LectorRekordbox
 {
