@@ -245,6 +245,79 @@ public class NovedadesTests
         Assert.Null(NovedadesDeezer.PublicadaEnElCatalogo(Pista("El Álbum", album), catalogo, desde));   // él mismo no cuenta
     }
 
+    // Una remezcla o un directo NUEVOS no son la canción de antes. MEDIDO con 200 artistas y 90 días:
+    // comparando solo el título sin versión, unas 20 de las 146 «publicadas antes» eran versiones nuevas
+    // (estos títulos son de esa medición) y «Solo estrenos» las escondía.
+    [Fact]
+    public void Una_version_nueva_no_cuenta_como_publicada_por_el_lanzamiento_anterior_de_la_original()
+    {
+        var album = Lanzamiento(10, "El Álbum", "2026-10-10", TipoLanzamiento.Album);
+        var catalogo = new[]
+        {
+            album,
+            Lanzamiento(11, "No Te Hagas", "2025-05-09"),
+            Lanzamiento(12, "Temperature", "2006-04-28"),
+            Lanzamiento(13, "uuu", "2025-12-29"),
+            Lanzamiento(14, "Irreplaceable", "2006-10-21"),
+            Lanzamiento(15, "Sentimientos Escondidos (Versión Chile)", "2020-04-03"),
+            Lanzamiento(16, "Velvet Cake (Tiësto Remix)", "2025-09-12"),
+            Lanzamiento(17, "Satalanaaa", "2026-06-05"),
+        };
+        var desde = NovedadesDeezer.Desde(Hoy, 30);
+        (DateTime, string)? Antes(string titulo) => NovedadesDeezer.PublicadaEnElCatalogo(Pista(titulo, album), catalogo, desde);
+
+        Assert.Null(Antes("No Te Hagas (Remix)"));
+        Assert.Null(Antes("Temperature (GAMEBOYS RMX) (Radio Edit)"));
+        Assert.Null(Antes("UUU (EN VIVO)"));
+        Assert.Null(Antes("IRREPLACEABLE (IRREEMPLAZABLE) (NORTEÑA REMIX)"));
+        Assert.Null(Antes("Sentimientos Escondidos (Dominican Version)"));   // otra versión con nombre
+        Assert.Null(Antes("Velvet Cake (Remix)"));                           // un «Remix» a secas no es el de Tiësto
+        Assert.Null(Antes("Satalanaaa (Live in Malta Remix)"));
+        Assert.Null(Antes("Temperature - Instrumental"));                    // la versión tras un guion también cuenta
+        Assert.True(Pista("UUU (EN VIVO)", album).EsEstreno);
+    }
+
+    // Lo que sí había salido: la misma versión (aunque el lanzamiento anterior diga algo más), o la
+    // canción sin versión, o una edición que no cambia la grabación.
+    [Fact]
+    public void La_misma_version_o_la_cancion_sin_version_si_cuentan_como_publicadas_antes()
+    {
+        var album = Lanzamiento(10, "El Álbum", "2026-10-10", TipoLanzamiento.Album);
+        var catalogo = new[]
+        {
+            album,
+            Lanzamiento(21, "Palomino (Remix) [feat. Otro]", "2026-06-18"),
+            Lanzamiento(22, "Bichota (DJ X Remix) [Extended Mix]", "2026-01-09"),
+            Lanzamiento(23, "Maldita Noche Tour En Vivo", "2025-10-17"),
+            Lanzamiento(24, "Beautiful Liar (Freemasons Remix Edit)", "2006-08-18"),
+            Lanzamiento(25, "Temperature", "2006-04-28"),
+        };
+        var desde = NovedadesDeezer.Desde(Hoy, 30);
+        DateTime? Antes(string titulo) => NovedadesDeezer.PublicadaEnElCatalogo(Pista(titulo, album), catalogo, desde)?.Fecha;
+
+        Assert.Equal(new DateTime(2026, 6, 18), Antes("Palomino (feat. Otro) (Remix)"));
+        Assert.Equal(new DateTime(2026, 1, 9), Antes("Bichota (DJ X Remix)"));
+        Assert.Equal(new DateTime(2025, 10, 17), Antes("Maldita Noche Tour En Vivo"));
+        Assert.Equal(new DateTime(2006, 8, 18), Antes("BEAUTIFUL LIAR (BELLO EMBUSTERO)"));   // sin versión: la canción ya existía
+        Assert.Equal(new DateTime(2006, 4, 28), Antes("Temperature (Radio Edit)"));           // la edición de radio es la misma grabación
+        Assert.Equal(new DateTime(2006, 4, 28), Antes("Temperature (Remastered 2026)"));
+    }
+
+    [Theory]
+    [InlineData("Monaco", "")]
+    [InlineData("Temperature (GAMEBOYS RMX) (Radio Edit)", "gameboys rmx")]
+    [InlineData("IRREPLACEABLE (IRREEMPLAZABLE) (NORTEÑA REMIX)", "nortena remix")]
+    [InlineData("Sentimientos Escondidos (Versión Chile)", "version chile")]
+    [InlineData("La Gerencia (feat. Arcángel, Wisin) (Remix)", "remix")]
+    [InlineData("Curazao (Chipeo En Vivo)", "chipeo en vivo")]
+    [InlineData("Bichota (DJ X Remix) [Extended Mix]", "dj x remix|extended mix")]
+    [InlineData("Song - Instrumental", "instrumental")]
+    [InlineData("Clásico (Remastered 2011)", "")]
+    [InlineData("Beautiful Liar (Bello Embustero)", "")]
+    [InlineData("Felices los 4 (4 Versiones)", "4 versiones")]
+    public void Las_versiones_que_nombra_un_titulo(string titulo, string esperado)
+        => Assert.Equal(esperado, string.Join("|", NovedadesDeezer.VersionesDelTitulo(titulo).OrderBy(v => v, StringComparer.Ordinal)));
+
     [Theory]
     [InlineData("USUM71703861", 2017, 2017)]
     [InlineData("QMFMF9800001", 2026, 1998)]
@@ -337,6 +410,31 @@ public class NovedadesTests
         Assert.Equal(new[] { "Cruz Cafuné", "Feid" }, sinBb.Select(a => a.Nombre));
     }
 
+    // Un pool junto a artistas de verdad no tira el crédito entero: antes «Ozuna, Latin Box» no contaba
+    // para Ozuna ni su título servía para reconocerlo en Deezer.
+    [Fact]
+    public void Un_pool_entre_artistas_se_aparta_por_partes_y_el_resto_del_credito_cuenta()
+    {
+        var canciones = new List<Track>
+        {
+            Cancion("Ozuna, Latin Box", "Hey Mor"),
+            Cancion("Bad Bunny (Latin Box Intro)", "Titi Me Pregunto"),
+            Cancion("Ozuna", "Taki Taki"),
+            Cancion("Bad Bunny", "Monaco"),
+            Cancion("Latin Box", "Pack 1"), Cancion("Latin Box 15 12 2025", "Pack 2"), Cancion("UNLIMITED LATIN", "Pack 3"),
+            Cancion("@liyo_dj98 Ozuna", "Algo"), Cancion("@liyo_dj98", "Otra"),
+        };
+
+        var p = ArtistasDeLaBiblioteca.Principales(canciones, 10, new ArtistAliases());
+
+        Assert.Equal(new[] { "Bad Bunny", "Ozuna" }, p.Select(a => a.Nombre));
+        Assert.All(p, a => Assert.Equal(2, a.Canciones));
+        Assert.Contains(ArtistasDeLaBiblioteca.ClaveTitulo("Hey Mor"), p.Single(a => a.Nombre == "Ozuna").Titulos);
+        Assert.True(ArtistasDeLaBiblioteca.SoloPublicidad("Latin Box 15 12 2025"));
+        Assert.True(ArtistasDeLaBiblioteca.SoloPublicidad("@liyo_dj98"));
+        Assert.False(ArtistasDeLaBiblioteca.SoloPublicidad("Ozuna, Latin Box"));
+    }
+
     // =============================================================================================
     // El almacén de correspondencias
     // =============================================================================================
@@ -398,15 +496,44 @@ public class NovedadesTests
         a.Poner(Guardado("Kike", 34, EstadoArtistaDeezer.Dudoso));
         a.Excluir(IndiceArtistasClave("Kike"), "Kike", true, Hoy);
 
-        Assert.True(a.Olvidar(IndiceArtistasClave("Bad Bunny")));
-        Assert.True(a.Olvidar(IndiceArtistasClave("Kike")));
-        Assert.False(a.Olvidar(IndiceArtistasClave("Nadie")));
+        Assert.True(a.Olvidar(IndiceArtistasClave("Bad Bunny"), "Bad Bunny"));
+        Assert.True(a.Olvidar(IndiceArtistasClave("Kike"), "Kike"));
+        Assert.False(a.Olvidar(IndiceArtistasClave("Nadie"), "Nadie"));   // no había nada, pero queda por identificar
 
-        Assert.Null(a.Buscar(IndiceArtistasClave("Bad Bunny")));
+        var bb = a.Buscar(IndiceArtistasClave("Bad Bunny"))!;
+        Assert.Equal(EstadoArtistaDeezer.PorIdentificar, bb.Estado);
+        Assert.Equal(0, bb.DeezerId);
+        Assert.False(bb.Excluido);
+        Assert.True(AlmacenArtistasDeezer.HayQueIdentificar(bb, Hoy));
+        Assert.True(AlmacenArtistasDeezer.IdentificarSinCache(bb));
         var kike = a.Buscar(IndiceArtistasClave("Kike"))!;
         Assert.True(kike.Excluido);
         Assert.Equal(0, kike.DeezerId);
         Assert.True(AlmacenArtistasDeezer.HayQueIdentificar(kike, Hoy));   // en cuanto se vuelva a incluir
+        Assert.True(AlmacenArtistasDeezer.HayQueIdentificar(a.Buscar(IndiceArtistasClave("Nadie")), Hoy));
+    }
+
+    // Excluir a uno que no se llegó a identificar (Deezer no respondió) y volver a incluirlo: ni dice que
+    // no está en Deezer ni espera 30 días para buscarlo.
+    [Fact]
+    public void Excluir_a_un_artista_sin_identificar_y_volver_a_incluirlo_lo_deja_por_identificar()
+    {
+        using var c = new Carpeta();
+        var a = new AlmacenArtistasDeezer(c.Archivo);
+        var clave = IndiceArtistasClave("Rochy RD");
+
+        Assert.True(a.Excluir(clave, "Rochy RD", true, Hoy));
+        Assert.True(a.Excluir(clave, "Rochy RD", false, Hoy));
+        Assert.Equal("", a.Guardar());
+
+        var g = new AlmacenArtistasDeezer(c.Archivo).Buscar(clave)!;   // también tras guardar y volver a leer
+        Assert.False(g.Excluido);
+        Assert.Equal(EstadoArtistaDeezer.PorIdentificar, g.Estado);
+        Assert.True(AlmacenArtistasDeezer.HayQueIdentificar(g, Hoy));
+        var consulta = new ConsultaArtista(Artista("Rochy RD", "Algo"), null, 0, true);
+        var fila = PresentacionNovedades.FilasArtistas(new[] { consulta }, a, new HashSet<string> { clave }).Single();
+        Assert.Equal("Se identificará en la próxima búsqueda · Deezer no respondió a todo", fila.EstadoTexto);
+        Assert.DoesNotContain("No está en Deezer", fila.EstadoTexto);
     }
 
     [Fact]
@@ -546,6 +673,34 @@ public class NovedadesTests
         Assert.Equal(2, m.Red.Cuantas("/artist/27/albums"));
         Assert.Equal(1, m.Red.Cuantas("/album/5001/tracks"));   // las canciones de un lanzamiento valen una semana
         Assert.Equal(1, m.Red.Cuantas("/track/isrc:"));
+    }
+
+    // «Volver a identificar» pregunta de nuevo a Deezer: la búsqueda de artistas guardada en la caché
+    // (30 días) daría lo mismo que la vez anterior.
+    [Fact]
+    public async Task Volver_a_identificar_pregunta_de_nuevo_a_deezer_sin_la_cache()
+    {
+        using var m = Red(cache: true);
+        using var c = new Carpeta();
+        var almacen = new AlmacenArtistasDeezer(c.Archivo);
+        var dz = new NovedadesDeezer(m.Api);
+        await dz.BuscarAsync(new[] { BadBunny, Estopa }, almacen, 30, Hoy, null, CancellationToken.None);
+        Assert.Equal(1, m.Red.Cuantas("search/artist?q=Bad"));
+        Assert.Equal(1, m.Red.Cuantas("/artist/77/top"));
+
+        almacen.Olvidar(BadBunny.Clave, BadBunny.Nombre);
+        almacen.Olvidar(Estopa.Clave, Estopa.Nombre);
+        var r = await dz.BuscarAsync(new[] { BadBunny, Estopa }, almacen, 30, Hoy, null, CancellationToken.None);
+
+        Assert.Equal(2, m.Red.Cuantas("search/artist?q=Bad"));
+        Assert.Equal(2, m.Red.Cuantas("/artist/77/top"));   // las canciones más escuchadas, también sin caché
+        Assert.Equal(27, almacen.Buscar(BadBunny.Clave)!.DeezerId);
+        Assert.Equal(EstadoArtistaDeezer.Confirmado, almacen.Buscar(Estopa.Clave)!.Estado);
+        Assert.Equal(4, r.Pistas.Count);
+
+        // Ya identificados de nuevo, la siguiente no vuelve a preguntar.
+        await dz.BuscarAsync(new[] { BadBunny, Estopa }, almacen, 30, Hoy, null, CancellationToken.None);
+        Assert.Equal(2, m.Red.Cuantas("search/artist?q=Bad"));
     }
 
     [Fact]

@@ -210,8 +210,7 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
             RellenarArtistas();
 
             // Un «Crear carpeta» u «Ordenar para mezclar» empezado antes de la búsqueda trabaja sobre la
-            // lista anterior: se espera a que termine antes de sustituirla.
-            while (IsBusy) await Task.Delay(100);
+            // lista anterior: MostrarAsync espera a que termine antes de sustituirla.
             await MostrarAsync();
 
             Avance = 100;
@@ -256,6 +255,11 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
     /// <summary>
     /// Rehace la tabla con los filtros de ahora. Si ya se está rehaciendo (se han tocado dos filtros
     /// seguidos), se repite al terminar con los últimos: nunca se cruzan dos a la vez.
+    ///
+    /// Con «Crear carpeta» u «Ordenar para mezclar» en marcha, espera a que terminen: rehacer la tabla
+    /// borra el orden para mezclar, y el que estaba calculándose se habría enseñado sobre una lista que
+    /// ya no es la de la tabla. Los filtros se desactivan mientras tanto; esto cubre lo demás que la
+    /// rehace (corregir o excluir un artista).
     /// </summary>
     private async Task MostrarAsync()
     {
@@ -266,6 +270,7 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
         {
             do
             {
+                while (IsBusy) await Task.Delay(100);
                 _otraVez = false;
                 // Se vuelve a leer en cada vuelta: la repetición puede venir de una búsqueda recién terminada.
                 if (_resultado is not { } r) break;
@@ -365,7 +370,9 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
     {
         if (ArtistaElegido is not { } a) { Status = "Elige antes un artista en la tabla."; return; }
         if (Buscando) { Status = "Espera a que termine la búsqueda."; return; }
-        if (!Almacen.Olvidar(a.Clave)) { Status = $"«{a.Nombre}» todavía no se ha identificado: se buscará en la próxima búsqueda."; return; }
+        // Queda «por identificar» aunque no se hubiera llegado a identificar: así la próxima búsqueda
+        // pregunta de nuevo a Deezer, sin la caché de red.
+        Almacen.Olvidar(a.Clave, a.Nombre);
         var error = Almacen.Guardar();
         _corregidos.Add(a.Clave);
         RellenarArtistas();

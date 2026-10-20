@@ -153,6 +153,7 @@ public static class PresentacionNovedades
                 ? "Sin confirmar (solo 1 canción en común)"
                 : "Sin confirmar (ninguna canción en común)",
             EstadoArtistaDeezer.NoEncontrado => "No está en Deezer con ese nombre",
+            EstadoArtistaDeezer.PorIdentificar => "Se identificará en la próxima búsqueda",
             _ => "Corregido a mano",
         };
         return a.FalloDeRed ? texto + " · Deezer no respondió a todo" : texto;

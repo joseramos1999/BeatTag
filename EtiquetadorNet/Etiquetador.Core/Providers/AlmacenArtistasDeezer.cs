@@ -20,6 +20,13 @@ public enum EstadoArtistaDeezer
 
     /// <summary>Lo ha indicado el usuario: no se vuelve a buscar.</summary>
     Manual,
+
+    /// <summary>
+    /// Todavía sin identificar: el usuario ha pedido «Volver a identificar», o lo excluyó antes de que
+    /// se pudiera identificar. La próxima búsqueda lo identifica preguntando de nuevo a Deezer, sin la
+    /// caché de red (que guarda las búsquedas de artistas 30 días y daría lo mismo que antes).
+    /// </summary>
+    PorIdentificar,
 }
 
 /// <summary>
@@ -50,7 +57,7 @@ public sealed class ArtistaDeezerGuardado
     /// <summary>El usuario no quiere ver sus novedades. Se conserva el artista de Deezer por si se vuelve a incluir.</summary>
     public bool Excluido { get; set; }
 
-    /// <summary>Cuándo se identificó (o se corrigió).</summary>
+    /// <summary>Cuándo se identificó (o se corrigió); <see cref="DateTime.MinValue"/> si está por identificar.</summary>
     public DateTime Fecha { get; set; }
 
     [JsonIgnore] public string Enlace => DeezerId > 0 ? NovedadesDeezer.EnlaceArtista(DeezerId) : "";
@@ -168,10 +175,14 @@ public sealed class AlmacenArtistasDeezer
             if (!_porClave.TryGetValue(clave, out var a))
             {
                 if (!excluir) return false;
-                // Excluir a uno que todavía no se ha identificado: queda apuntado sin artista de Deezer.
+                // Excluir a uno que todavía no se ha identificado (Deezer no respondió, por ejemplo): queda
+                // apuntado sin artista de Deezer y POR IDENTIFICAR. Como «no encontrado» y con la fecha de
+                // hoy, al volver a incluirlo la tabla decía que no está en Deezer, sin haberlo buscado, y
+                // no se buscaba hasta pasados 30 días.
                 _porClave[clave] = new ArtistaDeezerGuardado
                 {
-                    Clave = clave, Nombre = nombre, Estado = EstadoArtistaDeezer.NoEncontrado, Excluido = true, Fecha = ahora,
+                    Clave = clave, Nombre = nombre, Estado = EstadoArtistaDeezer.PorIdentificar, Excluido = true,
+                    Fecha = DateTime.MinValue,
                 };
                 return true;
             }
@@ -182,35 +193,42 @@ public sealed class AlmacenArtistasDeezer
     }
 
     /// <summary>
-    /// Olvida lo averiguado de un artista (también una corrección a mano), para que la próxima búsqueda
-    /// lo vuelva a identificar. La exclusión se conserva. Devuelve si había algo.
+    /// Olvida lo averiguado de un artista (también una corrección a mano) y lo deja
+    /// <see cref="EstadoArtistaDeezer.PorIdentificar"/>, para que la próxima búsqueda lo vuelva a
+    /// identificar preguntando de nuevo a Deezer. Se apunta aunque no hubiera nada (Deezer no respondió
+    /// la otra vez): así tampoco se usa la caché. La exclusión se conserva. Devuelve si había algo
+    /// averiguado.
     /// </summary>
-    public bool Olvidar(string clave)
+    public bool Olvidar(string clave, string nombre)
     {
         lock (_cerrojo)
         {
-            if (!_porClave.TryGetValue(clave, out var a)) return false;
-            if (a.Excluido)
+            var habia = _porClave.TryGetValue(clave, out var a) && a.Estado != EstadoArtistaDeezer.PorIdentificar;
+            _porClave[clave] = new ArtistaDeezerGuardado
             {
-                a.DeezerId = 0;
-                a.DeezerNombre = "";
-                a.Fans = 0;
-                a.Coincidencias = 0;
-                a.Estado = EstadoArtistaDeezer.NoEncontrado;
-                a.Fecha = DateTime.MinValue;   // ya «caducado»: se identifica en cuanto se vuelva a incluir
-                return true;
-            }
-            return _porClave.Remove(clave);
+                Clave = clave, Nombre = a?.Nombre is { Length: > 0 } n ? n : nombre, Estado = EstadoArtistaDeezer.PorIdentificar,
+                Excluido = a?.Excluido ?? false, Fecha = DateTime.MinValue,
+            };
+            return habia;
         }
     }
 
     /// <summary>
-    /// ¿Hay que (volver a) identificar a este artista en Deezer? Sí si no se ha hecho nunca, o si quedó
-    /// dudoso o sin encontrar hace más de <see cref="Revision"/>.
+    /// ¿Hay que (volver a) identificar a este artista en Deezer? Sí si no se ha hecho nunca, si está
+    /// <see cref="EstadoArtistaDeezer.PorIdentificar"/>, o si quedó dudoso o sin encontrar hace más de
+    /// <see cref="Revision"/>.
     /// </summary>
     public static bool HayQueIdentificar(ArtistaDeezerGuardado? guardado, DateTime ahora)
         => guardado == null
+        || guardado.Estado == EstadoArtistaDeezer.PorIdentificar
         || (guardado.Estado is EstadoArtistaDeezer.Dudoso or EstadoArtistaDeezer.NoEncontrado && ahora - guardado.Fecha > Revision);
+
+    /// <summary>
+    /// ¿Hay que identificarlo sin la caché de red? Solo si el usuario lo ha pedido
+    /// (<see cref="EstadoArtistaDeezer.PorIdentificar"/>). La revisión de cada 30 días no lo necesita:
+    /// la caché dura lo mismo, así que para entonces ya ha caducado.
+    /// </summary>
+    public static bool IdentificarSinCache(ArtistaDeezerGuardado? guardado) => guardado?.Estado == EstadoArtistaDeezer.PorIdentificar;
 
     /// <summary>Devuelve "" si fue bien, o el motivo del fallo.</summary>
     public string Guardar()

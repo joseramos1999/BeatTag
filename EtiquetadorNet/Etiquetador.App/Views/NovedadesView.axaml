@@ -41,13 +41,15 @@
             <!-- ============================ CANCIONES ============================ -->
             <TabItem Header="Canciones">
                 <DockPanel Margin="0,6,0,0">
+                    <!-- Los filtros que rehacen la lista se desactivan mientras se copia a una carpeta o se ordena para mezclar:
+                         rehacerla borra el orden que se está calculando. -->
                     <WrapPanel DockPanel.Dock="Top" ItemSpacing="8" LineSpacing="6" Margin="0,0,0,6">
-                        <ComboBox ItemsSource="{Binding Tipos}" SelectedItem="{Binding Tipo}" MinWidth="140"
+                        <ComboBox ItemsSource="{Binding Tipos}" SelectedItem="{Binding Tipo}" MinWidth="140" IsEnabled="{Binding !IsBusy}"
                                   ToolTip.Tip="El tipo de lanzamiento, según Deezer. Los recopilatorios cuentan como álbumes." />
                         <CheckBox Content="Solo las que no están en la biblioteca" IsChecked="{Binding SoloQueFaltan}" VerticalAlignment="Center" />
-                        <CheckBox Content="Solo estrenos" IsChecked="{Binding SoloEstrenos}" VerticalAlignment="Center"
-                                  ToolTip.Tip="Quita las canciones que ya se habían publicado antes del plazo (un álbum que recoge singles de meses anteriores) y las reediciones o remasterizaciones." />
-                        <CheckBox Content="Incluir artistas sin confirmar" IsChecked="{Binding IncluirSinConfirmar}" VerticalAlignment="Center"
+                        <CheckBox Content="Solo estrenos" IsChecked="{Binding SoloEstrenos}" VerticalAlignment="Center" IsEnabled="{Binding !IsBusy}"
+                                  ToolTip.Tip="Quita las canciones que ya se habían publicado antes del plazo (un álbum que recoge singles de meses anteriores) y las reediciones o remasterizaciones. Una remezcla, un directo o una versión nuevos se consideran estrenos aunque la canción original sea anterior." />
+                        <CheckBox Content="Incluir artistas sin confirmar" IsChecked="{Binding IncluirSinConfirmar}" VerticalAlignment="Center" IsEnabled="{Binding !IsBusy}"
                                   ToolTip.Tip="Un artista queda sin confirmar cuando ninguno de los artistas de Deezer con su nombre tiene al menos dos canciones que estén en la biblioteca con él: el elegido puede ser otro artista que se llama igual. Revísalo en «Artistas consultados»." />
                     </WrapPanel>
                     <WrapPanel DockPanel.Dock="Top" ItemSpacing="8" LineSpacing="6" Margin="0,0,0,6">
@@ -60,7 +62,7 @@
                         <Button Content="Ordenar para mezclar" Command="{Binding OrdenarParaMezclarCommand}" IsEnabled="{Binding PuedeActuar}"
                                 Background="#2563EB" Foreground="White" FontWeight="SemiBold"
                                 ToolTip.Tip="Ordena las canciones de la lista que están en la biblioteca para pincharlas seguidas, con las mismas reglas que el Asistente: tonos compatibles en la rueda Camelot, tempo y, si tienen ficha de DJ, energía y momentos de la sesión." />
-                        <Button Content="Añadir a pendientes ▾"
+                        <Button Content="Añadir a pendientes ▾" IsEnabled="{Binding !IsBusy}"
                                 ToolTip.Tip="Guarda en la lista de Pendientes las canciones que no están en la biblioteca, con el lanzamiento del que salen. Se tachan solas cuando aparecen en ella.">
                             <Button.Flyout>
                                 <MenuFlyout>
@@ -139,7 +141,7 @@
                             <Button Content="{Binding TextoExcluir}" Command="{Binding ExcluirArtistaCommand}" IsEnabled="{Binding PuedeTocarArtista}"
                                     ToolTip.Tip="Deja de buscar las novedades de este artista (por ejemplo, un editor que firma ediciones y no publica en Deezer). Su sitio lo ocupa el siguiente artista con más canciones." />
                             <Button Content="Volver a identificar" Command="{Binding VolverAIdentificarCommand}" IsEnabled="{Binding PuedeTocarArtista}"
-                                    ToolTip.Tip="Olvida a qué artista de Deezer corresponde, también una corrección hecha a mano, para que la próxima búsqueda lo identifique de nuevo con las canciones que haya entonces en la biblioteca." />
+                                    ToolTip.Tip="Olvida a qué artista de Deezer corresponde, también una corrección hecha a mano, para que la próxima búsqueda lo identifique de nuevo, preguntando otra vez a Deezer y con las canciones que haya entonces en la biblioteca." />
                         </WrapPanel>
                     </StackPanel>
 

@@ -123,13 +123,28 @@ public static class ArtistasDeLaBiblioteca
 
     /// <summary>
     /// El crédito de artistas de la canción: el de las etiquetas o, si no hay, el del nombre del
-    /// archivo. Vacío si es publicidad (un «@usuario», un pool).
+    /// archivo. Vacío si el crédito entero es publicidad (<see cref="SoloPublicidad"/>).
     /// </summary>
     internal static string Credito(Track t)
     {
         var credito = (t.Artist ?? "").Trim();
         if (credito.Length == 0) credito = FileNameParser.Parse(t.FileName).FnArtist.Trim();
-        return credito.Length == 0 || LimpiezaPacks.ArtistaEsPublicidad(credito) ? "" : credito;
+        return credito.Length == 0 || SoloPublicidad(credito) ? "" : credito;
+    }
+
+    /// <summary>
+    /// El crédito no nombra a ningún intérprete: empieza por «@» (un usuario de redes) o es solo el
+    /// nombre de un pool, con su fecha o su volumen si acaso («Latin Box», «Latin Box 15 12 2025»;
+    /// ver <see cref="LimpiezaPacks.RestoDelPool"/>). Si el pool va junto a artistas de verdad («Ozuna,
+    /// Latin Box», «Bad Bunny (Latin Box Intro)»), el crédito vale y el pool se aparta por partes
+    /// (<see cref="ClaveDeParte"/>). Antes se descartaba el crédito entero en cuanto nombraba un pool,
+    /// y esas canciones no contaban para sus artistas ni servían para reconocerlos en Deezer.
+    /// </summary>
+    internal static bool SoloPublicidad(string credito)
+    {
+        var c = credito.Trim();
+        if (c.StartsWith('@')) return true;
+        return LimpiezaPacks.ArtistaEsPublicidad(c) && LimpiezaPacks.RestoDelPool(c).Length == 0;
     }
 
     /// <summary>

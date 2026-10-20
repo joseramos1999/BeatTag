@@ -371,22 +371,79 @@ public sealed class NovedadesDeezer
     /// <summary>
     /// Si la canción ya había salido en un lanzamiento ANTERIOR AL PLAZO del mismo artista (un single con
     /// su título, o un disco que se llama como ella), cuándo y dónde. Es lo más habitual: el álbum recoge
-    /// los singles de los meses anteriores. Se compara el título sin versión, como se cruza con la
-    /// biblioteca. Null si no hay ninguno.
+    /// los singles de los meses anteriores. Null si no hay ninguno.
+    ///
+    /// Se compara el título sin versión, como se cruza con la biblioteca, PERO una versión nueva no es
+    /// la canción de antes: si la canción nombra una versión («(Remix)», «(EN VIVO)», «(Dominican
+    /// Version)»; ver <see cref="VersionesDelTitulo"/>), el lanzamiento anterior tiene que nombrar esa
+    /// misma versión. Al revés sí cuenta: «Monaco» en el álbum nuevo, con un «Monaco (Remix)» de hace
+    /// años, ya había salido. MEDIDO con 200 artistas y 90 días (934 canciones): comparando solo el
+    /// título sin versión, unas 20 de las 146 «publicadas antes» eran remezclas y directos nuevos, con
+    /// el ISRC del año («No Te Hagas (Remix)» frente al single «No Te Hagas» de 2025, «UUU (EN VIVO)»,
+    /// «Temperature (GAMEBOYS RMX) (Radio Edit)» frente a «Temperature» de 2006), y «Solo estrenos»
+    /// los escondía: justo lo que más interesa a un DJ. Una grabación antigua de verdad no se pierde
+    /// por esto: su ISRC lo delata y se le pregunta a Deezer (<see cref="MerecePreguntarPorIsrc"/>).
     /// </summary>
     public static (DateTime Fecha, string Lanzamiento)? PublicadaEnElCatalogo(PistaNovedad pista,
         IEnumerable<LanzamientoDeezer> catalogo, DateTime desde)
     {
         var clave = ArtistasDeLaBiblioteca.ClaveTitulo(pista.Titulo);
         if (clave.Length == 0) return null;
+        var versiones = VersionesDelTitulo(pista.Titulo);
         (DateTime Fecha, string Lanzamiento)? primera = null;
         foreach (var l in catalogo)
         {
             if (l.Fecha.Date >= desde || l.Id == pista.Lanzamiento.Id) continue;
             if (ArtistasDeLaBiblioteca.ClaveTitulo(l.Titulo) != clave) continue;
+            if (versiones.Count > 0 && !versiones.IsSubsetOf(VersionesDelTitulo(l.Titulo))) continue;
             if (primera is not { } p || l.Fecha < p.Fecha) primera = (l.Fecha, l.Titulo);
         }
         return primera;
+    }
+
+    /// <summary>
+    /// Palabras que nombran una grabación distinta de la original: remezclas, ediciones de DJ,
+    /// directos, acústicos, versiones con nombre («Versión Salsa»), aceleradas… Se buscan en el texto
+    /// ya en minúsculas y sin acentos («Versión» → «version», «Acústico» → «acustico»).
+    /// </summary>
+    private static readonly Regex NombraVersion = new(
+        @"\b(?:remix(?:es)?|rmx|mix|edit|re ?edit|refix|rework|flip|bootleg|vip|dub|extended|live|en vivo|en directo|directo|unplugged|acoustic|acustic[oa]|version|versiones|sessions?|cover|mashup|blend|slowed|sped up|instrumental|acapella|a ?cappella)\b",
+        RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Lo que no cambia la grabación aunque vaya entre paréntesis: la edición de radio, la versión del
+    /// álbum o del single, la mezcla original, la versión limpia o explícita y la remasterización (que
+    /// ya se avisa aparte como reedición). «Temperature (GAMEBOYS RMX) (Radio Edit)» nombra la
+    /// remezcla de GAMEBOYS, no una «Radio Edit» distinta.
+    /// </summary>
+    private static readonly Regex VersionNeutra = new(
+        @"\b(?:radio (?:edit|version|mix)|(?:album|single|main|original) (?:version|mix)|clean|dirty|explicit|remaster(?:ed)?(?: \d{4})?|remasterizad[oa]|mono|stereo|bonus track)\b",
+        RegexOptions.CultureInvariant);
+
+    private static readonly Regex EntreParentesis = new(@"\(([^)]*)\)|\[([^\]]*)\]", RegexOptions.CultureInvariant);
+
+    // La versión tras un guion, como la escriben Spotify y algunos sellos: «Song - Instrumental».
+    private static readonly Regex TrasGuion = new(@"\s[-–—]\s([^-–—()\[\]]+)$", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Las versiones que nombra el título: cada paréntesis o corchete (y la cola tras « - ») que nombra
+    /// una versión, en minúsculas, sin acentos ni signos y sin lo que no cambia la grabación
+    /// (<see cref="VersionNeutra"/>). «IRREPLACEABLE (IRREEMPLAZABLE) (NORTEÑA REMIX)» → {«nortena
+    /// remix»}; «Monaco» o «Beautiful Liar (Bello Embustero)» → ninguna. Un «feat.» no es una versión.
+    /// </summary>
+    public static HashSet<string> VersionesDelTitulo(string? titulo)
+    {
+        var salida = new HashSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(titulo)) return salida;
+        var trozos = EntreParentesis.Matches(titulo).Select(m => m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value).ToList();
+        if (TrasGuion.Match(titulo) is { Success: true } cola) trozos.Add(cola.Groups[1].Value);
+        foreach (var t in trozos)
+        {
+            var k = Regex.Replace(TextUtils.ToAscii(t).ToLowerInvariant(), "[^a-z0-9]+", " ").Trim();
+            k = Regex.Replace(VersionNeutra.Replace(k, " "), @"\s+", " ").Trim();
+            if (k.Length > 0 && NombraVersion.IsMatch(k)) salida.Add(k);
+        }
+        return salida;
     }
 
     /// <summary>
@@ -476,7 +533,7 @@ public sealed class NovedadesDeezer
     /// Los artistas de Deezer con ese nombre (la búsqueda se guarda en la caché). Null si Deezer no
     /// respondió; una lista vacía si respondió y no hay nadie.
     /// </summary>
-    /// <param name="sinCache">Preguntar aunque esté en la caché («Volver a identificar»).</param>
+    /// <param name="sinCache">Preguntar aunque esté en la caché («Volver a identificar»: <see cref="AlmacenArtistasDeezer.IdentificarSinCache"/>).</param>
     public async Task<List<ArtistaDeezer>?> BuscarArtistasAsync(string nombre, CancellationToken ct, bool sinCache = false)
     {
         var r = await _api.GetRespuestaAsync($"https://api.deezer.com/search/artist?q={TextUtils.UrlEnc(nombre)}&limit=10",
@@ -511,10 +568,14 @@ public sealed class NovedadesDeezer
         return lista;
     }
 
-    /// <summary>Los títulos de las 50 canciones más escuchadas del artista (de la caché, si están). Null si Deezer no respondió.</summary>
-    public async Task<List<string>?> TitulosPopularesAsync(long artistaId, CancellationToken ct)
+    /// <summary>
+    /// Los títulos de las 50 canciones más escuchadas del artista (de la caché, si están y no se pide
+    /// <paramref name="sinCache"/>). Null si Deezer no respondió.
+    /// </summary>
+    public async Task<List<string>?> TitulosPopularesAsync(long artistaId, CancellationToken ct, bool sinCache = false)
     {
-        var r = await _api.GetRespuestaAsync($"https://api.deezer.com/artist/{artistaId}/top?limit=50", ct: ct).ConfigureAwait(false);
+        var r = await _api.GetRespuestaAsync($"https://api.deezer.com/artist/{artistaId}/top?limit=50", ct: ct, useCache: !sinCache)
+                          .ConfigureAwait(false);
         return r.FalloDeRed ? null : LeerTitulos(r.Json());
     }
 
@@ -553,6 +614,10 @@ public sealed class NovedadesDeezer
     /// novedades; si ahí no casan bastantes, también con sus 50 canciones más escuchadas, que incluyen las
     /// de los álbumes y las colaboraciones. Null si Deezer no respondió (no se sabe nada: no se guarda).
     /// </summary>
+    /// <param name="sinCache">
+    /// Buscar al artista y leer sus canciones más escuchadas sin la caché de red, cuando el usuario ha
+    /// pedido «Volver a identificar». El catálogo se pide siempre sin caché.
+    /// </param>
     public async Task<ArtistaIdentificado?> IdentificarAsync(ArtistaBiblioteca artista, CancellationToken ct, bool sinCache = false)
     {
         var resultados = new List<ArtistaDeezer>();
@@ -573,7 +638,7 @@ public sealed class NovedadesDeezer
             IEnumerable<string> titulos = lanzamientos.Select(l => l.Titulo);
             if (Coincidencias(titulos, artista.Titulos) < MinimoCoincidencias)
             {
-                var populares = await TitulosPopularesAsync(c.Id, ct).ConfigureAwait(false);
+                var populares = await TitulosPopularesAsync(c.Id, ct, sinCache).ConfigureAwait(false);
                 if (populares == null) return null;
                 titulos = titulos.Concat(populares);
             }
@@ -622,7 +687,7 @@ public sealed class NovedadesDeezer
 
                     if (guardado is not { Excluido: true } && AlmacenArtistasDeezer.HayQueIdentificar(guardado, hoy))
                     {
-                        var id = await IdentificarAsync(a, tok).ConfigureAwait(false);
+                        var id = await IdentificarAsync(a, tok, AlmacenArtistasDeezer.IdentificarSinCache(guardado)).ConfigureAwait(false);
                         if (id != null)
                         {
                             almacen.Poner(new ArtistaDeezerGuardado
