@@ -68,19 +68,25 @@ public enum ValoracionCalidad
 /// filtro propio y una grabación antigua puede no tener agudos. Por eso la interfaz enseña siempre
 /// la frecuencia medida junto a la estimación, y nada de esto borra ni cambia archivos.
 ///
-/// MEDIDO (octubre de 2026, 1.795 archivos de una biblioteca real y 180 codificaciones controladas;
-/// las cifras completas están junto a cada umbral):
-///   · Dónde cae el corte medido con este método: los MP3 que declaran 128 kbps, entre 15,6 y 16,6 kHz
+/// MEDIDO (octubre de 2026, 1.795 archivos de una biblioteca real, 1.750 MP3 y 45 WAV, y 180
+/// codificaciones controladas; las cifras de cada umbral están junto a él):
+///   · Dónde cae el corte medido con este método: los MP3 que declaran 128 kbps, entre 15,6 y 16,8 kHz
 ///     (LAME corta a 17 kHz nominales y el codificador de Windows a 16); los de 192, hacia 18,6; los
-///     de 320, entre 19,6 y 20,3 (LAME: 20,5 nominales). El método sitúa el corte donde la caída ya
+///     de 320, entre 19,6 y 20,4 (LAME: 20,5 nominales). El método sitúa el corte donde la caída ya
 ///     es clara, unos 0,4 kHz por debajo del valor nominal del filtro del codificador.
-///   · 36 WAV sin corte recodificados a 128 con el codificador de Windows y luego a 320 (un «320
-///     falso» de origen conocido): 35 de 36 detectados (el que falta tiene unos agudos tan débiles
-///     que el resultado es «no concluyente», no un error).
-///   · Sin pérdida (45 WAV): ningún falso positivo achacable al método. 3 salen sospechosos, y los 3
-///     tienen un escalón de más de 20 dB en 300 Hz a 15,6-16,6 kHz, que no da ningún máster: son
-///     acapellas y un remix hechos con material con pérdida. 6 salen dudosos (corte hacia 20 kHz,
-///     el de un MP3 de 320). Los 36 restantes, sin corte.
+///   · Controles positivos: 36 fragmentos de 40 s de WAV sin corte, codificados a 128 con el
+///     codificador de Windows y recodificados a 320 (un «320 falso» de origen conocido): 35 de 36
+///     salen sospechosos; el que falta tiene unos agudos tan débiles que el resultado es «no
+///     concluyente», no un error. Los mismos fragmentos a 128: los 36 coherentes, con el corte a
+///     15,6-15,8 kHz.
+///   · Controles negativos, sin pérdida (45 WAV de la biblioteca y los 36 fragmentos originales):
+///     ningún falso positivo achacable al método. De los 45, 3 salen sospechosos, y los 3 tienen un
+///     escalón de más de 20 dB en 300 Hz a 15,7-16,6 kHz, que no da ningún máster: son dos acapellas
+///     y un remix hechos con material con pérdida. 6 salen dudosos (corte hacia 20 kHz, el de un MP3
+///     de 320) y 36, sin corte. De los 36 fragmentos, ninguno sospechoso y 3 dudosos (19,9-20 kHz).
+///   · Los que declaran 320 (1.200 MP3 al azar): 63 sospechosos (5,3 %) y 18 dudosos (1,5 %).
+///   · Coste: 325 ms por archivo (mediana; 441 ms el percentil 90) con 2 hilos, casi todo lectura
+///     del disco.
 /// </summary>
 public static class CorteEspectral
 {
@@ -98,27 +104,31 @@ public static class CorteEspectral
 
     /// <summary>
     /// Caída mínima, en dB, entre lo que hay justo debajo del corte y lo MÁS alto que queda por encima,
-    /// hasta el final. MEDIDO: con 20 dB, de 45 WAV salen 3 escalones (los tres de origen con pérdida);
-    /// con 15, saldrían 6 y uno de ellos (un remix con un sintetizador filtrado a 19 kHz y agudos
-    /// a −30 dB por encima) ya sería un falso positivo. Con 25 se perderían el 15 % de los 128 kbps.
+    /// hasta el final. MEDIDO sobre 45 WAV y 300 MP3 de 128: con 20 dB, 9 WAV muestran un corte (3
+    /// hacia 16 kHz, los de origen con pérdida, y 6 hacia 19,5-20,5) y 8 de los 128 salen sin corte.
+    /// Con 15 dB, 4 WAV más darían un corte hacia 19-20 kHz por un descenso suave de los agudos, que
+    /// no es el muro de un codificador, y pasarían a dudosos; con 25, los 128 sin corte pasan de 8 a
+    /// 20 y dejarían de reconocerse.
     /// </summary>
     public const double CaidaMinimaDb = 20.0;
 
     /// <summary>
     /// Lo que hay justo debajo del corte no puede estar más de esto por debajo del nivel del medio
-    /// (1-8 kHz), o el resultado es «no concluyente». MEDIDO: un WAV con agudos a −45 dB codificado
-    /// a 320 por el codificador de Windows sale con un corte a 16 kHz, porque el codificador quita lo
-    /// que no se oiría. En los MP3 de 128 reales, lo que hay debajo del corte está casi siempre entre
-    /// −35 y −5 dB (287 de 292).
+    /// (1-8 kHz), o el resultado es «no concluyente». Con agudos muy débiles, el codificador los quita
+    /// aunque trabaje a 320 porque no se oirían, y aparece un corte bajo que no dice nada del origen.
+    /// MEDIDO: de 36 codificaciones a 320 con el codificador de Windows, 3 son así y con este límite
+    /// salen «no concluyentes» en vez de sospechosas. En los MP3 que declaran 128 con el corte por
+    /// debajo de 17,8 kHz, lo que hay justo debajo está entre −35 y −5 dB en 274 de 275.
     /// </summary>
     public const double FuerzaMinimaDb = 35.0;
 
     /// <summary>Por debajo de esto no se buscan cortes: ningún archivo con un mínimo de calidad corta ahí.</summary>
     public const double CorteMinimoHz = 8000.0;
 
-    // Umbrales de la estimación. MEDIDO sobre 1.150 MP3 (reparto del corte medido, en kHz):
-    //   declaran 128: 15,6-16,6 el 92 %;   declaran 160-319: picos en 15,6-16,4 (falsos), 18,6 y 19,2;
-    //   declaran 320: 19,6-20,3 el 85 %, 18,6-19,4 el 2 %, por debajo de 17,8 el 5 %.
+    // Umbrales de la estimación. MEDIDO sobre 1.750 MP3 (reparto del corte medido, en kHz):
+    //   declaran 128 (300): por debajo de 17,8 el 91 % (273), casi todos entre 15,6 y 16,8;
+    //   declaran 160-319 (250): picos en 15,6-16,6 (falsos), 18,4-18,6 y 19,2;
+    //   declaran 320 (1.200): 19,6-20,4 el 85 %, 18,6-19,4 el 2 %, por debajo de 17,8 el 5 %.
     // Los límites se ponen en los valles entre picos, y valen para cualquier biblioteca porque los
     // fija el codificador, no la música.
 
@@ -261,8 +271,8 @@ public static class CorteEspectral
     ///   Sospechosa  declara 224 kbps o más (o sin pérdida) y el audio acaba antes de 17,8 kHz: viene
     ///               de 160 kbps o menos.
     ///   Dudosa      declara 300 kbps o más y el corte está entre 17,8 y 19,5 kHz. MEDIDO: es lo que
-    ///               hace a veces el propio codificador de Windows a 320 (4 de 36 codificaciones, entre
-    ///               18,1 y 18,9 kHz), así que no basta para sospechar.
+    ///               hace a veces el propio codificador de Windows a 320 (2 de 36 codificaciones, a
+    ///               18,1 y 18,7 kHz), así que no basta para sospechar.
     ///               Declara sin pérdida y el corte está por debajo de 20,8 kHz (probable origen MP3).
     ///               Declara 160-223 kbps y el audio acaba antes de 17,8 kHz (posible origen de 128).
     ///   Coherente   el resto.

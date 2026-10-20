@@ -1356,8 +1356,7 @@ public sealed class AppEngine
                 if (!File.Exists(EspectroScanner.RutaCache(Paths))) return;
                 cache = Espectro;
             }
-            if (!string.Equals(origen, destino, StringComparison.Ordinal)) cache.Mover(origen, destino);
-            if (antes.Existe) cache.Retocar(destino, antes.M, antes.S);
+            cache.Seguir(origen, destino, antes);
         }
         catch (Exception e) { Logger.Error($"No se pudo poner al día la calidad real de «{Path.GetFileName(destino)}»", e); }
     }

@@ -243,6 +243,18 @@ public sealed class EspectroScanner
     // medida acompaña al archivo en vez de caducar por la fecha. Ajustar el volumen tampoco cambia
     // dónde está el corte (sube o baja todo el espectro a la vez), así que también se pone al día.
 
+    /// <summary>
+    /// La aplicación acaba de escribir etiquetas, renombrar o ajustar el volumen de
+    /// <paramref name="origen"/>, que ahora está en <paramref name="destino"/> (puede ser el mismo).
+    /// <paramref name="antes"/> es el sello justo antes de escribir: la medida se pone al día solo si
+    /// valía entonces.
+    /// </summary>
+    public void Seguir(string origen, string destino, SelloArchivo antes)
+    {
+        if (!string.Equals(origen, destino, StringComparison.Ordinal)) Mover(origen, destino);
+        if (antes.Existe) Retocar(destino, antes.M, antes.S);
+    }
+
     /// <summary>La medida acompaña al archivo renombrado o movido (DESPUÉS de moverlo). Devuelve si había algo que mover.</summary>
     public bool Mover(string origen, string destino)
     {

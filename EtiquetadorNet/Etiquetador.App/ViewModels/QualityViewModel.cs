@@ -79,7 +79,7 @@ public sealed partial class QualRow : ObservableObject, IFilaBuscable
 }
 
 /// <summary>Pestaña Calidad: clasifica el audio de la biblioteca compartida.</summary>
-public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
+public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible, IProgresoPagina
 {
     private readonly AppEngine _engine;
 
@@ -92,7 +92,8 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
     /// <summary>
     /// La tabla tiene una fila por canción (15.000 en una biblioteca grande): solo se rehace con la
     /// página a la vista, y si no, al volver a ella. Antes se rehacía con cada cambio de la biblioteca
-    /// aunque nadie la mirase, y desde el arranque.
+    /// aunque nadie la mirase, y desde el arranque; ahora además relee las medidas del espectro, que
+    /// no tiene sentido hacer para una página oculta.
     /// </summary>
     private readonly RecalculoDiferido _recalculo;
 
@@ -102,6 +103,7 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
         RowsView = new DataGridCollectionView(Rows);
         RowsView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(QualRow.Folder)));
         _filtroDiferido = new BusquedaDiferida(AplicarFiltro);
+        // Sin recálculo aquí: se hace la primera vez que la página se muestra.
         _recalculo = new RecalculoDiferido(Recompute);
     }
 
@@ -116,10 +118,10 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
 
     private readonly BusquedaDiferida _filtroDiferido;
 
-    /// <summary>Cuadro de búsqueda de la tabla. Se combina con el filtro de «solo baja calidad».</summary>
+    /// <summary>Cuadro de búsqueda de la tabla. Se combina con los filtros de «solo baja calidad» y «solo sospechosos».</summary>
     [ObservableProperty] private string _busqueda = "";
 
-    /// <summary>Cuántas quedan a la vista mientras hay búsqueda. Vacío si no se está filtrando.</summary>
+    /// <summary>Cuántas quedan a la vista mientras hay búsqueda o filtro de sospechosos. Vacío si no.</summary>
     [ObservableProperty] private string _filtroInfo = "";
 
     // La casilla filtra al momento; el cuadro de búsqueda, al dejar de teclear.
@@ -150,12 +152,17 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
                    && (!soloMalas || r.IsPoor)
                    && (!soloSospechosos || r.Valoracion == ValoracionCalidad.Sospechosa)
                    && (consulta.Vacia || consulta.Coincide(r));
-        FiltroInfo = consulta.Vacia && !soloSospechosos ? "" : $"{RowsView.Count} de {Rows.Count}";
+        ContarFiltradas();
     }
+
+    private void ContarFiltradas()
+        => FiltroInfo = ConsultaTabla.De(Busqueda).Vacia && !SoloSospechosos ? "" : $"{RowsView.Count} de {Rows.Count}";
 
     protected override void Recompute()
     {
         Rows.Clear();
+        // Sin biblioteca escaneada no hay nada que contar: se deja la indicación de pulsar «Analizar».
+        if (!Store.IsScanned) { ContarFiltradas(); return; }
         foreach (var t in Store.Tracks)
         {
             var tier = AudioQuality.Rate(t);
@@ -177,7 +184,7 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
             Rows.Add(fila);
         }
         RowsView.Refresh();
-        AplicarFiltro();
+        ContarFiltradas();
         ActualizarEstado();
         // Las medidas guardadas se validan contra el disco (fecha y tamaño de cada archivo) fuera del
         // hilo de la interfaz.
@@ -203,10 +210,24 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
     [ObservableProperty] private bool _soloSospechosos;
 
     /// <summary>Hay un análisis del espectro en marcha (para el botón «Cancelar» y la barra).</summary>
-    [ObservableProperty] private bool _analizandoEspectro;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(OcupadaSinAvance))]
+    private bool _analizandoEspectro;
 
-    /// <summary>Avance del análisis del espectro, de 0 a 100.</summary>
-    [ObservableProperty] private double _progresoEspectro;
+    /// <summary>Avance del análisis del espectro, de 0 a 100. También lo enseña la barra del pie.</summary>
+    [ObservableProperty] private double _progress;
+
+    /// <summary>
+    /// Ocupada en algo que no dice cuánto lleva (escanear la biblioteca): la barra sin avance. El
+    /// análisis del espectro tiene la suya, con el avance, y no se enseñan las dos a la vez.
+    /// </summary>
+    public bool OcupadaSinAvance => IsBusy && !AnalizandoEspectro;
+
+    protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        if (e.PropertyName == nameof(IsBusy)) OnPropertyChanged(nameof(OcupadaSinAvance));
+    }
 
     partial void OnSoloSospechososChanged(bool value) => _filtroDiferido.Ahora();
 
@@ -219,7 +240,9 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
     /// <summary>
     /// Lee de la caché las medidas que siguen valiendo para las filas de ahora y las pone en la tabla.
     /// Si nunca se ha analizado nada (no hay caché en disco ni cargada), no hace nada: ni siquiera
-    /// crea la caché.
+    /// crea la caché. Comprobar la fecha y el tamaño de 15.000 archivos lleva su tiempo en un disco
+    /// duro, así que va fuera del hilo de la interfaz; si mientras tanto se pide otra lectura (la
+    /// biblioteca volvió a cambiar), esta se abandona sin más: la nueva ya trae lo último.
     /// </summary>
     private async Task CargarMedidasAsync()
     {
@@ -228,17 +251,22 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
         var cts = _ctsCarga = new CancellationTokenSource();
         var ct = cts.Token;
         var rutas = Rows.Select(r => r.FilePath).ToList();
-        var medidas = await Task.Run(() =>
+        Dictionary<string, MedidaEspectro> medidas;
+        try
         {
-            var cache = _engine.Espectro;
-            var d = new Dictionary<string, MedidaEspectro>(StringComparer.OrdinalIgnoreCase);
-            foreach (var ruta in rutas)
+            medidas = await Task.Run(() =>
             {
-                ct.ThrowIfCancellationRequested();
-                if (cache.Get(ruta) is { } m) d[ruta] = m;
-            }
-            return d;
-        }, ct);
+                var cache = _engine.Espectro;
+                var d = new Dictionary<string, MedidaEspectro>(StringComparer.OrdinalIgnoreCase);
+                foreach (var ruta in rutas)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (cache.Get(ruta) is { } m) d[ruta] = m;
+                }
+                return d;
+            }, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
         if (ct.IsCancellationRequested) return;
         _medidas = medidas;
         foreach (var r in Rows) r.PonerMedida(medidas.TryGetValue(r.FilePath, out var m) ? m : null);
@@ -257,7 +285,7 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
         if (Store.Folders.Count == 0) { Status = "No hay carpetas configuradas. Añádelas en la pestaña Biblioteca."; return; }
         IsBusy = true;
         AnalizandoEspectro = true;
-        ProgresoEspectro = 0;
+        Progress = 0;
         var cts = _ctsEspectro = new CancellationTokenSource();
         _engine.ReleaseAudio();   // no conviene leer mientras suena algo
         try
@@ -265,29 +293,29 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
             if (!Store.IsScanned) { Status = "Escaneando biblioteca…"; await Store.ScanAsync(); }
             var todas = Store.Tracks.Select(t => t.FilePath).ToList();
             var analizables = todas.Where(EspectroScanner.Analizable).ToList();
-            _engine.Logger.Head($"Calidad: analizando el espectro de {analizables.Count} canciones");
+            _engine.Logger.Head($"Calidad: analizando el espectro de {analizables.Count} {Sustantivo.Archivo.De(analizables.Count)}");
             var reloj = System.Diagnostics.Stopwatch.StartNew();
             var avance = new Progress<(int done, int total, string file)>(p =>
             {
-                ProgresoEspectro = p.total == 0 ? 0 : p.done * 100.0 / p.total;
-                Status = $"Analizando el espectro: {p.done} de {p.total}…  {p.file}";
+                Progress = p.total == 0 ? 0 : p.done * 100.0 / p.total;
+                Status = $"Analizando la calidad real: {p.done} de {p.total}…  {p.file}";
             });
             var cache = await Task.Run(() => _engine.Espectro);
             await cache.MeasureManyAsync(analizables, force: false, avance, cts.Token);
             await CargarMedidasAsync();
-            ProgresoEspectro = 100;
+            Progress = 100;
             var resumen = ResumenEspectro(todas.Count, analizables.Count);
-            Status = $"Análisis del espectro terminado en {TextUtils.FormatEta(reloj.Elapsed.TotalSeconds)}. {resumen}";
+            Status = $"Análisis de la calidad real terminado en {TextUtils.FormatEta(reloj.Elapsed.TotalSeconds)}. {resumen}";
             _engine.Logger.Sum("Calidad: " + resumen);
         }
         catch (OperationCanceledException)
         {
             await CargarMedidasAsync();
-            Status = "Análisis del espectro cancelado. Lo analizado hasta ahora queda guardado.";
+            Status = "Análisis de la calidad real cancelado. Lo analizado hasta ahora queda guardado.";
         }
         catch (Exception e)
         {
-            Status = "Error durante el análisis del espectro: " + e.Message;
+            Status = "Error durante el análisis de la calidad real: " + e.Message;
             _engine.Logger.Error("Calidad: fallo al analizar el espectro", e);
         }
         finally
@@ -299,14 +327,15 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
         }
     }
 
+    /// <summary>Para el análisis entre un archivo y el siguiente. Lo usa también el cierre de la ventana.</summary>
     [RelayCommand]
-    private void CancelarEspectro() => _ctsEspectro?.Cancel();
+    public void CancelarEspectro() => _ctsEspectro?.Cancel();
 
     private void ActualizarEstado()
     {
         if (IsBusy) return;   // mientras se analiza, la línea de estado la lleva el avance
         var poor = Rows.Count(r => r.IsPoor);
-        var basico = $"{Rows.Count} archivos · {poor} de baja calidad (< 192 kbps).";
+        var basico = $"{Rows.Count} {Sustantivo.Archivo.De(Rows.Count)} · {poor} de baja calidad (< 192 kbps).";
         Status = _medidas.Count == 0 ? basico : basico + " " + ResumenEspectro(Rows.Count, Rows.Count(r => EspectroScanner.Analizable(r.FilePath)));
     }
 
@@ -322,9 +351,9 @@ public partial class QualityViewModel : ScanViewModelBase, IPaginaVisible
     }
 
     /// <summary>
-    /// Resumen del análisis del espectro, con el número y el género bien puestos. Los que no se
-    /// pudieron leer y los que este sistema no sabe decodificar se dicen aparte: no es lo mismo un
-    /// archivo dañado que un FLAC en macOS.
+    /// Resumen del análisis del espectro, con el número bien puesto. Los que no se pudieron leer y los
+    /// que este sistema no sabe decodificar se dicen aparte: no es lo mismo un archivo dañado que un
+    /// FLAC en macOS.
     /// </summary>
     internal static string TextoResumenEspectro(int analizados, int sospechosos, int dudosos, int sinLeer, int noAnalizables)
     {
