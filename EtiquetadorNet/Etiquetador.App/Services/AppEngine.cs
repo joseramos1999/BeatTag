@@ -1253,12 +1253,20 @@ public sealed class AppEngine
     {
         try
         {
-            var almacen = Sustituciones;
-            if (almacen.Count > 0 && almacen.Seguir(origen, destino))
-                Registrar("las sustituciones de la bandeja", almacen.Guardar());
+            if (SeguirSustituciones(Sustituciones, origen, destino) is { } error)
+                Registrar("las sustituciones de la bandeja", error);
         }
         catch (Exception e) { Logger.Error("No se pudo poner al día una sustitución de la bandeja tras mover su archivo", e); }
     }
+
+    /// <summary>
+    /// La regla de <see cref="SeguirSustituciones(string, string)"/>, aparte para poder probarla sin
+    /// el motor (que solo se construye sobre la carpeta de datos real de Documentos): el almacén sigue
+    /// el traslado y, si ha cambiado algo, se guarda. Devuelve null si no había nada que seguir, o lo
+    /// que devolvió el guardado ("" si fue bien).
+    /// </summary>
+    internal static string? SeguirSustituciones(AlmacenSustituciones almacen, string origen, string destino)
+        => almacen.Count > 0 && almacen.Seguir(origen, destino) ? almacen.Guardar() : null;
 
     /// <summary>
     /// Se ha sustituido una copia de la biblioteca: lo calculado sobre esas rutas (una propuesta de

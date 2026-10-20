@@ -668,17 +668,40 @@ public sealed class LibraryStore
     /// Qué decir de las carpetas que no se han podido leer, para el aviso de la ventana. "" si se
     /// leyeron todas.
     /// </summary>
-    public string AvisoNoDisponibles()
+    public string AvisoNoDisponibles() => TextoNoDisponibles(NoDisponibles);
+
+    /// <summary>
+    /// El texto de <see cref="AvisoNoDisponibles"/>, aparte para poder probarlo.
+    ///
+    /// Revisión de la tanda 3: decía «(y 1 carpeta(s) más)» y, con una sola canción conservada, «Se
+    /// mantienen sus 1 canciones». Ahora concuerda en número, también el verbo cuando son varias
+    /// carpetas («cuando estén disponibles»).
+    /// </summary>
+    internal static string TextoNoDisponibles(IReadOnlyList<CarpetaNoDisponible> caidas)
     {
-        if (NoDisponibles.Count == 0) return "";
-        var n = NoDisponibles[0];
-        var nombre = Nombre(n.Raiz);
-        var otras = NoDisponibles.Count > 1 ? $" (y {NoDisponibles.Count - 1} carpeta(s) más)" : "";
-        var conservadas = NoDisponibles.Sum(x => x.Conservadas);
-        return $"No se ha podido leer la carpeta «{nombre}»{otras}: {n.Motivo}. "
+        if (caidas.Count == 0) return "";
+        var n = caidas[0];
+        var otras = caidas.Count - 1;
+        var varias = otras > 0;
+        var masTexto = otras switch
+        {
+            0 => "",
+            1 => " (y 1 carpeta más)",
+            _ => $" (y {otras} carpetas más)",
+        };
+        var conservadas = caidas.Sum(x => x.Conservadas);
+        var disponibles = varias ? "estén disponibles" : "esté disponible";
+        var mantenidas = (conservadas, varias) switch
+        {
+            (1, false) => "Se mantiene su única canción de la vez anterior",
+            (1, true) => "Se mantiene la única canción que tenían la vez anterior",
+            (_, false) => $"Se mantienen sus {conservadas} canciones de la vez anterior",
+            _ => $"Se mantienen las {conservadas} canciones que tenían la vez anterior",
+        };
+        return $"No se ha podido leer la carpeta «{Nombre(n.Raiz)}»{masTexto}: {n.Motivo}. "
              + (conservadas > 0
-                ? $"Se mantienen sus {conservadas} canciones de la vez anterior; vuelve a escanear cuando esté disponible."
-                : "Sus canciones no aparecen hasta que esté disponible y vuelvas a escanear.");
+                ? $"{mantenidas}; vuelve a escanear cuando {disponibles}."
+                : $"Sus canciones no aparecen hasta que {disponibles} y vuelvas a escanear.");
     }
 }
 

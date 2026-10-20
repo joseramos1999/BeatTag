@@ -350,7 +350,9 @@ public partial class PendientesViewModel : ViewModelBase, IEstadoPagina
 
         var partes = new List<string>();
         if (tachadas > 0) partes.Add(tachadas == 1 ? "1 canción vuelve a estar conseguida" : $"{tachadas} canciones vuelven a estar conseguidas");
-        if (yaConseguidas > 0) partes.Add(yaConseguidas == 1 ? "1 sigue conseguida con otro archivo" : $"{yaConseguidas} siguen conseguidas con otro archivo");
+        // Con el sujeto explícito (revisión de la tanda 3): tras «3 archivos descartados vuelven a
+        // contar», un «1 sigue conseguida» suelto se leía como si hablara de un archivo.
+        if (yaConseguidas > 0) partes.Add(yaConseguidas == 1 ? "1 canción sigue conseguida con otro archivo" : $"{yaConseguidas} canciones siguen conseguidas con otro archivo");
         var texto = $"{recuperados} archivos descartados vuelven a contar";
         return partes.Count == 0
             ? texto + ": si están o vuelven a estar en la biblioteca, tacharán sus canciones."
