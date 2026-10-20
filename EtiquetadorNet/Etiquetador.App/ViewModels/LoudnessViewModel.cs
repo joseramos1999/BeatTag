@@ -583,19 +583,17 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     public void ExcluirCarpetas(IReadOnlyCollection<LoudnessRow> filas)
     {
         if (IsBusy) { Status = "Espera a que termine la operación en curso."; return; }
-        var carpetas = filas.Select(f => Path.GetDirectoryName(f.FilePath) ?? "")
-                            .Where(d => d.Length > 0)
-                            .Distinct(StringComparer.OrdinalIgnoreCase)
-                            .ToList();
+        var carpetas = AjusteVolumenSeleccion.CarpetasDe(filas);
         if (carpetas.Count == 0) { Status = "Elige antes una canción de la tabla."; return; }
 
-        var (lista, anadidas) = AjusteVolumenSeleccion.AnadirCarpetas(_engine.Config.VolumenCarpetasExcluidas, carpetas);
-        if (anadidas == 0) { Status = AjusteVolumenSeleccion.TextoCarpetasExcluidas(carpetas, 0, 0); return; }
+        var (lista, nuevas) = AjusteVolumenSeleccion.AnadirCarpetasConNombre(_engine.Config.VolumenCarpetasExcluidas, carpetas);
+        if (nuevas.Count == 0) { Status = AjusteVolumenSeleccion.TextoCarpetasExcluidas(carpetas, 0, 0); return; }
         _engine.Config.VolumenCarpetasExcluidas = lista;
         var aviso = GuardarExclusiones();
         var excluidas = AplicarExclusiones();
-        Status = AjusteVolumenSeleccion.TextoCarpetasExcluidas(carpetas, anadidas, excluidas) + aviso;
-        _engine.Logger.Detail($"Volumen: excluida{(anadidas == 1 ? " 1 carpeta" : $"s {anadidas} carpetas")} del ajuste: {string.Join(" · ", carpetas)}");
+        // Se nombran y se cuentan las que han entrado de verdad en la lista, no las pedidas.
+        Status = AjusteVolumenSeleccion.TextoCarpetasExcluidas(nuevas, nuevas.Count, excluidas) + aviso;
+        _engine.Logger.Detail($"Volumen: excluida{(nuevas.Count == 1 ? " 1 carpeta" : $"s {nuevas.Count} carpetas")} del ajuste: {string.Join(" · ", nuevas)}");
     }
 
     /// <summary>«Excluir del ajuste»: estas canciones, por su ruta.</summary>

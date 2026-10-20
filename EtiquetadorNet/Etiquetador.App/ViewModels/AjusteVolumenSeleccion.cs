@@ -85,17 +85,42 @@ public static class AjusteVolumenSeleccion
     /// </summary>
     public static (List<string> Lista, int Anadidas) AnadirCarpetas(IEnumerable<string> actuales, IEnumerable<string> nuevas)
     {
-        var lista = actuales.Where(c => !string.IsNullOrWhiteSpace(c)).ToList();
-        var anadidas = 0;
+        var (lista, anadidas) = AnadirCarpetasConNombre(actuales, nuevas);
+        return (lista, anadidas.Count);
+    }
+
+    /// <summary>
+    /// Lo mismo, con las carpetas que de verdad han entrado en la lista: las de la lista final que no
+    /// estaban en la inicial. Contar cada carpeta pedida contaba de más (House\2024 y luego House, que
+    /// la sustituye, eran «2 carpetas» con una sola en la lista) y el aviso podía nombrar una que ya
+    /// estaba excluida.
+    /// </summary>
+    public static (List<string> Lista, List<string> Anadidas) AnadirCarpetasConNombre(IEnumerable<string> actuales, IEnumerable<string> nuevas)
+    {
+        var inicial = actuales.Where(c => !string.IsNullOrWhiteSpace(c)).ToList();
+        var lista = inicial.ToList();
         foreach (var n in nuevas.Where(c => !string.IsNullOrWhiteSpace(c)))
         {
             if (lista.Any(c => Rutas.MismaCarpeta(n, c) || Rutas.EstaDentroDe(n, c))) continue;
             lista.RemoveAll(c => Rutas.EstaDentroDe(c, n));
             lista.Add(n);
-            anadidas++;
         }
-        return (lista, anadidas);
+        return (lista, lista.Where(c => !inicial.Any(i => Rutas.MismaCarpeta(i, c))).ToList());
     }
+
+    /// <summary>Las carpetas de unas filas, sin repetir: lo que excluye «Excluir esta carpeta del ajuste».</summary>
+    public static List<string> CarpetasDe(IEnumerable<LoudnessRow> filas)
+        => filas.Select(f => Path.GetDirectoryName(f.FilePath) ?? "")
+                .Where(d => d.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+    /// <summary>
+    /// El rótulo de la opción según la selección: con canciones de varias carpetas excluye todas, y
+    /// «esta carpeta» no lo decía.
+    /// </summary>
+    public static string RotuloExcluirCarpetas(int carpetas)
+        => carpetas <= 1 ? "Excluir esta carpeta del ajuste" : $"Excluir sus {carpetas} carpetas del ajuste";
 
     /// <summary>Añade canciones sin repetir (sin distinguir mayúsculas). Devuelve la lista y cuántas se han añadido.</summary>
     public static (List<string> Lista, int Anadidas) AnadirCanciones(IEnumerable<string> actuales, IEnumerable<string> nuevas)
@@ -214,7 +239,10 @@ public static class AjusteVolumenSeleccion
               + "El cambio queda registrado y se puede revertir desde Enriquecer con «Deshacer última» o, más adelante, con «Historial de cambios…».");
     }
 
-    /// <summary>Lo que se dice al excluir carpetas.</summary>
+    /// <summary>
+    /// Lo que se dice al excluir carpetas. <paramref name="carpetas"/> son las que han entrado en la
+    /// lista (<see cref="AnadirCarpetasConNombre"/>), o las pedidas si no ha entrado ninguna.
+    /// </summary>
     public static string TextoCarpetasExcluidas(IReadOnlyList<string> carpetas, int anadidas, int canciones)
     {
         if (anadidas == 0)

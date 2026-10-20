@@ -211,6 +211,7 @@
                             <Button Content="Cerrar BeatTag ahora" Click="CerrarParaRestaurar_Click" Classes="gris"
                                     ToolTip.Tip="Cierra la aplicación guardando lo pendiente, como al cerrar la ventana. La restauración se completa al volver a abrirla." />
                             <Button Content="Cancelar la restauración" Command="{Binding CancelarRestauracionCommand}" Classes="gris"
+                                    IsEnabled="{Binding !CopiaOcupada}"
                                     ToolTip.Tip="Descarta la restauración preparada. Los datos actuales no cambian." />
                         </StackPanel>
                     </StackPanel>

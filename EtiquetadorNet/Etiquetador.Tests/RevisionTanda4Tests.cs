@@ -352,6 +352,108 @@ public class RevisionTanda4Tests : IDisposable
         Assert.Matches(@"<Button Content=""Reparar colección de rekordbox""[^>]*ToolTip\.Tip=""\{Binding AyudaAbrirRekordbox\}"" ToolTip\.ShowOnDisabled=""True""", vista);
     }
 
+    // rendimiento-7: mientras se prepara otra restauración (se borra y se reescribe la misma carpeta),
+    // cancelar no puede borrarla a medias.
+    [Fact]
+    public async Task Cancelar_la_restauracion_espera_a_que_termine_de_prepararse_otra()
+    {
+        var ajustes = (SettingsViewModel)RuntimeHelpers.GetUninitializedObject(typeof(SettingsViewModel));
+        ajustes.CopiaOcupada = true;
+
+        // Sin motor: si no esperase, fallaría al buscar la carpeta de datos.
+        await ajustes.CancelarRestauracionCommand.ExecuteAsync(null);
+
+        Assert.True(ajustes.CopiaOcupada);
+        var vista = File.ReadAllText(Path.Combine(Fuentes(), "Views", "SettingsView.axaml"));
+        Assert.Matches(@"<Button Content=""Cancelar la restauración""[^>]*IsEnabled=""\{Binding !CopiaOcupada\}""", vista);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // interfaz-7: copiar a una carpeta (Tendencias, Playlists y Novedades) se cancela y no deja archivos cortados
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Copiar_a_una_carpeta_se_detiene_entre_archivos_y_no_deja_archivos_cortados()
+    {
+        var a = Ruta("Musica", "a.mp3");
+        var b = Ruta("Musica", "b.mp3");
+        File.WriteAllText(a, "audio a");
+        File.WriteAllText(b, "audio b");
+        var usb = Path.Combine(_dir, "USB");
+        var archivos = new[] { (a, "01 - a.mp3"), (b, "02 - b.mp3") };
+
+        // «Cancelar» (o cerrar la ventana) durante la primera: la segunda ya no se copia.
+        using (var cts = new CancellationTokenSource())
+        {
+            var r = ListaFrenteBibliotecaViewModel.CopiarNumeradas(archivos, usb, cts.Token, (o, d) => { File.Copy(o, d, true); cts.Cancel(); });
+            Assert.Equal(new ListaFrenteBibliotecaViewModel.ResultadoCopia(1, 0, 0, true), r);
+        }
+        Assert.Equal("audio a", File.ReadAllText(Path.Combine(usb, "01 - a.mp3")));
+        Assert.False(File.Exists(Path.Combine(usb, "02 - b.mp3")));
+
+        // Un fallo a mitad de una copia no deja nada con el nombre definitivo ni el parcial.
+        var cortada = ListaFrenteBibliotecaViewModel.CopiarNumeradas(archivos, usb, CancellationToken.None,
+            (o, d) => { File.WriteAllText(d, "aud"); throw new IOException("el USB se ha desconectado"); });
+        Assert.Equal(new ListaFrenteBibliotecaViewModel.ResultadoCopia(0, 1, 1, false), cortada);
+        Assert.Empty(Directory.GetFiles(usb, "02*"));
+
+        // Lo que dejó un cierre a la fuerza es el parcial, no el archivo: la copia siguiente lo repone.
+        var parcial = Path.Combine(usb, "02 - b.mp3" + ListaFrenteBibliotecaViewModel.SufijoParcial);
+        File.WriteAllText(parcial, "aud");
+        var otra = ListaFrenteBibliotecaViewModel.CopiarNumeradas(archivos, usb, CancellationToken.None);
+        Assert.Equal(new ListaFrenteBibliotecaViewModel.ResultadoCopia(1, 1, 0, false), otra);
+        Assert.Equal("audio b", File.ReadAllText(Path.Combine(usb, "02 - b.mp3")));
+        Assert.False(File.Exists(parcial));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // rendimiento-3: corregir un artista de Novedades no se solapa con una búsqueda
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Mientras_se_comprueba_una_correccion_de_Novedades_no_se_busca_ni_se_toca_otro_artista()
+    {
+        var motor = Motor(new Logger(), new LibraryStore(new AppConfig(), () => { }, new ScanCache(Ruta("scan.json"))));
+        var vm = new NovedadesViewModel(motor);
+        var respuesta = new TaskCompletionSource<(ArtistaDeezer? Artista, bool FalloDeRed)>();
+        vm.ConsultaArtistaDePrueba = _ => respuesta.Task;
+        vm.ArtistaElegido = new FilaArtistaNovedades("bad bunny", "Bad Bunny", 12, 0, "", 0, null, 0, -1, false, false);
+        vm.Correccion = "https://www.deezer.com/artist/10583405";
+        Assert.True(vm.PuedeBuscar);
+
+        var corregir = vm.CorregirArtistaCommand.ExecuteAsync(null);   // Deezer tarda en contestar
+
+        Assert.True(vm.Corrigiendo);
+        Assert.False(vm.PuedeBuscar);
+        Assert.False(vm.PuedeTocarArtista);
+        await vm.ExcluirArtistaCommand.ExecuteAsync(null);
+        Assert.Equal("Espera a que termine la comprobación del artista en Deezer.", vm.Status);
+
+        respuesta.SetResult((new ArtistaDeezer(10583405, "Bad Bunny", 1_000_000, 50), false));
+        await corregir;
+
+        Assert.False(vm.Corrigiendo);
+        Assert.True(vm.PuedeBuscar);
+        Assert.StartsWith("«Bad Bunny» queda asociado a «Bad Bunny» de Deezer.", vm.Status);
+        var guardado = new AlmacenArtistasDeezer(Path.Combine(motor.Paths.DataDir, AlmacenArtistasDeezer.NombreArchivo)).Buscar("bad bunny");
+        Assert.Equal(EstadoArtistaDeezer.Manual, guardado?.Estado);
+    }
+
+    // El guardado toma la foto dentro de su turno: con varios guardados a la vez, el último en escribir
+    // lleva lo último hecho.
+    [Fact]
+    public void Los_guardados_a_la_vez_de_los_artistas_de_Novedades_dejan_lo_ultimo()
+    {
+        var archivo = Ruta("datos", AlmacenArtistasDeezer.NombreArchivo);
+        var almacen = new AlmacenArtistasDeezer(archivo);
+        Parallel.For(0, 40, i =>
+        {
+            almacen.Corregir($"artista {i}", $"Artista {i}", new ArtistaDeezer(i + 1, $"Artista {i}", 10, 1), DateTime.Now);
+            Assert.Equal("", almacen.Guardar());
+        });
+        Assert.Equal(40, new AlmacenArtistasDeezer(archivo).Count);
+    }
+
     // ---------------------------------------------------------------------------------------------
     // menor-audio_medido-2 y -4: la página Calidad
     // ---------------------------------------------------------------------------------------------

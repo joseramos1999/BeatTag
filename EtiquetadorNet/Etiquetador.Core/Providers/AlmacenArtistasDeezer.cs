@@ -230,12 +230,22 @@ public sealed class AlmacenArtistasDeezer
     /// </summary>
     public static bool IdentificarSinCache(ArtistaDeezerGuardado? guardado) => guardado?.Estado == EstadoArtistaDeezer.PorIdentificar;
 
-    /// <summary>Devuelve "" si fue bien, o el motivo del fallo.</summary>
+    /// <summary>
+    /// Devuelve "" si fue bien, o el motivo del fallo.
+    ///
+    /// La foto se toma DENTRO del turno de escritura, como en AlmacenSustituciones.Guardar: tomada
+    /// antes, un guardado periódico de la búsqueda con una foto anterior podía escribirse después del
+    /// de una corrección hecha a mano y dejar en disco el estado viejo. Así el último en escribir lleva
+    /// siempre lo más reciente.
+    /// </summary>
     public string Guardar()
     {
         if (SoloLectura) return ArchivoJson.AvisoSoloLectura(_archivo);
-        List<ArtistaDeezerGuardado> copia;
-        lock (_cerrojo) copia = _porClave.Values.OrderBy(a => a.Clave, StringComparer.Ordinal).Select(a => a.Copia()).ToList();
-        lock (_cerrojoGuardar) return ArchivoJson.Escribir(_archivo, copia);
+        lock (_cerrojoGuardar)
+        {
+            List<ArtistaDeezerGuardado> copia;
+            lock (_cerrojo) copia = _porClave.Values.OrderBy(a => a.Clave, StringComparer.Ordinal).Select(a => a.Copia()).ToList();
+            return ArchivoJson.Escribir(_archivo, copia);
+        }
     }
 }

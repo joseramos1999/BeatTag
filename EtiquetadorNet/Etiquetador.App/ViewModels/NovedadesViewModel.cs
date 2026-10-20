@@ -115,8 +115,18 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
     /// <summary>El resumen de la última búsqueda, encima de la tabla.</summary>
     [ObservableProperty] private string _resumenBusqueda = "";
 
+    /// <summary>
+    /// Se está comprobando en Deezer el artista que el usuario indica para corregir uno. Esa consulta
+    /// pasa por el limitador compartido de api.deezer.com y puede tardar segundos: mientras tanto no se
+    /// busca, porque la búsqueda leería el estado anterior del artista y al terminar volvería a poner
+    /// en la tabla las canciones del homónimo recién corregido.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PuedeBuscar), nameof(PuedeTocarArtista))]
+    private bool _corrigiendo;
+
     /// <summary>Se puede empezar una búsqueda.</summary>
-    public bool PuedeBuscar => !Buscando && !IsBusy;
+    public bool PuedeBuscar => !Buscando && !IsBusy && !Corrigiendo;
 
     /// <summary>
     /// Se puede copiar a una carpeta u ordenar. Mientras se busca no: al terminar, la lista se
@@ -307,8 +317,17 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
     [NotifyPropertyChangedFor(nameof(TextoExcluir), nameof(PuedeTocarArtista))]
     private FilaArtistaNovedades? _artistaElegido;
 
-    /// <summary>Hay un artista elegido y no se está buscando (la búsqueda escribe en el mismo almacén).</summary>
-    public bool PuedeTocarArtista => ArtistaElegido != null && !Buscando;
+    /// <summary>
+    /// Hay un artista elegido, no se está buscando (la búsqueda escribe en el mismo almacén) ni se está
+    /// comprobando otra corrección.
+    /// </summary>
+    public bool PuedeTocarArtista => ArtistaElegido != null && !Buscando && !Corrigiendo;
+
+    /// <summary>Por qué no se puede tocar ahora un artista, o null si se puede.</summary>
+    private string? EsperaArtista()
+        => Buscando ? "Espera a que termine la búsqueda."
+         : Corrigiendo ? "Espera a que termine la comprobación del artista en Deezer."
+         : null;
 
     public string TextoExcluir => ArtistaElegido?.Excluido == true ? "Volver a incluir" : "No buscar sus novedades";
 
@@ -342,34 +361,45 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
     private async Task CorregirArtistaAsync()
     {
         if (ArtistaElegido is not { } a) { Status = "Elige antes un artista en la tabla."; return; }
-        if (Buscando) { Status = "Espera a que termine la búsqueda."; return; }
+        if (EsperaArtista() is { } espera) { Status = espera; return; }
         if (NovedadesDeezer.IdDeEnlace(Correccion) is not { } id)
         {
             Status = "Pega el enlace del artista en Deezer (https://www.deezer.com/artist/…) o su número.";
             return;
         }
 
-        Status = "Comprobando el artista en Deezer…";
-        var (artista, fallo) = await new NovedadesDeezer(_engine.Api).ArtistaAsync(id, CancellationToken.None);
-        if (fallo) { Status = "Deezer no responde. Inténtalo de nuevo dentro de unos minutos."; return; }
-        if (artista == null) { Status = $"Deezer no tiene ningún artista con el número {id}."; return; }
+        Corrigiendo = true;
+        try
+        {
+            Status = "Comprobando el artista en Deezer…";
+            var (artista, fallo) = await ConsultarArtista(id);
+            if (fallo) { Status = "Deezer no responde. Inténtalo de nuevo dentro de unos minutos."; return; }
+            if (artista == null) { Status = $"Deezer no tiene ningún artista con el número {id}."; return; }
 
-        Almacen.Corregir(a.Clave, a.Nombre, artista, DateTime.Now);
-        var error = Almacen.Guardar();
-        _corregidos.Add(a.Clave);
-        Correccion = "";
-        RellenarArtistas();
-        await QuitarCancionesDeAsync(a.Nombre);
-        Status = $"«{a.Nombre}» queda asociado a «{artista.Nombre}» de Deezer. Sus novedades saldrán en la próxima búsqueda."
-               + (error.Length > 0 ? $" No se ha podido guardar: {error}" : "");
-        _engine.Logger.Detail($"Novedades: «{a.Nombre}» corregido a mano → Deezer {artista.Id} «{artista.Nombre}».");
+            Almacen.Corregir(a.Clave, a.Nombre, artista, DateTime.Now);
+            var error = Almacen.Guardar();
+            _corregidos.Add(a.Clave);
+            Correccion = "";
+            RellenarArtistas();
+            await QuitarCancionesDeAsync(a.Nombre);
+            Status = $"«{a.Nombre}» queda asociado a «{artista.Nombre}» de Deezer. Sus novedades saldrán en la próxima búsqueda."
+                   + (error.Length > 0 ? $" No se ha podido guardar: {error}" : "");
+            _engine.Logger.Detail($"Novedades: «{a.Nombre}» corregido a mano → Deezer {artista.Id} «{artista.Nombre}».");
+        }
+        finally { Corrigiendo = false; }
     }
+
+    /// <summary>La consulta del artista a Deezer. Se puede sustituir en las pruebas.</summary>
+    internal Func<long, Task<(ArtistaDeezer? Artista, bool FalloDeRed)>>? ConsultaArtistaDePrueba { get; set; }
+
+    private Task<(ArtistaDeezer? Artista, bool FalloDeRed)> ConsultarArtista(long id)
+        => ConsultaArtistaDePrueba?.Invoke(id) ?? new NovedadesDeezer(_engine.Api).ArtistaAsync(id, CancellationToken.None);
 
     [RelayCommand]
     private void VolverAIdentificar()
     {
         if (ArtistaElegido is not { } a) { Status = "Elige antes un artista en la tabla."; return; }
-        if (Buscando) { Status = "Espera a que termine la búsqueda."; return; }
+        if (EsperaArtista() is { } espera) { Status = espera; return; }
         // Queda «por identificar» aunque no se hubiera llegado a identificar: así la próxima búsqueda
         // pregunta de nuevo a Deezer, sin la caché de red.
         Almacen.Olvidar(a.Clave, a.Nombre);
@@ -386,7 +416,7 @@ public partial class NovedadesViewModel : ListaFrenteBibliotecaViewModel
     private async Task ExcluirArtistaAsync()
     {
         if (ArtistaElegido is not { } a) { Status = "Elige antes un artista en la tabla."; return; }
-        if (Buscando) { Status = "Espera a que termine la búsqueda."; return; }
+        if (EsperaArtista() is { } espera) { Status = espera; return; }
         var excluir = !a.Excluido;
         Almacen.Excluir(a.Clave, a.Nombre, excluir, DateTime.Now);
         var error = Almacen.Guardar();
