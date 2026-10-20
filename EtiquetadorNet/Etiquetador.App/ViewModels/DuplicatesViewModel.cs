@@ -47,6 +47,18 @@ public partial class DupRow : ObservableObject
     /// </summary>
     public string Version { get; init; } = "";
 
+    /// <summary>
+    /// Al agrupar por audio, qué edición del tema es frente a la de referencia del grupo («Otra
+    /// edición: empieza 32 s después»). Vacío si el grupo son solo copias, o con otros criterios.
+    /// </summary>
+    public string Edicion { get; init; } = "";
+
+    /// <summary>
+    /// Qué edición es, para separar las copias que sobran de las ediciones distintas: «Marcar
+    /// sobrantes» y el aviso de «se quedaría sin ninguna copia» trabajan dentro de cada edición.
+    /// </summary>
+    public int EdicionId { get; init; }
+
     /// <summary>Verde para la copia a conservar. El resto sin fondo, para que destaque una sola.</summary>
     public IBrush? Fondo => EsMejor ? VerdeConservar : null;
 
@@ -349,6 +361,13 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     /// <summary>Los grupos que se ven ahora en la tabla, para poder quitar copias sin recalcular.</summary>
     private IReadOnlyList<DuplicateGroup> _grupos = Array.Empty<DuplicateGroup>();
 
+    /// <summary>
+    /// De la última comparación por audio, la edición de cada canción (A14). Se guarda para repintar
+    /// sin volver a comparar al quitar lo enviado a la papelera: las etiquetas se rehacen con lo que
+    /// queda, así que si se va la edición de referencia, la siguiente pasa a serlo.
+    /// </summary>
+    private IReadOnlyDictionary<string, AlineacionAudio>? _alineacion;
+
     /// <summary>Esta pestaña está quitando de la biblioteca lo que acaba de enviar a la papelera.</summary>
     private bool _quitandoBorradas;
 
@@ -409,7 +428,7 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         var porAudio = SelectedMode.Value == DuplicateMode.Fingerprint;
         var (filas, conPrioridad) = ConstruirFilas(groups, porAudio, Puntuar, MotivoDe,
                                                    t => EsPrioritaria(t.Folder), conservar?.Marcadas,
-                                                   conservar?.Recomendadas);
+                                                   conservar?.Recomendadas, porAudio ? _alineacion : null);
         Rows.Clear();
         foreach (var f in filas) Rows.Add(f);
         var copies = filas.Count;
@@ -441,26 +460,40 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     /// </summary>
     /// <param name="marcadas">Copias que tienen que seguir marcadas, o null para empezar sin marcas.</param>
     /// <param name="recomendadasMarcadas">De ellas, las que ya eran la copia recomendada.</param>
+    /// <param name="alineacion">
+    /// Al agrupar por audio, la edición de cada canción (hallazgo A14). Las ediciones distintas de un
+    /// mismo tema se separan igual que las versiones: cada una conserva su mejor copia.
+    /// </param>
     /// <returns>Las filas y cuántos grupos se resolvieron por carpeta prioritaria.</returns>
     internal static (List<DupRow> Filas, int ConPrioridad) ConstruirFilas(
         IReadOnlyList<DuplicateGroup> groups, bool porAudio,
         Func<Track, double> puntuar, Func<Track, string> motivoDe, Func<Track, bool> esPrioritaria,
-        IReadOnlySet<string>? marcadas = null, IReadOnlySet<string>? recomendadasMarcadas = null)
+        IReadOnlySet<string>? marcadas = null, IReadOnlySet<string>? recomendadasMarcadas = null,
+        IReadOnlyDictionary<string, AlineacionAudio>? alineacion = null)
     {
         var filas = new List<DupRow>();
         var conPrioridad = 0;
         for (var gi = 0; gi < groups.Count; gi++)
         {
             var g = groups[gi];
-            var label = $"{(string.IsNullOrWhiteSpace(g.Artist) ? "¿?" : g.Artist)} - {g.Title}   ({g.Tracks.Count} copias)";
+
+            // Ediciones del mismo tema (una Extended frente a su Original): solo al agrupar por audio.
+            var ediciones = porAudio ? EdicionesPorAudio.Contar(g.Tracks, alineacion) : 1;
+            var etiquetas = ediciones > 1 ? EdicionesPorAudio.Etiquetas(g.Tracks, alineacion) : null;
+            int EdicionDe(Track t) => ediciones > 1 && alineacion!.TryGetValue(t.FilePath, out var a) ? a.Edicion : 0;
+
+            var label = $"{(string.IsNullOrWhiteSpace(g.Artist) ? "¿?" : g.Artist)} - {g.Title}   "
+                        + (ediciones > 1 ? $"({Cuenta(g.Tracks.Count, "archivo", "archivos")} · {ediciones} ediciones)" : $"({g.Tracks.Count} copias)");
 
             // Al agrupar por AUDIO, un grupo reúne el original con sus ediciones de DJ: comparten la
             // grabación pero no son copias sobrantes, son herramientas distintas para pinchar. Por
             // eso cada versión conserva SU ejemplar: se elige la mejor dentro de cada descriptor,
-            // no una sola para todo el grupo. Con los demás criterios no aplica: ahí un grupo son
-            // copias del mismo archivo y solo debe quedar una.
+            // no una sola para todo el grupo. Lo mismo con cada EDICIÓN (A14): una Extended y su
+            // Original no son duplicados para un DJ, así que «Marcar sobrantes» nunca marca la única
+            // copia de una edición. Con los demás criterios no aplica: ahí un grupo son copias del
+            // mismo archivo y solo debe quedar una.
             var porVersion = g.Tracks
-                .GroupBy(t => porAudio ? VersionDe(t) : "", StringComparer.OrdinalIgnoreCase);
+                .GroupBy(t => (Edicion: EdicionDe(t), Version: porAudio ? VersionDe(t).ToUpperInvariant() : ""));
 
             foreach (var v in porVersion)
             {
@@ -479,6 +512,9 @@ public partial class DuplicatesViewModel : ScanViewModelBase
                                      && v.All(t => marcadas.Contains(t.FilePath))
                                      && recomendadasMarcadas?.Contains(mejor.FilePath) != true;
 
+                // La única copia de una edición no compite con nadie: «Mejor calidad» no diría nada.
+                var unicaDeSuEdicion = ediciones > 1 && v.Count() == 1;
+
                 foreach (var t in v)
                 {
                     var esMejor = ReferenceEquals(t, mejor);
@@ -493,10 +529,13 @@ public partial class DuplicatesViewModel : ScanViewModelBase
                         Folder = t.Folder,
                         FilePath = t.FilePath,
                         Version = version,
+                        Edicion = etiquetas?.GetValueOrDefault(t.FilePath) ?? "",
+                        EdicionId = v.Key.Edicion,
                         EsMejor = esMejor,
-                        Motivo = esMejor
-                            ? (version.Length > 0 ? $"Se conserva ({version})" : motivoDe(t))
-                            : "",
+                        Motivo = !esMejor ? ""
+                            : version.Length > 0 ? $"Se conserva ({version})"
+                            : unicaDeSuEdicion ? "Única de su edición"
+                            : motivoDe(t),
                         Marcada = marcadas?.Contains(t.FilePath) == true && !(esMejor && desmarcarMejor),
                     });
                 }
@@ -522,6 +561,14 @@ public partial class DuplicatesViewModel : ScanViewModelBase
              + $"{excl}{edic}{prio}{nota}.";
     }
 
+    /// <summary>
+    /// El estado tras comparar el audio. Puro, para probarlo. Dice aparte cuántos grupos reúnen otras
+    /// ediciones del mismo tema (hallazgo A14), que no son copias que sobren.
+    /// </summary>
+    internal static string TextoPorAudio(int grupos, int archivos, int conOtrasEdiciones)
+        => $"{Cuenta(grupos, "grupo", "grupos")} con el mismo audio · {Cuenta(archivos, "archivo implicado", "archivos implicados")}"
+           + (conOtrasEdiciones > 0 ? $" · {conOtrasEdiciones} con otras ediciones del mismo tema" : "") + ".";
+
     /// <summary>Lo que se añade al estado cuando el repintado ha desmarcado copias. Puro.</summary>
     internal static string NotaDesmarcadas(int desmarcadas) => desmarcadas switch
     {
@@ -532,10 +579,10 @@ public partial class DuplicatesViewModel : ScanViewModelBase
 
     /// <summary>
     /// Cuántas canciones se quedarían sin ninguna copia si se envían las marcadas: grupos (o, al
-    /// agrupar por audio, versiones de un grupo) con TODAS sus copias marcadas.
+    /// agrupar por audio, versiones o ediciones de un grupo) con TODAS sus copias marcadas.
     /// </summary>
     internal static int SinNingunaCopia(IEnumerable<DupRow> filas)
-        => filas.GroupBy(f => (f.GrupoId, f.Version.ToUpperInvariant()))
+        => filas.GroupBy(f => (f.GrupoId, f.EdicionId, f.Version.ToUpperInvariant()))
                 .Count(g => g.All(f => f.Marcada));
 
     /// <summary>
@@ -786,24 +833,29 @@ public partial class DuplicatesViewModel : ScanViewModelBase
 
         try
         {
+            // El avance es por canciones: lo que más tarda ahora es votar el desfase de cada una en
+            // el índice, no comparar parejas (A14).
             var avance = new Progress<(int Hechas, int Total)>(p =>
-                Status = $"Comparando el audio: {p.Hechas} de {p.Total} parejas…");
+                Status = $"Comparando el audio: {p.Hechas} de {p.Total} canciones…");
 
             // Sin las huellas guardadas, comparar daría «0 grupos con el mismo audio», que es falso:
             // se dice por qué no se puede comparar y la tabla se queda como estaba.
             await _huellas.CargarAsync();
             if (_huellas.AvisoCarga is { Length: > 0 } aviso) { Status = aviso; return; }
 
-            var groups = await Task.Run(
-                () => FingerprintDuplicates.Find(lista, t => _huellas.Get(t.FilePath),
-                                                 AudioFingerprint.UmbralIgual, avance, ct), ct);
+            // Siempre con las otras ediciones del mismo tema (A14): salen distinguidas y cada una
+            // conserva su copia, así que no estorban a la limpieza. Las ediciones de DJ que el
+            // usuario excluye ya no están en la lista, así que tampoco aparecen como ediciones.
+            var res = await Task.Run(
+                () => FingerprintDuplicates.Agrupar(lista, t => _huellas.Get(t.FilePath), incluirEdiciones: true,
+                                                    AudioFingerprint.UmbralIgual, avance, ct), ct);
 
             // El usuario puede haber cambiado de criterio mientras esto corría: no pisar la tabla.
             if (SelectedMode.Value != DuplicateMode.Fingerprint) return;
 
-            Pintar(groups);
-            var copias = groups.Sum(g => g.Tracks.Count);
-            Status = $"{Cuenta(groups.Count, "grupo", "grupos")} con el mismo audio · {Cuenta(copias, "archivo implicado", "archivos implicados")}.";
+            _alineacion = res.Alineacion;
+            Pintar(res.Grupos);
+            Status = TextoPorAudio(res.Grupos.Count, res.Grupos.Sum(g => g.Tracks.Count), res.GruposConVariasEdiciones);
         }
         catch (OperationCanceledException) { Status = "Comparación cancelada."; }
         catch (Exception e) { Status = "No se pudo comparar el audio: " + e.Message; }
@@ -821,7 +873,9 @@ public partial class DuplicatesViewModel : ScanViewModelBase
     {
         foreach (var r in Rows) r.Marcada = !r.EsMejor;
         RecontarMarcadas();
-        Status = $"{Cuenta(Marcadas, "copia marcada", "copias marcadas")}. Se conserva una de cada canción.";
+        // Por audio, también una de cada edición del mismo tema (A14): la Extended no sobra por tener el Original.
+        Status = $"{Cuenta(Marcadas, "copia marcada", "copias marcadas")}. Se conserva una de cada canción"
+                 + (EsPorHuella ? " y de cada edición." : ".");
     }
 
     [RelayCommand]

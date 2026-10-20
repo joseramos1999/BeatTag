@@ -24,7 +24,7 @@
             <ComboBox ItemsSource="{Binding KeepOptions}" SelectedItem="{Binding SelectedKeep}" MinWidth="230"
                       ToolTip.Tip="Qué copia se considera la mejor de cada grupo. Es la que se marca en verde y la que no se marca al pulsar «Marcar sobrantes»." />
             <CheckBox Content="Excluir ediciones de DJ" IsChecked="{Binding ExcluirEdicionesDj}" VerticalAlignment="Center"
-                      ToolTip.Tip="Deja fuera del análisis las ediciones hechas para pinchar: hype intro, melodic intro, break intro, open show, starter, aca in/out, acapellas, redrum, quick hit, transiciones y mashups. No son copias sobrantes de una canción, son herramientas distintas, y emparejadas con su original tapan los duplicados de verdad.&#10;&#10;No excluye «Extended», «Remix», «Radio Edit» ni «Original Mix»: esas también las publica el catálogo, y dejarlas fuera escondería duplicados reales." />
+                      ToolTip.Tip="Deja fuera del análisis las ediciones hechas para pinchar: hype intro, melodic intro, break intro, open show, starter, aca in/out, acapellas, redrum, quick hit, transiciones y mashups. No son copias sobrantes de una canción, son herramientas distintas, y emparejadas con su original tapan los duplicados de verdad.&#10;&#10;No excluye «Extended», «Remix», «Radio Edit» ni «Original Mix»: esas también las publica el catálogo, y dejarlas fuera escondería duplicados reales.&#10;&#10;Con el criterio de audio, las ediciones excluidas tampoco aparecen como «Otra edición». Las Extended y los Radio Edit sí aparecen, distinguidas de las copias, y nunca se marcan como sobrantes." />
             <Button Content="⯆ Desplegar" Click="ExpandAll_Click" />
             <Button Content="⯈ Cerrar" Click="CollapseAll_Click" />
             <TextBox Text="{Binding Busqueda}" PlaceholderText="Buscar…" Width="180"
@@ -64,7 +64,7 @@
                 <TextBlock Classes="desc" Margin="0"
                            Text="Compara el AUDIO, así que encuentra la misma canción aunque tenga títulos distintos o no esté etiquetada. Hay que analizar antes cada archivo: la primera vez tarda un buen rato, pero queda guardado y las siguientes son inmediatas." />
                 <TextBlock Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap" FontSize="12"
-                           Text="Tus ediciones de DJ (Aca Out, Melodic Intro, Extended…) comparten el audio del original, así que aparecen en el mismo grupo. Cada una conserva su propio ejemplar y «Marcar sobrantes» respeta esa distinción: solo marca copias de la MISMA versión. Aun así, revisa antes de enviar nada a la papelera." />
+                           Text="También agrupa las otras ediciones del mismo tema (Extended, Hype Intro, Radio Edit, Aca Out…) y, a veces, un mashup o una transición que lo contiene. La columna Edición indica en qué se diferencia cada una de la edición de referencia, la que empieza antes: «Otra edición: empieza 32 s después». Cada edición y cada versión conservan su propio ejemplar, y «Marcar sobrantes» solo marca copias de la MISMA edición. Aun así, revisa antes de enviar nada a la papelera." />
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button Content="Analizar audio" Command="{Binding ScanFingerprintsCommand}" IsEnabled="{Binding !FpBusy}"
                             Background="#7C3AED" Foreground="White" FontWeight="SemiBold" />
@@ -131,6 +131,8 @@
                 <DataGridCheckBoxColumn Header="Borrar" Binding="{Binding Marcada}" Width="70" MinWidth="60" />
                 <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="2*" MinWidth="140" IsReadOnly="True" />
                 <DataGridTextColumn Header="Versión" Binding="{Binding Version}" Width="140" MinWidth="90" IsReadOnly="True" />
+                <!-- Solo con el criterio de audio (A14): qué edición del tema es frente a la de referencia. -->
+                <DataGridTextColumn Header="Edición" Binding="{Binding Edicion}" Width="230" MinWidth="110" IsReadOnly="True" />
                 <DataGridTextColumn Header="Conservar" Binding="{Binding Motivo}" Width="170" MinWidth="110" IsReadOnly="True" />
                 <DataGridTextColumn Header="Calidad" Binding="{Binding Quality}" Width="90" MinWidth="70" IsReadOnly="True" />
                 <DataGridTextColumn Header="Dur." Binding="{Binding Duration}" Width="70" MinWidth="55" IsReadOnly="True" />
