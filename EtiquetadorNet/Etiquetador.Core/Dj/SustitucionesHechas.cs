@@ -285,12 +285,30 @@ public sealed class AlmacenSustituciones
         return JsonSerializer.Serialize(a, ArchivoJson.Opciones) == JsonSerializer.Serialize(b, ArchivoJson.Opciones);
     }
 
-    /// <summary>Devuelve "" si fue bien, o el motivo del fallo. En solo lectura no escribe nada.</summary>
+    /// <summary>Solo un guardado a la vez; ver <see cref="Guardar"/>.</summary>
+    private readonly object _cerrojoGuardado = new();
+
+    /// <summary>
+    /// Devuelve "" si fue bien, o el motivo del fallo. En solo lectura no escribe nada.
+    ///
+    /// POR QUÉ el cerrojo propio (revisión de la tanda 3). Se guarda desde los hilos de fondo de
+    /// aplicar y deshacer (AppEngine.SeguirSustituciones) y desde el de la interfaz (al conciliar con
+    /// la biblioteca y al sustituir en la Bandeja). Dos guardados a la vez escribían el MISMO
+    /// «bandeja-sustituidas.json.tmp»: uno fallaba con el archivo en uso, o el segundo intercambio no
+    /// encontraba el temporal que el primero ya había puesto en su sitio. Y como la foto de la lista se
+    /// tomaba fuera, un guardado con la foto anterior podía terminar el último y dejar en disco un
+    /// estado viejo. Ahora la foto se toma DENTRO del turno de escritura: el último en escribir
+    /// lleva siempre lo más reciente. La foto es un JsonElement, para que nadie cambie un registro
+    /// (Seguir cambia el destino) mientras se serializa fuera del cerrojo de la lista.
+    /// </summary>
     public string Guardar()
     {
         if (SoloLectura) return ArchivoJson.AvisoSoloLectura(_archivo);
-        List<SustitucionHecha> copia;
-        lock (_cerrojo) copia = _lista.ToList();
-        return ArchivoJson.Escribir(_archivo, copia);
+        lock (_cerrojoGuardado)
+        {
+            JsonElement foto;
+            lock (_cerrojo) foto = JsonSerializer.SerializeToElement(_lista, ArchivoJson.Opciones);
+            return ArchivoJson.Escribir(_archivo, foto);
+        }
     }
 }

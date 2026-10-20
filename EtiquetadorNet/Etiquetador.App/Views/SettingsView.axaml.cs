@@ -23,7 +23,10 @@ public partial class SettingsView : UserControl
     {
         base.OnPropertyChanged(change);
         if (change.Property == IsVisibleProperty && IsVisible && DataContext is ViewModels.SettingsViewModel vm)
+        {
             _ = vm.ActualizarRenombradosAsync();
+            _ = vm.ActualizarCopiasAsync();   // T15 (equipo «volumen_copias»): copias automáticas y restauración preparada
+        }
     }
 
     // Vaciar la caché no toca la música, pero sale caro después: se dice qué se borra y cuánto. La
@@ -177,5 +180,62 @@ public partial class SettingsView : UserControl
     private void PoolBusqueda_LostFocus(object? sender, RoutedEventArgs e)
     {
         if (DataContext is ViewModels.SettingsViewModel vm) vm.GuardarPoolBusqueda();
+    }
+
+    // --- Copia de seguridad (equipo «volumen_copias», tanda 4, T15) ---
+
+    // Hacer la copia no cambia nada del usuario: basta con elegir dónde se guarda.
+    private async void HacerCopia_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.SettingsViewModel vm || vm.CopiaOcupada) return;
+        var top = TopLevel.GetTopLevel(this);
+        if (top is null) return;
+        var guardar = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Guardar la copia de seguridad",
+            SuggestedFileName = ViewModels.SettingsViewModel.NombreSugeridoCopia(System.DateTime.Now),
+            DefaultExtension = "zip",
+            FileTypeChoices = new[] { new FilePickerFileType("Copia de seguridad de BeatTag") { Patterns = new[] { "*.zip" } } },
+        });
+        var destino = guardar?.TryGetLocalPath();
+        if (string.IsNullOrEmpty(destino)) return;
+        await vm.HacerCopiaAsync(destino);
+    }
+
+    // Restaurar sustituye los datos de trabajo: vista previa, ubicación de la música y confirmación
+    // (las dos últimas, dentro del diálogo). Se completa al volver a abrir BeatTag.
+    private async void RestaurarCopia_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.SettingsViewModel vm || vm.CopiaOcupada) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+
+        IStorageFolder? inicio = null;
+        try
+        {
+            if (System.IO.Directory.Exists(vm.CarpetaCopias))
+                inicio = await owner.StorageProvider.TryGetFolderFromPathAsync(vm.CarpetaCopias);
+        }
+        catch { /* sin carpeta de partida, la que proponga el sistema */ }
+        var abrir = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Selecciona la copia de seguridad que quieres restaurar",
+            AllowMultiple = false,
+            SuggestedStartLocation = inicio,
+            FileTypeFilter = new[] { new FilePickerFileType("Copia de seguridad de BeatTag") { Patterns = new[] { "*.zip" } } },
+        });
+        var zip = abrir.Count > 0 ? abrir[0].TryGetLocalPath() : null;
+        if (string.IsNullOrEmpty(zip)) return;
+
+        var lectura = await vm.LeerCopiaAsync(zip);
+        if (lectura == null) return;
+        var cambios = await RestaurarCopiaDialog.MostrarAsync(owner, lectura);
+        if (cambios == null) { vm.Status = "Restauración cancelada: no se ha cambiado nada."; return; }
+        await vm.PrepararRestauracionAsync(lectura, cambios);
+    }
+
+    // Cerrar la ventana es el camino de siempre: guarda lo que vive en memoria antes de salir.
+    private void CerrarParaRestaurar_Click(object? sender, RoutedEventArgs e)
+    {
+        if (TopLevel.GetTopLevel(this) is Window ventana) ventana.Close();
     }
 }

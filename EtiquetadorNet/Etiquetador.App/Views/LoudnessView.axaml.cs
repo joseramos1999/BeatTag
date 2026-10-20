@@ -1,8 +1,10 @@
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using System.Linq;
-using Avalonia.VisualTree;
+using Etiquetador.App.ViewModels;
 
 namespace Etiquetador.App.Views;
 
@@ -16,44 +18,56 @@ public partial class LoudnessView : UserControl
 
     private void Grid_DoubleTapped(object? sender, TappedEventArgs e) => GridBehaviors.AutoFitOnHeaderDoubleTap(sender, e);
 
+    /// <summary>Las filas seleccionadas en la tabla (varias con Ctrl o Mayús).</summary>
+    private List<LoudnessRow> Seleccionadas()
+        => this.FindControl<DataGrid>("RowsGrid")?.SelectedItems.OfType<LoudnessRow>().ToList() ?? new List<LoudnessRow>();
+
     // Ajustar el volumen modifica los archivos del usuario: se confirma antes, indicando
-    // exactamente cuántos se van a tocar y qué implica.
+    // exactamente cuántos se van a tocar, qué implica y qué queda fuera.
     private async void Apply_Click(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not ViewModels.LoudnessViewModel vm) return;
-        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (DataContext is not LoudnessViewModel vm) return;
+        await ConfirmarYAjustarAsync(vm, vm.Elegir(), porSeleccion: false);
+    }
 
-        var objetivo = vm.ParaAjustar();
-        if (objetivo.Count == 0)
+    // E15: solo lo seleccionado, marcado o no; las excluidas, nunca.
+    private async void AjustarSeleccion_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not LoudnessViewModel vm) return;
+        var sel = Seleccionadas();
+        if (sel.Count == 0) { vm.Status = "Elige antes las grabaciones en la tabla."; return; }
+        await ConfirmarYAjustarAsync(vm, vm.Elegir(sel), porSeleccion: true);
+    }
+
+    private async Task ConfirmarYAjustarAsync(LoudnessViewModel vm, SeleccionAjuste s, bool porSeleccion)
+    {
+        if (vm.IsBusy) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (s.Ajustar.Count == 0)
         {
-            vm.Status = "No hay ninguna grabación que requiera ajuste.";
+            vm.Status = AjusteVolumenSeleccion.TextoNadaQueAjustar(s, porSeleccion, vm.DesviadasNoMp3);
             return;
         }
 
-        var suben = objetivo.Count(r => r.Gain > 0);
-        var bajan = objetivo.Count - suben;
         // El mismo criterio que usa el ajuste: con el aumento redondeado hacia abajo por el pico.
-        var parciales = objetivo.Count(ViewModels.LoudnessViewModel.AumentoParcial);
-
-        var ok = await ConfirmDialog.AskAsync(owner,
-            $"Se va a ajustar el volumen de {objetivo.Count} grabaciones",
-            $"Se aumentará el nivel de {suben} y se reducirá el de {bajan}. Solo se modifican las que "
-            + $"se desvían más de {ViewModels.LoudnessViewModel.UmbralAjuste:0} dB del nivel de referencia."
-            + (parciales > 0
-                ? $" En {parciales} el aumento será parcial, porque no admiten más sin distorsionar."
-                : ""),
-            "El audio no se recodifica, por lo que no hay pérdida de calidad y los archivos mantienen su tamaño. "
-            + "El cambio queda registrado y se puede revertir con «Deshacer última» desde Enriquecer.",
-            "Ajustar volumen");
-
-        if (ok) await vm.ApplyAsync();
+        var parciales = s.Ajustar.Count(LoudnessViewModel.AumentoParcial);
+        var (titulo, cuerpo, nota) = AjusteVolumenSeleccion.TextosConfirmacion(s, porSeleccion, parciales);
+        var ok = await ConfirmDialog.AskAsync(owner, titulo, cuerpo, nota, "Ajustar volumen");
+        if (ok) await vm.ApplyAsync(s.Ajustar);
     }
 
-    private void Grid_PointerPressed(object? sender, PointerPressedEventArgs e)
+    // Excluir no toca ningún archivo y se deshace con «Quitar»: no hace falta confirmación.
+    private void ExcluirCanciones_Click(object? sender, RoutedEventArgs e)
     {
-        if (sender is not DataGrid grid) return;
-        if (!e.GetCurrentPoint(grid).Properties.IsRightButtonPressed) return;
-        if (e.Source is Control c && c.FindAncestorOfType<DataGridRow>() is { DataContext: { } item })
-            grid.SelectedItem = item;
+        if (DataContext is LoudnessViewModel vm) vm.ExcluirCanciones(Seleccionadas());
     }
+
+    private void ExcluirCarpetas_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is LoudnessViewModel vm) vm.ExcluirCarpetas(Seleccionadas());
+    }
+
+    // El clic derecho selecciona la fila sin deshacer una selección múltiple, para que el menú actúe
+    // sobre lo que se ve.
+    private void Grid_PointerPressed(object? sender, PointerPressedEventArgs e) => TeclaEnergia.SeleccionarConClicDerecho(sender, e);
 }

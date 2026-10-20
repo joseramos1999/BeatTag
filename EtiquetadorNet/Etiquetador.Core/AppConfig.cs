@@ -469,4 +469,17 @@ public sealed class AppConfig
     /// catálogo (ver FileProcessor.IsrcDelArchivo).
     /// </summary>
     public bool WriteIsrc { get; set; }
+
+    // --- Volumen: exclusiones del ajuste (equipo «volumen_copias», tanda 4, E15) ---
+
+    /// <summary>
+    /// Carpetas cuyas canciones no se ajustan en Volumen (ni las de sus subcarpetas): acapellas,
+    /// intros o ediciones que el DJ quiere más bajas a propósito. Se siguen midiendo y se ven en la
+    /// tabla; solo quedan fuera del ajuste. Antes, la única forma de protegerlas era desmarcar la
+    /// carpeta en Biblioteca, que la sacaba de todas las pestañas.
+    /// </summary>
+    public List<string> VolumenCarpetasExcluidas { get; set; } = new();
+
+    /// <summary>Canciones sueltas que no se ajustan en Volumen, por su ruta.</summary>
+    public List<string> VolumenCancionesExcluidas { get; set; } = new();
 }

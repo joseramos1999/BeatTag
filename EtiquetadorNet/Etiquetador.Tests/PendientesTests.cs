@@ -488,9 +488,9 @@ public class PendientesTests : IDisposable
     {
         Assert.Equal("El archivo descartado vuelve a contar. La canción sigue conseguida con otro archivo.",
                      PendientesViewModel.TextoRecuperados(1, 0, yaConseguidas: 1));
-        Assert.Equal("3 archivos descartados vuelven a contar; 1 canción vuelve a estar conseguida; 2 siguen conseguidas con otro archivo.",
+        Assert.Equal("3 archivos descartados vuelven a contar; 1 canción vuelve a estar conseguida; 2 canciones siguen conseguidas con otro archivo.",
                      PendientesViewModel.TextoRecuperados(3, 1, yaConseguidas: 2));
-        Assert.Equal("2 archivos descartados vuelven a contar; 1 sigue conseguida con otro archivo.",
+        Assert.Equal("2 archivos descartados vuelven a contar; 1 canción sigue conseguida con otro archivo.",
                      PendientesViewModel.TextoRecuperados(2, 0, yaConseguidas: 1));
 
         // En el almacén: la recuperación no la destacha ni cambia su archivo.
