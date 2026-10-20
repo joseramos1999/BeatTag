@@ -206,7 +206,9 @@ public partial class MainViewModel : ViewModelBase
                 {
                     new() { Indice = 3,  Icono = "👥", Nombre = "Duplicados",  Vm = Duplicates, Ocupada = () => Duplicates.IsBusy,
                             Cancelar = Duplicates.CancelarTodo },   // huellas y papelera (rendimiento-1, equipo catalogo)
-                    new() { Indice = 4,  Icono = "🎧", Nombre = "Calidad",     Vm = Quality, Ocupada = () => Quality.IsBusy },
+                    // Cancelar: el análisis de la calidad real se para entre un archivo y el siguiente al cerrar (P4, equipo audio_medido).
+                    new() { Indice = 4,  Icono = "🎧", Nombre = "Calidad",     Vm = Quality, Ocupada = () => Quality.IsBusy,
+                            Cancelar = Quality.CancelarEspectro },
                     new() { Indice = 5,  Icono = "⚠",  Nombre = "Incompletas", Vm = Incomplete, Ocupada = () => Incomplete.IsBusy },
                     new() { Indice = 10, Icono = "🔊", Nombre = "Volumen",     Vm = Loudness, Ocupada = () => Loudness.IsBusy,
                             Cancelar = () => Loudness.CancelCommand.Execute(null) },

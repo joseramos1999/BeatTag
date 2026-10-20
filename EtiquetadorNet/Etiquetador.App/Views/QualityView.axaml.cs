@@ -1,7 +1,9 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
+using Etiquetador.App.ViewModels;
 
 namespace Etiquetador.App.Views;
 
@@ -11,6 +13,14 @@ public partial class QualityView : UserControl
     {
         InitializeComponent();
         GridBehaviors.EnableWidthMemory(this, "Calidad");
+    }
+
+    // La tabla solo se rehace a la vista (una fila por canción): el shell cambia IsVisible al cambiar de página.
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if ((change.Property == IsVisibleProperty || change.Property == DataContextProperty) && DataContext is IPaginaVisible p)
+            p.Visible = IsVisible;
     }
 
     private void ExpandAll_Click(object? sender, RoutedEventArgs e) => GridBehaviors.SetAllGroups(this.FindDescendantOfType<DataGrid>(), true);

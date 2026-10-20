@@ -137,4 +137,107 @@ public class KeyDetectorTests
     [Fact]
     public void La_fft_exige_potencia_de_dos()
         => Assert.Throws<ArgumentException>(() => Fft.Forward(new double[3], new double[3]));
+
+    // ---- A15 (tanda 4, equipo audio_medido): el método medido, por bloques ----
+
+    /// <summary>El mismo acorde, a otra frecuencia de muestreo.</summary>
+    private static float[] AcordeA(int sr, int[] midis, double segundos = 4.0)
+    {
+        var n = (int)(sr * segundos);
+        var x = new float[n];
+        foreach (var m in midis)
+        {
+            var f = Hz(m);
+            for (var i = 0; i < n; i++)
+                x[i] += (float)(0.3 * Math.Sin(2 * Math.PI * f * i / sr) + 0.1 * Math.Sin(2 * Math.PI * 2 * f * i / sr));
+        }
+        return x;
+    }
+
+    // Por bloques y en estéreo da lo mismo que de una vez en mono: lo que lee el decodificador llega a
+    // trozos de cualquier tamaño, y la canción entera no tiene por qué caber en memoria.
+    [Fact]
+    public void Por_bloques_y_en_estereo_da_lo_mismo_que_de_una_vez()
+    {
+        var mono = Acorde(new[] { 57, 60, 64 });
+        var estereo = new float[mono.Length * 2];
+        for (var i = 0; i < mono.Length; i++) { estereo[2 * i] = mono[i]; estereo[2 * i + 1] = mono[i]; }
+
+        var a = new AcumuladorTonalidad(Sr, 2);
+        var buf = new float[2 * 1234];
+        for (var desde = 0; desde < estereo.Length; desde += buf.Length)
+        {
+            var n = Math.Min(buf.Length, estereo.Length - desde);
+            Array.Copy(estereo, desde, buf, 0, n);
+            a.Add(buf, n);
+        }
+        var porBloques = a.Croma();
+        var deUnaVez = KeyDetector.Chromagram(mono, Sr);
+
+        Assert.NotNull(porBloques);
+        for (var i = 0; i < 12; i++) Assert.Equal(deUnaVez![i], porBloques![i], 9);
+    }
+
+    // Se diezma a unos 11 kHz desde cualquier frecuencia de muestreo (48 kHz queda en 12 kHz, no en
+    // 11.025 Hz; 11.025 Hz no se diezma) y las notas se buscan con la frecuencia que queda.
+    [Theory]
+    [InlineData(48000)]
+    [InlineData(22050)]
+    [InlineData(11025)]
+    public void Reconoce_la_tonalidad_a_otras_frecuencias_de_muestreo(int sr)
+    {
+        var k = KeyDetector.Detect(AcordeA(sr, new[] { 57, 60, 64 }), sr);
+        Assert.NotNull(k);
+        Assert.Equal("Am", k!.Name);
+    }
+
+    // Un agudo fuerte de 9 kHz, sin el filtro previo al diezmado, se colaría como un Si de 2 kHz y
+    // movería la tonalidad. Con el filtro no llega.
+    [Fact]
+    public void Un_agudo_fuerte_no_se_cuela_en_los_graves_al_diezmar()
+    {
+        var x = Acorde(new[] { 57, 60, 64 });
+        for (var i = 0; i < x.Length; i++) x[i] += (float)(0.8 * Math.Sin(2 * Math.PI * 9000 * i / Sr));
+
+        var croma = KeyDetector.Chromagram(x, Sr)!;
+
+        Assert.Equal("Am", KeyDetector.FromChromagram(croma)!.Name);
+        Assert.True(croma[11] < 0.02, $"Si con {croma[11]:P1} de la energía");
+    }
+
+    // Lo percusivo (un golpe que suena en todas las frecuencias a la vez) se aparta antes de contar las notas.
+    [Fact]
+    public void Un_bombo_encima_no_cambia_la_tonalidad()
+    {
+        var x = Acorde(new[] { 57, 60, 64 }, segundos: 6);
+        for (var i = 0; i < x.Length; i += Sr / 2)
+            for (var j = 0; j < 400 && i + j < x.Length; j++)
+                x[i + j] += (float)(0.9 * Math.Exp(-j / 60.0) * (j % 2 == 0 ? 1 : -1));
+
+        Assert.Equal("Am", KeyDetector.Detect(x, Sr)!.Name);
+    }
+
+    // Una elección clara destaca sobre la segunda; las doce notas a la vez no tienen centro tonal.
+    [Fact]
+    public void Solo_es_concluyente_cuando_la_ganadora_destaca()
+    {
+        var clara = KeyDetector.Detect(Acorde(new[] { 57, 60, 64, 69, 72 }), Sr)!;
+        Assert.True(KeyDetector.EsConcluyente(clara), $"margen {clara.Confidence}");
+
+        var todas = KeyDetector.Detect(Acorde(Enumerable.Range(60, 12).ToArray()), Sr);
+        Assert.True(todas == null || !KeyDetector.EsConcluyente(todas), $"margen {todas?.Confidence}");
+    }
+
+    [Fact]
+    public void Despues_de_pedir_el_resultado_no_se_puede_seguir_anadiendo()
+    {
+        var a = new AcumuladorTonalidad(Sr, 1);
+        var x = Acorde(new[] { 60, 64, 67 });
+        a.Add(x, x.Length);
+        Assert.Equal("C", a.Tonalidad()!.Name);
+        Assert.Equal("C", a.Tonalidad()!.Name);   // pedirlo dos veces da lo mismo
+        Assert.Throws<InvalidOperationException>(() => a.Add(x, x.Length));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AcumuladorTonalidad(0, 2));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AcumuladorTonalidad(Sr, 0));
+    }
 }

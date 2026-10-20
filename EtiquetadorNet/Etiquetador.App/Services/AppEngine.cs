@@ -305,6 +305,7 @@ public sealed class AppEngine
         Uno("la sonoridad", () => { Loudness.Save(); return ""; });
         Uno("las huellas", () => { EsperarColaDeHuellas(); Fingerprints.Save(); return ""; });
         Uno("la identificación", () => { Identificacion.Save(); return ""; });
+        Uno("la calidad real", () => { EspectroCargado?.Save(); return ""; });   // P4 (equipo audio_medido)
 
         foreach (var f in fallos) Logger.Err($"No se pudo guardar ({cuando}) {f}");
         if (fallos.Count > 0) Avisos.Poner("guardar", "No se ha podido guardar " + string.Join(" · ", fallos));
@@ -393,6 +394,7 @@ public sealed class AppEngine
             {
                 Identificacion.Save();
                 Loudness.Save();
+                EspectroCargado?.Save();   // P4 (equipo audio_medido)
                 if (++_vueltasGuardado % 10 == 0) Fingerprints.Save();
             }
             catch (Exception e) { Logger.Error("Guardado periódico de las cachés de audio", e); }
@@ -445,6 +447,7 @@ public sealed class AppEngine
             }
         }
         catch (Exception e) { Logger.Error($"No se pudieron poner al día las cachés de audio de «{Path.GetFileName(destino)}»", e); }
+        if (mueve || antes.Existe) SeguirEspectro(origen, destino, antes);   // P4 (equipo audio_medido)
 
         if (!mueve && !antes.Existe) return;
         EnColaDeHuellas(() =>
@@ -464,6 +467,7 @@ public sealed class AppEngine
         if (!antes.Existe) return;
         try { Identificacion.Retocar(ruta, antes.M, antes.S); }
         catch (Exception e) { Logger.Error($"No se pudo poner al día la identificación de «{Path.GetFileName(ruta)}»", e); }
+        SeguirEspectro(ruta, ruta, antes);   // P4 (equipo audio_medido): el volumen no mueve el corte
         EnColaDeHuellas(() => Fingerprints.Retocar(ruta, antes.M, antes.S));
     }
 
@@ -1311,5 +1315,49 @@ public sealed class AppEngine
             else AvisarFichasCambiadas();
         }
         catch (Exception e) { Logger.Error("Error al devolver las fichas de una sustitución deshecha de la bandeja", e); }
+    }
+
+    // --- P4 (tanda 4, equipo audio_medido): calidad real por espectro ---
+    //
+    // La caché de los cortes medidos (espectro.json) se carga la primera vez que hace falta y no en el
+    // arranque: quien nunca abre esa función no paga nada. Sigue al archivo igual que la sonoridad
+    // (SeguirArchivo y VolumenAjustado llaman a SeguirEspectro) y se guarda con las demás cachés de
+    // audio (GuardarTodo y el reloj de 30 s).
+
+    private readonly object _cerrojoEspectro = new();
+    private EspectroScanner? _espectro;
+
+    /// <summary>Medidas del espectro (calidad real) con su caché. Se carga al pedirla por primera vez.</summary>
+    public EspectroScanner Espectro
+    {
+        get
+        {
+            lock (_cerrojoEspectro)
+                return _espectro ??= new EspectroScanner(EspectroScanner.RutaCache(Paths), Logger);
+        }
+    }
+
+    /// <summary>La caché del espectro si ya se cargó; null si nadie la ha pedido aún (no hay nada que guardar).</summary>
+    private EspectroScanner? EspectroCargado { get { lock (_cerrojoEspectro) return _espectro; } }
+
+    /// <summary>
+    /// La medida del espectro acompaña al archivo que la aplicación acaba de renombrar, etiquetar o
+    /// ajustar de volumen: nada de eso cambia hasta dónde llega el audio. Se carga la caché si existe
+    /// en disco, aunque nadie la haya pedido en esta sesión: si no, una medida guardada ayer se quedaría
+    /// apuntando al nombre antiguo.
+    /// </summary>
+    private void SeguirEspectro(string origen, string destino, SelloArchivo antes)
+    {
+        try
+        {
+            var cache = EspectroCargado;
+            if (cache == null)
+            {
+                if (!File.Exists(EspectroScanner.RutaCache(Paths))) return;
+                cache = Espectro;
+            }
+            cache.Seguir(origen, destino, antes);
+        }
+        catch (Exception e) { Logger.Error($"No se pudo poner al día la calidad real de «{Path.GetFileName(destino)}»", e); }
     }
 }
