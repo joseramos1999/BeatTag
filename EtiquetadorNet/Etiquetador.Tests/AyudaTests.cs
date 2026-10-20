@@ -1,8 +1,11 @@
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Etiquetador.Core;
+using Etiquetador.Core.Analysis;
+using Etiquetador.Core.Copias;
 using Etiquetador.Core.Dj;
 using Etiquetador.Core.Pipeline;
+using Etiquetador.Core.Providers;
 
 namespace Etiquetador.Tests;
 
@@ -91,6 +94,9 @@ public class AyudaTests
             // Pulido de la tanda 3: guarda la ficha y lo decidido sobre la copia antigua mientras
             // está en la papelera. Perderlo deja sin ficha la canción al deshacer la sustitución.
             Path.GetFileName(AlmacenSustituciones.RutaEn("datos")),
+            // Tanda 4 (Novedades): las correcciones y exclusiones de artistas hechas a mano. Las
+            // búsquedas en Deezer van a la caché de red y no hace falta copiarlas; esto sí.
+            AlmacenArtistasDeezer.NombreArchivo,
         };
 
         var ayuda = TodaLaAyuda();
@@ -100,6 +106,52 @@ public class AyudaTests
             Assert.True(ayuda.Contains(a, StringComparison.Ordinal), $"la Ayuda no nombra {a}");
             Assert.True(readme.Contains(a, StringComparison.Ordinal), $"el README no nombra {a}");
         }
+    }
+
+    // La copia de seguridad (tanda 4) mete en un ZIP los archivos de trabajo, pero las copias que
+    // hace sola al arrancar viven en una carpeta propia de la carpeta de datos. Quien guarda esa
+    // carpeta a mano tiene que saber que existe, cómo se llaman sus archivos y cuántos se conservan;
+    // los nombres y la cifra salen del código, para que un cambio ahí no deje la Ayuda desfasada.
+    [Fact]
+    public void La_Ayuda_y_el_README_explican_la_carpeta_de_copias_automaticas()
+    {
+        var p = new AppPaths(Path.Combine(Path.GetTempPath(), "beattag-ayuda-no-se-crea"));
+        var nombres = new[]
+        {
+            CopiaSeguridad.PrefijoAutomatica + "…zip",
+            CopiaSeguridad.PrefijoAntesDeRestaurar + "…zip",
+            Path.GetFileName(CopiaSeguridad.CarpetaRestauracion(p)),
+            $"las {CopiaSeguridad.CopiasQueSeConservan} últimas",
+        };
+
+        var ayuda = TodaLaAyuda();
+        var readme = Readme();
+        foreach (var n in nombres)
+        {
+            Assert.True(ayuda.Contains(n, StringComparison.Ordinal), $"la Ayuda no dice «{n}»");
+            Assert.True(readme.Contains(n, StringComparison.Ordinal), $"el README no dice «{n}»");
+        }
+
+        var carpeta = Path.GetFileName(CopiaSeguridad.CarpetaCopias(p));
+        Assert.Contains("La carpeta " + carpeta + " guarda", ayuda);
+        Assert.Contains("La carpeta `" + carpeta + "` guarda", readme);
+    }
+
+    // Las secciones nuevas de la tanda 4 van en el orden de la barra lateral: rekordbox dentro de TU
+    // MÚSICA (junto a la Bandeja) y Novedades detrás de Pendientes, como en la barra.
+    [Fact]
+    public void Las_secciones_de_rekordbox_y_Novedades_siguen_el_orden_de_la_barra_lateral()
+    {
+        var cabeceras = TextosAyuda().Where(t => t.Clase == "h").Select(t => t.Texto).ToList();
+        int Posicion(string texto)
+        {
+            var i = cabeceras.FindIndex(c => c.Contains(texto, StringComparison.Ordinal));
+            Assert.True(i >= 0, $"no hay cabecera «{texto}» en la Ayuda");
+            return i;
+        }
+
+        Assert.Equal(Posicion("📥 Bandeja de entrada") + 1, Posicion("🎛 rekordbox"));
+        Assert.Equal(Posicion("📝 Pendientes") + 1, Posicion("🆕 Novedades"));
     }
 
     /// <summary>¿Nombra <paramref name="texto"/> esa extensión, con su punto o como palabra («AIFF», «Opus»)?</summary>
@@ -193,6 +245,59 @@ public class AyudaTests
     [InlineData("Faltan", "Views/PendientesView.axaml")]
     [InlineData("Al revisarla otro día", "ViewModels/PendientesViewModel.cs")]
     [InlineData("Pendiente (1 descartado)", "ViewModels/PendientesViewModel.cs")]
+    // Tanda 4. Página rekordbox (P3 y P11) y su acceso desde Ajustes.
+    [InlineData("Abrir colección exportada…", "Views/RekordboxView.axaml")]
+    [InlineData("Volver a leer", "Views/RekordboxView.axaml")]
+    [InlineData("No están en rekordbox", "ViewModels/RekordboxViewModel.cs")]
+    [InlineData("Rutas rotas", "ViewModels/RekordboxViewModel.cs")]
+    [InlineData("Sin preparar", "ViewModels/RekordboxViewModel.cs")]
+    [InlineData("Nunca pinchadas", "ViewModels/RekordboxViewModel.cs")]
+    [InlineData("Guardar como lista M3U8…", "Views/RekordboxView.axaml")]
+    [InlineData("Resultado", "Views/RekordboxView.axaml")]
+    [InlineData("Mismo nombre", "Views/RekordboxView.axaml")]
+    [InlineData("Cómo llevar la reparación a rekordbox", "Views/RekordboxView.axaml")]
+    [InlineData("Guardar colección reparada…", "Views/RekordboxView.axaml")]
+    [InlineData("Contar como preparación un único hot cue en el primer tiempo de compás", "Views/RekordboxView.axaml")]
+    [InlineData("Solo canciones de la biblioteca", "Views/RekordboxView.axaml")]
+    [InlineData("Llevar listas a rekordbox", "Views/RekordboxView.axaml")]
+    [InlineData("Exportar a XML…", "Views/RekordboxView.axaml")]
+    [InlineData("Reparar colección de rekordbox", "Views/SettingsView.axaml")]
+    // Novedades (P5).
+    [InlineData("Buscar novedades", "Views/NovedadesView.axaml")]
+    [InlineData("Solo estrenos", "Views/NovedadesView.axaml")]
+    [InlineData("Incluir artistas sin confirmar", "Views/NovedadesView.axaml")]
+    [InlineData("Solo las que no están en la biblioteca", "Views/NovedadesView.axaml")]
+    [InlineData("Artistas consultados", "Views/NovedadesView.axaml")]
+    [InlineData("Corregir", "Views/NovedadesView.axaml")]
+    [InlineData("Volver a identificar", "Views/NovedadesView.axaml")]
+    [InlineData("Abrir en Deezer", "Views/NovedadesView.axaml")]
+    [InlineData("No buscar sus novedades", "ViewModels/NovedadesViewModel.cs")]
+    [InlineData("Volver a incluir", "ViewModels/NovedadesViewModel.cs")]
+    [InlineData("Origen", "Views/PendientesView.axaml")]
+    // Volumen: exclusiones del ajuste (E15).
+    [InlineData("Ajustar solo las seleccionadas…", "Views/LoudnessView.axaml")]
+    [InlineData("Excluir del ajuste", "Views/LoudnessView.axaml")]
+    [InlineData("Excluir esta carpeta del ajuste", "Views/LoudnessView.axaml")]
+    [InlineData("Exclusiones del ajuste", "ViewModels/AjusteVolumenSeleccion.cs")]
+    [InlineData("ya no está en la biblioteca", "ViewModels/AjusteVolumenSeleccion.cs")]
+    // Copia de seguridad y restauración (T15).
+    [InlineData("Copia de seguridad…", "Views/SettingsView.axaml")]
+    [InlineData("Restaurar copia…", "Views/SettingsView.axaml")]
+    [InlineData("Copias automáticas", "Views/SettingsView.axaml")]
+    [InlineData("Cerrar BeatTag ahora", "Views/SettingsView.axaml")]
+    [InlineData("Cancelar la restauración", "Views/SettingsView.axaml")]
+    [InlineData("Ubicación de la música", "Views/RestaurarCopiaDialog.axaml")]
+    // Calidad real por espectro (P4).
+    [InlineData("Analizar calidad real", "Views/QualityView.axaml")]
+    [InlineData("Corte medido", "Views/QualityView.axaml")]
+    [InlineData("Calidad real (estimada)", "Views/QualityView.axaml")]
+    [InlineData("Solo sospechosos", "Views/QualityView.axaml")]
+    [InlineData("Solo baja calidad", "Views/QualityView.axaml")]
+    // Duplicados: otras ediciones del mismo tema (A14).
+    [InlineData("Mismo audio (huella acústica)", "ViewModels/DuplicatesViewModel.cs")]
+    [InlineData("Analizar audio", "Views/DuplicatesView.axaml")]
+    [InlineData("Marcar sobrantes", "Views/DuplicatesView.axaml")]
+    [InlineData("Única de su edición", "ViewModels/DuplicatesViewModel.cs")]
     public void Lo_que_cita_la_Ayuda_existe_en_la_pantalla(string rotulo, string archivo)
     {
         var fuente = Fuente(new[] { "Etiquetador.App" }.Concat(archivo.Split('/')).ToArray());
@@ -233,6 +338,19 @@ public class AyudaTests
             HistorialDeshacer.Texto(TipoEjecucion.LimpiezaPacks),
             HistorialDeshacer.Texto(TipoEjecucion.GeneroPorReglas),
             HistorialDeshacer.Texto(TipoEjecucion.Sustitucion),
+            // Tanda 4: la lista que deja la reparación de rekordbox, la carpeta de la exportación de
+            // listas, las columnas de la calidad real y la columna Edición de Duplicados. Los ejemplos
+            // de la Ayuda («empieza 32 s después», «1:15 más larga») se generan con la función real.
+            RekordboxRelocator.ListaReparadas,
+            ExportadorRekordbox.CarpetaRaiz,
+            CorteEspectral.TextoCorte(new MedidaEspectro(EstadoCorte.SinCorte, 0, 22050)),
+            CorteEspectral.TextoCorte(new MedidaEspectro(EstadoCorte.NoConcluyente, 0, 22050)),
+            CorteEspectral.TextoValoracion(ValoracionCalidad.Sospechosa),
+            CorteEspectral.TextoValoracion(ValoracionCalidad.Dudosa),
+            EdicionesPorAudio.Referencia,
+            EdicionesPorAudio.Texto(32, 0),
+            EdicionesPorAudio.Texto(0, 75),
+            EdicionesPorAudio.Texto(0, 0),
         };
         foreach (var r in rotulos)
             Assert.True(ayuda.Contains("«" + r + "»", StringComparison.Ordinal), $"la Ayuda no cita «{r}»");
@@ -265,6 +383,15 @@ public class AyudaTests
     [InlineData("a partir de mañana", "las novedades llegan cuando se revisa la lista otro día, no necesariamente mañana")]
     [InlineData("la próxima vez que analices la bandeja", "una sustitución cortada se recoge también al arrancar")]
     [InlineData("la próxima vez que la analices", "una sustitución cortada se recoge también al arrancar")]
+    // Tanda 4: la reparación de rekordbox se mudó a su página (Ajustes solo la abre), «Ajustar
+    // volumen» ya solo corrige lo marcado en la columna «Ajustar», y la detección de la tonalidad por
+    // el audio (A15) se midió pero no se ofrece.
+    [InlineData("Ajustes → Reparar colección", "la reparación de rekordbox está en la página rekordbox; Ajustes solo la abre")]
+    [InlineData("repárala aquí", "la reparación de rekordbox está en la página rekordbox; Ajustes solo la abre")]
+    [InlineData("la colección en Ajustes", "la reparación de rekordbox está en la página rekordbox; Ajustes solo la abre")]
+    [InlineData("corrige las grabaciones que se desvían", "«Ajustar volumen» solo corrige las marcadas en la columna «Ajustar» y nunca las excluidas")]
+    [InlineData("detecta la tonalidad", "la detección de la tonalidad por el audio no se ofrece en la interfaz")]
+    [InlineData("deduce la tonalidad", "la detección de la tonalidad por el audio no se ofrece en la interfaz")]
     public void La_Ayuda_y_el_README_no_dicen_lo_que_el_codigo_ya_no_hace(string expresion, string motivo)
     {
         Assert.False(TodaLaAyuda().Contains(expresion, StringComparison.OrdinalIgnoreCase), $"la Ayuda dice «{expresion}», y {motivo}");

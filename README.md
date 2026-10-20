@@ -55,9 +55,15 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   (hype intro, open show, aca out, acapellas, transiciones, mashups): no son copias sobrantes, y
   emparejadas con su original tapan los duplicados de verdad.
   También puede agrupar **por el audio** (huella acústica), lo que encuentra la misma canción
-  aunque tenga títulos distintos o no esté etiquetada. En ese modo cada versión conserva su propio
-  ejemplar: tus ediciones de DJ no se marcan como sobrantes.
-- **Calidad**: clasifica el audio por bitrate/formato y filtra el de baja calidad.
+  aunque tenga títulos distintos o no esté etiquetada. En ese modo reúne además las **otras
+  ediciones del mismo tema** (Extended, Hype Intro, Radio Edit…), con una columna que indica en qué
+  se diferencia cada una; cada edición conserva siempre su mejor copia y nunca se marca como
+  sobrante.
+- **Calidad**: clasifica el audio por bitrate/formato y filtra el de baja calidad. Con **«Analizar
+  calidad real»** mide hasta qué frecuencia llega el audio y señala como **sospechosos** los archivos
+  que declaran más calidad de la que tienen (un 128 kbps recodificado a 320): es una sospecha que
+  conviene escuchar, no un veredicto, y no modifica ningún archivo. Fuera de Windows solo se miden
+  MP3, WAV y AIFF.
 - **Formatos**: MP3, FLAC, WAV, **AIFF** (.aif y .aiff), M4A, AAC, OGG, Opus y WMA. Los AIFF-C que
   exportan algunas aplicaciones de macOS se pueden escuchar, medir y comprobar, y entran en la
   biblioteca con su duración, su calidad y sus etiquetas, pero BeatTag todavía no escribe en ellos:
@@ -68,6 +74,8 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   del resto. El audio **no se recodifica** —se ajusta la ganancia del propio MP3—, así que no hay
   pérdida de calidad, los archivos mantienen su tamaño y el cambio es reversible. Ese ajuste sin
   pérdida solo existe para MP3: un FLAC, un WAV, un AIFF o un M4A **se miden pero no se tocan**.
+  La columna «Ajustar» decide qué se corrige, y las carpetas o canciones que deben quedarse más
+  bajas a propósito (acapellas, intros) se pueden **excluir del ajuste** de forma permanente.
 - **Tendencias**: el **chart diario de Spotify** de 77 países (y el Global), marcando lo que ya
   está en la biblioteca. Deezer queda como fuente alternativa.
 - **Playlists**: igual que Tendencias, pero con la lista que tú elijas: pega el enlace de una
@@ -84,6 +92,9 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   y **«Buscar en mi pool»** abre su búsqueda en el pool de descargas que configures. También reúne
   las playlists y charts que sigues: «Actualizar todas» los vuelve a leer en segundo plano y cuenta
   las canciones nuevas y cuántas de ellas faltan.
+- **Novedades**: los lanzamientos recientes en Deezer de los artistas con más canciones en la
+  biblioteca, cruzados con ella, con la misma exportación y «Añadir a pendientes» que Tendencias
+  (ver [más abajo](#-novedades)).
 - **Tonalidad**: muestra la clave de cada tema y su código **Camelot**, para mezclar en armónico.
   Se lee de los tags (la escriben rekordbox y similares); BeatTag no la deduce del audio.
 - **Listas M3U8**: exporta lo que hayas filtrado a una lista que abren rekordbox, Engine DJ o Serato.
@@ -115,6 +126,13 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   [IA local](#-ia-local-opcional).
 - **Estadísticas**: reparto de la biblioteca por BPM, género, calidad, década y Clean/Explícito.
 - **Importar rekordbox**: trae BPM y clave musical desde un XML de rekordbox.
+- **rekordbox**: una página que compara la colección exportada de rekordbox con la biblioteca,
+  repara las rutas rotas sin perder los cue points y lleva a rekordbox las listas de BeatTag (ver
+  «rekordbox y los cue points», más abajo).
+- **Copia de seguridad**: guarda en un ZIP el trabajo que no se regenera (ajustes sin las claves,
+  fichas, colecciones, decisiones de Enriquecer, identificaciones por audio, pendientes…) y lo
+  restaura en este u otro equipo, también de Windows a macOS, reescribiendo las rutas de la música.
+  Cada arranque guarda además una copia automática si algo ha cambiado.
 - **Caché persistente** en tres niveles (respuestas de red, escaneo y análisis): no se reprocesa lo
   ya hecho salvo que lo pidas.
 
@@ -143,8 +161,8 @@ introduce tus claves en la pestaña **Ajustes**. Se guardan **cifradas** en tu e
 ## 📁 Dónde se guardan tus datos
 
 En `Documentos\Etiquetador de Musica\`: los ajustes, las cachés, los manifiestos para deshacer y los
-registros. Las cachés se regeneran solas; estos archivos, en cambio, son trabajo tuyo y conviene
-incluirlos en tus copias de seguridad:
+registros. Las cachés se regeneran solas; estos archivos, en cambio, son trabajo tuyo y no se pueden
+regenerar:
 
 | Archivo | Contenido |
 |---|---|
@@ -155,11 +173,24 @@ incluirlos en tus copias de seguridad:
 | `listas-seguidas.json` | Playlists y charts que sigues |
 | `generos-por-carpeta.json` | Reglas de «Género por carpeta y artista» |
 | `bandeja-sustituidas.json` | Sustituciones de la Bandeja que aún se pueden deshacer, con la ficha de DJ de la copia antigua |
+| `novedades-artistas.json` | Artistas de Deezer que corresponden a los de la biblioteca en Novedades, con las correcciones y exclusiones hechas a mano |
 | `ArtistAliases.json`, `ArtistsExceptions.json` | Nombres de artista (ver más abajo) |
+
+**Ajustes → Copia de seguridad…** los incluye todos en un archivo ZIP, junto con lo aplicado,
+descartado y marcado en Enriquecer (`aplicadas.json`, `descartadas.json`, `marcas-aplicar.json`), los
+avisos aceptados y las identificaciones de «Comprobar audio» (`audio-aceptadas.json`,
+`identificacion.json`) y los ajustes (`config.net.json`, sin las claves de API, que en otro equipo se
+vuelven a introducir). **«Restaurar copia…»** enseña antes qué sustituye y, si la música está en otra
+carpeta o en otro sistema, reescribe las rutas guardadas.
+
+La carpeta `copias` guarda las copias automáticas que se hacen al abrir BeatTag si algo ha cambiado
+(`auto_…zip`) y las que se hacen justo antes de restaurar otra (`antes-de-restaurar_…zip`); de cada
+tipo se conservan las 5 últimas. `restauracion-pendiente` solo existe mientras hay una restauración
+preparada, que se completa en el siguiente arranque.
 
 La carpeta `bandeja-sustituciones` solo tiene contenido mientras hay una sustitución de la Bandeja en
 curso: si la aplicación se cierra a medias, la descarga vuelve a la bandeja al arrancar de nuevo o al
-analizarla.
+analizarla. No entra en las copias de seguridad, porque solo sirve en ese equipo y en ese momento.
 
 ## 🤖 IA local (opcional)
 
@@ -222,14 +253,51 @@ editar etiquetas, marcar o desmarcar las seleccionadas, abrir la carpeta y envia
 Lo que escriben en tus archivos (géneros, nombres y etiquetas de los packs) se puede deshacer. Nada
 se aplica sin que lo marques.
 
+## 🆕 Novedades
+
+La página **Novedades** muestra los lanzamientos recientes en Deezer (de los últimos 30, 60 o 90
+días) de los artistas con más canciones en la biblioteca (50, 100, 200 o 300) y los cruza con ella
+para ver cuáles están y cuáles faltan. No necesita cuenta de Deezer, y la búsqueda va en segundo
+plano.
+
+- **Qué artistas**: cuenta cada artista del crédito, con los alias unidos, y consulta los que tienen
+  al menos dos canciones. No cuentan los record pools, los usuarios de redes («@…») ni los créditos
+  que describen ediciones.
+- **Colaboraciones**: Deezer devuelve los lanzamientos en los que el artista figura como principal;
+  sus colaboraciones como invitado en lanzamientos de otros artistas normalmente no aparecen.
+- **Estrenos**: una remezcla, un directo o una versión nuevos cuentan como estrenos aunque la canción
+  original sea anterior. Solo se da por publicada antes si un lanzamiento anterior nombra esa misma
+  versión o si Deezer lo confirma por su código ISRC.
+
+Cada artista se identifica en Deezer por las canciones que tiene en común con la biblioteca; si el
+elegido no es el correcto, se corrige con el enlace de su página, y el que no publica en Deezer se
+puede excluir. Esas correcciones y exclusiones se guardan en `novedades-artistas.json`.
+
 ## 🎛️ rekordbox y los cue points
 
 rekordbox guarda los cue points y el beatgrid en su base de datos, **ligados a la ruta del archivo**.
-Al renombrar, los da por perdidos — y renombrar es justo lo que hace BeatTag.
+Al renombrar o mover un archivo, los da por perdidos — y renombrar es justo lo que hace BeatTag.
 
-Por eso cada renombrado queda anotado, y desde **Ajustes → Reparar colección de rekordbox** puedes
-devolvérselos: exporta tu colección desde rekordbox, repárala y vuelve a importarla. El archivo
-original no se modifica.
+La página **rekordbox** lee la colección que exportas desde rekordbox (Archivo → Exportar colección en
+formato xml) y la cruza con la biblioteca. Solo lee ese XML: no toca la base de datos de rekordbox, ni
+el XML, ni tus archivos de música. El botón «Reparar colección de rekordbox» de **Ajustes** lleva a
+esta página.
+
+- **No están en rekordbox**: canciones de la biblioteca que rekordbox no tiene, para guardarlas como
+  lista M3U8 e importarlas. Las que rekordbox tiene con una ruta antigua no se importan de nuevo: se
+  reparan, para no duplicarlas sin su preparación.
+- **Rutas rotas**: cada entrada cuyo archivo ya no existe se busca en la biblioteca por los renombrados
+  que BeatTag tiene anotados, por nombre y tamaño o por nombre y duración, y solo se repara si encaja
+  un único archivo. Las que solo cambiaron de carpeta se reubican desde el propio rekordbox; para el
+  resto, «Guardar colección reparada…» escribe un XML **nuevo** con las rutas corregidas para
+  importarlo, y la colección exportada no se modifica. La página explica los pasos y qué conviene
+  escuchar antes de importar.
+- **Sin preparar** y **Nunca pinchadas**: pistas sin hot cues o sin beatgrid, y pistas que rekordbox
+  nunca ha contado como pinchadas, con su lista M3U8.
+- **Llevar listas a rekordbox**: un único XML con una carpeta «BeatTag» que reúne las Colecciones, las
+  listas seguidas, las listas abiertas en Tendencias y Playlists con sus órdenes para mezclar, el orden
+  del Asistente y las pendientes ya conseguidas. De cada pista solo se escriben la ubicación, el título
+  y el artista, nunca el BPM, la tonalidad, la valoración ni los cues.
 
 Al **sustituir** una copia desde la Bandeja, la descarga toma el nombre y la carpeta de la antigua:
 rekordbox y Traktor conservan la pista si la extensión no cambia (conviene volver a analizarla); si
