@@ -25,17 +25,43 @@
                 <CheckBox Content="Mostrar solo las desviadas" IsChecked="{Binding SoloDesviadas}" VerticalAlignment="Center" />
                 <Button Content="Ajustar volumen" Click="Apply_Click" IsEnabled="{Binding !IsBusy}"
                         Background="#16A34A" Foreground="White" FontWeight="SemiBold"
-                        ToolTip.Tip="Corrige el volumen de las grabaciones desviadas modificando los archivos. No se recodifica el audio, por lo que no hay pérdida de calidad, y el cambio se puede deshacer." />
+                        ToolTip.Tip="Corrige el volumen de las grabaciones marcadas en la columna «Ajustar». No se recodifica el audio, por lo que no hay pérdida de calidad, y el cambio se puede deshacer." />
+                <TextBlock Text="{Binding TextoMarcadas}" VerticalAlignment="Center" Foreground="{DynamicResource TextoSecundario}" />
             </StackPanel>
 
             <TextBlock Text="{Binding ExplicacionModo}" Foreground="{DynamicResource TextoSecundario}" TextWrapping="Wrap" FontSize="12" />
+
+            <!-- E15: lo que nunca se ajusta, a la vista y con su «Quitar». Se añade desde el menú de la tabla. -->
+            <Expander Header="{Binding TituloExclusiones}" HorizontalAlignment="Stretch">
+                <StackPanel Spacing="4" Margin="4">
+                    <TextBlock Classes="desc"
+                               Text="Las grabaciones de estas carpetas (y de sus subcarpetas) y estas canciones se miden, pero no se ajustan nunca. Sirve para las acapellas, intros o ediciones que quieres más bajas a propósito. Se añaden con el botón derecho sobre la tabla: «Excluir esta carpeta del ajuste» o «Excluir del ajuste»." />
+                    <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding ExclusionesGuardadas}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <DockPanel Margin="0,1">
+                                        <Button DockPanel.Dock="Right" Content="Quitar" Margin="8,0,0,0"
+                                                Command="{Binding $parent[UserControl].DataContext.QuitarExclusionCommand}"
+                                                CommandParameter="{Binding}"
+                                                IsEnabled="{Binding !$parent[UserControl].DataContext.IsBusy}"
+                                                ToolTip.Tip="Sus grabaciones vuelven a marcarse para ajustar si lo requieren." />
+                                        <TextBlock Text="{Binding Texto}" VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Ruta}" />
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </StackPanel>
+            </Expander>
 
             <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}" Height="8"
                          IsVisible="{Binding IsBusy}" Margin="0,2,0,0" />
         </StackPanel>
 
         <DataGrid Name="RowsGrid" ItemsSource="{Binding RowsView}" SelectedItem="{Binding SelectedRow}"
-                  AutoGenerateColumns="False" IsReadOnly="True"
+                  AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Extended"
                   CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal"
                   DoubleTapped="Grid_DoubleTapped" PointerPressed="Grid_PointerPressed">
             <DataGrid.Styles>
@@ -47,9 +73,25 @@
                 <ContextMenu>
                     <MenuItem Header="Escuchar / Parar" Command="{Binding PlayPreviewCommand}" />
                     <MenuItem Header="Abrir carpeta contenedora" Command="{Binding OpenContainingFolderCommand}" />
+                    <Separator />
+                    <MenuItem Header="Ajustar solo las seleccionadas…" Click="AjustarSeleccion_Click" IsEnabled="{Binding !IsBusy}"
+                              ToolTip.Tip="Ajusta las seleccionadas que lo requieren, estén marcadas o no. Las excluidas no se tocan." />
+                    <MenuItem Header="Excluir del ajuste" Click="ExcluirCanciones_Click" IsEnabled="{Binding !IsBusy}"
+                              ToolTip.Tip="Las seleccionadas se siguen midiendo, pero no se ajustan nunca. Se puede quitar en «Exclusiones del ajuste»." />
+                    <MenuItem Header="Excluir esta carpeta del ajuste" Click="ExcluirCarpetas_Click" IsEnabled="{Binding !IsBusy}"
+                              ToolTip.Tip="Ninguna grabación de su carpeta ni de sus subcarpetas se ajusta. Se puede quitar en «Exclusiones del ajuste»." />
                 </ContextMenu>
             </DataGrid.ContextMenu>
             <DataGrid.Columns>
+                <!-- Solo se puede marcar lo que requiere ajuste y no está excluido. -->
+                <DataGridTemplateColumn Header="Ajustar" Width="70" MinWidth="60" SortMemberPath="Ajustar">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding Ajustar}" IsEnabled="{Binding PuedeMarcarse}"
+                                      HorizontalAlignment="Center" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <DataGridTextColumn Header="Archivo" Binding="{Binding FileName}" Width="*" MinWidth="180" />
                 <DataGridTextColumn Header="Estado" Binding="{Binding Estado}" Width="100" MinWidth="80" />
                 <DataGridTextColumn Header="Ajuste necesario" Binding="{Binding Accion}" Width="140" MinWidth="110" />

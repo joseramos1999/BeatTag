@@ -63,8 +63,48 @@ public sealed partial class LoudnessRow : ObservableObject
     /// <summary>Limitación aplicable a esta grabación, expresada sin tecnicismos.</summary>
     public string Aviso =>
         !Ajustable ? "Se mide, pero no se ajusta: solo los MP3 admiten el cambio sin pérdida"
+        : Exclusion == ExclusionVolumen.Carpeta ? "Excluida del ajuste: su carpeta está en las exclusiones"
+        : Exclusion == ExclusionVolumen.Cancion ? "Excluida del ajuste"
         : Satura ? "Sin margen suficiente: aumentarla produciría distorsión"
         : "";
+
+    // --- Qué se ajusta (E15, equipo «volumen_copias», tanda 4) ---
+
+    /// <summary>
+    /// Requiere ajuste y se puede ajustar: MP3, desviada más del umbral y con algún paso que aplicar
+    /// (una que solo podría subir y no tiene margen se queda fuera). Es el criterio de siempre.
+    /// </summary>
+    public bool Candidata => Ajustable && Math.Abs(Gain) > LoudnessViewModel.UmbralAjuste
+                             && LoudnessViewModel.PasosAplicables(Gain, PeakDb) != 0;
+
+    /// <summary>Excluida del ajuste por su carpeta o por ella misma (se mide igual).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Aviso), nameof(PuedeMarcarse))]
+    private ExclusionVolumen _exclusion;
+
+    /// <summary>La casilla «Ajustar» se puede tocar: requiere ajuste y no está excluida.</summary>
+    public bool PuedeMarcarse => Candidata && Exclusion == ExclusionVolumen.Ninguna;
+
+    /// <summary>Casilla «Ajustar»: entra en «Ajustar volumen». Marcada de entrada en las que lo requieren.</summary>
+    [ObservableProperty] private bool _ajustar;
+
+    /// <summary>El usuario ha cambiado la casilla (no el código al montar la tabla).</summary>
+    internal Action<LoudnessRow>? AlMarcarAMano { get; set; }
+
+    private bool _marcandoDesdeElCodigo;
+
+    partial void OnAjustarChanged(bool value)
+    {
+        if (!_marcandoDesdeElCodigo) AlMarcarAMano?.Invoke(this);
+    }
+
+    /// <summary>Pone la casilla sin contarlo como un cambio hecho a mano.</summary>
+    internal void Marcar(bool valor)
+    {
+        _marcandoDesdeElCodigo = true;
+        try { Ajustar = valor; }
+        finally { _marcandoDesdeElCodigo = false; }
+    }
 
     public IBrush StateBrush =>
         Math.Abs(Gain) <= 1.0 ? OkBrush :
@@ -73,7 +113,8 @@ public sealed partial class LoudnessRow : ObservableObject
 
 /// <summary>
 /// Pestaña Volumen: mide la sonoridad real (EBU R128) de la biblioteca y dice cuánto se desvía
-/// cada canción del objetivo. De momento SOLO MIDE: no se toca ningún archivo.
+/// cada canción del objetivo. Medir no toca ningún archivo; «Ajustar volumen» corrige los MP3 que el
+/// usuario deja marcados (o los seleccionados), salvo los excluidos, y se puede deshacer.
 /// </summary>
 public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgresoPagina
 {
@@ -147,6 +188,8 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         _engine = engine;
         RowsView = new DataGridCollectionView(Rows);
         RowsView.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(LoudnessRow.Folder)));
+        RefrescarListaExclusiones();
+        RecontarMarcadas();
     }
 
     partial void OnSoloDesviadasChanged(bool value) => AplicarFiltro();
@@ -163,13 +206,10 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     {
         if (Rows.Count == 0) return;
         var previas = Rows.ToList();
+        var excl = Exclusiones();
         Rows.Clear();
         foreach (var r in previas)
-            Rows.Add(new LoudnessRow
-            {
-                FileName = r.FileName, Folder = r.Folder, FilePath = r.FilePath,
-                Lufs = r.Lufs, PeakDb = r.PeakDb, Target = Target,
-            });
+            Rows.Add(Fila(r.FileName, r.Folder, r.FilePath, r.Lufs, r.PeakDb, excl));
         AplicarFiltro();
         Resumir();
     }
@@ -205,16 +245,14 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
             await _engine.Loudness.MeasureManyAsync(rutas, force, prog, _cts.Token);
 
             Rows.Clear();
+            var excl = Exclusiones();
             foreach (var t in tracks)
             {
                 var m = _engine.Loudness.Get(t.FilePath);
                 if (m is not { Ok: true } r) continue;
-                Rows.Add(new LoudnessRow
-                {
-                    FileName = t.FileName, Folder = t.Folder, FilePath = t.FilePath,
-                    Lufs = r.Lufs, PeakDb = r.PeakDb, Target = Target,
-                });
+                Rows.Add(Fila(t.FileName, t.Folder, t.FilePath, r.Lufs, r.PeakDb, excl));
             }
+            RefrescarListaExclusiones();   // ya se sabe qué canciones excluidas siguen en la biblioteca
 
             // En el modo automático la referencia sale de la propia música, así que hasta ahora no
             // se podía saber: se calcula al terminar de medir y se rehace la tabla con ella.
@@ -242,6 +280,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     /// <summary>Resumen del estado de la biblioteca, sin tecnicismos.</summary>
     private void Resumir()
     {
+        RecontarMarcadas();
         if (Rows.Count == 0) { Resumen = ""; return; }
         var correctas = Rows.Count(r => Math.Abs(r.Gain) <= 1.0);
         var bajas = Rows.Count(r => r.Gain > 1.0);
@@ -260,12 +299,21 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     /// <summary>Margen que se deja sin usar para no llegar justo al límite de distorsión.</summary>
     internal const double MargenSeguridad = 0.5;
 
-    /// <summary>Grabaciones que se corregirían con los criterios actuales.</summary>
-    public List<LoudnessRow> ParaAjustar()
-        => Rows.Where(r => r.Ajustable)   // un FLAC o un WAV se miden, pero no se tocan
-               .Where(r => Math.Abs(r.Gain) > UmbralAjuste)
-               .Where(r => PasosAplicables(r.Gain, r.PeakDb) != 0)
-               .ToList();
+    /// <summary>
+    /// Grabaciones que se corregirían con «Ajustar volumen»: las marcadas en la columna «Ajustar»
+    /// entre las que lo requieren (MP3, desviadas más del umbral, con margen) y no están excluidas.
+    /// </summary>
+    public List<LoudnessRow> ParaAjustar() => AjusteVolumenSeleccion.Elegir(Rows).Ajustar.ToList();
+
+    /// <summary>
+    /// Lo que entraría en el ajuste: lo marcado (<paramref name="seleccion"/> null) o lo seleccionado,
+    /// con lo que queda fuera y por qué (ver <see cref="AjusteVolumenSeleccion.Elegir"/>).
+    /// </summary>
+    public SeleccionAjuste Elegir(IReadOnlyCollection<LoudnessRow>? seleccion = null)
+        => AjusteVolumenSeleccion.Elegir(Rows, seleccion);
+
+    /// <summary>Desviadas que no son MP3: se miden, pero no se pueden ajustar sin recodificar.</summary>
+    public int DesviadasNoMp3 => Rows.Count(r => !r.Ajustable && Math.Abs(r.Gain) > UmbralAjuste);
 
     /// <summary>
     /// Pasos de MP3Gain (1,5 dB cada uno) que de verdad se pueden aplicar. Bajar siempre cabe, y se
@@ -298,21 +346,19 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         => r.Gain > 0 && r.Gain - PasosAplicables(r.Gain, r.PeakDb) * Mp3Gain.DbPerStep > Mp3Gain.DbPerStep / 2;
 
     /// <summary>
-    /// Ajusta el volumen de las grabaciones desviadas. Modifica los archivos, pero sin recodificar
-    /// (no hay pérdida de calidad) y dejando manifiesto para poder deshacerlo.
+    /// Ajusta el volumen de las grabaciones elegidas (por defecto, las marcadas). Modifica los
+    /// archivos, pero sin recodificar (no hay pérdida de calidad) y dejando manifiesto para poder
+    /// deshacerlo. Quien llama ya ha confirmado con el usuario exactamente esta lista.
     /// </summary>
-    public async Task ApplyAsync()
+    public async Task ApplyAsync(IReadOnlyList<LoudnessRow>? elegidas = null)
     {
         if (IsBusy) return;
-        var objetivo = ParaAjustar();
+        var objetivo = (elegidas ?? ParaAjustar()).ToList();
         if (objetivo.Count == 0)
         {
-            // Que no haya nada que ajustar y que lo desviado no sea ajustable son dos cosas
-            // distintas, y el usuario merece saber cuál de las dos le está pasando.
-            var noMp3 = Rows.Count(r => !r.Ajustable && Math.Abs(r.Gain) > UmbralAjuste);
-            Status = noMp3 > 0
-                ? $"No hay ningún MP3 que ajustar. {noMp3} grabaciones están desviadas, pero no son MP3: se miden, no se ajustan."
-                : "No hay ninguna grabación que requiera ajuste.";
+            // Que no haya nada que ajustar, que se haya desmarcado o excluido todo y que lo desviado
+            // no sea ajustable son cosas distintas, y el usuario merece saber cuál le está pasando.
+            Status = AjusteVolumenSeleccion.TextoNadaQueAjustar(Elegir(), porSeleccion: false, DesviadasNoMp3);
             return;
         }
 
@@ -322,7 +368,9 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         var ct = _cts.Token;
         Progress = 0;
 
-        var manifiesto = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+        // El nombre del manifiesto lo da AppPaths: antes se componía aquí a mano, y dos ajustes en el
+        // mismo segundo acababan mezclados en un solo manifiesto.
+        var manifiesto = _engine.Paths.NuevoManifiesto();
         _engine.Logger.Head($"Volumen: ajustando {objetivo.Count} grabaciones (referencia {Target:0.0} LUFS)");
 
         int hechas = 0, parciales = 0, fallidas = 0, i = 0;
@@ -351,6 +399,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 }
 
                 hechas++;
+                _marcasAMano.Remove(fila.FilePath);   // ya ajustada: su casilla vuelve a la regla de siempre
                 if (AumentoParcial(fila)) parciales++;
 
                 // El ajuste se anuncia como reversible. Si el historial no se puede escribir, esa
@@ -423,20 +472,165 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     private void RecargarDesdeCache()
     {
         var previas = Rows.ToList();
+        var excl = Exclusiones();
         Rows.Clear();
         foreach (var r in previas)
         {
             var m = _engine.Loudness.Get(r.FilePath);
             var lufs = m is { Ok: true } v ? v.Lufs : r.Lufs;
             var pico = m is { Ok: true } v2 ? v2.PeakDb : r.PeakDb;
-            Rows.Add(new LoudnessRow
-            {
-                FileName = r.FileName, Folder = r.Folder, FilePath = r.FilePath,
-                Lufs = lufs, PeakDb = pico, Target = Target,
-            });
+            Rows.Add(Fila(r.FileName, r.Folder, r.FilePath, lufs, pico, excl));
         }
         AplicarFiltro();
         Resumir();
+    }
+
+    // =============================================================================================
+    // Qué se ajusta: casilla por fila, selección y exclusiones (E15, equipo «volumen_copias», tanda 4)
+    // =============================================================================================
+
+    /// <summary>
+    /// Casillas que el usuario ha cambiado a mano en esta sesión, por ruta. Cambiar el nivel de
+    /// referencia rehace la tabla entera, y sin esto volvería a marcar lo que se acaba de desmarcar.
+    /// </summary>
+    private readonly Dictionary<string, bool> _marcasAMano = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Las exclusiones guardadas, para la lista visible con su botón «Quitar».</summary>
+    public ObservableCollection<ExclusionVolumenFila> ExclusionesGuardadas { get; } = new();
+
+    /// <summary>«Exclusiones del ajuste: 2 carpetas y 1 canción».</summary>
+    [ObservableProperty] private string _tituloExclusiones = "";
+
+    /// <summary>«143 grabaciones marcadas para ajustar».</summary>
+    [ObservableProperty] private string _textoMarcadas = "";
+
+    /// <summary>Las exclusiones de la configuración, listas para mirar muchas filas seguidas.</summary>
+    private (List<string> Carpetas, HashSet<string> Canciones) Exclusiones()
+        => (_engine.Config.VolumenCarpetasExcluidas.ToList(),
+            new HashSet<string>(_engine.Config.VolumenCancionesExcluidas, StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>Una fila nueva, con su exclusión y su casilla como tocan.</summary>
+    private LoudnessRow Fila(string nombre, string carpeta, string ruta, double lufs, double pico,
+                             (List<string> Carpetas, HashSet<string> Canciones) excl)
+    {
+        var r = new LoudnessRow
+        {
+            FileName = nombre, Folder = carpeta, FilePath = ruta, Lufs = lufs, PeakDb = pico, Target = Target,
+            Exclusion = AjusteVolumenSeleccion.De(ruta, excl.Carpetas, excl.Canciones),
+        };
+        r.Marcar(AjusteVolumenSeleccion.MarcaInicial(r.PuedeMarcarse, _marcasAMano.TryGetValue(ruta, out var m) ? m : null));
+        r.AlMarcarAMano = AlMarcarAMano;
+        return r;
+    }
+
+    private void AlMarcarAMano(LoudnessRow r)
+    {
+        _marcasAMano[r.FilePath] = r.Ajustar;
+        RecontarMarcadas();
+    }
+
+    private void RecontarMarcadas()
+        => TextoMarcadas = Rows.Count == 0 ? "" : AjusteVolumenSeleccion.TextoMarcadas(Rows.Count(r => r.Ajustar && r.PuedeMarcarse));
+
+    /// <summary>Rehace la lista visible de exclusiones a partir de la configuración.</summary>
+    private void RefrescarListaExclusiones()
+    {
+        var cfg = _engine.Config;
+        // Si una canción excluida sigue en la biblioteca solo se sabe con la biblioteca leída; sin
+        // ella no se dice nada en vez de dar por perdidas todas.
+        HashSet<string>? enBiblioteca = null;
+        if (cfg.VolumenCancionesExcluidas.Count > 0 && _engine.Library.IsScanned)
+            enBiblioteca = new HashSet<string>(_engine.Library.Tracks.Select(t => t.FilePath), StringComparer.OrdinalIgnoreCase);
+
+        ExclusionesGuardadas.Clear();
+        foreach (var c in cfg.VolumenCarpetasExcluidas.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+            ExclusionesGuardadas.Add(new ExclusionVolumenFila { Ruta = c, EsCarpeta = true });
+        foreach (var c in cfg.VolumenCancionesExcluidas.OrderBy(x => Path.GetFileName(x), StringComparer.OrdinalIgnoreCase))
+            ExclusionesGuardadas.Add(new ExclusionVolumenFila
+            {
+                Ruta = c, EsCarpeta = false, FueraDeLaBiblioteca = enBiblioteca != null && !enBiblioteca.Contains(c),
+            });
+        TituloExclusiones = AjusteVolumenSeleccion.TituloExclusiones(cfg.VolumenCarpetasExcluidas.Count, cfg.VolumenCancionesExcluidas.Count);
+    }
+
+    /// <summary>
+    /// Vuelve a mirar la exclusión de cada fila tras cambiar la lista, sin rehacer la tabla. Devuelve
+    /// cuántas de las que requerían ajuste han quedado excluidas.
+    /// </summary>
+    private int AplicarExclusiones()
+    {
+        var excl = Exclusiones();
+        var nuevas = 0;
+        foreach (var r in Rows)
+        {
+            var antes = r.Exclusion;
+            var ahora = AjusteVolumenSeleccion.De(r.FilePath, excl.Carpetas, excl.Canciones);
+            if (antes == ahora) continue;
+            r.Exclusion = ahora;
+            if (antes == ExclusionVolumen.Ninguna && r.Candidata) nuevas++;
+            r.Marcar(AjusteVolumenSeleccion.MarcaInicial(r.PuedeMarcarse, _marcasAMano.TryGetValue(r.FilePath, out var m) ? m : null));
+        }
+        RefrescarListaExclusiones();
+        RecontarMarcadas();
+        return nuevas;
+    }
+
+    /// <summary>Guarda la configuración tras cambiar las exclusiones; "" si fue bien, o el aviso para el estado.</summary>
+    private string GuardarExclusiones()
+        => _engine.SaveConfig(out var error) ? "" : " ⚠ No se pudo guardar en la configuración: " + error;
+
+    /// <summary>«Excluir esta carpeta del ajuste»: la carpeta de cada canción elegida, con sus subcarpetas.</summary>
+    public void ExcluirCarpetas(IReadOnlyCollection<LoudnessRow> filas)
+    {
+        if (IsBusy) { Status = "Espera a que termine la operación en curso."; return; }
+        var carpetas = filas.Select(f => Path.GetDirectoryName(f.FilePath) ?? "")
+                            .Where(d => d.Length > 0)
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+        if (carpetas.Count == 0) { Status = "Elige antes una canción de la tabla."; return; }
+
+        var (lista, anadidas) = AjusteVolumenSeleccion.AnadirCarpetas(_engine.Config.VolumenCarpetasExcluidas, carpetas);
+        if (anadidas == 0) { Status = AjusteVolumenSeleccion.TextoCarpetasExcluidas(carpetas, 0, 0); return; }
+        _engine.Config.VolumenCarpetasExcluidas = lista;
+        var aviso = GuardarExclusiones();
+        var excluidas = AplicarExclusiones();
+        Status = AjusteVolumenSeleccion.TextoCarpetasExcluidas(carpetas, anadidas, excluidas) + aviso;
+        _engine.Logger.Detail($"Volumen: excluida{(anadidas == 1 ? " 1 carpeta" : $"s {anadidas} carpetas")} del ajuste: {string.Join(" · ", carpetas)}");
+    }
+
+    /// <summary>«Excluir del ajuste»: estas canciones, por su ruta.</summary>
+    public void ExcluirCanciones(IReadOnlyCollection<LoudnessRow> filas)
+    {
+        if (IsBusy) { Status = "Espera a que termine la operación en curso."; return; }
+        if (filas.Count == 0) { Status = "Elige antes una canción de la tabla."; return; }
+        var (lista, anadidas) = AjusteVolumenSeleccion.AnadirCanciones(_engine.Config.VolumenCancionesExcluidas, filas.Select(f => f.FilePath));
+        if (anadidas > 0)
+        {
+            _engine.Config.VolumenCancionesExcluidas = lista;
+            var aviso = GuardarExclusiones();
+            AplicarExclusiones();
+            Status = AjusteVolumenSeleccion.TextoCancionesExcluidas(filas.Count, anadidas) + aviso;
+        }
+        else Status = AjusteVolumenSeleccion.TextoCancionesExcluidas(filas.Count, 0);
+    }
+
+    /// <summary>Quita una exclusión de la lista: sus canciones vuelven a marcarse si requieren ajuste.</summary>
+    [RelayCommand]
+    private void QuitarExclusion(ExclusionVolumenFila? fila)
+    {
+        if (fila == null) return;
+        if (IsBusy) { Status = "Espera a que termine la operación en curso."; return; }
+        var cfg = _engine.Config;
+        var quitadas = fila.EsCarpeta
+            ? cfg.VolumenCarpetasExcluidas.RemoveAll(c => Rutas.MismaCarpeta(c, fila.Ruta))
+            : cfg.VolumenCancionesExcluidas.RemoveAll(c => string.Equals(c, fila.Ruta, StringComparison.OrdinalIgnoreCase));
+        if (quitadas == 0) { RefrescarListaExclusiones(); return; }
+        var aviso = GuardarExclusiones();
+        AplicarExclusiones();
+        var nombre = fila.EsCarpeta ? Path.GetFileName(fila.Ruta.TrimEnd('\\', '/')) : Path.GetFileName(fila.Ruta);
+        Status = (fila.EsCarpeta
+                    ? $"Quitada la exclusión de la carpeta «{nombre}»: sus grabaciones vuelven a marcarse si requieren ajuste."
+                    : $"Quitada la exclusión de «{nombre}»: vuelve a marcarse si requiere ajuste.") + aviso;
     }
 
     [RelayCommand]
