@@ -8,7 +8,12 @@ namespace Etiquetador.Core.Analysis;
 /// Pico real en dBTP (ITU-R BS.1770, ver <see cref="TruePeakMeter"/>), o null si no se midió: las
 /// medidas guardadas por versiones anteriores solo tienen el pico de muestra.
 /// </param>
-public readonly record struct LoudnessResult(double Lufs, double PeakDb, double Seconds, double? TruePeakDb = null)
+/// <param name="GananciaAplicada">
+/// Ganancia que BeatTag ha aplicado al archivo desde que se midió su audio original (dB; 0 si ninguna
+/// o si no se sabe). La lleva la caché de medidas; el medidor no la conoce.
+/// </param>
+public readonly record struct LoudnessResult(double Lufs, double PeakDb, double Seconds, double? TruePeakDb = null,
+                                            double GananciaAplicada = 0)
 {
     public bool Ok => !double.IsNaN(Lufs) && !double.IsNegativeInfinity(Lufs);
 }

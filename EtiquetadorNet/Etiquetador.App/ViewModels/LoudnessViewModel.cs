@@ -44,6 +44,18 @@ public sealed partial class LoudnessRow : ObservableObject
     /// </summary>
     public double PicoDecision => TruePeakDb is { } t ? Math.Max(t, PeakDb) : PeakDb;
 
+    /// <summary>
+    /// Ganancia que BeatTag le ha aplicado desde que se midió su audio original (dB; 0 si ninguna).
+    /// La referencia automática se calcula con el nivel original, Lufs menos esta ganancia.
+    /// </summary>
+    public double GananciaAplicada { get; init; }
+
+    /// <summary>
+    /// Se bajó con el pico recortado: el pico guardado es el tope y el real se desconoce hasta volver
+    /// a medirlo (ver LoudnessScanner.TrasAjustar). Antes de dar por hecho que no admite aumento, se mide.
+    /// </summary>
+    internal bool PicoDesconocidoTrasBajar => TruePeakDb == null && GananciaAplicada < 0 && PeakDb >= LoudnessScanner.PicoRecortado;
+
     /// <summary>Objetivo con el que se calculó la ganancia.</summary>
     public double Target { get; init; }
 
@@ -91,6 +103,8 @@ public sealed partial class LoudnessRow : ObservableObject
         !Ajustable ? "Se mide, pero no se ajusta: solo los MP3 admiten el cambio sin pérdida"
         : Exclusion == ExclusionVolumen.Carpeta ? "Excluida del ajuste: su carpeta está en las exclusiones"
         : Exclusion == ExclusionVolumen.Cancion ? "Excluida del ajuste"
+        : Gain > LoudnessViewModel.UmbralAjuste && PicoDesconocidoTrasBajar
+            ? "Falta medir su pico real para saber si admite aumento: pulsa Analizar"
         : Gain > LoudnessViewModel.UmbralAjuste && LoudnessViewModel.AumentoParcial(this)
             ? (LoudnessViewModel.PasosAplicables(Gain, PicoDecision) == 0
                 ? "Sin margen suficiente: aumentarla produciría distorsión"
@@ -180,8 +194,11 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     /// <summary>Explicación del modo elegido, para que se entienda qué va a pasar.</summary>
     [ObservableProperty] private string _explicacionModo = "";
 
-    /// <summary>Nivel medio (mediana) de la biblioteca, para explicar la referencia automática.</summary>
-    private double? _medianaBiblioteca;
+    /// <summary>La última referencia automática calculada, con su mediana y su motivo, para explicarla.</summary>
+    private ResultadoReferencia? _referenciaCalculada;
+
+    /// <summary>Alguna de las grabaciones que cuentan para la referencia ya la ha ajustado BeatTag.</summary>
+    private bool _hayAjustadas;
 
     private bool EsAutomatico => Modo.StartsWith("Nivel común", StringComparison.Ordinal);
 
@@ -203,13 +220,13 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         }
         // Si la referencia cambia, OnTargetChanged ya rehace la tabla.
         ExplicarModo();
-        _ = ComprobarPicoRealTrasCambioAsync();
+        AvisarPicoRealPendiente();
     }
 
     private void ExplicarModo()
     {
         ExplicacionModo = EsAutomatico
-            ? TextoReferenciaAutomatica(Rows.Count > 0 ? Target : null, _medianaBiblioteca)
+            ? TextoReferenciaAutomatica(Rows.Count > 0 ? _referenciaCalculada : null, _hayAjustadas)
             : Modo.StartsWith("Nivel de club")
                 ? "Nivel elevado, adecuado para equipos de sala."
                 : Modo.StartsWith("Nivel de plataformas")
@@ -218,34 +235,63 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     }
 
     /// <summary>
-    /// Qué es la referencia automática. Cuando queda por debajo del nivel medio se dan los dos valores
-    /// y el motivo, para que no parezca un error que no coincidan.
+    /// Qué es la referencia automática y por qué ha quedado ahí. Cuando queda por debajo del nivel
+    /// medio se dan los dos valores y el motivo, para que no parezca un error que no coincidan; cuando
+    /// el límite de <see cref="ReferenciaVolumen.DescensoMaximo"/> dB o una de las salvaguardas la
+    /// dejan en otro sitio, se dice cuál. Si ya hay grabaciones ajustadas, el nivel medio es el que
+    /// tenían antes de ajustarlas, que es con el que se calcula.
     /// </summary>
-    internal static string TextoReferenciaAutomatica(double? referencia, double? mediana)
+    internal static string TextoReferenciaAutomatica(ResultadoReferencia? resultado, bool hayAjustadas = false)
     {
-        if (referencia is not { } r)
+        if (resultado is not { } x || x.Motivo == MotivoReferencia.SinMedidas)
             return "La referencia se calcula a partir de tus grabaciones al analizarlas: el nivel más alto que alcanza "
                  + $"sin distorsión el {PorcentajeAlcance} % de ellas, sin superar su nivel medio.";
-        if (mediana is { } m && r < m - 0.05)
-            return $"Referencia: {r:0.0} LUFS, el nivel más alto que alcanzan sin distorsión el {PorcentajeAlcance} % de tus "
-                 + $"grabaciones (nivel medio: {m:0.0} LUFS). Las más bajas no admiten aumento, así que se igualan reduciendo las demás.";
-        return $"Referencia: {r:0.0} LUFS, el nivel medio de tus grabaciones.";
+
+        var r = x.Referencia;
+        var m = x.Mediana;
+        var nivelMedio = hayAjustadas ? "nivel medio que tenían tus grabaciones antes de ajustarlas" : "nivel medio de tus grabaciones";
+        return x.Motivo switch
+        {
+            MotivoReferencia.Alcance =>
+                $"Referencia: {r:0.0} LUFS, el nivel más alto que alcanzan sin distorsión el {PorcentajeAlcance} % de tus "
+                + $"grabaciones ({(hayAjustadas ? "nivel medio antes de ajustarlas" : "nivel medio")}: {m:0.0} LUFS). "
+                + "Las más bajas no admiten aumento, así que se igualan reduciendo las demás.",
+            MotivoReferencia.Tope =>
+                $"Referencia: {r:0.0} LUFS, {ReferenciaVolumen.DescensoMaximo:0} dB por debajo del {nivelMedio} ({m:0.0} LUFS): "
+                + "es lo máximo que se reduce de forma automática. "
+                + $"Más del {100 - PorcentajeAlcance} % de tus grabaciones no alcanza ese nivel sin distorsión y se quedará por debajo; "
+                + "para igualarlas también, elige un nivel fijo más bajo.",
+            MotivoReferencia.PocasGrabaciones =>
+                $"Referencia: {r:0.0} LUFS, el {nivelMedio}. Con menos de {ReferenciaVolumen.MinimoGrabaciones} grabaciones, "
+                + "las que no alcanzan ese nivel sin distorsión se quedan por debajo en vez de reducir las demás.",
+            MotivoReferencia.PocasAjustables =>
+                $"Referencia: {r:0.0} LUFS, el {nivelMedio}. La mayoría no son MP3 y no se pueden reducir, "
+                + "así que las que no alcanzan ese nivel sin distorsión se quedan por debajo.",
+            _ => $"Referencia: {r:0.0} LUFS, el {nivelMedio}.",
+        };
     }
 
     private static int PorcentajeAlcance => (int)Math.Round((1 - ReferenciaVolumen.PercentilAlcance) * 100);
+
+    /// <summary>Las filas que cuentan para la referencia automática: las no excluidas (o todas, si lo están todas).</summary>
+    private static List<LoudnessRow> CuentanParaLaReferencia(IReadOnlyCollection<LoudnessRow> filas)
+    {
+        var cuentan = filas.Where(r => r.Exclusion == ExclusionVolumen.Ninguna).ToList();
+        return cuentan.Count == 0 ? filas.ToList() : cuentan;
+    }
 
     /// <summary>
     /// Referencia del modo automático (ver <see cref="ReferenciaVolumen"/>), sin contar las excluidas:
     /// las acapellas o intros que el DJ quiere bajas a propósito no pueden arrastrar hacia abajo la
     /// referencia de todas las demás. Si todo está excluido, se calcula con todo (solo se muestra).
+    /// Va con el nivel original de cada grabación (el actual menos lo que BeatTag ya le ha aplicado),
+    /// para que ajustar no mueva la referencia.
     /// </summary>
-    internal static (double Referencia, double Mediana) ReferenciaAutomatica(IReadOnlyCollection<LoudnessRow> filas)
-    {
-        var cuentan = filas.Where(r => r.Exclusion == ExclusionVolumen.Ninguna).ToList();
-        if (cuentan.Count == 0) cuentan = filas.ToList();
-        return ReferenciaVolumen.Automatica(
-            cuentan.Select(r => (r.Lufs, r.PicoDecision, r.Ajustable)).ToList(), MargenSeguridad, Mp3Gain.DbPerStep);
-    }
+    internal static ResultadoReferencia ReferenciaAutomatica(IReadOnlyCollection<LoudnessRow> filas)
+        => ReferenciaVolumen.Automatica(
+            CuentanParaLaReferencia(filas)
+                .Select(r => new FilaReferencia(r.Lufs, r.PicoDecision, r.Ajustable, r.GananciaAplicada)).ToList(),
+            MargenSeguridad, Mp3Gain.DbPerStep);
 
     /// <summary>
     /// Recalcula la referencia automática con lo que hay en la tabla. Ordenar unas miles de medidas ya
@@ -253,9 +299,10 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     /// </summary>
     private void ActualizarReferenciaAutomatica()
     {
-        var (referencia, mediana) = ReferenciaAutomatica(Rows);
-        _medianaBiblioteca = mediana;
-        Target = referencia;   // si cambia, OnTargetChanged rehace la tabla
+        var resultado = ReferenciaAutomatica(Rows);
+        _referenciaCalculada = resultado;
+        _hayAjustadas = CuentanParaLaReferencia(Rows).Any(r => r.GananciaAplicada != 0);
+        Target = resultado.Referencia;   // si cambia, OnTargetChanged rehace la tabla
         ExplicarModo();
     }
     [ObservableProperty] private bool _isBusy;
@@ -292,7 +339,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         var excl = Exclusiones();
         Rows.Clear();
         foreach (var r in previas)
-            Rows.Add(Fila(r.FileName, r.Folder, r.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, excl));
+            Rows.Add(Fila(r.FileName, r.Folder, r.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, r.GananciaAplicada, excl));
         AplicarFiltro();
         Resumir();
     }
@@ -339,7 +386,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
             {
                 var m = _engine.Loudness.Get(t.FilePath);
                 if (m is not { Ok: true } r) continue;
-                Rows.Add(Fila(t.FileName, t.Folder, t.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, excl));
+                Rows.Add(Fila(t.FileName, t.Folder, t.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, r.GananciaAplicada, excl));
             }
             RefrescarListaExclusiones();   // ya se sabe qué canciones excluidas siguen en la biblioteca
 
@@ -477,13 +524,18 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     }
 
     /// <summary>
-    /// Grabaciones que se aumentarían (MP3, no excluidas, desviadas más del umbral y con algún paso
-    /// según el pico de muestra) y cuyo pico real aún no se conoce. Son las únicas que hay que volver
-    /// a medir para decidir con seguridad: el resto de medidas guardadas sigue valiendo.
+    /// Grabaciones que se aumentarían (MP3, no excluidas, desviadas más del umbral) y cuyo pico real
+    /// aún no se conoce: las que tienen algún paso según el pico de muestra, y las que BeatTag bajó con
+    /// el pico recortado (el pico guardado es el tope, pero el de verdad se desconoce y puede dejar
+    /// recuperar parte de lo bajado). Son las únicas que hay que volver a medir para decidir con
+    /// seguridad: el resto de medidas guardadas sigue valiendo. Una grabación con el pico recortado
+    /// que nunca se ha ajustado no entra: su pico real no puede ser menor que el de muestra, así que
+    /// medirlo no cambiaría nada.
     /// </summary>
     internal static List<LoudnessRow> SinPicoReal(IEnumerable<LoudnessRow> filas)
         => filas.Where(r => r.TruePeakDb == null && r.Ajustable && r.Exclusion == ExclusionVolumen.Ninguna
-                            && r.Gain > UmbralAjuste && PasosAplicables(r.Gain, r.PeakDb) > 0)
+                            && r.Gain > UmbralAjuste
+                            && (PasosAplicables(r.Gain, r.PeakDb) > 0 || r.PicoDesconocidoTrasBajar))
                 .ToList();
 
     /// <summary>
@@ -512,31 +564,28 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     }
 
     /// <summary>
-    /// Tras cambiar el nivel de referencia o las exclusiones puede haber grabaciones nuevas que se
-    /// aumentarían sin pico real conocido: se mide en segundo plano, y se puede cancelar.
+    /// Tras cambiar el nivel de referencia o las exclusiones puede haber grabaciones que se
+    /// aumentarían sin pico real conocido. NO se miden en ese momento: elegir «Nivel de club» lanzaba
+    /// sin avisar la decodificación de cientos de canciones con todos los núcleos menos uno, y Analizar
+    /// y Ajustar quedaban desactivados mientras duraba. Se dice cuántas son; su pico real se mide al
+    /// ajustarlas (última barrera, ver <see cref="Decidir"/>) o al pulsar Analizar. Devuelve el aviso
+    /// ("" si no hay ninguna), para añadirlo al mensaje de quien llama.
     /// </summary>
-    private async Task ComprobarPicoRealTrasCambioAsync()
+    private string PicoRealPendiente()
+        => IsBusy || Rows.Count == 0 ? "" : AjusteVolumenSeleccion.TextoPicoRealPendiente(SinPicoReal(Rows).Count);
+
+    /// <summary>Tras cambiar el nivel de referencia: el aviso de <see cref="PicoRealPendiente"/>, si lo hay.</summary>
+    private void AvisarPicoRealPendiente()
     {
-        if (IsBusy || Rows.Count == 0 || SinPicoReal(Rows).Count == 0) return;
-        IsBusy = true;
-        _cts = new CancellationTokenSource();
-        Progress = 0;
-        try
-        {
-            await ComprobarPicoRealAsync(_cts.Token);
-            Progress = 100;
-            Status = "Pico real comprobado. " + Resumen;
-        }
-        catch (OperationCanceledException)
-        {
-            Status = "Comprobación del pico real cancelada. Las grabaciones sin comprobar se medirán antes de aumentarlas.";
-        }
-        catch (Exception e)
-        {
-            Status = "Error al comprobar el pico real: " + e.Message;
-            _engine.Logger.Error("Volumen: fallo al medir el pico real", e);
-        }
-        finally { IsBusy = false; _engine.Loudness.Save(); _cts?.Dispose(); _cts = null; }
+        var aviso = PicoRealPendiente();
+        if (aviso.Length > 0) Status = aviso;
+    }
+
+    /// <summary>El mensaje de una exclusión con el aviso de <see cref="PicoRealPendiente"/> detrás, si lo hay.</summary>
+    private string ConPicoRealPendiente(string mensaje)
+    {
+        var aviso = PicoRealPendiente();
+        return aviso.Length == 0 ? mensaje : mensaje + " " + aviso;
     }
 
     /// <summary>
@@ -705,8 +754,8 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         foreach (var r in previas)
         {
             var m = _engine.Loudness.Get(r.FilePath);
-            if (m is { Ok: true } v) Rows.Add(Fila(r.FileName, r.Folder, r.FilePath, v.Lufs, v.PeakDb, v.TruePeakDb, excl));
-            else Rows.Add(Fila(r.FileName, r.Folder, r.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, excl));
+            if (m is { Ok: true } v) Rows.Add(Fila(r.FileName, r.Folder, r.FilePath, v.Lufs, v.PeakDb, v.TruePeakDb, v.GananciaAplicada, excl));
+            else Rows.Add(Fila(r.FileName, r.Folder, r.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, r.GananciaAplicada, excl));
         }
         if (recalcularReferencia && EsAutomatico && Rows.Count > 0) ActualizarReferenciaAutomatica();
         AplicarFiltro();
@@ -739,11 +788,12 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
 
     /// <summary>Una fila nueva, con su exclusión y su casilla como tocan.</summary>
     private LoudnessRow Fila(string nombre, string carpeta, string ruta, double lufs, double pico, double? picoReal,
-                             (List<string> Carpetas, HashSet<string> Canciones) excl)
+                             double aplicada, (List<string> Carpetas, HashSet<string> Canciones) excl)
     {
         var r = new LoudnessRow
         {
-            FileName = nombre, Folder = carpeta, FilePath = ruta, Lufs = lufs, PeakDb = pico, TruePeakDb = picoReal, Target = Target,
+            FileName = nombre, Folder = carpeta, FilePath = ruta, Lufs = lufs, PeakDb = pico, TruePeakDb = picoReal,
+            GananciaAplicada = aplicada, Target = Target,
             Exclusion = AjusteVolumenSeleccion.De(ruta, excl.Carpetas, excl.Canciones),
         };
         r.Marcar(AjusteVolumenSeleccion.MarcaInicial(r.PuedeMarcarse, _marcasAMano.TryGetValue(ruta, out var m) ? m : null));
@@ -802,10 +852,9 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         RecontarMarcadas();
 
         // Las excluidas no cuentan para la referencia automática: excluir o quitar una exclusión puede
-        // moverla (si cambia, OnTargetChanged rehace la tabla). Y lo que pase a aumentarse necesita
-        // antes su pico real.
+        // moverla (si cambia, OnTargetChanged rehace la tabla). Lo que pase a aumentarse sin pico real
+        // medido no se mide aquí: quien llama lo añade a su mensaje (ver PicoRealPendiente).
         if (EsAutomatico && Rows.Count > 0) ActualizarReferenciaAutomatica();
-        _ = ComprobarPicoRealTrasCambioAsync();
         return nuevas;
     }
 
@@ -826,7 +875,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         var aviso = GuardarExclusiones();
         var excluidas = AplicarExclusiones();
         // Se nombran y se cuentan las que han entrado de verdad en la lista, no las pedidas.
-        Status = AjusteVolumenSeleccion.TextoCarpetasExcluidas(nuevas, nuevas.Count, excluidas) + aviso;
+        Status = ConPicoRealPendiente(AjusteVolumenSeleccion.TextoCarpetasExcluidas(nuevas, nuevas.Count, excluidas) + aviso);
         _engine.Logger.Detail($"Volumen: excluida{(nuevas.Count == 1 ? " 1 carpeta" : $"s {nuevas.Count} carpetas")} del ajuste: {string.Join(" · ", nuevas)}");
     }
 
@@ -841,7 +890,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
             _engine.Config.VolumenCancionesExcluidas = lista;
             var aviso = GuardarExclusiones();
             AplicarExclusiones();
-            Status = AjusteVolumenSeleccion.TextoCancionesExcluidas(filas.Count, anadidas) + aviso;
+            Status = ConPicoRealPendiente(AjusteVolumenSeleccion.TextoCancionesExcluidas(filas.Count, anadidas) + aviso);
         }
         else Status = AjusteVolumenSeleccion.TextoCancionesExcluidas(filas.Count, 0);
     }
@@ -860,9 +909,9 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         var aviso = GuardarExclusiones();
         AplicarExclusiones();
         var nombre = fila.EsCarpeta ? Path.GetFileName(fila.Ruta.TrimEnd('\\', '/')) : Path.GetFileName(fila.Ruta);
-        Status = (fila.EsCarpeta
+        Status = ConPicoRealPendiente((fila.EsCarpeta
                     ? $"Quitada la exclusión de la carpeta «{nombre}»: sus grabaciones vuelven a marcarse si requieren ajuste."
-                    : $"Quitada la exclusión de «{nombre}»: vuelve a marcarse si requiere ajuste.") + aviso;
+                    : $"Quitada la exclusión de «{nombre}»: vuelve a marcarse si requiere ajuste.") + aviso);
     }
 
     [RelayCommand]

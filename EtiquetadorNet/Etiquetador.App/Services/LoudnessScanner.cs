@@ -35,7 +35,7 @@ public sealed class LoudnessScanner
     internal const double PicoRecortado = -0.01;
 
     /// <summary>
-    /// Lo que se guarda de cada archivo en sonoridad.json. T y V son nuevos y opcionales: las
+    /// Lo que se guarda de cada archivo en sonoridad.json. T, V y G son nuevos y opcionales: las
     /// entradas antiguas se leen sin ellos, y una versión anterior de BeatTag los ignora. No se
     /// escriben cuando no hay valor, para no engordar el archivo con nulos.
     /// </summary>
@@ -53,6 +53,15 @@ public sealed class LoudnessScanner
         /// <summary>Versión de la medida (<see cref="VersionActual"/>), o null si es anterior.</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public int? V { get; set; }
+
+        /// <summary>
+        /// Ganancia que BeatTag ha aplicado al archivo desde que se midió su audio original (dB), o
+        /// null si ninguna. Restándola de Lufs sale el nivel original, que es con el que se calcula
+        /// la referencia automática (ver <see cref="ReferenciaVolumen"/>): sin ella, cada «Ajustar»
+        /// movía la referencia y el siguiente volvía a tocar las mismas canciones.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double? G { get; set; }
     }
 
     private readonly string _file;
@@ -80,22 +89,30 @@ public sealed class LoudnessScanner
         if (!Stat(path, out var m, out var s)) return null;
         lock (_lock)
             if (_map.TryGetValue(path, out var e) && e.M == m && e.S == s)
-                return new LoudnessResult(e.Lufs, e.Peak, 0, e.T);
+                return new LoudnessResult(e.Lufs, e.Peak, 0, e.T, e.G ?? 0);
         return null;
     }
 
     /// <summary>
     /// Actualiza la medida tras haber cambiado el volumen del archivo, sin volver a analizarlo:
     /// una ganancia conocida desplaza el nivel y el pico en la misma cantidad. La versión de la
-    /// medida no cambia (la sonoridad de un mono sigue medida como estaba).
+    /// medida no cambia (la sonoridad de un mono sigue medida como estaba), y la ganancia aplicada
+    /// tampoco: para sumarle la de un ajuste está <see cref="Ajustado"/>.
     /// </summary>
     public void Update(string path, double lufs, double peak, double? truePeak = null)
+        => Guardar(path, lufs, peak, truePeak, 0);
+
+    private void Guardar(string path, double lufs, double peak, double? truePeak, double db)
     {
         if (!Stat(path, out var m, out var s)) return;
         lock (_lock)
         {
-            var version = _map.TryGetValue(path, out var anterior) ? anterior.V : null;
-            _map[path] = new Entry { M = m, S = s, Lufs = lufs, Peak = peak, T = Finito(truePeak), V = version };
+            _map.TryGetValue(path, out var anterior);
+            _map[path] = new Entry
+            {
+                M = m, S = s, Lufs = lufs, Peak = peak, T = Finito(truePeak), V = anterior?.V,
+                G = SinCero((anterior?.G ?? 0) + db),
+            };
             _dirty = true;
         }
     }
@@ -103,13 +120,54 @@ public sealed class LoudnessScanner
     /// <summary>
     /// La medida tras aplicar <paramref name="db"/> de ganancia a un archivo que medía
     /// <paramref name="lufs"/>, con pico de muestra <paramref name="pico"/> y pico real
-    /// <paramref name="picoReal"/> (ver <see cref="TrasAjustar"/>).
+    /// <paramref name="picoReal"/> (ver <see cref="TrasAjustar"/>). La ganancia se suma a la ya
+    /// aplicada, para poder calcular siempre con el nivel original.
     /// </summary>
     public void Ajustado(string path, double lufs, double pico, double? picoReal, double db)
     {
         var (l, p, t) = TrasAjustar(lufs, pico, picoReal, db);
-        Update(path, l, p, t);
+        Guardar(path, l, p, t, db);
     }
+
+    /// <summary>Lo que mueve de verdad un paso de global_gain: 2^(1/4) en amplitud, 5·log10(2) dB.</summary>
+    private static readonly double PasoReal = 5 * Math.Log10(2);
+
+    /// <summary>
+    /// Diferencia de nivel por debajo de la cual dos medidas son del mismo audio. Medir dos veces el
+    /// mismo archivo da el mismo valor; dos copias o versiones distintas de una canción rara vez
+    /// quedan a menos de una décima de un número exacto de pasos.
+    /// </summary>
+    internal const double ToleranciaMismoAudio = 0.1;
+
+    /// <summary>
+    /// La ganancia aplicada que sigue valiendo tras volver a medir un archivo que la tenía. Se vuelve
+    /// a medir cuando se pide («Analizar de nuevo», el pico real) o cuando el archivo ha cambiado de
+    /// fecha o tamaño, y eso pasa también al escribirle etiquetas con otro programa o al deshacer un
+    /// ajuste. Lo que cuenta es el audio:
+    ///   · mismo nivel que el guardado (a 0,1 dB): el audio no ha cambiado y la ganancia sigue igual;
+    ///   · un número exacto de pasos de diferencia: se ha cambiado su global_gain (el deshacer de
+    ///     BeatTag, o MP3Gain), y esos pasos se suman a la ganancia;
+    ///   · cualquier otra diferencia: es otro audio (otra copia, otra versión), y su nivel original es
+    ///     el que se acaba de medir.
+    /// Una medida de un mono anterior al mono doble se compara con lo que habría medido como mono
+    /// doble (+3,01 dB), para no tomar esa diferencia por dos pasos.
+    /// </summary>
+    /// <param name="aplicada">Ganancia guardada (null si ninguna).</param>
+    /// <param name="version">Versión de la medida guardada.</param>
+    /// <param name="lufsGuardado">Nivel guardado.</param>
+    /// <param name="lufsMedido">Nivel recién medido.</param>
+    /// <param name="canales">Canales del archivo recién medido.</param>
+    internal static double? GananciaTrasMedir(double? aplicada, int? version, double lufsGuardado, double lufsMedido, int canales)
+    {
+        if (aplicada is not { } g || !double.IsFinite(lufsGuardado) || !double.IsFinite(lufsMedido)) return null;
+        if (MonoSinDoble(version, canales)) lufsGuardado += 10 * Math.Log10(2);
+        var diferencia = lufsMedido - lufsGuardado;
+        var pasos = Math.Round(diferencia / PasoReal);
+        if (Math.Abs(diferencia - pasos * PasoReal) > ToleranciaMismoAudio) return null;
+        return SinCero(g + pasos * Mp3Gain.DbPerStep);
+    }
+
+    private static double? SinCero(double g) => !double.IsFinite(g) || Math.Abs(g) < 1e-6 ? null : g;
 
     /// <summary>
     /// Lo que se guarda tras ajustar sin volver a medir. El nivel se desplaza exactamente la ganancia
@@ -186,8 +244,13 @@ public sealed class LoudnessScanner
             {
                 lock (_lock)
                 {
-                    _map[path] = new Entry { M = m, S = s, Lufs = r.Lufs, Peak = r.PeakDb, T = r.TruePeakDb, V = VersionActual };
+                    // La ganancia que BeatTag ya le había aplicado sigue valiendo si el audio es el mismo.
+                    var g = _map.TryGetValue(path, out var anterior)
+                        ? GananciaTrasMedir(anterior.G, anterior.V, anterior.Lufs, r.Lufs, fmt.Channels)
+                        : null;
+                    _map[path] = new Entry { M = m, S = s, Lufs = r.Lufs, Peak = r.PeakDb, T = r.TruePeakDb, V = VersionActual, G = g };
                     _dirty = true;
+                    r = r with { GananciaAplicada = g ?? 0 };
                 }
             }
             return r;

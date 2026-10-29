@@ -1,5 +1,45 @@
 namespace Etiquetador.Core.Analysis;
 
+/// <summary>Una grabación tal como entra en el cálculo de la referencia automática.</summary>
+/// <param name="Lufs">Nivel actual.</param>
+/// <param name="PicoDb">Pico actual con el que se decide (el real si se conoce).</param>
+/// <param name="Ajustable">Es un MP3 que se puede subir o bajar sin recodificar.</param>
+/// <param name="Aplicada">Ganancia que BeatTag le ha aplicado desde que se midió (dB; 0 si ninguna).</param>
+public readonly record struct FilaReferencia(double Lufs, double PicoDb, bool Ajustable, double Aplicada = 0);
+
+/// <summary>Por qué la referencia automática ha quedado donde está (para explicarlo en la pestaña).</summary>
+public enum MotivoReferencia
+{
+    /// <summary>No hay nada medido.</summary>
+    SinMedidas,
+
+    /// <summary>Casi todas alcanzan el nivel medio: la referencia es el nivel medio.</summary>
+    Mediana,
+
+    /// <summary>Más del 5 % no alcanza el nivel medio: la referencia baja hasta donde llega el 95 %.</summary>
+    Alcance,
+
+    /// <summary>Habría que bajar más de <see cref="ReferenciaVolumen.DescensoMaximo"/>: se queda en ese límite.</summary>
+    Tope,
+
+    /// <summary>Hay menos de <see cref="ReferenciaVolumen.MinimoGrabaciones"/>: no se baja del nivel medio.</summary>
+    PocasGrabaciones,
+
+    /// <summary>La mayoría no se puede ajustar (no son MP3): bajar no igualaría nada; se queda en el nivel medio.</summary>
+    PocasAjustables,
+}
+
+/// <summary>Referencia automática, nivel medio y por qué. Los dos niveles en LUFS, redondeados a 0,1.</summary>
+public readonly record struct ResultadoReferencia(double Referencia, double Mediana, MotivoReferencia Motivo)
+{
+    /// <summary>Para quien solo necesita los dos niveles.</summary>
+    public void Deconstruct(out double referencia, out double mediana)
+    {
+        referencia = Referencia;
+        mediana = Mediana;
+    }
+}
+
 /// <summary>
 /// Nivel de referencia del modo automático de Volumen («Nivel común de la biblioteca»): el nivel al
 /// que se igualan todas las grabaciones.
@@ -16,13 +56,24 @@ namespace Etiquetador.Core.Analysis;
 /// margen de pico (un MP3, subiendo los pasos que le caben; cualquier otro formato, su propio nivel,
 /// porque no se ajusta). La referencia es el nivel más alto que alcanza el 95 % de la biblioteca
 /// (percentil 5 del alcance, más medio paso, que es lo que el redondeo deja de error), sin pasar de la
-/// mediana y sin bajar más de <see cref="DescensoMaximo"/> por debajo de ella.
-///   · Se calcula en cada biblioteca, con un percentil convencional: nada está calibrado contra una
-///     colección concreta. Si el 95 % ya alcanza la mediana, la referencia ES la mediana.
-///   · Es estable: ajustar no cambia el alcance de nadie (nivel y pico se mueven juntos), así que un
-///     segundo «Ajustar» no vuelve a tocar nada. MEDIDO: 0 % retocadas, también tras añadir un 20 %
-///     de canciones nuevas; y en validación cruzada (50 particiones) la referencia de una mitad y la
-///     de la otra difieren 0,024 dB.
+/// mediana y sin bajar más de <see cref="DescensoMaximo"/> por debajo de ella. Se calcula en cada
+/// biblioteca, con un percentil convencional: nada está calibrado contra una colección concreta.
+///
+/// CON EL NIVEL ORIGINAL. Todo (mediana, alcance y tope) se calcula con el nivel y el pico que tenía
+/// cada grabación ANTES de los ajustes de BeatTag (el actual menos la ganancia aplicada). Si se
+/// calculara con el nivel actual, cada «Ajustar» bajaría la mediana, el tope de 3 dB bajaría con ella
+/// y el siguiente «Ajustar» volvería a bajar las mismas canciones. MEDIDO con una biblioteca del 80 %
+/// a −9 LUFS y el 20 % a −17 sin margen: la referencia pasaba de −12,2 a −15,3 y a −16,8 en tres
+/// pasadas, y el grupo alto acababa 7,5 dB más bajo. Con el nivel original la referencia es la misma
+/// en cada pasada, así que un segundo «Ajustar» no vuelve a tocar nada, y «nunca más de 3 dB por
+/// debajo del nivel medio» se cumple de verdad, por muchas veces que se ajuste.
+///
+/// DOS SALVAGUARDAS, que dejan la referencia en la mediana:
+///   · Menos de <see cref="MinimoGrabaciones"/> grabaciones: el 5 % no llega a una, y el «percentil 5»
+///     sería la más baja. Una sola acapella o intro bajaría la referencia de toda la carpeta.
+///   · Menos de la mitad son ajustables: bajar la referencia solo sirve si lo que queda por encima se
+///     puede bajar. En una biblioteca de AIFF o FLAC no se puede, y bajarla solo marcaría como «Alto»
+///     lo que está en su nivel.
 /// </summary>
 public static class ReferenciaVolumen
 {
@@ -36,30 +87,40 @@ public static class ReferenciaVolumen
     /// </summary>
     public const double DescensoMaximo = 3.0;
 
+    /// <summary>
+    /// Grabaciones necesarias para que el percentil 5 deje fuera al menos a una: 1 / 0,05 = 20. Con
+    /// menos, la referencia no baja del nivel medio.
+    /// </summary>
+    public static readonly int MinimoGrabaciones = (int)Math.Ceiling(1 / PercentilAlcance - 1e-9);
+
     /// <summary>Referencia cuando no hay nada medido (la de streaming, como hasta ahora).</summary>
     public const double SinMedidas = -14.0;
 
     /// <summary>
-    /// Referencia automática y mediana (las dos en LUFS, redondeadas a 0,1). La referencia nunca pasa
-    /// de la mediana; la mediana se devuelve para poder explicar la diferencia.
+    /// Referencia automática, mediana (las dos en LUFS, redondeadas a 0,1) y motivo. La referencia nunca
+    /// pasa de la mediana. Todo se calcula con el nivel original de cada grabación (ver la clase).
     /// </summary>
-    /// <param name="filas">Nivel, pico con el que se decide (el real si se conoce) y si es un MP3 ajustable.</param>
+    /// <param name="filas">Nivel, pico, si es un MP3 ajustable y la ganancia ya aplicada por BeatTag.</param>
     /// <param name="margen">Margen bajo el tope que no se usa al subir (dB).</param>
     /// <param name="paso">Lo que mueve cada paso del ajuste (dB).</param>
-    public static (double Referencia, double Mediana) Automatica(
-        IReadOnlyList<(double Lufs, double PicoDb, bool Ajustable)> filas,
+    public static ResultadoReferencia Automatica(IReadOnlyList<FilaReferencia> filas,
         double margen = 0.5, double paso = Mp3Gain.DbPerStep)
     {
         var n = filas.Count;
-        if (n == 0) return (SinMedidas, SinMedidas);
+        if (n == 0) return new ResultadoReferencia(SinMedidas, SinMedidas, MotivoReferencia.SinMedidas);
 
         var niveles = new double[n];
         var alcances = new double[n];
+        var ajustables = 0;
         for (int i = 0; i < n; i++)
         {
             var f = filas[i];
-            niveles[i] = f.Lufs;
-            alcances[i] = Alcance(f.Lufs, f.PicoDb, f.Ajustable, margen, paso);
+            // El nivel y el pico se mueven juntos con la ganancia: restándola salen los de antes de
+            // ajustar. Un pico recortado que se bajó se guarda en el tope (0 dBFS): restado, queda por
+            // encima de 0 y su alcance es su nivel original, como antes de bajarlo.
+            niveles[i] = f.Lufs - f.Aplicada;
+            alcances[i] = Alcance(f.Lufs - f.Aplicada, f.PicoDb - f.Aplicada, f.Ajustable, margen, paso);
+            if (f.Ajustable) ajustables++;
         }
         Array.Sort(niveles);
         Array.Sort(alcances);
@@ -67,8 +128,17 @@ public static class ReferenciaVolumen
         // La mediana, igual que se calculaba antes: el elemento central, redondeado a 0,1.
         var mediana = Math.Round(niveles[n / 2], 1);
         var p5 = alcances[(int)Math.Floor(PercentilAlcance * n)];
-        var referencia = Math.Clamp(Math.Min(mediana, p5 + paso / 2), mediana - DescensoMaximo, mediana);
-        return (Math.Round(referencia, 1, MidpointRounding.AwayFromZero), mediana);
+        var deseada = Math.Round(Math.Min(mediana, p5 + paso / 2), 1, MidpointRounding.AwayFromZero);
+        if (deseada >= mediana) return new ResultadoReferencia(mediana, mediana, MotivoReferencia.Mediana);
+
+        // Habría que bajar: solo si hay base para el percentil y algo que bajar.
+        if (n < MinimoGrabaciones) return new ResultadoReferencia(mediana, mediana, MotivoReferencia.PocasGrabaciones);
+        if (ajustables * 2 < n) return new ResultadoReferencia(mediana, mediana, MotivoReferencia.PocasAjustables);
+
+        var tope = Math.Round(mediana - DescensoMaximo, 1);
+        return deseada < tope
+            ? new ResultadoReferencia(tope, mediana, MotivoReferencia.Tope)
+            : new ResultadoReferencia(deseada, mediana, MotivoReferencia.Alcance);
     }
 
     /// <summary>

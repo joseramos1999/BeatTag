@@ -185,6 +185,20 @@ public static class AjusteVolumenSeleccion
             : $"Comprobando el pico real de {n} grabaciones que se aumentarían…";
 
     /// <summary>
+    /// Tras cambiar el nivel de referencia o las exclusiones, cuántas se aumentarían sin el pico real
+    /// medido. No se miden en ese momento (decodificar cientos de canciones por elegir otra opción
+    /// bloqueaba la pestaña sin haberlo pedido): se miden al pulsar Analizar y, como última
+    /// comprobación, al ajustar. "" si no hay ninguna.
+    /// </summary>
+    public static string TextoPicoRealPendiente(int n)
+        => n switch
+        {
+            0 => "",
+            1 => "1 grabación que se aumentaría aún no tiene el pico real medido: pulsa Analizar para medirlo antes de ajustar.",
+            _ => $"{n} grabaciones que se aumentarían aún no tienen el pico real medido: pulsa Analizar para medirlo antes de ajustar.",
+        };
+
+    /// <summary>
     /// Las que iban a aumentarse y, medido el pico real al ajustar, no admitían ni un paso: se dejan
     /// como estaban. "" si no hay ninguna.
     /// </summary>
