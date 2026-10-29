@@ -325,6 +325,42 @@ public class RevisionTanda4Tests : IDisposable
         Assert.False(AppEngine.CambiarRutaExcluida(lista, @"D:\M\b.mp3", @"D:\M\b.mp3"));
     }
 
+    // Revisión V3: elegir «Nivel de club» lanzaba sin avisar la medición del pico real de las que se
+    // aumentarían (en una biblioteca real, unas 1.500 decodificaciones con todos los núcleos menos uno)
+    // y Analizar y Ajustar quedaban desactivados. Ahora no se mide nada: se dice cuántas faltan.
+    [Fact]
+    public void Cambiar_el_nivel_de_referencia_no_mide_nada_y_dice_cuantas_faltan()
+    {
+        var vm = new LoudnessViewModel(Motor(new Logger()));
+        vm.Rows.Add(new LoudnessRow { FilePath = Ruta("Musica", "baja.mp3"), Lufs = -16, PeakDb = -8, Target = -14 });
+        vm.Rows.Add(new LoudnessRow { FilePath = Ruta("Musica", "alta.mp3"), Lufs = -6, PeakDb = 0, Target = -14 });
+
+        vm.Modo = "Nivel de club";
+
+        Assert.False(vm.IsBusy);
+        Assert.Equal(-11, vm.Target);
+        Assert.Equal(AjusteVolumenSeleccion.TextoPicoRealPendiente(1), vm.Status);
+    }
+
+    // Revisión V3: excluir lanzaba esa misma medición, que tapaba la confirmación de la exclusión (y el
+    // aviso de que no se pudo guardar). Ahora la confirmación queda, con lo que falta detrás.
+    [Fact]
+    public void Al_excluir_la_confirmacion_no_la_tapa_ninguna_medicion()
+    {
+        var biblioteca = new LibraryStore(new AppConfig(), () => { }, new ScanCache(Ruta("datos", "scan.json")));
+        var vm = new LoudnessViewModel(Motor(new Logger(), biblioteca));
+        vm.Modo = "Nivel de club";
+        var baja = new LoudnessRow { FilePath = Ruta("Musica", "baja.mp3"), Lufs = -16, PeakDb = -8, Target = -11 };
+        var otra = new LoudnessRow { FilePath = Ruta("Musica", "otra.mp3"), Lufs = -15, PeakDb = -9, Target = -11 };
+        vm.Rows.Add(baja);
+        vm.Rows.Add(otra);
+
+        vm.ExcluirCanciones(new[] { otra });
+
+        Assert.False(vm.IsBusy);
+        Assert.Equal(AjusteVolumenSeleccion.TextoCancionesExcluidas(1, 1) + " " + AjusteVolumenSeleccion.TextoPicoRealPendiente(1), vm.Status);
+    }
+
     // ---------------------------------------------------------------------------------------------
     // rendimiento-4 y rendimiento-5: la caché del espectro, fuera del hilo que llama y guardada
     // ---------------------------------------------------------------------------------------------

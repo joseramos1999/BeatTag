@@ -758,6 +758,12 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
             else Rows.Add(Fila(r.FileName, r.Folder, r.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, r.GananciaAplicada, excl));
         }
         if (recalcularReferencia && EsAutomatico && Rows.Count > 0) ActualizarReferenciaAutomatica();
+        else if (EsAutomatico && Rows.Count > 0)
+        {
+            // La referencia se queda, pero la explicación ya puede hablar del nivel de antes de ajustar.
+            _hayAjustadas = CuentanParaLaReferencia(Rows).Any(r => r.GananciaAplicada != 0);
+            ExplicarModo();
+        }
         AplicarFiltro();
         Resumir();
     }

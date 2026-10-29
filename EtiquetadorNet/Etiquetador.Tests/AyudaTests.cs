@@ -330,6 +330,11 @@ public class AyudaTests
         Assert.Contains($"más de {ReferenciaVolumen.DescensoMaximo:0} dB por debajo", volumen);
         Assert.Contains("−0,5 dBTP", volumen);
         Assert.Contains($"pasos de {Mp3Gain.DbPerStep:0.0} dB".Replace('.', ','), volumen);
+        // La referencia con el nivel de antes de ajustar y la salvaguarda de las carpetas pequeñas.
+        Assert.Contains("antes de que BeatTag la ajustara", volumen);
+        Assert.Contains($"menos de {ReferenciaVolumen.MinimoGrabaciones} grabaciones", volumen);
+        // Cambiar el nivel de referencia ya no lanza mediciones por su cuenta.
+        Assert.Contains("Cambiar el nivel de referencia o las exclusiones no mide nada", volumen);
     }
 
     // La norma de registro del producto: neutro y profesional, sin coloquialismos. Son los que ya se
