@@ -234,6 +234,7 @@ public static class CopiaSeguridad
             _ when Igual(nombre, N(p.ArtistAliasesPath)) => "Alias de artista",
             _ when Igual(nombre, N(p.ArtistExceptionsPath)) => "Grafías de artista",
             _ when Igual(nombre, N(p.IdentificacionCachePath)) => "Identificaciones por audio (consultas ya hechas)",
+            _ when Igual(nombre, N(p.VolumenAplicadoPath)) => "Ganancia aplicada por el ajuste de volumen",
             _ when Igual(nombre, Dj.AlmacenPendientes.NombreArchivo) => "Lista de pendientes",
             _ when Igual(nombre, Dj.AlmacenListasSeguidas.NombreArchivo) => "Listas seguidas",
             _ when Igual(nombre, Dj.MapaGenerosCarpeta.NombreArchivo) => "Reglas de género por carpeta",

@@ -89,4 +89,20 @@ public sealed class UndoRecord
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? Origen { get; set; }
+
+    /// <summary>
+    /// Solo en los registros de la pestaña Volumen: true si el ajuste quedó anotado en la ganancia
+    /// aplicada de la medida del archivo (la «G» de sonoridad.json y volumen-aplicado.json). Al
+    /// deshacerlo, solo los pasos de los registros con esta marca se restan de esa ganancia; los demás
+    /// solo desplazan la medida.
+    ///
+    /// POR QUÉ. BeatTag 1.10 ajustaba sin anotar la ganancia. Al deshacer uno de esos ajustes con una
+    /// versión posterior, sus pasos se sumaban a una ganancia que nunca los había contado: un archivo
+    /// devuelto a su nivel original quedaba con +3 dB «aplicados», su nivel original calculado pasaba
+    /// a ser el ya ajustado, y el siguiente «Ajustar» automático partía de una referencia equivocada.
+    ///
+    /// Sin valor no se escribe: los manifiestos de antes y los de las demás herramientas quedan igual.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? GananciaAnotada { get; set; }
 }

@@ -28,48 +28,9 @@ public class RevisionTanda4Tests : IDisposable
         return r;
     }
 
-    /// <summary>
-    /// El motor real sin su constructor (que solo trabaja sobre la carpeta de datos de Documentos), con
-    /// las cachés de audio, la configuración y las colas que usan SeguirArchivo y los guardados.
-    /// </summary>
+    /// <summary>El motor real sin su constructor (ver <see cref="MotorDePrueba"/>), con los datos en la carpeta temporal.</summary>
     private AppEngine Motor(Logger log, LibraryStore? biblioteca = null)
-    {
-        var motor = (AppEngine)RuntimeHelpers.GetUninitializedObject(typeof(AppEngine));
-        void Poner(string campo, object valor)
-        {
-            var f = typeof(AppEngine).GetField(campo, BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.True(f != null, $"AppEngine ya no tiene el campo {campo}: actualiza Motor");
-            f!.SetValue(motor, valor);
-        }
-        var datos = Ruta("datos", "x");
-        var paths = new AppPaths(Path.GetDirectoryName(datos)!);
-        var api = new ApiClient(paths);
-        var huellas = new Fingerprint(paths, log);
-        Poner("<Paths>k__BackingField", paths);
-        Poner("<Logger>k__BackingField", log);
-        Poner("<Avisos>k__BackingField", new AvisosApp());
-        Poner("<Config>k__BackingField", new AppConfig());
-        Poner("<Api>k__BackingField", api);
-        Poner("<AudioAceptadas>k__BackingField", new IgnoreList(paths.AudioAceptadasPath));
-        Poner("<Loudness>k__BackingField", new LoudnessScanner(paths.LoudnessCachePath, log));
-        Poner("<Fingerprints>k__BackingField", new FingerprintScanner(paths.FingerprintCachePath, huellas.FpcalcPath, log));
-        Poner("<Identificacion>k__BackingField", new IdentificationScanner(paths.IdentificacionCachePath, huellas, new AcoustIdProvider(api),
-                                                                          new AuddProvider(new HttpClient(), log), new HttpClient(), log));
-        Poner("<Analysis>k__BackingField", new AnalysisCache(paths.AnalysisCachePath));
-        Poner("<Marks>k__BackingField", new ApplyMarks(paths.ApplyMarksPath));
-        Poner("<Applied>k__BackingField", new IgnoreList(paths.AppliedPath));
-        Poner("<Ignored>k__BackingField", new IgnoreList(paths.IgnoredPath));
-        Poner("_cerrojoSustituciones", new object());
-        Poner("_sustituciones", new AlmacenSustituciones(AlmacenSustituciones.RutaEn(paths.DataDir)));
-        Poner("_cerrojoHuellas", new object());
-        Poner("_colaHuellas", Task.CompletedTask);
-        Poner("_cerrojoEspectro", new object());
-        Poner("_cerrojoCargaEspectro", new object());
-        Poner("_relojPunto", System.Diagnostics.Stopwatch.StartNew());
-        if (biblioteca != null) Poner("<Library>k__BackingField", biblioteca);
-        motor.EnLaInterfaz = a => a();   // en la aplicación, Dispatcher.UIThread.Post
-        return motor;
-    }
+        => MotorDePrueba.Crear(Path.GetDirectoryName(Ruta("datos", "x"))!, log, biblioteca);
 
     private static object? Privado(AppEngine motor, string metodo, params object[] args)
     {
@@ -323,6 +284,42 @@ public class RevisionTanda4Tests : IDisposable
         Assert.Equal(new[] { @"D:\M\b.mp3" }, lista);
         Assert.False(AppEngine.CambiarRutaExcluida(lista, @"D:\M\z.mp3", @"D:\M\w.mp3"));
         Assert.False(AppEngine.CambiarRutaExcluida(lista, @"D:\M\b.mp3", @"D:\M\b.mp3"));
+    }
+
+    // Revisión V3: elegir «Nivel de club» lanzaba sin avisar la medición del pico real de las que se
+    // aumentarían (en una biblioteca real, unas 1.500 decodificaciones con todos los núcleos menos uno)
+    // y Analizar y Ajustar quedaban desactivados. Ahora no se mide nada: se dice cuántas faltan.
+    [Fact]
+    public void Cambiar_el_nivel_de_referencia_no_mide_nada_y_dice_cuantas_faltan()
+    {
+        var vm = new LoudnessViewModel(Motor(new Logger()));
+        vm.Rows.Add(new LoudnessRow { FilePath = Ruta("Musica", "baja.mp3"), Lufs = -16, PeakDb = -8, Target = -14 });
+        vm.Rows.Add(new LoudnessRow { FilePath = Ruta("Musica", "alta.mp3"), Lufs = -6, PeakDb = 0, Target = -14 });
+
+        vm.Modo = "Nivel de club";
+
+        Assert.False(vm.IsBusy);
+        Assert.Equal(-11, vm.Target);
+        Assert.Equal(AjusteVolumenSeleccion.TextoPicoRealPendiente(1), vm.Status);
+    }
+
+    // Revisión V3: excluir lanzaba esa misma medición, que tapaba la confirmación de la exclusión (y el
+    // aviso de que no se pudo guardar). Ahora la confirmación queda, con lo que falta detrás.
+    [Fact]
+    public void Al_excluir_la_confirmacion_no_la_tapa_ninguna_medicion()
+    {
+        var biblioteca = new LibraryStore(new AppConfig(), () => { }, new ScanCache(Ruta("datos", "scan.json")));
+        var vm = new LoudnessViewModel(Motor(new Logger(), biblioteca));
+        vm.Modo = "Nivel de club";
+        var baja = new LoudnessRow { FilePath = Ruta("Musica", "baja.mp3"), Lufs = -16, PeakDb = -8, Target = -11 };
+        var otra = new LoudnessRow { FilePath = Ruta("Musica", "otra.mp3"), Lufs = -15, PeakDb = -9, Target = -11 };
+        vm.Rows.Add(baja);
+        vm.Rows.Add(otra);
+
+        vm.ExcluirCanciones(new[] { otra });
+
+        Assert.False(vm.IsBusy);
+        Assert.Equal(AjusteVolumenSeleccion.TextoCancionesExcluidas(1, 1) + " " + AjusteVolumenSeleccion.TextoPicoRealPendiente(1), vm.Status);
     }
 
     // ---------------------------------------------------------------------------------------------

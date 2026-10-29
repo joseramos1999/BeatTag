@@ -6,7 +6,7 @@ namespace Etiquetador.Tests;
 /// <summary>
 /// Volumen: casilla «Ajustar» por fila, «Ajustar solo las seleccionadas» y exclusiones guardadas
 /// (E15, equipo «volumen_copias», tanda 4). El caso real: acapellas, intros y ediciones que el DJ
-/// quiere más bajas a propósito, y que «Nivel medio de la biblioteca» subía junto al resto.
+/// quiere más bajas a propósito, y que el modo automático (antes «Nivel medio de la biblioteca») subía junto al resto.
 /// </summary>
 public class VolumenExclusionesTests
 {
@@ -192,6 +192,43 @@ public class VolumenExclusionesTests
         Assert.EndsWith("Queda fuera 1 seleccionada que no lo requiere.", c3);
     }
 
+    // Revisión final: los parciales de la confirmación salen del pico de muestra cuando aún no hay pico
+    // real, y el ajuste lo mide antes y puede aplicar menos. Con −16 LUFS, pico de muestra −6 y
+    // referencia −11 se anunciaban 3 pasos sin aviso, y con el pico real a −3,4 se aplicaba 1.
+    [Fact]
+    public void La_confirmacion_avisa_de_los_aumentos_sin_pico_real_medido()
+    {
+        var sinReal = Fila(Reggaeton, "a.mp3", -16, pico: -6);
+        Assert.False(LoudnessViewModel.AumentoParcial(sinReal));   // con el de muestra no parece parcial
+        var (_, c1, _) = AjusteVolumenSeleccion.TextosConfirmacion(new SeleccionAjuste(new[] { sinReal }, 0, 0, 0), false, parciales: 0);
+        Assert.Contains("1 grabación que se aumentará aún no tiene el pico real medido: se medirá antes de aumentarla", c1);
+        Assert.Contains("Analizar lo mide de antemano.", c1);
+
+        // Con el pico real medido, o si solo se reduce, no hace falta decir nada.
+        var conReal = new LoudnessRow { FileName = "b.mp3", Folder = Raiz, FilePath = Path.Combine(Reggaeton, "b.mp3"), Lufs = -16, PeakDb = -6, TruePeakDb = -5.5, Target = -11 };
+        var (_, c2, _) = AjusteVolumenSeleccion.TextosConfirmacion(new SeleccionAjuste(new[] { conReal, Fila(Reggaeton, "c.mp3", -6) }, 0, 0, 0), false, 0);
+        Assert.DoesNotContain("pico real", c2);
+
+        var (_, c3, _) = AjusteVolumenSeleccion.TextosConfirmacion(
+            new SeleccionAjuste(new[] { sinReal, Fila(Reggaeton, "d.mp3", -15), conReal }, 0, 0, 0), false, 0);
+        Assert.Contains("2 grabaciones que se aumentarán aún no tienen el pico real medido", c3);
+        Assert.Contains("de una en una", c3);
+    }
+
+    [Fact]
+    public void Los_textos_del_resultado_dan_el_motivo_de_cada_grabacion_sin_cambios()
+    {
+        Assert.Equal("", AjusteVolumenSeleccion.TextoYaEnNivel(0));
+        Assert.Equal(" · 1 sin cambios: había cambiado desde el análisis y ya está en el nivel de referencia", AjusteVolumenSeleccion.TextoYaEnNivel(1));
+        Assert.EndsWith("habían cambiado desde el análisis y ya están en el nivel de referencia", AjusteVolumenSeleccion.TextoYaEnNivel(2));
+        Assert.Equal("", AjusteVolumenSeleccion.TextoSinLeer(0));
+        Assert.Equal(" · 1 sin cambios: no se pudo leer para medirla antes del ajuste (ver el registro)", AjusteVolumenSeleccion.TextoSinLeer(1));
+        Assert.StartsWith(" · 3 sin cambios: no se pudieron leer para medirlas", AjusteVolumenSeleccion.TextoSinLeer(3));
+        Assert.Equal("", AjusteVolumenSeleccion.TextoFallidas(0));
+        Assert.Equal(" · 1 no se pudo ajustar (ver el registro)", AjusteVolumenSeleccion.TextoFallidas(1));
+        Assert.Equal(" · 4 no se pudieron ajustar (ver el registro)", AjusteVolumenSeleccion.TextoFallidas(4));
+    }
+
     [Fact]
     public void Los_textos_de_estado_distinguen_por_que_no_hay_nada_que_ajustar()
     {
@@ -221,6 +258,122 @@ public class VolumenExclusionesTests
                           AjusteVolumenSeleccion.TextoCarpetasExcluidas(new[] { Acapellas, Reggaeton }, 2, 7));
         Assert.Equal("Esa carpeta ya está excluida del ajuste.", AjusteVolumenSeleccion.TextoCarpetasExcluidas(new[] { Acapellas }, 0, 0));
         Assert.StartsWith("Excluidas del ajuste 2 canciones. Se siguen midiendo", AjusteVolumenSeleccion.TextoCancionesExcluidas(2, 2));
+    }
+
+    // Revisión de las correcciones: una fila «Por medir» seleccionada se contaba como «no lo requiere», y
+    // el estado lo atribuía a que se desviaba 1 dB o menos, no era MP3 o no tenía margen; la
+    // confirmación decía «seleccionada que no lo requiere». Lo cierto es que no se sabe hasta volver a medirla.
+    [Fact]
+    public void Las_seleccionadas_por_medir_se_cuentan_aparte_con_su_motivo()
+    {
+        var porMedir = new LoudnessRow
+        {
+            FileName = "a.mp3", Folder = Raiz, FilePath = Path.Combine(Reggaeton, "a.mp3"),
+            Lufs = -16, PeakDb = -8, Target = -11, MedidaCaducada = true,
+        };
+        var otra = Fila(Reggaeton, "b.mp3", -16);
+
+        var sola = AjusteVolumenSeleccion.Elegir(new[] { porMedir, otra }, new[] { porMedir });
+        Assert.Empty(sola.Ajustar);
+        Assert.Equal(1, sola.PorMedir);
+        Assert.Equal(0, sola.SinNecesidad);
+        Assert.Equal("La seleccionada ha cambiado desde que se midió: pulsa Analizar para volver a medirla.",
+                     AjusteVolumenSeleccion.TextoNadaQueAjustar(sola, porSeleccion: true, 0));
+
+        var mezcla = AjusteVolumenSeleccion.Elegir(new[] { porMedir, otra }, new[] { porMedir, otra });
+        Assert.Equal(new[] { otra }, mezcla.Ajustar);
+        var (_, cuerpo, _) = AjusteVolumenSeleccion.TextosConfirmacion(mezcla, porSeleccion: true, 0);
+        Assert.EndsWith("Queda fuera 1 que ha cambiado desde que se midió (pulsa Analizar para volver a medirla).", cuerpo);
+        Assert.DoesNotContain("no lo requiere", cuerpo);
+
+        // Lo marcado: tampoco se dice que no haya ninguna que lo requiera.
+        var marcadas = AjusteVolumenSeleccion.Elegir(new[] { porMedir });
+        Assert.Equal("No hay ninguna grabación marcada para ajustar. 1 ha cambiado desde que se midió: pulsa Analizar para volver a medirla.",
+                     AjusteVolumenSeleccion.TextoNadaQueAjustar(marcadas, porSeleccion: false, 0));
+
+        // Un FLAC «Por medir» no se ajustaría nunca, y una excluida tampoco: no cuentan como por medir.
+        var flac = new LoudnessRow { FileName = "c.flac", Folder = Raiz, FilePath = Path.Combine(Reggaeton, "c.flac"), Lufs = -16, PeakDb = -8, Target = -11, MedidaCaducada = true };
+        var excluida = new LoudnessRow { FileName = "d.mp3", Folder = Raiz, FilePath = Path.Combine(Reggaeton, "d.mp3"), Lufs = -16, PeakDb = -8, Target = -11, MedidaCaducada = true };
+        excluida.Exclusion = ExclusionVolumen.Cancion;
+        var otras = AjusteVolumenSeleccion.Elegir(new[] { flac, excluida }, new[] { flac, excluida });
+        Assert.Equal((0, 1, 1), (otras.PorMedir, otras.Excluidas, otras.SinNecesidad));
+
+        var vacia = Array.Empty<LoudnessRow>();
+        Assert.Equal("Las seleccionadas han cambiado desde que se midieron: pulsa Analizar para volver a medirlas.",
+                     AjusteVolumenSeleccion.TextoNadaQueAjustar(new SeleccionAjuste(vacia, 0, 0, 0, 2), true, 0));
+        Assert.Equal("Ninguna de las seleccionadas se puede ajustar: 1 está excluida del ajuste, 2 han cambiado desde que se midieron "
+                     + "(pulsa Analizar para volver a medirlas) y el resto no lo requiere.",
+                     AjusteVolumenSeleccion.TextoNadaQueAjustar(new SeleccionAjuste(vacia, 0, 1, 3, 2), true, 0));
+        Assert.Equal("Ninguna de las seleccionadas se puede ajustar: 1 está excluida del ajuste y el resto no lo requiere.",
+                     AjusteVolumenSeleccion.TextoNadaQueAjustar(new SeleccionAjuste(vacia, 0, 1, 3), true, 0));
+        Assert.Equal("No hay ninguna grabación marcada para ajustar. De las que lo requieren, 2 tienen la casilla «Ajustar» quitada. "
+                     + "3 han cambiado desde que se midieron: pulsa Analizar para volver a medirlas.",
+                     AjusteVolumenSeleccion.TextoNadaQueAjustar(new SeleccionAjuste(vacia, 2, 0, 0, 3), false, 0));
+        var (_, varias, _) = AjusteVolumenSeleccion.TextosConfirmacion(new SeleccionAjuste(new[] { otra }, 4, 1, 0, 2), false, 0);
+        Assert.EndsWith("Quedan fuera 4 desmarcadas, 1 excluida del ajuste y 2 que han cambiado desde que se midieron "
+                        + "(pulsa Analizar para volver a medirlas).", varias);
+    }
+
+    // Revisión de las correcciones: el resumen cuenta aparte las «Por medir», y el resultado del ajuste
+    // dice cuántas se dejaron porque ahora requerían el ajuste contrario.
+    [Fact]
+    public void El_resumen_cuenta_aparte_las_por_medir_y_el_resultado_las_de_sentido_contrario()
+    {
+        Assert.Equal("9 con el nivel correcto · 0 por debajo · 0 por encima · 1 por medir. Ninguna de las demás requiere ajuste. "
+                     + "La que está por medir ha cambiado desde que se midió: pulsa Analizar para volver a medirla.",
+                     AjusteVolumenSeleccion.TextoResumen(10, 9, 0, 0, 0, porMedir: 1));
+        Assert.Equal("6 con el nivel correcto · 1 por debajo · 0 por encima · 3 por medir. 1 requiere ajuste. "
+                     + "Las que están por medir han cambiado desde que se midieron: pulsa Analizar para volver a medirlas.",
+                     AjusteVolumenSeleccion.TextoResumen(10, 6, 1, 0, 1, porMedir: 3));
+        // Todas por medir (el disco de la música se ha desconectado tras analizar): no hay «demás».
+        Assert.Equal("Las 3 grabaciones han cambiado desde que se midieron: pulsa Analizar para volver a medirlas.",
+                     AjusteVolumenSeleccion.TextoResumen(3, 0, 0, 0, 0, porMedir: 3));
+        Assert.Equal("La grabación ha cambiado desde que se midió: pulsa Analizar para volver a medirla.",
+                     AjusteVolumenSeleccion.TextoResumen(1, 0, 0, 0, 0, porMedir: 1));
+
+        Assert.Equal("", AjusteVolumenSeleccion.TextoSentidoContrario(0));
+        Assert.Equal(" · 1 sin cambios: había cambiado desde el análisis y ahora requiere el ajuste contrario "
+                     + "(revísala en la tabla antes de volver a ajustarla)", AjusteVolumenSeleccion.TextoSentidoContrario(1));
+        Assert.Equal(" · 2 sin cambios: habían cambiado desde el análisis y ahora requieren el ajuste contrario "
+                     + "(revísalas en la tabla antes de volver a ajustarlas)", AjusteVolumenSeleccion.TextoSentidoContrario(2));
+    }
+
+    // El umbral se cita desde la constante: si cambia, los textos cambian con él.
+    [Fact]
+    public void Los_textos_citan_el_umbral_de_1_dB()
+    {
+        var vacia = Array.Empty<LoudnessRow>();
+        var nada = AjusteVolumenSeleccion.TextoNadaQueAjustar(new SeleccionAjuste(vacia, 0, 0, 2), true, 0);
+        Assert.Contains("1 dB", nada);
+        Assert.DoesNotContain("2 dB", nada);
+
+        var (_, cuerpo, _) = AjusteVolumenSeleccion.TextosConfirmacion(new SeleccionAjuste(new[] { Fila(Reggaeton, "a.mp3", -16) }, 0, 0, 0), false, 0);
+        Assert.Contains("más de 1 dB del nivel de referencia", cuerpo);
+    }
+
+    [Fact]
+    public void Los_textos_nuevos_concuerdan_en_numero()
+    {
+        Assert.Equal("El nivel de la grabación analizada es correcto.", AjusteVolumenSeleccion.TextoResumen(1, 1, 0, 0, 0));
+        Assert.Equal("El nivel es uniforme en las 12 grabaciones analizadas.", AjusteVolumenSeleccion.TextoResumen(12, 12, 0, 0, 0));
+        Assert.Equal("9 con el nivel correcto · 1 por debajo · 0 por encima. 1 requiere ajuste.", AjusteVolumenSeleccion.TextoResumen(10, 9, 1, 0, 1));
+        Assert.Equal("8 con el nivel correcto · 1 por debajo · 1 por encima. 2 requieren ajuste.", AjusteVolumenSeleccion.TextoResumen(10, 8, 1, 1, 2));
+        Assert.Equal("", AjusteVolumenSeleccion.TextoResumen(0, 0, 0, 0, 0));
+
+        Assert.Equal("Comprobando el pico real de 1 grabación que se aumentaría…", AjusteVolumenSeleccion.TextoComprobandoPicoReal(1));
+        Assert.Equal("Comprobando el pico real de 7 grabaciones que se aumentarían…", AjusteVolumenSeleccion.TextoComprobandoPicoReal(7));
+
+        Assert.Equal("", AjusteVolumenSeleccion.TextoPicoRealPendiente(0));
+        Assert.Equal("1 grabación que se aumentaría aún no tiene el pico real medido: pulsa Analizar para medirlo antes de ajustar.",
+                     AjusteVolumenSeleccion.TextoPicoRealPendiente(1));
+        Assert.StartsWith("5 grabaciones que se aumentarían aún no tienen el pico real medido", AjusteVolumenSeleccion.TextoPicoRealPendiente(5));
+
+        Assert.Equal("", AjusteVolumenSeleccion.TextoSinMargen(0));
+        Assert.Equal(" · 1 sin cambios: su pico real no deja margen para aumentarla", AjusteVolumenSeleccion.TextoSinMargen(1));
+        Assert.EndsWith("margen para aumentarlas", AjusteVolumenSeleccion.TextoSinMargen(3));
+
+        Assert.StartsWith("1 grabación mono se ha vuelto a medir", AjusteVolumenSeleccion.TextoMonoMedidas(1));
+        Assert.StartsWith("4 grabaciones mono se han vuelto a medir", AjusteVolumenSeleccion.TextoMonoMedidas(4));
     }
 
     // ------------------------------------------------------------------ se guardan

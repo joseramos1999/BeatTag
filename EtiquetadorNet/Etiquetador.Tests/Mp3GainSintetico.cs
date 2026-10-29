@@ -22,18 +22,37 @@ internal static class Mp3GainSintetico
     /// </summary>
     private static readonly int[] BitsDeGanancia = { 41, 100, 159, 218 };
 
-    /// <summary>Una trama cuyos cuatro global_gain valen <paramref name="ganancia"/>.</summary>
-    public static byte[] Trama(int ganancia)
+    /// <summary>Posición en bits del part2_3_length de cada gránulo y canal: 21 bits antes del global_gain.</summary>
+    private static readonly int[] BitsDeAudio = BitsDeGanancia.Select(b => b - 21).ToArray();
+
+    /// <summary>Bits de audio que se declaran en un gránulo con audio (cualquier valor distinto de 0).</summary>
+    private const int BitsDeAudioPorGranulo = 1000;
+
+    /// <summary>
+    /// Una trama cuyos cuatro global_gain valen <paramref name="ganancia"/>. Con
+    /// <paramref name="vacia"/>, sus gránulos no llevan audio (part2_3_length = 0, silencio digital),
+    /// como el 42 % de los MP3 reales en algún punto; si no, declaran bits de audio.
+    /// </summary>
+    public static byte[] Trama(int ganancia, bool vacia = false)
     {
         var t = new byte[LargoTrama];
         t[0] = 0xFF; t[1] = 0xFB; t[2] = 0x90; t[3] = 0x00;
         foreach (var bit in BitsDeGanancia) EscribirByte(t, 4, bit, (byte)ganancia);
+        if (!vacia)
+            foreach (var bit in BitsDeAudio) EscribirBits(t, 4, bit, BitsDeAudioPorGranulo, 12);
         return t;
     }
 
-    /// <summary>Varias tramas seguidas; la ganancia de cada una la decide <paramref name="ganancia"/>.</summary>
-    public static byte[] Tramas(int cuantas, Func<int, int> ganancia)
-        => Enumerable.Range(0, cuantas).SelectMany(k => Trama(ganancia(k))).ToArray();
+    /// <summary>
+    /// Varias tramas seguidas; la ganancia de cada una la decide <paramref name="ganancia"/>, y
+    /// <paramref name="vacia"/> cuáles no llevan audio (por defecto, ninguna).
+    /// </summary>
+    public static byte[] Tramas(int cuantas, Func<int, int> ganancia, Func<int, bool>? vacia = null)
+        => Enumerable.Range(0, cuantas).SelectMany(k => Trama(ganancia(k), vacia?.Invoke(k) ?? false)).ToArray();
+
+    /// <summary>Los cuatro part2_3_length de la trama que empieza en <paramref name="inicio"/>.</summary>
+    public static int[] BitsDeAudioDe(byte[] archivo, int inicio)
+        => BitsDeAudio.Select(bit => LeerBits(archivo, inicio + 4, bit, 12)).ToArray();
 
     /// <summary>Los cuatro global_gain de la trama que empieza en <paramref name="inicio"/>.</summary>
     public static int[] Ganancias(byte[] archivo, int inicio)
@@ -145,6 +164,29 @@ internal static class Mp3GainSintetico
             var v = (valor >> (7 - k)) & 1;
             b[pos] = (byte)((b[pos] & ~(1 << desp)) | (v << desp));
         }
+    }
+
+    private static void EscribirBits(byte[] b, int baseByte, int bit, int valor, int cuantos)
+    {
+        for (var k = 0; k < cuantos; k++)
+        {
+            var pos = baseByte + (bit + k) / 8;
+            var desp = 7 - (bit + k) % 8;
+            var v = (valor >> (cuantos - 1 - k)) & 1;
+            b[pos] = (byte)((b[pos] & ~(1 << desp)) | (v << desp));
+        }
+    }
+
+    private static int LeerBits(byte[] b, int baseByte, int bit, int cuantos)
+    {
+        var r = 0;
+        for (var k = 0; k < cuantos; k++)
+        {
+            var pos = baseByte + (bit + k) / 8;
+            var desp = 7 - (bit + k) % 8;
+            r = (r << 1) | ((b[pos] >> desp) & 1);
+        }
+        return r;
     }
 
     private static int LeerByte(byte[] b, int baseByte, int bit)

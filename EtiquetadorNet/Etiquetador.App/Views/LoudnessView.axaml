@@ -99,7 +99,16 @@
                 <DataGridTextColumn Header="Observaciones" Binding="{Binding Aviso}" Width="280" MinWidth="140" />
                 <!-- Datos técnicos, al final para no entorpecer la lectura. -->
                 <DataGridTextColumn Header="Nivel (LUFS)" Binding="{Binding LufsText}" Width="100" MinWidth="80" />
-                <DataGridTextColumn Header="Margen (dB)" Binding="{Binding PeakText}" Width="100" MinWidth="80" />
+                <!-- La cabecera sigue siendo el texto (GridBehaviors recuerda los anchos por él); la
+                     plantilla solo le añade la explicación. -->
+                <DataGridTextColumn Header="Margen (dB)" Binding="{Binding PeakText}" Width="100" MinWidth="80">
+                    <DataGridTextColumn.HeaderTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}"
+                                       ToolTip.Tip="Pico real (dBTP) si ya está medido; si no, pico de muestra (dBFS). Las subidas lo dejan como mucho en −0,5 dBTP." />
+                        </DataTemplate>
+                    </DataGridTextColumn.HeaderTemplate>
+                </DataGridTextColumn>
             </DataGrid.Columns>
         </DataGrid>
     </DockPanel>

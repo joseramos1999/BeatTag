@@ -706,12 +706,13 @@ public sealed class LibraryStore
 }
 
 /// <summary>
-/// La lista de canciones, con un cambio «en bloque»: sustituir el contenido entero con UN solo
-/// aviso a las tablas en lugar de uno por canción.
+/// Una colección con un cambio «en bloque»: sustituir el contenido entero con UN solo aviso a las
+/// tablas en lugar de uno por elemento. Con una tabla agrupada de 20.000 filas, vaciarla y volver a
+/// llenarla una a una costaba casi un segundo en el hilo de la interfaz; con un solo aviso, una décima.
 /// </summary>
-internal sealed class ListaPistas : ObservableCollection<Track>
+internal class ListaEnBloque<T> : ObservableCollection<T>
 {
-    public void Reemplazar(IEnumerable<Track> nuevas)
+    public void Reemplazar(IEnumerable<T> nuevas)
     {
         CheckReentrancy();
         Items.Clear();
@@ -721,3 +722,6 @@ internal sealed class ListaPistas : ObservableCollection<Track>
         OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
     }
 }
+
+/// <summary>La lista de canciones de la biblioteca (ver <see cref="ListaEnBloque{T}"/>).</summary>
+internal sealed class ListaPistas : ListaEnBloque<Track> { }

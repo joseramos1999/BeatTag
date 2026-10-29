@@ -192,7 +192,7 @@ public class RestosRevisionTanda3Tests : IDisposable
 
         var deshacer = new UndoEngine(paths)
         {
-            AlDeshacer = a => AppEngine.SeguirDeshecho(a, motor.SeguirArchivo, (_, _) => { }),
+            AlDeshacer = a => AppEngine.SeguirDeshecho(a, motor.SeguirArchivo, (_, _, _, _) => { }),
         };
         Assert.Equal(1, deshacer.UndoLastRun(man).Reverted);
 

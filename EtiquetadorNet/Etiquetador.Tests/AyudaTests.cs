@@ -97,6 +97,9 @@ public class AyudaTests
             // Tanda 4 (Novedades): las correcciones y exclusiones de artistas hechas a mano. Las
             // búsquedas en Deezer van a la caché de red y no hace falta copiarlas; esto sí.
             AlmacenArtistasDeezer.NombreArchivo,
+            // Volumen: la ganancia ya aplicada. sonoridad.json se regenera; esto no, y sin ello el
+            // siguiente ajuste vuelve a bajar lo que ya se había bajado.
+            Path.GetFileName(p.VolumenAplicadoPath),
         };
 
         var ayuda = TodaLaAyuda();
@@ -280,6 +283,12 @@ public class AyudaTests
     [InlineData("Excluir esta carpeta del ajuste", "Views/LoudnessView.axaml")]
     [InlineData("Exclusiones del ajuste", "ViewModels/AjusteVolumenSeleccion.cs")]
     [InlineData("ya no está en la biblioteca", "ViewModels/AjusteVolumenSeleccion.cs")]
+    // Volumen: el modo automático, la columna del pico y el ajuste.
+    [InlineData("Nivel común de la biblioteca", "ViewModels/LoudnessViewModel.cs")]
+    [InlineData("Margen (dB)", "Views/LoudnessView.axaml")]
+    [InlineData("Ajuste necesario", "Views/LoudnessView.axaml")]
+    [InlineData("Ajustar volumen", "Views/LoudnessView.axaml")]
+    [InlineData("Por medir", "ViewModels/LoudnessViewModel.cs")]
     // Copia de seguridad y restauración (T15).
     [InlineData("Copia de seguridad…", "Views/SettingsView.axaml")]
     [InlineData("Restaurar copia…", "Views/SettingsView.axaml")]
@@ -304,6 +313,48 @@ public class AyudaTests
 
         Assert.True(TodaLaAyuda().Contains(rotulo, StringComparison.Ordinal), $"la Ayuda ya no cita «{rotulo}»");
         Assert.True(fuente.Contains(rotulo, StringComparison.Ordinal), $"«{rotulo}» no aparece en {archivo}: actualiza la Ayuda");
+    }
+
+    // Volumen: la Ayuda cita el umbral, la referencia y el margen de pico que usa el código, no los de
+    // antes (2 dB y la mediana a secas).
+    [Fact]
+    public void La_seccion_de_Volumen_cita_los_valores_del_codigo()
+    {
+        var textos = TextosAyuda().Select(t => t.Texto).ToList();
+        var inicio = textos.FindIndex(t => t == "🔊 Volumen");
+        Assert.True(inicio >= 0, "no hay sección de Volumen en la Ayuda");
+        var fin = textos.FindIndex(inicio + 1, t => t.StartsWith("📊", StringComparison.Ordinal));
+        var volumen = string.Join("\n", textos.Skip(inicio).Take((fin < 0 ? textos.Count : fin) - inicio));
+
+        var umbral = Etiquetador.App.ViewModels.LoudnessViewModel.UmbralAjuste;
+        Assert.Contains($"más de {umbral:0.#} dB", volumen);
+        Assert.DoesNotContain("2 dB", volumen);
+        Assert.DoesNotContain("Nivel medio de la biblioteca", volumen);
+        Assert.Contains($"el {(1 - ReferenciaVolumen.PercentilAlcance) * 100:0} %", volumen);
+        Assert.Contains($"más de {ReferenciaVolumen.DescensoMaximo:0} dB por debajo", volumen);
+        Assert.Contains("−0,5 dBTP", volumen);
+        Assert.Contains($"pasos de {Mp3Gain.DbPerStep:0.0} dB".Replace('.', ','), volumen);
+        // La referencia con el nivel de antes de ajustar y la salvaguarda de las carpetas pequeñas.
+        Assert.Contains("antes de que BeatTag la ajustara", volumen);
+        Assert.Contains($"menos de {ReferenciaVolumen.MinimoGrabaciones} grabaciones", volumen);
+        // Cambiar el nivel de referencia ya no lanza mediciones por su cuenta.
+        Assert.Contains("Cambiar el nivel de referencia o las exclusiones no mide nada", volumen);
+        // Revisión final: la ganancia aplicada no se borra con las mediciones, y el ajuste parte de la
+        // medida del archivo tal como está (tras un deshacer, con su nivel de ahora).
+        Assert.Contains("volumen-aplicado.json", volumen);
+        Assert.Contains("no las borra aunque borre las mediciones", volumen);
+        Assert.DoesNotContain("esas anotaciones se borran con ellas", volumen);
+        Assert.Contains("se parte siempre de la medida del archivo tal como está", volumen);
+        // Revisión de las correcciones: el ajuste no hace lo contrario de lo confirmado, las «Por medir»
+        // van aparte en el resumen y fuera de la referencia, los ajustes de versiones anteriores no
+        // quedaron anotados y «Limpiar» vacía la tabla.
+        Assert.Contains("ahora requiere el ajuste contrario", volumen);
+        Assert.Contains("ahora requiere el ajuste contrario", Etiquetador.App.ViewModels.AjusteVolumenSeleccion.TextoSentidoContrario(1));
+        Assert.Contains("la cuenta aparte en el resumen, no la usa para calcular la referencia automática", volumen);
+        Assert.DoesNotContain("no la cuenta en el resumen", volumen);
+        Assert.Contains("por medir", Etiquetador.App.ViewModels.AjusteVolumenSeleccion.TextoResumen(10, 9, 0, 0, 0, porMedir: 1));
+        Assert.Contains("Los ajustes hechos con una versión anterior de BeatTag no quedaron anotados", volumen);
+        Assert.Contains("la tabla de esta pestaña queda vacía hasta que vuelvas a pulsar Analizar", volumen);
     }
 
     // La norma de registro del producto: neutro y profesional, sin coloquialismos. Son los que ya se

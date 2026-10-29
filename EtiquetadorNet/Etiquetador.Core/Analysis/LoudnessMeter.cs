@@ -4,7 +4,16 @@ namespace Etiquetador.Core.Analysis;
 /// <param name="Lufs">Sonoridad integrada en LUFS (negativo; -14 es lo típico de streaming).</param>
 /// <param name="PeakDb">Pico de muestra en dBFS (0 = tope; por encima satura).</param>
 /// <param name="Seconds">Duración analizada.</param>
-public readonly record struct LoudnessResult(double Lufs, double PeakDb, double Seconds)
+/// <param name="TruePeakDb">
+/// Pico real en dBTP (ITU-R BS.1770, ver <see cref="TruePeakMeter"/>), o null si no se midió: las
+/// medidas guardadas por versiones anteriores solo tienen el pico de muestra.
+/// </param>
+/// <param name="GananciaAplicada">
+/// Ganancia que BeatTag ha aplicado al archivo desde que se midió su audio original (dB; 0 si ninguna
+/// o si no se sabe). La lleva la caché de medidas; el medidor no la conoce.
+/// </param>
+public readonly record struct LoudnessResult(double Lufs, double PeakDb, double Seconds, double? TruePeakDb = null,
+                                            double GananciaAplicada = 0)
 {
     public bool Ok => !double.IsNaN(Lufs) && !double.IsNegativeInfinity(Lufs);
 }
@@ -54,8 +63,14 @@ public sealed class LoudnessMeter
         }
 
         // Pesos de BS.1770: los canales normales pesan 1; los surround, 1,41. Aquí mono/estéreo.
+        //
+        // Un archivo MONO se mide como «mono doble»: su único canal pesa 2 (+3,01 dB), como
+        // EBUR128_DUAL_MONO en libebur128 y lo que recomienda EBU Tech 3344 para el mono que se
+        // reproduce por dos altavoces. Un programa de DJ envía el mono a la izquierda y a la
+        // derecha, así que suena como un estéreo con los dos canales iguales. Con peso 1 medía
+        // 3,01 LU menos que el mismo contenido en estéreo, y el ajuste lo subía dos pasos de más.
         _weights = new double[_channels];
-        for (int c = 0; c < _channels; c++) _weights[c] = 1.0;
+        for (int c = 0; c < _channels; c++) _weights[c] = _channels == 1 ? 2.0 : 1.0;
 
         _blockSize = (int)(sampleRate * 0.400);
         _hopSize = (int)(sampleRate * 0.100);
@@ -63,21 +78,31 @@ public sealed class LoudnessMeter
         for (int c = 0; c < _channels; c++) _acc[c] = new double[_blockSize];
     }
 
-    /// <summary>Añade muestras INTERCALADAS (L,R,L,R…) en punto flotante -1..1.</summary>
+    /// <summary>Canal de la siguiente muestra: una trama puede llegar partida entre dos búferes.</summary>
+    private int _canal;
+
+    /// <summary>
+    /// Añade muestras INTERCALADAS (L,R,L,R…) en punto flotante -1..1. El búfer no tiene por qué
+    /// acabar en una trama completa: lo que falte de la última llega con el siguiente. Antes se
+    /// descartaba la muestra sobrante, y el búfer siguiente empezaba por el canal derecho tomándolo
+    /// por el izquierdo (a 22,05 kHz en estéreo, el búfer de 250 ms tenía 11.025 muestras).
+    /// </summary>
     public void Add(float[] buffer, int count)
     {
-        for (int i = 0; i + _channels <= count; i += _channels)
+        for (int i = 0; i < count; i++)
         {
-            for (int c = 0; c < _channels; c++)
-            {
-                double x = buffer[i + c];
-                var a = Math.Abs(x);
-                if (a > _peak) _peak = a;
+            var c = _canal;
+            double x = buffer[i];
+            var a = Math.Abs(x);
+            if (a > _peak) _peak = a;
 
-                // Filtro K: realce de agudos + paso alto (aproxima cómo oye el oído).
-                var y = _hp[c].Process(_shelf[c].Process(x));
-                _acc[c][_accCount] = y * y;
-            }
+            // Filtro K: realce de agudos + paso alto (aproxima cómo oye el oído).
+            var y = _hp[c].Process(_shelf[c].Process(x));
+            _acc[c][_accCount] = y * y;
+
+            if (++_canal < _channels) continue;
+            // Trama completa: una muestra de cada canal.
+            _canal = 0;
             _accCount++;
             _samples++;
 
