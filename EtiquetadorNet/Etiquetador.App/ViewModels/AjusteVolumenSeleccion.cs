@@ -52,7 +52,11 @@ public sealed partial class ExclusionVolumenFila : ObservableObject
 /// <param name="Desmarcadas">Requieren ajuste pero tienen la casilla quitada (solo en el ajuste de lo marcado).</param>
 /// <param name="Excluidas">Requieren ajuste pero están excluidas (por carpeta o por canción).</param>
 /// <param name="SinNecesidad">Seleccionadas que no requieren ajuste: se desvían poco, no son MP3 o no tienen margen.</param>
-public sealed record SeleccionAjuste(IReadOnlyList<LoudnessRow> Ajustar, int Desmarcadas, int Excluidas, int SinNecesidad);
+/// <param name="PorMedir">
+/// MP3 no excluidos que han cambiado desde que se midieron (<see cref="LoudnessRow.MedidaCaducada"/>):
+/// no se sabe si requieren ajuste hasta volver a medirlos.
+/// </param>
+public sealed record SeleccionAjuste(IReadOnlyList<LoudnessRow> Ajustar, int Desmarcadas, int Excluidas, int SinNecesidad, int PorMedir = 0);
 
 /// <summary>Reglas y textos del ajuste selectivo de Volumen, aparte para poder probarlos sin la interfaz.</summary>
 public static class AjusteVolumenSeleccion
@@ -138,22 +142,36 @@ public static class AjusteVolumenSeleccion
     /// «Ajustar»; con selección, las seleccionadas que requieren ajuste, marcadas o no (seleccionar es
     /// elegir), pero nunca las excluidas: una selección amplia (Ctrl+A, un grupo entero) no puede
     /// saltarse lo que el DJ ha protegido a propósito.
+    ///
+    /// Un MP3 «Por medir» se cuenta aparte (<see cref="SeleccionAjuste.PorMedir"/>): no es que no lo
+    /// requiera, es que no se sabe hasta volver a medirlo. Antes contaba como «no lo requiere», y el
+    /// estado lo atribuía a que se desviaba poco, no era MP3 o no tenía margen.
     /// </summary>
     public static SeleccionAjuste Elegir(IEnumerable<LoudnessRow> filas, IEnumerable<LoudnessRow>? seleccion = null)
     {
         var ajustar = new List<LoudnessRow>();
-        int desmarcadas = 0, excluidas = 0, sinNecesidad = 0;
+        int desmarcadas = 0, excluidas = 0, sinNecesidad = 0, porMedir = 0;
         foreach (var r in seleccion ?? filas)
         {
+            if (r.MedidaCaducada && r.Ajustable)
+            {
+                if (r.Exclusion == ExclusionVolumen.Ninguna) porMedir++;
+                else if (seleccion != null) excluidas++;
+                continue;
+            }
             if (!r.Candidata) { if (seleccion != null) sinNecesidad++; continue; }
             if (r.Exclusion != ExclusionVolumen.Ninguna) { excluidas++; continue; }
             if (seleccion == null && !r.Ajustar) { desmarcadas++; continue; }
             ajustar.Add(r);
         }
-        return new SeleccionAjuste(ajustar, desmarcadas, excluidas, sinNecesidad);
+        return new SeleccionAjuste(ajustar, desmarcadas, excluidas, sinNecesidad, porMedir);
     }
 
     private static string N(int n, string singular, string plural) => n == 1 ? $"1 {singular}" : $"{n} {plural}";
+
+    /// <summary>«a», «a y b», «a, b y c».</summary>
+    private static string Unir(IReadOnlyList<string> partes)
+        => string.Join(", ", partes.Take(partes.Count - 1)) + (partes.Count > 1 ? " y " : "") + partes[^1];
 
     /// <summary>«Exclusiones del ajuste: 2 carpetas y 1 canción».</summary>
     public static string TituloExclusiones(int carpetas, int canciones)
@@ -167,15 +185,29 @@ public static class AjusteVolumenSeleccion
     /// <summary>
     /// El resumen de la tabla: cuántas están en nivel, por debajo y por encima, y cuántas se desvían
     /// más del umbral de ajuste. Con el umbral igual a la banda «Correcto», las que requieren ajuste
-    /// son las que están por debajo o por encima.
+    /// son las que están por debajo o por encima. Las <paramref name="porMedir"/> han cambiado desde
+    /// que se midieron: van aparte y no cuentan en ninguna de las otras cifras.
     /// </summary>
-    public static string TextoResumen(int total, int correctas, int bajas, int altas, int requierenAjuste)
+    public static string TextoResumen(int total, int correctas, int bajas, int altas, int requierenAjuste, int porMedir = 0)
     {
         if (total == 0) return "";
-        if (requierenAjuste == 0)
+        if (requierenAjuste == 0 && porMedir == 0)
             return total == 1 ? "El nivel de la grabación analizada es correcto." : $"El nivel es uniforme en las {total} grabaciones analizadas.";
-        return $"{correctas} con el nivel correcto · {bajas} por debajo · {altas} por encima. "
-             + (requierenAjuste == 1 ? "1 requiere ajuste." : $"{requierenAjuste} requieren ajuste.");
+        var cifras = $"{correctas} con el nivel correcto · {bajas} por debajo · {altas} por encima"
+                   + (porMedir > 0 ? $" · {porMedir} por medir" : "") + ". ";
+        var ajuste = requierenAjuste switch
+        {
+            0 => "Ninguna de las demás requiere ajuste.",
+            1 => "1 requiere ajuste.",
+            _ => $"{requierenAjuste} requieren ajuste.",
+        };
+        var medir = porMedir switch
+        {
+            0 => "",
+            1 => " La que está por medir ha cambiado desde que se midió: pulsa Analizar para volver a medirla.",
+            _ => " Las que están por medir han cambiado desde que se midieron: pulsa Analizar para volver a medirlas.",
+        };
+        return cifras + ajuste + medir;
     }
 
     /// <summary>Lo que se ve mientras se mide el pico real de las que se aumentarían.</summary>
@@ -220,6 +252,20 @@ public static class AjusteVolumenSeleccion
             0 => "",
             1 => " · 1 sin cambios: había cambiado desde el análisis y ya está en el nivel de referencia",
             _ => $" · {n} sin cambios: habían cambiado desde el análisis y ya están en el nivel de referencia",
+        };
+
+    /// <summary>
+    /// Las que habían cambiado desde el análisis (un deshacer, otro programa) y, con su nivel de
+    /// ahora, requerían el ajuste contrario al confirmado: aumentar una que se iba a reducir, o al
+    /// revés. No se tocan, porque no es lo que se confirmó; la tabla las muestra con su nivel de ahora.
+    /// "" si no hay ninguna.
+    /// </summary>
+    public static string TextoSentidoContrario(int n)
+        => n switch
+        {
+            0 => "",
+            1 => " · 1 sin cambios: había cambiado desde el análisis y ahora requiere el ajuste contrario (revísala en la tabla antes de volver a ajustarla)",
+            _ => $" · {n} sin cambios: habían cambiado desde el análisis y ahora requieren el ajuste contrario (revísalas en la tabla antes de volver a ajustarlas)",
         };
 
     /// <summary>
@@ -280,19 +326,37 @@ public static class AjusteVolumenSeleccion
     {
         if (porSeleccion)
         {
-            if (s.Excluidas > 0 && s.SinNecesidad == 0)
+            if (s.Excluidas > 0 && s.SinNecesidad == 0 && s.PorMedir == 0)
                 return s.Excluidas == 1 ? "La seleccionada está excluida del ajuste." : "Las seleccionadas están excluidas del ajuste.";
-            if (s.Excluidas > 0)
-                return $"Ninguna de las seleccionadas se puede ajustar: {N(s.Excluidas, "está excluida", "están excluidas")} del ajuste y el resto no lo requiere.";
+            if (s.PorMedir > 0 && s.SinNecesidad == 0 && s.Excluidas == 0)
+                return s.PorMedir == 1
+                    ? "La seleccionada ha cambiado desde que se midió: pulsa Analizar para volver a medirla."
+                    : "Las seleccionadas han cambiado desde que se midieron: pulsa Analizar para volver a medirlas.";
+            if (s.Excluidas > 0 || s.PorMedir > 0)
+            {
+                var motivos = new List<string>();
+                if (s.Excluidas > 0) motivos.Add(N(s.Excluidas, "está excluida del ajuste", "están excluidas del ajuste"));
+                if (s.PorMedir > 0)
+                    motivos.Add(N(s.PorMedir, "ha cambiado desde que se midió (pulsa Analizar para volver a medirla)",
+                                  "han cambiado desde que se midieron (pulsa Analizar para volver a medirlas)"));
+                if (s.SinNecesidad > 0) motivos.Add("el resto no lo requiere");
+                return "Ninguna de las seleccionadas se puede ajustar: " + Unir(motivos) + ".";
+            }
             return "Ninguna de las seleccionadas requiere ajuste: se desvían "
                  + $"{LoudnessViewModel.UmbralAjuste:0.#} dB o menos, no son MP3 o no tienen margen para subir sin distorsionar.";
         }
-        if (s.Desmarcadas > 0 || s.Excluidas > 0)
+        if (s.Desmarcadas > 0 || s.Excluidas > 0 || s.PorMedir > 0)
         {
+            var texto = "No hay ninguna grabación marcada para ajustar.";
             var partes = new List<string>();
             if (s.Desmarcadas > 0) partes.Add(N(s.Desmarcadas, "tiene la casilla «Ajustar» quitada", "tienen la casilla «Ajustar» quitada"));
             if (s.Excluidas > 0) partes.Add(N(s.Excluidas, "está excluida del ajuste", "están excluidas del ajuste"));
-            return "No hay ninguna grabación marcada para ajustar. De las que lo requieren, " + string.Join(" y ", partes) + ".";
+            if (partes.Count > 0) texto += " De las que lo requieren, " + string.Join(" y ", partes) + ".";
+            if (s.PorMedir > 0)
+                texto += s.PorMedir == 1
+                    ? " 1 ha cambiado desde que se midió: pulsa Analizar para volver a medirla."
+                    : $" {s.PorMedir} han cambiado desde que se midieron: pulsa Analizar para volver a medirlas.";
+            return texto;
         }
         return desviadasNoMp3 > 0
             ? $"No hay ningún MP3 que ajustar. {N(desviadasNoMp3, "grabación está desviada", "grabaciones están desviadas")}, pero no "
@@ -335,9 +399,12 @@ public static class AjusteVolumenSeleccion
         if (s.Desmarcadas > 0) fuera.Add(N(s.Desmarcadas, "desmarcada", "desmarcadas"));
         if (s.Excluidas > 0) fuera.Add(N(s.Excluidas, "excluida del ajuste", "excluidas del ajuste"));
         if (s.SinNecesidad > 0) fuera.Add(N(s.SinNecesidad, "seleccionada que no lo requiere", "seleccionadas que no lo requieren"));
+        if (s.PorMedir > 0)
+            fuera.Add(N(s.PorMedir, "que ha cambiado desde que se midió (pulsa Analizar para volver a medirla)",
+                        "que han cambiado desde que se midieron (pulsa Analizar para volver a medirlas)"));
         var quedan = fuera.Count == 0 ? ""
-            : (s.Desmarcadas + s.Excluidas + s.SinNecesidad == 1 ? " Queda fuera " : " Quedan fuera ")
-              + string.Join(", ", fuera.Take(fuera.Count - 1)) + (fuera.Count > 1 ? " y " : "") + fuera[^1] + ".";
+            : (s.Desmarcadas + s.Excluidas + s.SinNecesidad + s.PorMedir == 1 ? " Queda fuera " : " Quedan fuera ")
+              + Unir(fuera) + ".";
 
         return (titulo, sentido + criterio + parcial + quedan,
                 "El audio no se recodifica, por lo que no hay pérdida de calidad y los archivos mantienen su tamaño. "

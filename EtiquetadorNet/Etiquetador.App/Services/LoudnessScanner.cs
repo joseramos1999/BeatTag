@@ -132,9 +132,17 @@ public sealed class LoudnessScanner
         Load();
     }
 
+    /// <summary>
+    /// Para las pruebas: se llama al empezar cada <see cref="Get"/>, en el hilo que lo hace. Cada Get
+    /// mira la fecha y el tamaño del archivo, y con 20.000 filas eso bloquea 0,2-0,3 s el hilo de la
+    /// interfaz (ver LoudnessViewModel.MedidasGuardadasAsync).
+    /// </summary>
+    internal Action? AlConsultar { get; set; }
+
     /// <summary>Medida cacheada si el archivo no ha cambiado; si no, null.</summary>
     public LoudnessResult? Get(string path)
     {
+        AlConsultar?.Invoke();
         if (!Stat(path, out var m, out var s)) return null;
         lock (_lock)
             if (_map.TryGetValue(path, out var e) && e.M == m && e.S == s)
@@ -192,15 +200,31 @@ public sealed class LoudnessScanner
     /// <see cref="TrasAjustar"/>) y la ganancia aplicada se pone al día con los pasos que se conocen,
     /// sin depender de volver a medir ni de la tolerancia de <see cref="ToleranciaMismoAudio"/>. Si ya
     /// no valía, se deja: al volver a medirla se decide con el audio. Devuelve si la puso al día.
+    ///
+    /// A la ganancia aplicada solo se suma <paramref name="dbAnotados"/>: lo que deshace ajustes que la
+    /// anotaron. BeatTag 1.10 ajustaba sin anotarla (dejaba la medida desplazada y sin G). Caso visto en
+    /// revisión: un MP3 a −10,76 LUFS bajado 2 pasos con 1.10 y deshecho después de actualizar quedaba
+    /// con +3 dB «aplicados» y un nivel original calculado de −13,76; el siguiente «Ajustar» automático
+    /// partía de una referencia equivocada, y el dato se guardaba en volumen-aplicado.json.
     /// </summary>
-    public bool Reajustar(string ruta, long mAntes, long sAntes, double db)
+    /// <param name="ruta">El archivo.</param>
+    /// <param name="mAntes">Fecha de modificación justo antes del deshacer.</param>
+    /// <param name="sAntes">Tamaño justo antes del deshacer.</param>
+    /// <param name="db">Lo que ha cambiado el volumen: desplaza la medida.</param>
+    /// <param name="dbAnotados">La parte de <paramref name="db"/> que deshace ajustes anotados en la ganancia aplicada.</param>
+    public bool Reajustar(string ruta, long mAntes, long sAntes, double db, double dbAnotados)
     {
         if (!double.IsFinite(db) || db == 0 || !Stat(ruta, out var m, out var s)) return false;
+        if (!double.IsFinite(dbAnotados)) dbAnotados = 0;
         lock (_lock)
         {
             if (!_map.TryGetValue(ruta, out var e) || e.M != mAntes || e.S != sAntes) return false;
             var (l, p, t) = TrasAjustar(e.Lufs, e.Peak, e.T, db);
-            _map[ruta] = new Entry { M = m, S = s, Lufs = l, Peak = p, T = Finito(t), V = e.V, G = SumarGanancia(e.G, db) };
+            _map[ruta] = new Entry
+            {
+                M = m, S = s, Lufs = l, Peak = p, T = Finito(t), V = e.V,
+                G = dbAnotados == 0 ? e.G : SumarGanancia(e.G, dbAnotados),
+            };
             _dirty = true;
             return true;
         }
@@ -449,6 +473,13 @@ public sealed class LoudnessScanner
     }
 
     /// <summary>
+    /// Se han borrado las mediciones (<see cref="Clear"/>). Se avisa en el hilo que la llama, después
+    /// de borrarlas. Lo escucha la pestaña Volumen: sin el aviso seguía mostrando las filas medidas y
+    /// marcadas, y «Ajustar volumen» decodificaba una a una las canciones que Analizar mide en paralelo.
+    /// </summary>
+    public event Action? Borradas;
+
+    /// <summary>
     /// Borra las mediciones, en memoria y en disco («Limpiar carpeta de datos»). La ganancia que
     /// BeatTag ya ha aplicado se conserva, porque no se regenera (ver <see cref="_archivoAplicada"/>):
     /// sus entradas se quedan como medidas que hay que repetir, y al volver a analizar se sigue
@@ -466,6 +497,7 @@ public sealed class LoudnessScanner
             if (!File.Exists(_file)) _noSobrescribir = false;   // ya no hay nada que proteger
             _dirty = conservadas.Count > 0;
         }
+        Borradas?.Invoke();
     }
 
     /// <summary>
@@ -481,23 +513,38 @@ public sealed class LoudnessScanner
     /// silencio y pisarlo en el siguiente guardado. Lo que falte en él y esté en volumen-aplicado.json
     /// (tras «Limpiar», o al restaurar una copia de seguridad) se recupera como medida que hay que
     /// repetir, con su ganancia aplicada. Si un archivo está en los dos, manda sonoridad.json, que es
-    /// el que sigue al archivo tal como está ahora.
+    /// el que sigue al archivo tal como está ahora, salvo que en él no tenga ganancia aplicada: entonces
+    /// se vuelve a medir con la de volumen-aplicado.json, y al medirla se decide con el audio si sigue
+    /// valiendo (ver <see cref="GananciaTrasMedir"/>).
+    ///
+    /// POR QUÉ. Antes mandaba sonoridad.json también sin ganancia, y el primer guardado reescribía
+    /// volumen-aplicado.json sin ella. Pasaba al restaurar la copia en un equipo donde ya se había
+    /// analizado (sonoridad.json no viaja en la copia) y cuando sonoridad.json no se podía escribir:
+    /// la anotación que la copia debía proteger se perdía, y con ella el nivel original.
+    ///
+    /// Una entrada null (BeatTag nunca la escribe; solo una edición a mano o una sincronización) se
+    /// salta: antes impedía arrancar si estaba en volumen-aplicado.json, y hacía fallar todos los
+    /// guardados si estaba en sonoridad.json.
     /// </summary>
     private void Load()
     {
-        var leido = ArchivoDatos.LeerJson<Dictionary<string, Entry>>(_file);
+        var leido = ArchivoDatos.LeerJson<Dictionary<string, Entry?>>(_file);
         if (leido.Aviso.Length > 0) _log?.Err("Volumen: " + leido.Aviso);
         _noSobrescribir = leido.NoSobrescribir;
-        if (leido.Datos != null) _map = new Dictionary<string, Entry>(leido.Datos, StringComparer.OrdinalIgnoreCase);
+        if (leido.Datos != null)
+            foreach (var (ruta, e) in leido.Datos)
+                if (e != null) _map[ruta] = e;
 
         if (_archivoAplicada == null) return;
-        var aplicadas = ArchivoDatos.LeerJson<Dictionary<string, Aplicada>>(_archivoAplicada);
+        var aplicadas = ArchivoDatos.LeerJson<Dictionary<string, Aplicada?>>(_archivoAplicada);
         if (aplicadas.Aviso.Length > 0) _log?.Err("Volumen: " + aplicadas.Aviso);
         _aplicadaNoSobrescribir = aplicadas.NoSobrescribir;
         if (aplicadas.Datos == null) return;
         foreach (var (ruta, a) in aplicadas.Datos)
-            if (!_map.ContainsKey(ruta) && double.IsFinite(a.G) && double.IsFinite(a.Lufs))
-                _map[ruta] = SinMedidaVigente(a.Lufs, a.V, a.G);
+        {
+            if (a == null || !double.IsFinite(a.G) || !double.IsFinite(a.Lufs)) continue;
+            if (!_map.TryGetValue(ruta, out var e) || e.G == null) _map[ruta] = SinMedidaVigente(a.Lufs, a.V, a.G);
+        }
     }
 
     private static bool Stat(string path, out long m, out long s)

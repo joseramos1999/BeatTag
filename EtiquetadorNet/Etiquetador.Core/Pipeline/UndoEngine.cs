@@ -81,11 +81,16 @@ public sealed record UndoResult(string File, int Reverted, int Errors, int Missi
 /// <param name="ExistiaAntes">Se pudieron leer la fecha y el tamaño antes de tocarlo.</param>
 /// <param name="PasosVolumen">
 /// Pasos de global_gain que ha aplicado el deshacer (negativo si ha bajado el volumen; 0 si no lo ha
-/// tocado). Con ellos, la medida de sonoridad y la ganancia ya aplicada se ponen al día sin volver a
-/// medir el archivo.
+/// tocado). Con ellos, la medida de sonoridad se pone al día sin volver a medir el archivo.
+/// </param>
+/// <param name="PasosAnotados">
+/// La parte de <paramref name="PasosVolumen"/> que deshace ajustes anotados en la ganancia aplicada
+/// (<see cref="UndoRecord.GananciaAnotada"/>): solo esos pasos se descuentan de ella. Los de un ajuste
+/// de BeatTag 1.10, que no la anotaba, solo desplazan la medida.
 /// </param>
 public readonly record struct ArchivoDeshecho(string Desde, string Hasta, bool Etiquetas, bool Volumen,
-                                              long FechaAntes, long TamanoAntes, bool ExistiaAntes, int PasosVolumen = 0);
+                                              long FechaAntes, long TamanoAntes, bool ExistiaAntes, int PasosVolumen = 0,
+                                              int PasosAnotados = 0);
 
 /// <summary>Resultado de <see cref="UndoEngine.DarPorPerdidos"/>.</summary>
 /// <param name="Archivo">El manifiesto que se ha sacado de la cola ("" si no había ninguno).</param>
@@ -205,7 +210,7 @@ public sealed class UndoEngine
     {
         public string Desde = "", Hasta = "";
         public bool Movido, Etiquetas, Volumen;
-        public int PasosVolumen;
+        public int PasosVolumen, PasosAnotados;
         public long M, S;
         public bool Existia;
 
@@ -225,7 +230,7 @@ public sealed class UndoEngine
     private void Avisar(Efecto e)
     {
         if (AlDeshacer == null || !(e.Movido || e.Etiquetas || e.Volumen)) return;
-        try { AlDeshacer(new ArchivoDeshecho(e.Desde, e.Hasta, e.Etiquetas, e.Volumen, e.M, e.S, e.Existia, e.PasosVolumen)); }
+        try { AlDeshacer(new ArchivoDeshecho(e.Desde, e.Hasta, e.Etiquetas, e.Volumen, e.M, e.S, e.Existia, e.PasosVolumen, e.PasosAnotados)); }
         catch (Exception x) { _log?.Log($"  deshacer: no se pudieron poner al día las cachés de audio de «{Path.GetFileName(e.Hasta)}»: {x.Message}", LogKind.Err); }
     }
 
@@ -1062,7 +1067,13 @@ public sealed class UndoEngine
             if (pasos != 0)
             {
                 var res = Analysis.Mp3Gain.Apply(path, -pasos);
-                if (res.Ok) { restoredAny = volumenDevuelto = ef.Volumen = true; ef.PasosVolumen += res.Steps; _log?.Log($"  deshacer: volumen devuelto ({-pasos * Analysis.Mp3Gain.DbPerStep:+0.0;-0.0} dB) [{Path.GetFileName(path)}]", LogKind.Ok); }
+                if (res.Ok)
+                {
+                    restoredAny = volumenDevuelto = ef.Volumen = true;
+                    ef.PasosVolumen += res.Steps;
+                    if (r.GananciaAnotada == true) ef.PasosAnotados += res.Steps;   // los de 1.10 no se anotaron
+                    _log?.Log($"  deshacer: volumen devuelto ({-pasos * Analysis.Mp3Gain.DbPerStep:+0.0;-0.0} dB) [{Path.GetFileName(path)}]", LogKind.Ok);
+                }
                 else
                 {
                     // El audio sigue con el volumen cambiado. Antes esto solo se anotaba y el

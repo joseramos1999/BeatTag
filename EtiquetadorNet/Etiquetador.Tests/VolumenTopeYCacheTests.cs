@@ -417,7 +417,7 @@ public class VolumenTopeYCacheTests
 
             File.AppendAllText(cancion, " ");   // el deshacer reescribe el archivo
             Assert.Null(s.Get(cancion));
-            Assert.True(s.Reajustar(cancion, antes.M, antes.S, 1.5));
+            Assert.True(s.Reajustar(cancion, antes.M, antes.S, 1.5, 1.5));
 
             var r = s.Get(cancion)!.Value;
             Assert.Equal(-10.5, r.Lufs, 9);
@@ -427,8 +427,153 @@ public class VolumenTopeYCacheTests
 
             // Con un sello que no es el de la medida guardada, no se inventa nada.
             File.AppendAllText(cancion, " ");
-            Assert.False(s.Reajustar(cancion, antes.M, antes.S, 1.5));
+            Assert.False(s.Reajustar(cancion, antes.M, antes.S, 1.5, 1.5));
             Assert.Null(s.Get(cancion));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // El caso de la revisión: BeatTag 1.10 ajustaba sin anotar la ganancia (Update dejaba la medida
+    // desplazada y sin G). Deshacer uno de esos ajustes sumaba sus pasos a una ganancia que nunca los
+    // había contado: el archivo, ya en su nivel original (−10,76), quedaba con +3 dB «aplicados» y un
+    // nivel original calculado de −13,76, guardado además en volumen-aplicado.json. Ahora el deshacer
+    // solo descuenta los pasos de los ajustes anotados.
+    [Fact]
+    public void Deshacer_un_ajuste_de_la_version_anterior_no_inventa_ganancia_aplicada()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var cancion = Path.Combine(dir, "a.mp3");
+            Mp3Fixture.WriteMinMp3(cancion);
+            var cache = Path.Combine(dir, "sonoridad.json");
+            var aplicada = Path.Combine(dir, "volumen-aplicado.json");
+            var s = new LoudnessScanner(cache, null, aplicada);
+            s.Update(cancion, -13.76, -3.4, -3.2);   // lo que dejaba 1.10 tras bajarla 2 pasos
+            var antes = SelloArchivo.De(cancion);
+
+            File.AppendAllText(cancion, " ");   // el deshacer reescribe el archivo
+            Assert.True(s.Reajustar(cancion, antes.M, antes.S, 3.0, dbAnotados: 0));
+
+            var r = s.Get(cancion)!.Value;
+            Assert.Equal(-10.76, r.Lufs, 9);              // la medida sí se desplaza
+            Assert.Equal(0, r.GananciaAplicada);          // sin ganancia inventada: el original es −10,76
+            s.Save();
+            Assert.False(File.Exists(aplicada) && File.ReadAllText(aplicada).Contains("a.mp3"));
+            Assert.DoesNotContain("\"G\"", File.ReadAllText(cache));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // El caso mixto: un ajuste de 1.10 (2 pasos, sin anotar) y otro posterior (1 paso, anotado). Al
+    // deshacer el nuevo la ganancia vuelve a 0; al deshacer después el antiguo, sigue en 0 (antes pasaba
+    // a +3) y el nivel original calculado es el de verdad.
+    [Fact]
+    public void Deshacer_un_ajuste_nuevo_y_otro_antiguo_deja_el_nivel_original_de_verdad()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var cancion = Path.Combine(dir, "a.mp3");
+            Mp3Fixture.WriteMinMp3(cancion);
+            var s = new LoudnessScanner(Path.Combine(dir, "sonoridad.json"));
+            s.Update(cancion, -13.76, -3.4, -3.2);                 // 1.10: −3 dB sin anotar
+            s.Ajustado(cancion, -13.76, -3.4, -3.2, -1.5);         // ahora: −1,5 dB anotados
+            Assert.Equal(-1.5, s.Get(cancion)!.Value.GananciaAplicada, 9);
+
+            var antes = SelloArchivo.De(cancion);
+            File.AppendAllText(cancion, " ");
+            Assert.True(s.Reajustar(cancion, antes.M, antes.S, 1.5, 1.5));   // se deshace el nuevo
+            Assert.Equal(0, s.Get(cancion)!.Value.GananciaAplicada);
+
+            antes = SelloArchivo.De(cancion);
+            File.AppendAllText(cancion, " ");
+            Assert.True(s.Reajustar(cancion, antes.M, antes.S, 3.0, 0));     // y luego el de 1.10
+            var r = s.Get(cancion)!.Value;
+            Assert.Equal(-10.76, r.Lufs, 9);
+            Assert.Equal(0, r.GananciaAplicada);
+            Assert.Equal(-10.76, r.Lufs - r.GananciaAplicada, 9);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // El caso de la revisión: en el equipo viejo se bajó un paso un WAV medido a −10,46 (el espejo queda
+    // con G −1,5); en el equipo nuevo se analizó antes de restaurar la copia, así que sonoridad.json
+    // tiene la ruta a −11,96 y sin G. Antes mandaba sonoridad.json: la ganancia se perdía y el primer
+    // guardado dejaba volumen-aplicado.json en «{}». Ahora se vuelve a medir y, al ser el mismo audio,
+    // la ganancia se conserva.
+    [Fact]
+    public void La_ganancia_del_espejo_no_se_pierde_si_sonoridad_json_tiene_la_ruta_sin_ella()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var wav = Path.Combine(dir, "tono.wav");
+            var aplicada = Path.Combine(dir, "volumen-aplicado.json");
+            EscribirTono(wav, 0.3);
+            var viejo = new LoudnessScanner(Path.Combine(dir, "sonoridad-viejo.json"), null, aplicada);
+            var m = viejo.Measure(wav, force: true)!.Value;
+            EscribirTono(wav, 0.3 * Math.Pow(2, -0.25));   // se baja un paso…
+            viejo.Ajustado(wav, m.Lufs, m.PeakDb, m.TruePeakDb, -1.5);   // …y se anota
+            viejo.Save();
+            Assert.Contains("\"G\":-1.5", File.ReadAllText(aplicada));
+
+            // El equipo nuevo midió el archivo ya bajado, sin saber nada del ajuste.
+            var cache = Path.Combine(dir, "sonoridad.json");
+            var sinG = new LoudnessScanner(cache);
+            Assert.Equal(0, sinG.Measure(wav, force: true)!.Value.GananciaAplicada);
+            sinG.Save();
+            Assert.DoesNotContain("\"G\"", File.ReadAllText(cache));
+
+            // Se restaura la copia (solo trae volumen-aplicado.json) y se arranca.
+            var nuevo = new LoudnessScanner(cache, null, aplicada);
+            nuevo.Save();   // el primer guardado, que antes lo dejaba en «{}»
+            Assert.Contains("\"G\":-1.5", File.ReadAllText(aplicada));
+            Assert.Null(nuevo.Get(wav));   // hay que volver a medirla…
+            Assert.Equal(-1.5, nuevo.Measure(wav)!.Value.GananciaAplicada, 9);   // …y la ganancia sigue
+            nuevo.Save();
+            Assert.Contains("\"G\":-1.5", File.ReadAllText(aplicada));
+            Assert.Contains("\"G\":-1.5", File.ReadAllText(cache));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // BeatTag nunca escribe una entrada null, pero una edición a mano o una sincronización sí pueden.
+    // En volumen-aplicado.json impedía arrancar (NullReferenceException en el constructor), y en
+    // sonoridad.json hacía fallar todos los guardados. Ahora se salta.
+    [Fact]
+    public void Una_entrada_null_no_impide_arrancar_ni_guardar()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var cancion = Path.Combine(dir, "a.mp3");
+            Mp3Fixture.WriteMinMp3(cancion);
+            var fi = new FileInfo(cancion);
+            var cache = Path.Combine(dir, "sonoridad.json");
+            var aplicada = Path.Combine(dir, "volumen-aplicado.json");
+            var nula = Path.Combine(dir, "nula.mp3");
+            File.WriteAllText(cache, JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                [nula] = null,
+                [cancion] = new { M = fi.LastWriteTimeUtc.Ticks, S = fi.Length, Lufs = -9.5, Peak = -0.4 },
+            }));
+            File.WriteAllText(aplicada, JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                [nula] = null,
+                [Path.Combine(dir, "b.mp3")] = new { G = -1.5, Lufs = -12.0 },
+            }));
+
+            var s = new LoudnessScanner(cache, null, aplicada);
+            Assert.Equal(-9.5, s.Get(cancion)!.Value.Lufs, 9);
+            s.Update(cancion, -11, -1.9);
+            s.Save();
+
+            var texto = File.ReadAllText(cache);
+            Assert.Contains("-11", texto);
+            Assert.DoesNotContain("nula.mp3", texto);
+            Assert.Contains("b.mp3", File.ReadAllText(aplicada));
+            s.Clear();
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }

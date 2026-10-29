@@ -260,6 +260,79 @@ public class VolumenExclusionesTests
         Assert.StartsWith("Excluidas del ajuste 2 canciones. Se siguen midiendo", AjusteVolumenSeleccion.TextoCancionesExcluidas(2, 2));
     }
 
+    // Revisión de las correcciones: una fila «Por medir» seleccionada se contaba como «no lo requiere», y
+    // el estado lo atribuía a que se desviaba 1 dB o menos, no era MP3 o no tenía margen; la
+    // confirmación decía «seleccionada que no lo requiere». Lo cierto es que no se sabe hasta volver a medirla.
+    [Fact]
+    public void Las_seleccionadas_por_medir_se_cuentan_aparte_con_su_motivo()
+    {
+        var porMedir = new LoudnessRow
+        {
+            FileName = "a.mp3", Folder = Raiz, FilePath = Path.Combine(Reggaeton, "a.mp3"),
+            Lufs = -16, PeakDb = -8, Target = -11, MedidaCaducada = true,
+        };
+        var otra = Fila(Reggaeton, "b.mp3", -16);
+
+        var sola = AjusteVolumenSeleccion.Elegir(new[] { porMedir, otra }, new[] { porMedir });
+        Assert.Empty(sola.Ajustar);
+        Assert.Equal(1, sola.PorMedir);
+        Assert.Equal(0, sola.SinNecesidad);
+        Assert.Equal("La seleccionada ha cambiado desde que se midió: pulsa Analizar para volver a medirla.",
+                     AjusteVolumenSeleccion.TextoNadaQueAjustar(sola, porSeleccion: true, 0));
+
+        var mezcla = AjusteVolumenSeleccion.Elegir(new[] { porMedir, otra }, new[] { porMedir, otra });
+        Assert.Equal(new[] { otra }, mezcla.Ajustar);
+        var (_, cuerpo, _) = AjusteVolumenSeleccion.TextosConfirmacion(mezcla, porSeleccion: true, 0);
+        Assert.EndsWith("Queda fuera 1 que ha cambiado desde que se midió (pulsa Analizar para volver a medirla).", cuerpo);
+        Assert.DoesNotContain("no lo requiere", cuerpo);
+
+        // Lo marcado: tampoco se dice que no haya ninguna que lo requiera.
+        var marcadas = AjusteVolumenSeleccion.Elegir(new[] { porMedir });
+        Assert.Equal("No hay ninguna grabación marcada para ajustar. 1 ha cambiado desde que se midió: pulsa Analizar para volver a medirla.",
+                     AjusteVolumenSeleccion.TextoNadaQueAjustar(marcadas, porSeleccion: false, 0));
+
+        // Un FLAC «Por medir» no se ajustaría nunca, y una excluida tampoco: no cuentan como por medir.
+        var flac = new LoudnessRow { FileName = "c.flac", Folder = Raiz, FilePath = Path.Combine(Reggaeton, "c.flac"), Lufs = -16, PeakDb = -8, Target = -11, MedidaCaducada = true };
+        var excluida = new LoudnessRow { FileName = "d.mp3", Folder = Raiz, FilePath = Path.Combine(Reggaeton, "d.mp3"), Lufs = -16, PeakDb = -8, Target = -11, MedidaCaducada = true };
+        excluida.Exclusion = ExclusionVolumen.Cancion;
+        var otras = AjusteVolumenSeleccion.Elegir(new[] { flac, excluida }, new[] { flac, excluida });
+        Assert.Equal((0, 1, 1), (otras.PorMedir, otras.Excluidas, otras.SinNecesidad));
+
+        var vacia = Array.Empty<LoudnessRow>();
+        Assert.Equal("Las seleccionadas han cambiado desde que se midieron: pulsa Analizar para volver a medirlas.",
+                     AjusteVolumenSeleccion.TextoNadaQueAjustar(new SeleccionAjuste(vacia, 0, 0, 0, 2), true, 0));
+        Assert.Equal("Ninguna de las seleccionadas se puede ajustar: 1 está excluida del ajuste, 2 han cambiado desde que se midieron "
+                     + "(pulsa Analizar para volver a medirlas) y el resto no lo requiere.",
+                     AjusteVolumenSeleccion.TextoNadaQueAjustar(new SeleccionAjuste(vacia, 0, 1, 3, 2), true, 0));
+        Assert.Equal("Ninguna de las seleccionadas se puede ajustar: 1 está excluida del ajuste y el resto no lo requiere.",
+                     AjusteVolumenSeleccion.TextoNadaQueAjustar(new SeleccionAjuste(vacia, 0, 1, 3), true, 0));
+        Assert.Equal("No hay ninguna grabación marcada para ajustar. De las que lo requieren, 2 tienen la casilla «Ajustar» quitada. "
+                     + "3 han cambiado desde que se midieron: pulsa Analizar para volver a medirlas.",
+                     AjusteVolumenSeleccion.TextoNadaQueAjustar(new SeleccionAjuste(vacia, 2, 0, 0, 3), false, 0));
+        var (_, varias, _) = AjusteVolumenSeleccion.TextosConfirmacion(new SeleccionAjuste(new[] { otra }, 4, 1, 0, 2), false, 0);
+        Assert.EndsWith("Quedan fuera 4 desmarcadas, 1 excluida del ajuste y 2 que han cambiado desde que se midieron "
+                        + "(pulsa Analizar para volver a medirlas).", varias);
+    }
+
+    // Revisión de las correcciones: el resumen cuenta aparte las «Por medir», y el resultado del ajuste
+    // dice cuántas se dejaron porque ahora requerían el ajuste contrario.
+    [Fact]
+    public void El_resumen_cuenta_aparte_las_por_medir_y_el_resultado_las_de_sentido_contrario()
+    {
+        Assert.Equal("9 con el nivel correcto · 0 por debajo · 0 por encima · 1 por medir. Ninguna de las demás requiere ajuste. "
+                     + "La que está por medir ha cambiado desde que se midió: pulsa Analizar para volver a medirla.",
+                     AjusteVolumenSeleccion.TextoResumen(10, 9, 0, 0, 0, porMedir: 1));
+        Assert.Equal("6 con el nivel correcto · 1 por debajo · 0 por encima · 3 por medir. 1 requiere ajuste. "
+                     + "Las que están por medir han cambiado desde que se midieron: pulsa Analizar para volver a medirlas.",
+                     AjusteVolumenSeleccion.TextoResumen(10, 6, 1, 0, 1, porMedir: 3));
+
+        Assert.Equal("", AjusteVolumenSeleccion.TextoSentidoContrario(0));
+        Assert.Equal(" · 1 sin cambios: había cambiado desde el análisis y ahora requiere el ajuste contrario "
+                     + "(revísala en la tabla antes de volver a ajustarla)", AjusteVolumenSeleccion.TextoSentidoContrario(1));
+        Assert.Equal(" · 2 sin cambios: habían cambiado desde el análisis y ahora requieren el ajuste contrario "
+                     + "(revísalas en la tabla antes de volver a ajustarlas)", AjusteVolumenSeleccion.TextoSentidoContrario(2));
+    }
+
     // El umbral se cita desde la constante: si cambia, los textos cambian con él.
     [Fact]
     public void Los_textos_citan_el_umbral_de_1_dB()

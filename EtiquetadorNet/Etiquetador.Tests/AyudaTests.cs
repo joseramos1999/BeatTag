@@ -345,6 +345,13 @@ public class AyudaTests
         Assert.Contains("no las borra aunque borre las mediciones", volumen);
         Assert.DoesNotContain("esas anotaciones se borran con ellas", volumen);
         Assert.Contains("se parte siempre de la medida del archivo tal como está", volumen);
+        // Revisión de las correcciones: el ajuste no hace lo contrario de lo confirmado, las «Por medir»
+        // no cuentan, los ajustes de versiones anteriores no quedaron anotados y «Limpiar» vacía la tabla.
+        Assert.Contains("ahora requiere el ajuste contrario", volumen);
+        Assert.Contains("ahora requiere el ajuste contrario", Etiquetador.App.ViewModels.AjusteVolumenSeleccion.TextoSentidoContrario(1));
+        Assert.Contains("no la cuenta en el resumen ni en la referencia automática", volumen);
+        Assert.Contains("Los ajustes hechos con una versión anterior de BeatTag no quedaron anotados", volumen);
+        Assert.Contains("la tabla de esta pestaña queda vacía hasta que vuelvas a pulsar Analizar", volumen);
     }
 
     // La norma de registro del producto: neutro y profesional, sin coloquialismos. Son los que ya se

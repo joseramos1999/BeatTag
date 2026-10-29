@@ -292,11 +292,18 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
 
     private static int PorcentajeAlcance => (int)Math.Round((1 - ReferenciaVolumen.PercentilAlcance) * 100);
 
-    /// <summary>Las filas que cuentan para la referencia automática: las no excluidas (o todas, si lo están todas).</summary>
+    /// <summary>
+    /// Las filas que cuentan para la referencia automática: las no excluidas (o todas, si lo están
+    /// todas), y solo las que tienen una medida vigente. Una «Por medir» (ver
+    /// <see cref="LoudnessRow.MedidaCaducada"/>) ha cambiado desde que se midió y su nivel de ahora se
+    /// desconoce; si no queda ninguna con medida vigente, se calcula con todas (solo se muestra).
+    /// </summary>
     private static List<LoudnessRow> CuentanParaLaReferencia(IReadOnlyCollection<LoudnessRow> filas)
     {
-        var cuentan = filas.Where(r => r.Exclusion == ExclusionVolumen.Ninguna).ToList();
-        return cuentan.Count == 0 ? filas.ToList() : cuentan;
+        var medidas = filas.Where(r => !r.MedidaCaducada).ToList();
+        if (medidas.Count == 0) medidas = filas.ToList();
+        var cuentan = medidas.Where(r => r.Exclusion == ExclusionVolumen.Ninguna).ToList();
+        return cuentan.Count == 0 ? medidas : cuentan;
     }
 
     /// <summary>
@@ -339,15 +346,35 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         RefrescarListaExclusiones();
         RecontarMarcadas();
         ExplicarModo();
+        engine.Loudness.Borradas += () => engine.EnLaInterfaz(MedidasBorradas);
     }
 
     partial void OnSoloDesviadasChanged(bool value) => AplicarFiltro();
     partial void OnTargetChanged(double value) => Recalcular();
 
+    /// <summary>Se desvía más del umbral según una medida vigente (las «Por medir» no se sabe).</summary>
+    private static bool Desviada(LoudnessRow r) => !r.MedidaCaducada && Math.Abs(r.Gain) > UmbralAjuste;
+
     private void AplicarFiltro()
     {
-        RowsView.Filter = SoloDesviadas ? o => o is LoudnessRow r && Math.Abs(r.Gain) > UmbralAjuste : null;
+        RowsView.Filter = SoloDesviadas ? o => o is LoudnessRow r && Desviada(r) : null;
         RowsView.Refresh();
+    }
+
+    /// <summary>
+    /// «Limpiar carpeta de datos» ha borrado las mediciones: ninguna fila sigue teniendo una medida
+    /// vigente, así que la tabla se vacía hasta el próximo análisis. Antes seguía mostrándolas como
+    /// medidas y marcadas: «Ajustar volumen» decodificaba entonces una a una, sin avisar, las canciones
+    /// que Analizar mide en paralelo, y al terminar el resumen las contaba con sus valores de antes.
+    /// </summary>
+    private void MedidasBorradas()
+    {
+        if (Rows.Count == 0) return;
+        _filas.Reemplazar(new List<LoudnessRow>());
+        AplicarFiltro();
+        Resumir();
+        ExplicarModo();
+        if (!IsBusy) Status = "Las mediciones se han borrado al limpiar la carpeta de datos. Pulsa Analizar para volver a medir la biblioteca.";
     }
 
     /// <summary>Al cambiar el objetivo no hay que volver a medir: solo se recalcula la desviación.</summary>
@@ -397,12 +424,14 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
 
             await _engine.Loudness.MeasureManyAsync(rutas, force, prog, _cts.Token, mono);
 
+            // Las medidas se leen fuera del hilo de la interfaz (ver MedidasGuardadasAsync); las filas
+            // se montan después, en él.
+            var medidas = await MedidasGuardadasAsync(rutas);
             var excl = Exclusiones();
             var filas = new List<LoudnessRow>(tracks.Count);
             foreach (var t in tracks)
             {
-                var m = _engine.Loudness.Get(t.FilePath);
-                if (m is not { Ok: true } r) continue;
+                if (!medidas.TryGetValue(t.FilePath, out var m) || m is not { Ok: true } r) continue;
                 filas.Add(Fila(t.FileName, t.Folder, t.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, r.GananciaAplicada, excl));
             }
             _filas.Reemplazar(filas);
@@ -435,16 +464,20 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         finally { IsBusy = false; _engine.Loudness.Save(); _cts?.Dispose(); _cts = null; }
     }
 
-    /// <summary>Resumen del estado de la biblioteca, sin tecnicismos.</summary>
+    /// <summary>
+    /// Resumen del estado de la biblioteca, sin tecnicismos. Las «Por medir» se cuentan aparte: su
+    /// nivel de ahora se desconoce. Antes contaban por sus valores de antes, y el estado podía decir
+    /// «1 requiere ajuste» justo antes de que «Ajustar volumen» respondiera que no había ninguna.
+    /// </summary>
     private void Resumir()
     {
         RecontarMarcadas();
         if (Rows.Count == 0) { Resumen = ""; return; }
-        var correctas = Rows.Count(r => Math.Abs(r.Gain) <= UmbralAjuste);
-        var bajas = Rows.Count(r => r.Gain > UmbralAjuste);
-        var altas = Rows.Count(r => r.Gain < -UmbralAjuste);
-        var requierenAjuste = Rows.Count(r => Math.Abs(r.Gain) > UmbralAjuste);
-        Resumen = AjusteVolumenSeleccion.TextoResumen(Rows.Count, correctas, bajas, altas, requierenAjuste);
+        var medidas = Rows.Where(r => !r.MedidaCaducada).ToList();
+        var correctas = medidas.Count(r => Math.Abs(r.Gain) <= UmbralAjuste);
+        var bajas = medidas.Count(r => r.Gain > UmbralAjuste);
+        var altas = medidas.Count(r => r.Gain < -UmbralAjuste);
+        Resumen = AjusteVolumenSeleccion.TextoResumen(Rows.Count, correctas, bajas, altas, bajas + altas, Rows.Count - medidas.Count);
     }
 
     /// <summary>
@@ -480,7 +513,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         => AjusteVolumenSeleccion.Elegir(Rows, seleccion);
 
     /// <summary>Desviadas que no son MP3: se miden, pero no se pueden ajustar sin recodificar.</summary>
-    public int DesviadasNoMp3 => Rows.Count(r => !r.Ajustable && Math.Abs(r.Gain) > UmbralAjuste);
+    public int DesviadasNoMp3 => Rows.Count(r => !r.Ajustable && Desviada(r));
 
     /// <summary>
     /// Pasos de MP3Gain (1,5 dB cada uno) que de verdad se pueden aplicar. Bajar siempre cabe, y se
@@ -589,11 +622,12 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     /// recuperar parte de lo bajado). Son las únicas que hay que volver a medir para decidir con
     /// seguridad: el resto de medidas guardadas sigue valiendo. Una grabación con el pico recortado
     /// que nunca se ha ajustado no entra: su pico real no puede ser menor que el de muestra, así que
-    /// medirlo no cambiaría nada.
+    /// medirlo no cambiaría nada. Las «Por medir» tampoco: hay que volver a medirlas enteras, y eso lo
+    /// hace Analizar.
     /// </summary>
     internal static List<LoudnessRow> SinPicoReal(IEnumerable<LoudnessRow> filas)
         => filas.Where(r => r.TruePeakDb == null && r.Ajustable && r.Exclusion == ExclusionVolumen.Ninguna
-                            && r.Gain > UmbralAjuste
+                            && !r.MedidaCaducada && r.Gain > UmbralAjuste
                             && (PasosAplicables(r.Gain, r.PeakDb) > 0 || r.PicoDesconocidoTrasBajar))
                 .ToList();
 
@@ -675,7 +709,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         var manifiesto = _engine.Paths.NuevoManifiesto();
         _engine.Logger.Head($"Volumen: ajustando {objetivo.Count} grabaciones (referencia {Target:0.0} LUFS)");
 
-        int hechas = 0, parciales = 0, fallidas = 0, sinMargen = 0, enNivel = 0, sinLeer = 0, i = 0;
+        int hechas = 0, parciales = 0, fallidas = 0, sinMargen = 0, enNivel = 0, sinLeer = 0, contrario = 0, i = 0;
         var sinHistorial = false;
         try
         {
@@ -705,10 +739,22 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 }
                 var pasos = decision.Pasos;
                 var ganancia = fila.Target - decision.Lufs;
+                if (pasos == 0 && Math.Abs(ganancia) <= UmbralAjuste) { enNivel++; continue; }   // había cambiado y ya no lo requiere
+
+                // Había cambiado y ahora requiere lo contrario de lo confirmado (subir una que se iba a
+                // bajar, o al revés): no se toca. Caso visto en revisión: una fila a −12,5 tras subirla,
+                // «Deshacer última» la devuelve a −15,5 sin que la tabla se entere, y con −14 la
+                // confirmación decía «Se reducirá su nivel» y el archivo se aumentaba. La tabla la vuelve
+                // a mostrar con su nivel de ahora, para que el usuario lo vea y lo confirme.
+                if (ganancia * fila.Gain < 0)
+                {
+                    contrario++;
+                    _engine.Logger.Detail($"    {fila.FileName}: ha cambiado desde el análisis y ahora requiere el ajuste contrario; se deja como estaba");
+                    continue;
+                }
                 if (pasos == 0)
                 {
-                    if (Math.Abs(ganancia) <= UmbralAjuste) enNivel++;   // había cambiado y ya no lo requiere
-                    else if (ganancia > 0) sinMargen++;
+                    if (ganancia > 0) sinMargen++;
                     continue;
                 }
 
@@ -750,6 +796,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                    + (parciales > 0 ? $" · {parciales} solo en parte (sin margen para más)" : "")
                    + AjusteVolumenSeleccion.TextoSinMargen(sinMargen)
                    + AjusteVolumenSeleccion.TextoYaEnNivel(enNivel)
+                   + AjusteVolumenSeleccion.TextoSentidoContrario(contrario)
                    + AjusteVolumenSeleccion.TextoSinLeer(sinLeer)
                    + AjusteVolumenSeleccion.TextoFallidas(fallidas)
                    + (sinHistorial
@@ -757,31 +804,35 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                         : $". Se puede deshacer desde Enriquecer. {Resumen}");
             if (sinHistorial) _engine.Logger.Err($"Volumen: detenido tras {hechas} por no poder escribir el manifiesto de deshacer");
             _engine.Logger.Sum($"Volumen: ajustadas {hechas}, parciales {parciales}, sin margen por el pico real {sinMargen}, "
-                             + $"ya en nivel {enNivel}, sin poder leerlas {sinLeer}, fallidas {fallidas}");
+                             + $"ya en nivel {enNivel}, ahora requieren el ajuste contrario {contrario}, sin poder leerlas {sinLeer}, fallidas {fallidas}");
         }
         catch (OperationCanceledException)
         {
             // Lo ya ajustado tiene que verse con su nivel nuevo: con la medida anterior en la tabla,
             // un segundo «Ajustar» volvería a cambiarlo.
-            GuardarYRecargarTrasInterrupcion(hechas);
+            await GuardarYRecargarTrasInterrupcionAsync(hechas);
             Status = hechas == 1 ? "Ajuste cancelado (1 aplicada)." : $"Ajuste cancelado ({hechas} aplicadas).";
         }
         catch (Exception e)
         {
-            GuardarYRecargarTrasInterrupcion(hechas);
+            await GuardarYRecargarTrasInterrupcionAsync(hechas);
             Status = "Error durante el ajuste: " + e.Message;
             _engine.Logger.Error("Volumen: fallo al ajustar", e);
         }
         finally { IsBusy = false; _cts?.Dispose(); _cts = null; }
     }
 
-    private void GuardarYRecargarTrasInterrupcion(int hechas)
+    /// <summary>
+    /// Tras cancelar o fallar a mitad del ajuste: guarda lo ajustado y rehace la tabla, con las medidas
+    /// leídas fuera del hilo de la interfaz como en el camino normal (antes se leían en él, fila a fila).
+    /// </summary>
+    private async Task GuardarYRecargarTrasInterrupcionAsync(int hechas)
     {
         if (hechas == 0) return;
         try
         {
             _engine.Loudness.Save();
-            RecargarDesdeCache(recalcularReferencia: false);
+            RecargarDesdeCache(recalcularReferencia: false, await MedidasGuardadasAsync());
         }
         catch (Exception e) { _engine.Logger.Error("Volumen: no se pudo rehacer la tabla tras interrumpir el ajuste", e); }
     }
@@ -807,6 +858,9 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 Renamed = false,
                 Fields = new Dictionary<string, FieldChange> { [UndoEngine.VolumeField] = cambio },
                 Origen = nameof(TipoEjecucion.Volumen),
+                // El ajuste ya está anotado en la ganancia aplicada (Loudness.Ajustado, antes de esto):
+                // al deshacerlo hay que descontarlo de ella. Los de 1.10 no llevan la marca.
+                GananciaAnotada = true,
             };
 
             File.AppendAllText(archivo,
@@ -828,14 +882,17 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     /// antes se rehacía como si siguieran siendo los del archivo, y salía marcada para ajustar.
     /// </summary>
     /// <param name="recalcularReferencia">Recalcular también la referencia automática.</param>
-    /// <param name="medidas">Las medidas guardadas de las filas, ya leídas (ver <see cref="MedidasGuardadasAsync"/>); si falta, se leen aquí.</param>
-    private void RecargarDesdeCache(bool recalcularReferencia, IReadOnlyDictionary<string, LoudnessResult?>? medidas = null)
+    /// <param name="medidas">
+    /// Las medidas guardadas de las filas, ya leídas fuera del hilo de la interfaz (ver
+    /// <see cref="MedidasGuardadasAsync()"/>). Solo la de una fila que no esté se lee aquí.
+    /// </param>
+    private void RecargarDesdeCache(bool recalcularReferencia, IReadOnlyDictionary<string, LoudnessResult?> medidas)
     {
         var excl = Exclusiones();
         var filas = new List<LoudnessRow>(Rows.Count);
         foreach (var r in Rows)
         {
-            var m = medidas != null && medidas.TryGetValue(r.FilePath, out var leida) ? leida : _engine.Loudness.Get(r.FilePath);
+            var m = medidas.TryGetValue(r.FilePath, out var leida) ? leida : _engine.Loudness.Get(r.FilePath);
             filas.Add(m is { Ok: true } v
                 ? Fila(r.FileName, r.Folder, r.FilePath, v.Lufs, v.PeakDb, v.TruePeakDb, v.GananciaAplicada, excl)
                 : Fila(r.FileName, r.Folder, r.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, r.GananciaAplicada, excl, caducada: true));
@@ -855,11 +912,15 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     /// <summary>
     /// Las medidas guardadas de todas las filas, leídas fuera del hilo de la interfaz: cada una
     /// comprueba la fecha y el tamaño del archivo, y con 20.000 filas son 0,2-0,3 s (medido en una
-    /// biblioteca real) que antes bloqueaban la pestaña al terminar de medir el pico real y al ajustar.
+    /// biblioteca real) que antes bloqueaban la pestaña al terminar de analizar, al medir el pico real,
+    /// al ajustar y al cancelar o fallar a mitad del ajuste.
     /// </summary>
-    private async Task<Dictionary<string, LoudnessResult?>> MedidasGuardadasAsync()
+    private Task<Dictionary<string, LoudnessResult?>> MedidasGuardadasAsync()
+        => MedidasGuardadasAsync(Rows.Select(r => r.FilePath).ToList());
+
+    /// <summary>Las medidas guardadas de <paramref name="rutas"/> (una lista propia), leídas fuera del hilo de la interfaz.</summary>
+    private async Task<Dictionary<string, LoudnessResult?>> MedidasGuardadasAsync(IReadOnlyList<string> rutas)
     {
-        var rutas = Rows.Select(r => r.FilePath).ToList();
         return await Task.Run(() =>
         {
             var medidas = new Dictionary<string, LoudnessResult?>(rutas.Count, StringComparer.OrdinalIgnoreCase);

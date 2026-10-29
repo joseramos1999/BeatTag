@@ -231,16 +231,262 @@ public class VolumenRevisionFinalTests : IDisposable
             OrigPath = d, FinalPath = d,
             Fields = new() { [UndoEngine.VolumeField] = FieldChange.Num(2, 0) },
             Origen = nameof(TipoEjecucion.Volumen),
+            GananciaAnotada = true,
         }) + "\n");
 
-        var seguir = typeof(AppEngine).GetMethod("SeguirDeshecho", BindingFlags.Instance | BindingFlags.NonPublic, new[] { typeof(ArchivoDeshecho) })!;
-        var undo = new UndoEngine(motor.Paths) { AlDeshacer = a => seguir.Invoke(motor, new object[] { a }) };
-        Assert.Equal(1, undo.UndoLastRun().Reverted);   // …y «Deshacer última» lo devuelve
+        Assert.Equal(1, Deshacedor(motor).UndoLastRun().Reverted);   // …y «Deshacer última» lo devuelve
 
         var r = motor.Loudness.Get(d);
         Assert.NotNull(r);
         Assert.Equal(-9.0, r!.Value.Lufs, 9);
         Assert.Equal(-0.4, r.Value.TruePeakDb!.Value, 9);
         Assert.Equal(0, r.Value.GananciaAplicada);
+    }
+
+    /// <summary>Un UndoEngine que avisa al motor como el de la aplicación (AppEngine.SeguirDeshecho).</summary>
+    private static UndoEngine Deshacedor(AppEngine motor)
+    {
+        var seguir = typeof(AppEngine).GetMethod("SeguirDeshecho", BindingFlags.Instance | BindingFlags.NonPublic, new[] { typeof(ArchivoDeshecho) })!;
+        return new UndoEngine(motor.Paths) { AlDeshacer = a => seguir.Invoke(motor, new object[] { a }) };
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Revisión de las correcciones
+    // ---------------------------------------------------------------------------------------------
+
+    // El caso de la revisión, de punta a punta: un MP3 a −10,76 que BeatTag 1.10 bajó 2 pasos (la medida
+    // quedó a −13,76 sin ganancia anotada, y el manifiesto sin la marca) se deshace tras actualizar.
+    // Antes quedaba con +3 dB «aplicados»: su nivel original calculado era −13,76 y se guardaba en
+    // volumen-aplicado.json, que «Analizar de nuevo» conserva y «Limpiar» no borra.
+    [Fact]
+    public void Deshacer_un_ajuste_de_la_version_anterior_no_inventa_ganancia_aplicada()
+    {
+        var motor = MotorDePrueba.Crear(Datos, new Logger());
+        var d = Mp3("v110.mp3");
+        Assert.True(Mp3Gain.Apply(d, -2).Ok);
+        motor.Loudness.Update(d, -13.76, -3.4, -3.2);   // lo que dejaba 1.10: la medida desplazada, sin G
+        Directory.CreateDirectory(motor.Paths.UndoDir);
+        File.WriteAllText(Path.Combine(motor.Paths.UndoDir, "run_20261022_161531.jsonl"), JsonSerializer.Serialize(new UndoRecord
+        {
+            OrigPath = d, FinalPath = d,
+            Fields = new() { [UndoEngine.VolumeField] = FieldChange.Num(2, 0) },
+            Origen = nameof(TipoEjecucion.Volumen),
+        }) + "\n");
+
+        Assert.Equal(1, Deshacedor(motor).UndoLastRun().Reverted);
+
+        var r = motor.Loudness.Get(d)!.Value;
+        Assert.Equal(-10.76, r.Lufs, 9);
+        Assert.Equal(0, r.GananciaAplicada);
+        motor.Loudness.Save();
+        Assert.False(File.Exists(motor.Paths.VolumenAplicadoPath) && File.ReadAllText(motor.Paths.VolumenAplicadoPath).Contains("v110.mp3"));
+    }
+
+    // Lo que escribe la pestaña sí lleva la marca: ajustar y deshacer deja la ganancia aplicada en 0.
+    [Fact]
+    public async Task Ajustar_y_deshacer_con_la_pestana_deja_la_ganancia_aplicada_en_cero()
+    {
+        var motor = MotorDePrueba.Crear(Datos, new Logger());
+        var vm = new LoudnessViewModel(motor) { Modo = "Nivel de club" };
+        var b = Mp3("b.mp3");
+        motor.Loudness.Update(b, -7.0, -0.2, -0.1);
+        var fila = Fila(b, -7.0, -0.2, -0.1, vm.Target);
+        vm.Rows.Add(fila);
+
+        await vm.ApplyAsync(new[] { fila });
+        Assert.Equal(-4.5, motor.Loudness.Get(b)!.Value.GananciaAplicada, 9);
+        var manifiesto = Assert.Single(Directory.GetFiles(motor.Paths.UndoDir, "run_*.jsonl"));
+        Assert.Contains("\"GananciaAnotada\":true", File.ReadAllText(manifiesto));
+
+        Assert.Equal(1, Deshacedor(motor).UndoLastRun().Reverted);
+        var r = motor.Loudness.Get(b)!.Value;
+        Assert.Equal(-7.0, r.Lufs, 9);
+        Assert.Equal(0, r.GananciaAplicada);
+    }
+
+    // El caso de la revisión: un MP3 se subió 2 pasos hasta −12,5 y «Deshacer última» lo devolvió a −15,5
+    // sin que la tabla se enterase. Con «Nivel de plataformas» (−14) la fila decía «Reducir 1,5 dB» y la
+    // confirmación «Se reducirá su nivel», pero con la medida de ahora el archivo se AUMENTABA. Ahora no
+    // se toca, el resultado lo dice y la tabla lo vuelve a mostrar con su nivel de ahora.
+    [Fact]
+    public async Task Si_ahora_requiere_el_ajuste_contrario_no_se_toca_y_se_dice()
+    {
+        var motor = MotorDePrueba.Crear(Datos, new Logger());
+        var vm = new LoudnessViewModel(motor) { Modo = "Nivel de plataformas de streaming" };
+        var a = Mp3("a.mp3");
+        motor.Loudness.Update(a, -15.5, -6.0, -6.0);   // el archivo tal como está ahora
+        var fila = Fila(a, -12.5, -3.0, -3.0, vm.Target);
+        Assert.True(fila.Candidata);
+        Assert.True(fila.Gain < 0);                    // se confirmó para reducir
+        Assert.StartsWith("Se reducirá su nivel.", AjusteVolumenSeleccion.TextosConfirmacion(
+            new SeleccionAjuste(new[] { fila }, 0, 0, 0), porSeleccion: false, parciales: 0).Cuerpo);
+        vm.Rows.Add(fila);
+        var antes = File.ReadAllBytes(a);
+
+        await vm.ApplyAsync(new[] { fila });
+
+        Assert.Equal(antes, File.ReadAllBytes(a));
+        Assert.StartsWith("Ajustadas 0 de 1", vm.Status);
+        Assert.Contains(AjusteVolumenSeleccion.TextoSentidoContrario(1), vm.Status);
+        var enTabla = EnLaTabla(vm, a);
+        Assert.Equal(-15.5, enTabla.Lufs, 9);
+        Assert.StartsWith("Aumentar", enTabla.Accion);
+        Assert.True(enTabla.Ajustar);   // con su nivel de ahora, para que el usuario la vea y la confirme
+    }
+
+    // Las «Por medir» no cuentan como «requieren ajuste» en el resumen, ni en el filtro «Solo
+    // desviadas», ni en la referencia automática, ni entre las que faltan por medir el pico real. Antes,
+    // tras un ajuste en el que un archivo no se pudo leer, el estado decía «1 requiere ajuste» y
+    // «Ajustar volumen» respondía «No hay ninguna grabación que requiera ajuste».
+    [Fact]
+    public void Las_filas_por_medir_no_cuentan_como_desviadas()
+    {
+        var vm = new LoudnessViewModel(MotorDePrueba.Crear(Datos, new Logger()));
+        var medidas = Enumerable.Range(0, 30)
+            .Select(i => Fila(Path.Combine(_dir, "M", $"n{i}.mp3"), -10, -8, -7.5, vm.Target)).ToList();
+        LoudnessRow PorMedir(string nombre, double lufs, double pico) => new()
+        {
+            FileName = nombre, Folder = Path.Combine(_dir, "M"), FilePath = Path.Combine(_dir, "M", nombre),
+            Lufs = lufs, PeakDb = pico, Target = vm.Target, MedidaCaducada = true,
+        };
+        // Bajas y sin margen: con sus valores de antes arrastrarían la referencia hacia abajo.
+        var caducadas = Enumerable.Range(0, 6).Select(i => PorMedir($"c{i}.mp3", -16, -0.2)).ToList();
+        var conMargen = PorMedir("m.mp3", -16, -8);   // se aumentaría y no tiene pico real
+        var flac = PorMedir("d.flac", -20, -9);
+        foreach (var f in medidas.Concat(caducadas).Append(conMargen).Append(flac)) vm.Rows.Add(f);
+
+        vm.Modo = "Nivel de club";
+        vm.Modo = LoudnessViewModel.ModoAutomatico;   // se calcula la referencia con la tabla
+
+        var soloMedidas = LoudnessViewModel.ReferenciaAutomatica(medidas).Referencia;
+        Assert.Equal(soloMedidas, vm.Target);
+        Assert.NotEqual(soloMedidas, LoudnessViewModel.ReferenciaAutomatica(medidas.Concat(caducadas.Select(c => new LoudnessRow
+        {
+            FilePath = c.FilePath, Lufs = c.Lufs, PeakDb = c.PeakDb, Target = c.Target,
+        })).ToList()).Referencia);
+
+        Assert.Equal(AjusteVolumenSeleccion.TextoResumen(38, 30, 0, 0, 0, porMedir: 8), vm.Resumen);
+        Assert.DoesNotContain("requieren ajuste", vm.Resumen);
+        vm.SoloDesviadas = true;
+        Assert.False(vm.RowsView.Filter!(EnLaTabla(vm, caducadas[0].FilePath)));
+        Assert.True(vm.RowsView.Filter!(Fila(Path.Combine(_dir, "M", "x.mp3"), -16, -8, -7.5, vm.Target)));
+        Assert.Empty(LoudnessViewModel.SinPicoReal(vm.Rows));
+        Assert.Equal(0, vm.DesviadasNoMp3);
+    }
+
+    // «Limpiar carpeta de datos» borra las mediciones: la pestaña ya no las enseña como medidas y
+    // marcadas (antes «Ajustar volumen» decodificaba una a una las marcadas, sin avisar).
+    [Fact]
+    public void Limpiar_vacia_la_tabla_de_volumen()
+    {
+        var biblioteca = new LibraryStore(new AppConfig(), () => { }, new ScanCache(Path.Combine(Datos, "scan.json")));
+        var motor = MotorDePrueba.Crear(Datos, new Logger(), biblioteca);
+        var vm = new LoudnessViewModel(motor) { Modo = "Nivel de club" };
+        var a = Mp3("a.mp3");
+        motor.Loudness.Update(a, -16, -8, -7);
+        motor.Loudness.Save();
+        vm.Rows.Add(Fila(a, -16, -8, -7, vm.Target));
+        vm.Rows[0].Marcar(true);
+        Assert.Single(vm.ParaAjustar());
+
+        var ajustes = (SettingsViewModel)RuntimeHelpers.GetUninitializedObject(typeof(SettingsViewModel));
+        typeof(SettingsViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(ajustes, motor);
+        ajustes.LimpiarCarpetaDatos();
+
+        Assert.Empty(vm.Rows);
+        Assert.Empty(vm.ParaAjustar());
+        Assert.Equal("", vm.Resumen);
+        Assert.Contains("Pulsa Analizar", vm.Status);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Las medidas de la tabla se leen fuera del hilo de la interfaz
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Ejecuta <paramref name="accion"/> con un contexto de un solo hilo, como el de la interfaz: todas
+    /// sus continuaciones vuelven a ese hilo, que se pasa a la acción.
+    /// </summary>
+    private static void EnElHiloDeLaInterfaz(Func<Thread, Task> accion)
+    {
+        var cola = new System.Collections.Concurrent.BlockingCollection<(SendOrPostCallback D, object? S)>();
+        Exception? error = null;
+        var hilo = new Thread(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(new ContextoDeUnHilo(cola));
+            var tarea = accion(Thread.CurrentThread);
+            tarea.ContinueWith(_ => cola.CompleteAdding(), TaskScheduler.Default);
+            foreach (var (d, s) in cola.GetConsumingEnumerable()) d(s);
+            try { tarea.GetAwaiter().GetResult(); } catch (Exception e) { error = e; }
+        });
+        hilo.Start();
+        Assert.True(hilo.Join(TimeSpan.FromSeconds(60)), "la acción no terminó");
+        if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+    }
+
+    private sealed class ContextoDeUnHilo(System.Collections.Concurrent.BlockingCollection<(SendOrPostCallback D, object? S)> cola) : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            try { cola.Add((d, state)); } catch (InvalidOperationException) { /* ya terminó */ }
+        }
+
+        public override void Send(SendOrPostCallback d, object? state) => throw new NotSupportedException();
+    }
+
+    // Al terminar de analizar, la tabla se monta con las medidas guardadas: con 20.000 pistas, leerlas
+    // en el hilo de la interfaz (cada una mira la fecha y el tamaño del archivo) la bloqueaba 0,2-0,3 s.
+    [Fact]
+    public async Task Al_terminar_de_analizar_las_medidas_no_se_leen_en_el_hilo_de_la_interfaz()
+    {
+        Tono(Path.Combine(Musica, "tono.wav"), 0.3);
+        var biblioteca = new LibraryStore(new AppConfig { Folders = new List<string> { Musica } }, () => { },
+                                          new ScanCache(Path.Combine(Datos, "scan.json")));
+        await biblioteca.ScanAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Single(biblioteca.Tracks);
+        var motor = MotorDePrueba.Crear(Datos, new Logger(), biblioteca);
+        var vm = new LoudnessViewModel(motor);
+        var enLaInterfaz = 0;
+
+        EnElHiloDeLaInterfaz(async hilo =>
+        {
+            motor.Loudness.AlConsultar = () => { if (Thread.CurrentThread == hilo) Interlocked.Increment(ref enLaInterfaz); };
+            await vm.MeasureCommand.ExecuteAsync(null);
+        });
+
+        Assert.Single(vm.Rows);
+        Assert.Equal(0, enLaInterfaz);
+    }
+
+    // Lo mismo al fallar a mitad del ajuste: la tabla se rehacía leyendo cada medida en el hilo de la
+    // interfaz, cuando en el camino normal ya se leían fuera.
+    [Fact]
+    public void Al_fallar_a_mitad_del_ajuste_las_medidas_no_se_leen_en_el_hilo_de_la_interfaz()
+    {
+        var motor = MotorDePrueba.Crear(Datos, new Logger());
+        var vm = new LoudnessViewModel(motor) { Modo = "Nivel de club" };
+        var filas = new[] { Mp3("a.mp3"), Mp3("b.mp3") }.Select(ruta =>
+        {
+            motor.Loudness.Update(ruta, -7.0, -0.2, -0.1);
+            return Fila(ruta, -7.0, -0.2, -0.1, vm.Target);
+        }).ToList();
+        foreach (var f in filas) vm.Rows.Add(f);
+        // Un fallo inesperado con la primera ya ajustada (aquí, al anunciar la segunda).
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(LoudnessViewModel.Status) && vm.Status.StartsWith("Ajustando 2 de", StringComparison.Ordinal))
+                throw new InvalidOperationException("fallo de prueba");
+        };
+        var enLaInterfaz = 0;
+
+        EnElHiloDeLaInterfaz(async hilo =>
+        {
+            motor.Loudness.AlConsultar = () => { if (Thread.CurrentThread == hilo) Interlocked.Increment(ref enLaInterfaz); };
+            await vm.ApplyAsync(filas);
+        });
+
+        Assert.StartsWith("Error durante el ajuste", vm.Status);
+        Assert.Equal(-11.5, EnLaTabla(vm, filas[0].FilePath).Lufs, 9);   // la tabla, rehecha con lo ajustado
+        Assert.Equal(0, enLaInterfaz);
     }
 }
