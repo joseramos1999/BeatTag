@@ -164,6 +164,44 @@ public static class AjusteVolumenSeleccion
         return "Exclusiones del ajuste: " + (partes.Count == 0 ? "ninguna" : string.Join(" y ", partes));
     }
 
+    /// <summary>
+    /// El resumen de la tabla: cuántas están en nivel, por debajo y por encima, y cuántas se desvían
+    /// más del umbral de ajuste. Con el umbral igual a la banda «Correcto», las que requieren ajuste
+    /// son las que están por debajo o por encima.
+    /// </summary>
+    public static string TextoResumen(int total, int correctas, int bajas, int altas, int requierenAjuste)
+    {
+        if (total == 0) return "";
+        if (requierenAjuste == 0)
+            return total == 1 ? "El nivel de la grabación analizada es correcto." : $"El nivel es uniforme en las {total} grabaciones analizadas.";
+        return $"{correctas} con el nivel correcto · {bajas} por debajo · {altas} por encima. "
+             + (requierenAjuste == 1 ? "1 requiere ajuste." : $"{requierenAjuste} requieren ajuste.");
+    }
+
+    /// <summary>Lo que se ve mientras se mide el pico real de las que se aumentarían.</summary>
+    public static string TextoComprobandoPicoReal(int n)
+        => n == 1
+            ? "Comprobando el pico real de 1 grabación que se aumentaría…"
+            : $"Comprobando el pico real de {n} grabaciones que se aumentarían…";
+
+    /// <summary>
+    /// Las que iban a aumentarse y, medido el pico real al ajustar, no admitían ni un paso: se dejan
+    /// como estaban. "" si no hay ninguna.
+    /// </summary>
+    public static string TextoSinMargen(int n)
+        => n switch
+        {
+            0 => "",
+            1 => " · 1 sin cambios: su pico real no deja margen para aumentarla",
+            _ => $" · {n} sin cambios: su pico real no deja margen para aumentarlas",
+        };
+
+    /// <summary>Al terminar de analizar, si hubo que volver a medir grabaciones mono.</summary>
+    public static string TextoMonoMedidas(int n)
+        => n == 1
+            ? "1 grabación mono se ha vuelto a medir tal como se escucha, por los dos altavoces."
+            : $"{n} grabaciones mono se han vuelto a medir tal como se escuchan, por los dos altavoces.";
+
     /// <summary>«143 grabaciones marcadas para ajustar».</summary>
     public static string TextoMarcadas(int marcadas)
         => marcadas == 0 ? "Ninguna grabación marcada para ajustar"
@@ -182,8 +220,8 @@ public static class AjusteVolumenSeleccion
                 return s.Excluidas == 1 ? "La seleccionada está excluida del ajuste." : "Las seleccionadas están excluidas del ajuste.";
             if (s.Excluidas > 0)
                 return $"Ninguna de las seleccionadas se puede ajustar: {N(s.Excluidas, "está excluida", "están excluidas")} del ajuste y el resto no lo requiere.";
-            return "Ninguna de las seleccionadas requiere ajuste: se desvían menos de "
-                 + $"{LoudnessViewModel.UmbralAjuste:0} dB, no son MP3 o no tienen margen para subir sin distorsionar.";
+            return "Ninguna de las seleccionadas requiere ajuste: se desvían "
+                 + $"{LoudnessViewModel.UmbralAjuste:0.#} dB o menos, no son MP3 o no tienen margen para subir sin distorsionar.";
         }
         if (s.Desmarcadas > 0 || s.Excluidas > 0)
         {
@@ -217,8 +255,8 @@ public static class AjusteVolumenSeleccion
             _ => total == 1 ? "Se reducirá su nivel." : $"Se reducirá el nivel de las {bajan}.",
         };
         var criterio = porSeleccion
-            ? $" Se incluyen solo las seleccionadas que se desvían más de {LoudnessViewModel.UmbralAjuste:0} dB del nivel de referencia."
-            : $" Se incluyen solo las marcadas en la columna «Ajustar», que se desvían más de {LoudnessViewModel.UmbralAjuste:0} dB del nivel de referencia.";
+            ? $" Se incluyen solo las seleccionadas que se desvían más de {LoudnessViewModel.UmbralAjuste:0.#} dB del nivel de referencia."
+            : $" Se incluyen solo las marcadas en la columna «Ajustar», que se desvían más de {LoudnessViewModel.UmbralAjuste:0.#} dB del nivel de referencia.";
         var parcial = parciales switch
         {
             0 => "",

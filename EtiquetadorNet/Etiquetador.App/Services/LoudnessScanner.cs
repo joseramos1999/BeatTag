@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Etiquetador.Core;
@@ -20,12 +21,38 @@ namespace Etiquetador.App.Services;
 /// </summary>
 public sealed class LoudnessScanner
 {
+    /// <summary>
+    /// Versión de la medida que se guarda ahora: 2 = con pico real (dBTP) y con los archivos mono
+    /// medidos como mono doble. Las medidas sin versión son de BeatTag 1.10 o anterior: su sonoridad
+    /// sigue valiendo, salvo la de los archivos mono (ver <see cref="MonoPorVolverAMedir"/>).
+    /// </summary>
+    public const int VersionActual = 2;
+
+    /// <summary>
+    /// Un pico de muestra a partir de aquí es el tope del decodificador (16 bits): la señal estaba
+    /// recortada y su pico de verdad se desconoce.
+    /// </summary>
+    internal const double PicoRecortado = -0.01;
+
+    /// <summary>
+    /// Lo que se guarda de cada archivo en sonoridad.json. T y V son nuevos y opcionales: las
+    /// entradas antiguas se leen sin ellos, y una versión anterior de BeatTag los ignora. No se
+    /// escriben cuando no hay valor, para no engordar el archivo con nulos.
+    /// </summary>
     private sealed class Entry
     {
         public long M { get; set; }
         public long S { get; set; }
         public double Lufs { get; set; }
         public double Peak { get; set; }
+
+        /// <summary>Pico real (dBTP), o null si no se conoce.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double? T { get; set; }
+
+        /// <summary>Versión de la medida (<see cref="VersionActual"/>), o null si es anterior.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? V { get; set; }
     }
 
     private readonly string _file;
@@ -53,23 +80,74 @@ public sealed class LoudnessScanner
         if (!Stat(path, out var m, out var s)) return null;
         lock (_lock)
             if (_map.TryGetValue(path, out var e) && e.M == m && e.S == s)
-                return new LoudnessResult(e.Lufs, e.Peak, 0);
+                return new LoudnessResult(e.Lufs, e.Peak, 0, e.T);
         return null;
     }
 
     /// <summary>
     /// Actualiza la medida tras haber cambiado el volumen del archivo, sin volver a analizarlo:
-    /// una ganancia conocida desplaza el nivel y el pico en la misma cantidad.
+    /// una ganancia conocida desplaza el nivel y el pico en la misma cantidad. La versión de la
+    /// medida no cambia (la sonoridad de un mono sigue medida como estaba).
     /// </summary>
-    public void Update(string path, double lufs, double peak)
+    public void Update(string path, double lufs, double peak, double? truePeak = null)
     {
         if (!Stat(path, out var m, out var s)) return;
         lock (_lock)
         {
-            _map[path] = new Entry { M = m, S = s, Lufs = lufs, Peak = peak };
+            var version = _map.TryGetValue(path, out var anterior) ? anterior.V : null;
+            _map[path] = new Entry { M = m, S = s, Lufs = lufs, Peak = peak, T = Finito(truePeak), V = version };
             _dirty = true;
         }
     }
+
+    /// <summary>
+    /// La medida tras aplicar <paramref name="db"/> de ganancia a un archivo que medía
+    /// <paramref name="lufs"/>, con pico de muestra <paramref name="pico"/> y pico real
+    /// <paramref name="picoReal"/> (ver <see cref="TrasAjustar"/>).
+    /// </summary>
+    public void Ajustado(string path, double lufs, double pico, double? picoReal, double db)
+    {
+        var (l, p, t) = TrasAjustar(lufs, pico, picoReal, db);
+        Update(path, l, p, t);
+    }
+
+    /// <summary>
+    /// Lo que se guarda tras ajustar sin volver a medir. El nivel se desplaza exactamente la ganancia
+    /// aplicada, y los picos también, porque el audio decodificado escala igual... salvo si estaba
+    /// recortado: con el pico de muestra en el tope del decodificador (≥ −0,01 dBFS) el pico de verdad
+    /// se desconoce. MEDIDO: el 89 % de las canciones ajustadas por BeatTag tenía el pico recortado, y
+    /// el pico guardado tras ajustar se quedaba corto hasta 4,5 dB. En ese caso se guarda el pico en
+    /// el tope y sin pico real, que es lo conservador: no deja subir esa canción sin volver a medirla.
+    /// </summary>
+    internal static (double Lufs, double Pico, double? PicoReal) TrasAjustar(double lufs, double pico, double? picoReal, double db)
+        => pico >= PicoRecortado
+            ? (lufs + db, 0.0, null)
+            : (lufs + db, pico + db, picoReal + db);
+
+    /// <summary>Versión de la medida guardada (null si no hay, o es anterior a las versiones).</summary>
+    internal int? VersionDe(string path)
+    {
+        lock (_lock) return _map.TryGetValue(path, out var e) ? e.V : null;
+    }
+
+    /// <summary>
+    /// Pistas mono cuya medida guardada es anterior al mono doble: hay que volver a medirlas, y
+    /// solo a ellas. Su sonoridad se midió 3,01 LU por debajo de cómo suenan. Las demás medidas
+    /// antiguas siguen valiendo.
+    /// </summary>
+    public HashSet<string> MonoPorVolverAMedir(IEnumerable<(string Ruta, int Canales)> pistas)
+    {
+        var r = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        lock (_lock)
+            foreach (var (ruta, canales) in pistas)
+                if (_map.TryGetValue(ruta, out var e) && MonoSinDoble(e.V, canales)) r.Add(ruta);
+        return r;
+    }
+
+    /// <summary>La regla de <see cref="MonoPorVolverAMedir"/>: un mono medido antes de la versión 2.</summary>
+    internal static bool MonoSinDoble(int? version, int canales) => canales == 1 && (version ?? 1) < VersionActual;
+
+    private static double? Finito(double? v) => v is { } x && double.IsFinite(x) ? x : null;
 
     /// <summary>Mide un archivo (o devuelve lo cacheado). Devuelve null si no se pudo leer.</summary>
     public LoudnessResult? Measure(string path, bool force = false, CancellationToken ct = default)
@@ -89,22 +167,26 @@ public sealed class LoudnessScanner
             using var _ = recurso;
             var fmt = reader.WaveFormat;
             var meter = new LoudnessMeter(fmt.SampleRate, fmt.Channels);
+            // El pico real va en la misma pasada y sobre el mismo búfer: no hay que decodificar dos veces.
+            var picoReal = new TruePeakMeter(fmt.Channels);
             var buf = new float[fmt.SampleRate * fmt.Channels / 4];   // ~250 ms
             int n;
             while ((n = reader.Read(buf, 0, buf.Length)) > 0)
             {
                 ct.ThrowIfCancellationRequested();
                 meter.Add(buf, n);
+                picoReal.Add(buf, n);
             }
 
             var r = meter.GetResult();
             if (!r.Ok) return r;   // silencio: se devuelve pero no se cachea
+            r = r with { TruePeakDb = Finito(picoReal.Db) };
 
             if (Stat(path, out var m, out var s))
             {
                 lock (_lock)
                 {
-                    _map[path] = new Entry { M = m, S = s, Lufs = r.Lufs, Peak = r.PeakDb };
+                    _map[path] = new Entry { M = m, S = s, Lufs = r.Lufs, Peak = r.PeakDb, T = r.TruePeakDb, V = VersionActual };
                     _dirty = true;
                 }
             }
@@ -118,9 +200,14 @@ public sealed class LoudnessScanner
         }
     }
 
-    /// <summary>Mide muchos archivos repartiendo el trabajo entre núcleos.</summary>
+    /// <summary>
+    /// Mide muchos archivos repartiendo el trabajo entre núcleos. Con <paramref name="force"/> se
+    /// vuelven a medir todos; <paramref name="forzar"/> vuelve a medir solo esos (por ejemplo, los
+    /// mono medidos antes del mono doble) y aprovecha lo guardado del resto.
+    /// </summary>
     public async Task MeasureManyAsync(IReadOnlyList<string> paths, bool force,
-        IProgress<(int done, int total, string file)>? progress, CancellationToken ct = default)
+        IProgress<(int done, int total, string file)>? progress, CancellationToken ct = default,
+        IReadOnlySet<string>? forzar = null)
     {
         var hechos = 0;
         await Task.Run(() =>
@@ -133,7 +220,7 @@ public sealed class LoudnessScanner
             };
             Parallel.ForEach(paths, opts, p =>
             {
-                Measure(p, force, ct);
+                Measure(p, force || (forzar?.Contains(p) ?? false), ct);
                 var n = Interlocked.Increment(ref hechos);
                 if (n % 10 == 0 || n == paths.Count) progress?.Report((n, paths.Count, Path.GetFileName(p)));
             });

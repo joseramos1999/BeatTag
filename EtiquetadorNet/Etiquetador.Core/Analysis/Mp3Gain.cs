@@ -15,11 +15,19 @@ public readonly record struct Mp3GainResult(bool Ok, int Steps, int Frames, stri
 }
 
 /// <summary>
-/// Cambia el volumen de un MP3 SIN RECODIFICAR, como hace MP3Gain: cada trama lleva un campo
-/// "global_gain" y basta con sumarle o restarle unidades. No se toca el audio comprimido, así que
-/// no hay pérdida de calidad y el cambio es exactamente reversible (se aplica el inverso).
+/// Cambia el volumen de un MP3 SIN RECODIFICAR, como hace MP3Gain: cada gránulo de cada trama lleva
+/// un campo "global_gain" y basta con sumarle o restarle unidades. No se toca el audio comprimido,
+/// así que no hay pérdida de calidad, y deshacer (aplicar el inverso) devuelve el nivel exacto.
 ///
-/// La contrapartida es que el paso mínimo es 1,5 dB: no se puede afinar más que eso.
+/// Los gránulos SIN audio (part2_3_length = 0: silencio digital, sea cual sea su global_gain) no se
+/// tocan, y los que están por debajo de −200 dBFS se pueden recortar a 0 sin que eso cuente para
+/// rechazar el cambio. MEDIDO en una biblioteca real: el 42 % de los MP3 tiene gránulos vacíos con
+/// global_gain = 0, y por ellos se rechazaba bajar un solo paso en el 1,3 % de los archivos («el
+/// cambio es demasiado grande»), cuando el error de forzarlo quedaba entre −108 y −116 dBFS, igual que
+/// sin recortes. Por eso, tras ir y volver, algún gránulo de silencio puede no quedar idéntico byte a
+/// byte, con una diferencia por debajo de −100 dBFS; el nivel del audio sí vuelve exacto.
+///
+/// La contrapartida de no recodificar es que el paso mínimo es 1,5 dB: no se puede afinar más.
 /// </summary>
 public static class Mp3Gain
 {
@@ -258,15 +266,23 @@ public static class Mp3Gain
             {
                 for (int c = 0; c < canales; c++)
                 {
-                    var bit = cabeceraBits + (g * canales + c) * bloqueBits + antesDelGain;
+                    var bloque = cabeceraBits + (g * canales + c) * bloqueBits;
+                    var bit = bloque + antesDelGain;
                     var pos = si + bit / 8;
                     if (pos + 1 >= b.Length) { error = "trama incompleta"; return tramas; }
+
+                    // part2_3_length: los bits de audio del gránulo. Si es 0, no hay audio (silencio
+                    // digital) y su global_gain no cambia nada de lo que suena: no se toca. Como
+                    // part2_3_length no cambia nunca, ir y volver deja estos gránulos idénticos.
+                    if (LeerBits(b, si, bloque, 12) == 0) continue;
 
                     var actual = LeerByteEnBit(b, si, bit);
                     var nuevo = actual + steps;
                     if (nuevo is < 0 or > 255)
                     {
-                        recortadas++;
+                        // Un gránulo por debajo de GananciaAudible está a menos de −200 dBFS: se recorta
+                        // a 0 si hace falta, pero no cuenta para rechazar el cambio.
+                        if (actual >= GananciaAudible) recortadas++;
                         nuevo = Math.Clamp(nuevo, 0, 255);
                     }
                     if (!ensayo) EscribirByteEnBit(b, si, bit, (byte)nuevo);
@@ -298,6 +314,25 @@ public static class Mp3Gain
             b[frameStart + 38] == 'R' && b[frameStart + 39] == 'I')
             return true;
         return false;
+    }
+
+    /// <summary>
+    /// global_gain mínimo de un gránulo que puede sonar. La amplitud escala con 2^((global_gain − 210)/4):
+    /// con 3 o menos queda por debajo de 2^(−51,75), unos −311 dB, y ni con el mayor valor cuantizado
+    /// que admite el formato (8.206^(4/3), unos +104 dB) pasa de −200 dBFS.
+    /// </summary>
+    internal const int GananciaAudible = 4;
+
+    /// <summary>Lee hasta 16 bits (de más a menos significativo) a partir de un desplazamiento en bits.</summary>
+    private static int LeerBits(byte[] b, int baseByte, int bitOffset, int cuantos)
+    {
+        var r = 0;
+        for (var k = 0; k < cuantos; k++)
+        {
+            var p = bitOffset + k;
+            r = (r << 1) | ((b[baseByte + p / 8] >> (7 - p % 8)) & 1);
+        }
+        return r;
     }
 
     /// <summary>Lee 8 bits a partir de un desplazamiento en bits (puede quedar a caballo entre bytes).</summary>

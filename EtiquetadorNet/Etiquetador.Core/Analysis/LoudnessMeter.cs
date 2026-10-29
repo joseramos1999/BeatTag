@@ -4,7 +4,11 @@ namespace Etiquetador.Core.Analysis;
 /// <param name="Lufs">Sonoridad integrada en LUFS (negativo; -14 es lo típico de streaming).</param>
 /// <param name="PeakDb">Pico de muestra en dBFS (0 = tope; por encima satura).</param>
 /// <param name="Seconds">Duración analizada.</param>
-public readonly record struct LoudnessResult(double Lufs, double PeakDb, double Seconds)
+/// <param name="TruePeakDb">
+/// Pico real en dBTP (ITU-R BS.1770, ver <see cref="TruePeakMeter"/>), o null si no se midió: las
+/// medidas guardadas por versiones anteriores solo tienen el pico de muestra.
+/// </param>
+public readonly record struct LoudnessResult(double Lufs, double PeakDb, double Seconds, double? TruePeakDb = null)
 {
     public bool Ok => !double.IsNaN(Lufs) && !double.IsNegativeInfinity(Lufs);
 }
@@ -54,8 +58,14 @@ public sealed class LoudnessMeter
         }
 
         // Pesos de BS.1770: los canales normales pesan 1; los surround, 1,41. Aquí mono/estéreo.
+        //
+        // Un archivo MONO se mide como «mono doble»: su único canal pesa 2 (+3,01 dB), como
+        // EBUR128_DUAL_MONO en libebur128 y lo que recomienda EBU Tech 3344 para el mono que se
+        // reproduce por dos altavoces. Un programa de DJ envía el mono a la izquierda y a la
+        // derecha, así que suena como un estéreo con los dos canales iguales. Con peso 1 medía
+        // 3,01 LU menos que el mismo contenido en estéreo, y el ajuste lo subía dos pasos de más.
         _weights = new double[_channels];
-        for (int c = 0; c < _channels; c++) _weights[c] = 1.0;
+        for (int c = 0; c < _channels; c++) _weights[c] = _channels == 1 ? 2.0 : 1.0;
 
         _blockSize = (int)(sampleRate * 0.400);
         _hopSize = (int)(sampleRate * 0.100);
