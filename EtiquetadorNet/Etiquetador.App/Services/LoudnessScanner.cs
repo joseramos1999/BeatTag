@@ -133,9 +133,18 @@ public sealed class LoudnessScanner
     private static readonly double PasoReal = 5 * Math.Log10(2);
 
     /// <summary>
-    /// Diferencia de nivel por debajo de la cual dos medidas son del mismo audio. Medir dos veces el
-    /// mismo archivo da el mismo valor; dos copias o versiones distintas de una canción rara vez
-    /// quedan a menos de una décima de un número exacto de pasos.
+    /// Diferencia de nivel por debajo de la cual dos medidas son del mismo audio (o del mismo audio
+    /// con su global_gain cambiado un número exacto de pasos). Medir dos veces el mismo archivo da el
+    /// mismo valor. Tras bajarlo con Mp3Gain no da exactamente lo guardado: el paso de verdad es 1,505
+    /// dB y no 1,5, y si el pico estaba recortado por el decodificador, al bajarlo deja de estarlo y
+    /// aparece algo de energía. MEDIDO en copias de 45 MP3 reales (35 con el pico recortado), bajando
+    /// 1 y 2 pasos: entre −0,011 y +0,016 dB. Y entre la decodificación recortada y la sin recortar de
+    /// una misma canción, hasta 0,067 dB (ver AudioSamples). Una décima cubre las dos cosas.
+    ///
+    /// La contrapartida: otra copia de la canción guardada en la misma ruta pasa por el mismo audio si
+    /// su nivel cae, por casualidad, a menos de una décima de un número exacto de pasos (como mucho,
+    /// una de cada siete). Entonces conserva la ganancia anterior, y lo único que se desvía es el nivel
+    /// original de esa grabación en el cálculo de la referencia.
     /// </summary>
     internal const double ToleranciaMismoAudio = 0.1;
 

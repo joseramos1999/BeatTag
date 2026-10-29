@@ -222,6 +222,7 @@ public class VolumenTopeYCacheTests
             Assert.Equal(-9.5, r!.Value.Lufs, 6);
             Assert.Null(r.Value.TruePeakDb);
             Assert.Null(s.VersionDe(cancion));
+            Assert.Equal(0, r.Value.GananciaAplicada);   // sin G: nada aplicado
 
             s.Update(cancion, -11, -1.9);
             s.Save();
@@ -229,6 +230,7 @@ public class VolumenTopeYCacheTests
             Assert.DoesNotContain("null", texto);
             Assert.DoesNotContain("\"T\"", texto);
             Assert.DoesNotContain("\"V\"", texto);
+            Assert.DoesNotContain("\"G\"", texto);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
@@ -273,6 +275,136 @@ public class VolumenTopeYCacheTests
             Assert.Equal(m.Value.TruePeakDb!.Value - 1.5, otra.Get(wav)!.Value.TruePeakDb!.Value, 9);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // ---------- G: la ganancia que BeatTag ha aplicado, para calcular con el nivel original ----------
+
+    // Se suma en cada ajuste, sobrevive a guardar y leer, Update no la toca y, al volver a cero, no se escribe.
+    [Fact]
+    public void La_ganancia_aplicada_se_suma_al_ajustar_y_se_guarda()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var cancion = Path.Combine(dir, "a.mp3");
+            Mp3Fixture.WriteMinMp3(cancion);
+            var cache = Path.Combine(dir, "sonoridad.json");
+            var s = new LoudnessScanner(cache);
+
+            s.Update(cancion, -9, -0.2, -0.1);
+            Assert.Equal(0, s.Get(cancion)!.Value.GananciaAplicada);
+
+            s.Ajustado(cancion, -9, -0.2, -0.1, -3.0);
+            Assert.Equal(-3.0, s.Get(cancion)!.Value.GananciaAplicada, 9);
+            Assert.Equal(-12.0, s.Get(cancion)!.Value.Lufs, 9);
+
+            s.Ajustado(cancion, -12, -3.2, -3.1, 1.5);
+            s.Update(cancion, -10.5, -1.7, -1.6);
+            Assert.Equal(-1.5, s.Get(cancion)!.Value.GananciaAplicada, 9);
+            s.Save();
+            Assert.Contains("\"G\":-1.5", File.ReadAllText(cache));
+
+            var otra = new LoudnessScanner(cache);
+            Assert.Equal(-1.5, otra.Get(cancion)!.Value.GananciaAplicada, 9);
+            otra.Ajustado(cancion, -10.5, -1.7, -1.6, 1.5);
+            Assert.Equal(0, otra.Get(cancion)!.Value.GananciaAplicada);
+            otra.Save();
+            Assert.DoesNotContain("\"G\"", File.ReadAllText(cache));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Al volver a medir: el mismo audio conserva la ganancia; un número exacto de pasos (el deshacer de
+    // BeatTag, o MP3Gain) se suma; otro audio la pierde.
+    [Theory]
+    [InlineData(-3.0, -12.0, -12.0, -3.0)]      // mismo audio
+    [InlineData(-3.0, -12.0, -11.94, -3.0)]     // a menos de 0,1 dB: el mismo
+    [InlineData(-3.0, -12.0, -10.495, -1.5)]    // un paso más alto: se deshizo uno
+    [InlineData(-3.0, -12.0, -8.99, null)]      // dos pasos: se deshizo todo
+    [InlineData(-3.0, -12.0, -11.4, null)]      // 0,6 dB: es otro audio
+    [InlineData(1.5, -10.0, -11.505, null)]     // una subida deshecha
+    public void Al_volver_a_medir_la_ganancia_sigue_al_audio(double aplicada, double guardado, double medido, double? esperada)
+    {
+        var g = LoudnessScanner.GananciaTrasMedir(aplicada, LoudnessScanner.VersionActual, guardado, medido, canales: 2);
+        if (esperada is { } e) Assert.Equal(e, g!.Value, 9);
+        else Assert.Null(g);
+    }
+
+    [Fact]
+    public void Sin_ganancia_aplicada_o_con_un_mono_antiguo_no_se_inventa_nada()
+    {
+        Assert.Null(LoudnessScanner.GananciaTrasMedir(null, LoudnessScanner.VersionActual, -12, -12, 2));
+        Assert.Null(LoudnessScanner.GananciaTrasMedir(-3, LoudnessScanner.VersionActual, double.NaN, -12, 2));
+        // Un mono medido antes del mono doble sale 3,01 dB más alto al volver a medirlo: no son dos pasos.
+        Assert.Equal(-3.0, LoudnessScanner.GananciaTrasMedir(-3, null, -15, -15 + 10 * Math.Log10(2), canales: 1)!.Value, 9);
+        Assert.Equal(-3.0, LoudnessScanner.GananciaTrasMedir(-3, null, -12, -12, canales: 2)!.Value, 9);
+    }
+
+    // De punta a punta con un archivo de verdad: medir, ajustar, cambiar el audio y volver a medir.
+    [Fact]
+    public void Medir_de_nuevo_conserva_la_ganancia_si_el_audio_es_el_mismo()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var wav = Path.Combine(dir, "tono.wav");
+            var cache = Path.Combine(dir, "sonoridad.json");
+            var paso = Math.Pow(2, -0.25);   // un paso de global_gain en amplitud
+            EscribirTono(wav, 0.3);
+            var s = new LoudnessScanner(cache);
+            var m = s.Measure(wav, force: true)!.Value;
+            Assert.Equal(0, m.GananciaAplicada);
+
+            // BeatTag lo baja un paso (aquí se reescribe el audio a mano) y se vuelve a medir: sigue ajustado.
+            s.Ajustado(wav, m.Lufs, m.PeakDb, m.TruePeakDb, -1.5);
+            EscribirTono(wav, 0.3 * paso);
+            var tras = s.Measure(wav, force: true)!.Value;
+            Assert.Equal(-1.5, tras.GananciaAplicada, 9);
+            Assert.Equal(-1.5, s.Get(wav)!.Value.GananciaAplicada, 9);
+
+            // Se deshace (vuelve al nivel de antes): nada aplicado.
+            EscribirTono(wav, 0.3);
+            Assert.Equal(0, s.Measure(wav, force: true)!.Value.GananciaAplicada);
+
+            // Otro audio en la misma ruta: su nivel original es el que se acaba de medir.
+            var de = s.Measure(wav, force: true)!.Value;
+            s.Ajustado(wav, de.Lufs, de.PeakDb, de.TruePeakDb, -1.5);
+            EscribirTono(wav, 0.2);   // 3,5 dB por debajo: ni el mismo nivel ni un número exacto de pasos
+            Assert.Equal(0, s.Measure(wav, force: true)!.Value.GananciaAplicada);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    private static void EscribirTono(string ruta, double amplitud)
+    {
+        const int fs = 48000;
+        var x = new float[fs * 3 * 2];
+        for (int i = 0; i < fs * 3; i++)
+            x[2 * i] = x[2 * i + 1] = (float)(amplitud * Math.Sin(2 * Math.PI * 997 * i / fs));
+        using var w = new NAudio.Wave.WaveFileWriter(ruta, NAudio.Wave.WaveFormat.CreateIeeeFloatWaveFormat(fs, 2));
+        w.WriteSamples(x, 0, x.Length);
+    }
+
+    // Una grabación que BeatTag bajó con el pico recortado se guarda con el pico en el tope y sin pico
+    // real. Antes de decir que no admite aumento se mide; una recortada de origen no, porque su pico
+    // real no puede ser menor que el de muestra.
+    [Fact]
+    public void Una_bajada_con_el_pico_recortado_se_mide_antes_de_decir_que_no_admite_aumento()
+    {
+        var bajada = new LoudnessRow { FilePath = @"C:\m\a.mp3", Lufs = -14, PeakDb = 0, GananciaAplicada = -3, Target = -11 };
+        var original = new LoudnessRow { FilePath = @"C:\m\b.mp3", Lufs = -14, PeakDb = 0, Target = -11 };
+        Assert.Equal(new[] { bajada }, LoudnessViewModel.SinPicoReal(new[] { bajada, original }));
+        Assert.StartsWith("Falta medir su pico real", bajada.Aviso);
+        Assert.Equal("Sin margen suficiente: aumentarla produciría distorsión", original.Aviso);
+
+        // Medido (−2,6 dBTP), admite recuperar un paso de los dos.
+        var medida = new LoudnessRow { FilePath = @"C:\m\a.mp3", Lufs = -14, PeakDb = -3.0, TruePeakDb = -2.6, GananciaAplicada = -3, Target = -11 };
+        Assert.Equal(1, LoudnessViewModel.PasosAplicables(medida.Gain, medida.PicoDecision));
+        Assert.Empty(LoudnessViewModel.SinPicoReal(new[] { medida }));
+
+        // En nivel no hace falta medir nada (en el modo automático quedan a 0,75 dB o menos).
+        var enNivel = new LoudnessRow { FilePath = @"C:\m\c.mp3", Lufs = -11.5, PeakDb = 0, GananciaAplicada = -3, Target = -11 };
+        Assert.Empty(LoudnessViewModel.SinPicoReal(new[] { enNivel }));
     }
 
     // ---------- V5: los mono medidos antes del mono doble se vuelven a medir, y solo ellos ----------

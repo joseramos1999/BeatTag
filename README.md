@@ -72,8 +72,9 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   identifica.
 - **Volumen**: mide la sonoridad de cada grabación según **EBU R128** y corrige las que se apartan
   más de 1 dB del **nivel común de la biblioteca**: el nivel más alto que alcanza sin distorsión el
-  95 % de tus grabaciones, sin superar su nivel medio (también hay niveles fijos de club, streaming y
-  cine). El audio **no se recodifica** —se ajusta la ganancia del propio MP3, en pasos de 1,5 dB—,
+  95 % de tus grabaciones, sin superar su nivel medio ni quedar más de 3 dB por debajo (también hay
+  niveles fijos de club, streaming y cine). Se calcula con el nivel que tenía cada grabación antes de
+  ajustarla, así que repetir el ajuste no vuelve a tocar lo ya ajustado. El audio **no se recodifica** —se ajusta la ganancia del propio MP3, en pasos de 1,5 dB—,
   así que no hay pérdida de calidad, los archivos mantienen su tamaño y el cambio es reversible. Las
   subidas se limitan con el **pico real** (ITU-R BS.1770) para no distorsionar. Ese ajuste sin
   pérdida solo existe para MP3: un FLAC, un WAV, un AIFF o un M4A **se miden pero no se tocan**.

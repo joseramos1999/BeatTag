@@ -248,6 +248,11 @@ public class VolumenExclusionesTests
         Assert.Equal("Comprobando el pico real de 1 grabación que se aumentaría…", AjusteVolumenSeleccion.TextoComprobandoPicoReal(1));
         Assert.Equal("Comprobando el pico real de 7 grabaciones que se aumentarían…", AjusteVolumenSeleccion.TextoComprobandoPicoReal(7));
 
+        Assert.Equal("", AjusteVolumenSeleccion.TextoPicoRealPendiente(0));
+        Assert.Equal("1 grabación que se aumentaría aún no tiene el pico real medido: pulsa Analizar para medirlo antes de ajustar.",
+                     AjusteVolumenSeleccion.TextoPicoRealPendiente(1));
+        Assert.StartsWith("5 grabaciones que se aumentarían aún no tienen el pico real medido", AjusteVolumenSeleccion.TextoPicoRealPendiente(5));
+
         Assert.Equal("", AjusteVolumenSeleccion.TextoSinMargen(0));
         Assert.Equal(" · 1 sin cambios: su pico real no deja margen para aumentarla", AjusteVolumenSeleccion.TextoSinMargen(1));
         Assert.EndsWith("margen para aumentarlas", AjusteVolumenSeleccion.TextoSinMargen(3));
