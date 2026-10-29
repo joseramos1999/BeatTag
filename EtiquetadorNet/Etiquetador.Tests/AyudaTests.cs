@@ -346,10 +346,13 @@ public class AyudaTests
         Assert.DoesNotContain("esas anotaciones se borran con ellas", volumen);
         Assert.Contains("se parte siempre de la medida del archivo tal como está", volumen);
         // Revisión de las correcciones: el ajuste no hace lo contrario de lo confirmado, las «Por medir»
-        // no cuentan, los ajustes de versiones anteriores no quedaron anotados y «Limpiar» vacía la tabla.
+        // van aparte en el resumen y fuera de la referencia, los ajustes de versiones anteriores no
+        // quedaron anotados y «Limpiar» vacía la tabla.
         Assert.Contains("ahora requiere el ajuste contrario", volumen);
         Assert.Contains("ahora requiere el ajuste contrario", Etiquetador.App.ViewModels.AjusteVolumenSeleccion.TextoSentidoContrario(1));
-        Assert.Contains("no la cuenta en el resumen ni en la referencia automática", volumen);
+        Assert.Contains("la cuenta aparte en el resumen, no la usa para calcular la referencia automática", volumen);
+        Assert.DoesNotContain("no la cuenta en el resumen", volumen);
+        Assert.Contains("por medir", Etiquetador.App.ViewModels.AjusteVolumenSeleccion.TextoResumen(10, 9, 0, 0, 0, porMedir: 1));
         Assert.Contains("Los ajustes hechos con una versión anterior de BeatTag no quedaron anotados", volumen);
         Assert.Contains("la tabla de esta pestaña queda vacía hasta que vuelvas a pulsar Analizar", volumen);
     }

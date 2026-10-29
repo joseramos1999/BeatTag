@@ -325,6 +325,11 @@ public class VolumenExclusionesTests
         Assert.Equal("6 con el nivel correcto · 1 por debajo · 0 por encima · 3 por medir. 1 requiere ajuste. "
                      + "Las que están por medir han cambiado desde que se midieron: pulsa Analizar para volver a medirlas.",
                      AjusteVolumenSeleccion.TextoResumen(10, 6, 1, 0, 1, porMedir: 3));
+        // Todas por medir (el disco de la música se ha desconectado tras analizar): no hay «demás».
+        Assert.Equal("Las 3 grabaciones han cambiado desde que se midieron: pulsa Analizar para volver a medirlas.",
+                     AjusteVolumenSeleccion.TextoResumen(3, 0, 0, 0, 0, porMedir: 3));
+        Assert.Equal("La grabación ha cambiado desde que se midió: pulsa Analizar para volver a medirla.",
+                     AjusteVolumenSeleccion.TextoResumen(1, 0, 0, 0, 0, porMedir: 1));
 
         Assert.Equal("", AjusteVolumenSeleccion.TextoSentidoContrario(0));
         Assert.Equal(" · 1 sin cambios: había cambiado desde el análisis y ahora requiere el ajuste contrario "

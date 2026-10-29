@@ -186,11 +186,16 @@ public static class AjusteVolumenSeleccion
     /// El resumen de la tabla: cuántas están en nivel, por debajo y por encima, y cuántas se desvían
     /// más del umbral de ajuste. Con el umbral igual a la banda «Correcto», las que requieren ajuste
     /// son las que están por debajo o por encima. Las <paramref name="porMedir"/> han cambiado desde
-    /// que se midieron: van aparte y no cuentan en ninguna de las otras cifras.
+    /// que se midieron: van aparte y no cuentan en ninguna de las otras cifras. Si lo están todas, no
+    /// hay otras cifras que dar (por ejemplo, tras desconectarse el disco de la música).
     /// </summary>
     public static string TextoResumen(int total, int correctas, int bajas, int altas, int requierenAjuste, int porMedir = 0)
     {
         if (total == 0) return "";
+        if (porMedir >= total)
+            return total == 1
+                ? "La grabación ha cambiado desde que se midió: pulsa Analizar para volver a medirla."
+                : $"Las {total} grabaciones han cambiado desde que se midieron: pulsa Analizar para volver a medirlas.";
         if (requierenAjuste == 0 && porMedir == 0)
             return total == 1 ? "El nivel de la grabación analizada es correcto." : $"El nivel es uniforme en las {total} grabaciones analizadas.";
         var cifras = $"{correctas} con el nivel correcto · {bajas} por debajo · {altas} por encima"

@@ -386,6 +386,8 @@ public class VolumenRevisionFinalTests : IDisposable
         motor.Loudness.Update(a, -16, -8, -7);
         motor.Loudness.Save();
         vm.Rows.Add(Fila(a, -16, -8, -7, vm.Target));
+        vm.Modo = "Nivel de plataformas de streaming";   // rehace la tabla y el resumen
+        Assert.NotEqual("", vm.Resumen);
         vm.Rows[0].Marcar(true);
         Assert.Single(vm.ParaAjustar());
 
@@ -396,7 +398,7 @@ public class VolumenRevisionFinalTests : IDisposable
         Assert.Empty(vm.Rows);
         Assert.Empty(vm.ParaAjustar());
         Assert.Equal("", vm.Resumen);
-        Assert.Contains("Pulsa Analizar", vm.Status);
+        Assert.StartsWith("Las mediciones se han borrado al limpiar la carpeta de datos", vm.Status);
     }
 
     // ---------------------------------------------------------------------------------------------
