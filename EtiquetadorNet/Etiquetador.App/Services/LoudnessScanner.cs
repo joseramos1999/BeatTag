@@ -199,13 +199,20 @@ public sealed class LoudnessScanner
     /// tamaño <paramref name="mAntes"/> y <paramref name="sAntes"/>), se desplaza como al ajustar (ver
     /// <see cref="TrasAjustar"/>) y la ganancia aplicada se pone al día con los pasos que se conocen,
     /// sin depender de volver a medir ni de la tolerancia de <see cref="ToleranciaMismoAudio"/>. Si ya
-    /// no valía, se deja: al volver a medirla se decide con el audio. Devuelve si la puso al día.
+    /// no valía, se deja caducada: al volver a medirla se decide con el audio. Devuelve si la puso al día.
     ///
     /// A la ganancia aplicada solo se suma <paramref name="dbAnotados"/>: lo que deshace ajustes que la
     /// anotaron. BeatTag 1.10 ajustaba sin anotarla (dejaba la medida desplazada y sin G). Caso visto en
     /// revisión: un MP3 a −10,76 LUFS bajado 2 pasos con 1.10 y deshecho después de actualizar quedaba
     /// con +3 dB «aplicados» y un nivel original calculado de −13,76; el siguiente «Ajustar» automático
     /// partía de una referencia equivocada, y el dato se guardaba en volumen-aplicado.json.
+    ///
+    /// Con la medida caducada pasaba lo mismo por otro camino: al volver a medir,
+    /// <see cref="GananciaTrasMedir"/> suma a la ganancia todos los pasos de diferencia con lo guardado.
+    /// Caduca si otro programa escribe el archivo, tras «Limpiar carpeta de datos» o al recuperar la
+    /// ganancia de volumen-aplicado.json. Por eso, si la entrada tiene ganancia, la parte no anotada se
+    /// suma también a su nivel guardado, sin tocar la fecha ni el tamaño: así solo cuentan los pasos
+    /// anotados y los cambios ajenos.
     /// </summary>
     /// <param name="ruta">El archivo.</param>
     /// <param name="mAntes">Fecha de modificación justo antes del deshacer.</param>
@@ -218,7 +225,14 @@ public sealed class LoudnessScanner
         if (!double.IsFinite(dbAnotados)) dbAnotados = 0;
         lock (_lock)
         {
-            if (!_map.TryGetValue(ruta, out var e) || e.M != mAntes || e.S != sAntes) return false;
+            if (!_map.TryGetValue(ruta, out var e)) return false;
+            if (e.M != mAntes || e.S != sAntes)
+            {
+                // Caducada: se sigue volviendo a medir, pero los pasos no anotados se llevan a la medida
+                // guardada para que GananciaTrasMedir no los sume a la ganancia.
+                if (e.G != null && db != dbAnotados) { e.Lufs += db - dbAnotados; _dirty = true; }
+                return false;
+            }
             var (l, p, t) = TrasAjustar(e.Lufs, e.Peak, e.T, db);
             _map[ruta] = new Entry
             {

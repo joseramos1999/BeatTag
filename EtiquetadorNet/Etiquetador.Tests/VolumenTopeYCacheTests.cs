@@ -497,6 +497,50 @@ public class VolumenTopeYCacheTests
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
+    // El mismo caso con la medida caducada antes de deshacer: otro programa ha escrito el archivo, o se
+    // ha pulsado «Limpiar carpeta de datos». Reajustar no la pone al día, y al volver a medir se sumaban
+    // a la ganancia también los 2 pasos de 1.10: quedaba en +3 y el nivel original, 3 dB por debajo del
+    // de verdad. Ahora esos pasos se llevan a la medida guardada y la ganancia vuelve a 0.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Deshacer_con_la_medida_caducada_no_inventa_ganancia_aplicada(bool limpiar)
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var wav = Path.Combine(dir, "tono.wav");
+            var paso = Math.Pow(2, -0.25);
+            EscribirTono(wav, 0.3);
+            var s = new LoudnessScanner(Path.Combine(dir, "sonoridad.json"));
+            var m = s.Measure(wav, force: true)!.Value;
+
+            // 1.10 lo baja 2 pasos sin anotarlo; esta versión lo sube 1 y lo anota.
+            EscribirTono(wav, 0.3 * paso * paso);
+            s.Update(wav, m.Lufs - 3, m.PeakDb - 3, m.TruePeakDb - 3);
+            EscribirTono(wav, 0.3 * paso);
+            s.Ajustado(wav, m.Lufs - 3, m.PeakDb - 3, m.TruePeakDb - 3, 1.5);
+            Assert.Equal(1.5, s.Get(wav)!.Value.GananciaAplicada, 9);
+
+            if (limpiar) s.Clear();
+            else File.SetLastWriteTimeUtc(wav, File.GetLastWriteTimeUtc(wav).AddMinutes(-5));   // otro programa lo escribe
+            Assert.Null(s.Get(wav));
+
+            // Se deshacen los dos: el nuevo (−1,5 dB anotados) y el de 1.10 (+3 dB sin anotar).
+            var antes = SelloArchivo.De(wav);
+            EscribirTono(wav, 0.3 * paso * paso);
+            Assert.False(s.Reajustar(wav, antes.M, antes.S, -1.5, -1.5));
+            antes = SelloArchivo.De(wav);
+            EscribirTono(wav, 0.3);
+            Assert.False(s.Reajustar(wav, antes.M, antes.S, 3.0, 0));
+
+            var tras = s.Measure(wav)!.Value;
+            Assert.Equal(0, tras.GananciaAplicada, 9);
+            Assert.InRange(tras.Lufs - tras.GananciaAplicada - m.Lufs, -0.02, 0.02);   // el nivel original de verdad
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
     // El caso de la revisión: en el equipo viejo se bajó un paso un WAV medido a −10,46 (el espejo queda
     // con G −1,5); en el equipo nuevo se analizó antes de restaurar la copia, así que sonoridad.json
     // tiene la ruta a −11,96 y sin G. Antes mandaba sonoridad.json: la ganancia se perdía y el primer
