@@ -580,7 +580,10 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 Status = $"Ajustando {i} de {objetivo.Count}…  {fila.FileName}";
 
                 // Una subida sin pico real conocido lo mide antes (decodifica: fuera de la interfaz).
-                var decision = await Task.Run(() => Decidir(fila, p => _engine.Loudness.Measure(p, force: true, ct)), ct);
+                // Cancelar a mitad de esa medida es como cancelar entre dos canciones.
+                DecisionAjuste decision;
+                try { decision = await Task.Run(() => Decidir(fila, p => _engine.Loudness.Measure(p, force: true, ct)), ct); }
+                catch (OperationCanceledException) { break; }
                 var pasos = decision.Pasos;
                 if (pasos == 0)
                 {
@@ -630,13 +633,31 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
             if (sinHistorial) _engine.Logger.Err($"Volumen: detenido tras {hechas} por no poder escribir el manifiesto de deshacer");
             _engine.Logger.Sum($"Volumen: ajustadas {hechas}, parciales {parciales}, sin margen por el pico real {sinMargen}, fallidas {fallidas}");
         }
-        catch (OperationCanceledException) { Status = $"Ajuste cancelado ({hechas} aplicadas)."; }
+        catch (OperationCanceledException)
+        {
+            // Lo ya ajustado tiene que verse con su nivel nuevo: con la medida anterior en la tabla,
+            // un segundo «Ajustar» volvería a cambiarlo.
+            GuardarYRecargarTrasInterrupcion(hechas);
+            Status = hechas == 1 ? "Ajuste cancelado (1 aplicada)." : $"Ajuste cancelado ({hechas} aplicadas).";
+        }
         catch (Exception e)
         {
+            GuardarYRecargarTrasInterrupcion(hechas);
             Status = "Error durante el ajuste: " + e.Message;
             _engine.Logger.Error("Volumen: fallo al ajustar", e);
         }
         finally { IsBusy = false; _cts?.Dispose(); _cts = null; }
+    }
+
+    private void GuardarYRecargarTrasInterrupcion(int hechas)
+    {
+        if (hechas == 0) return;
+        try
+        {
+            _engine.Loudness.Save();
+            RecargarDesdeCache(recalcularReferencia: false);
+        }
+        catch (Exception e) { _engine.Logger.Error("Volumen: no se pudo rehacer la tabla tras interrumpir el ajuste", e); }
     }
 
     /// <summary>
