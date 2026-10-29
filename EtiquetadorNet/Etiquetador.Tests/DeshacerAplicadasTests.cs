@@ -36,8 +36,10 @@ public class DeshacerAplicadasTests : IDisposable
         var musica = Path.Combine(_dir, "musica");
         Directory.CreateDirectory(musica);
         var p = Path.Combine(musica, nombre);
-        Mp3Fixture.WriteMinMp3(p, tramas);
-        if (tramas > 25) Assert.True(Mp3Gain.Apply(p, +6).Ok);   // margen para subir y bajar el volumen
+        // Con más de 25 tramas, para ajustar el volumen: tramas con audio y margen para subir y bajar.
+        // Las de WriteMinMp3 no llevan audio en ningún gránulo y Mp3Gain no les cambia ni un byte.
+        if (tramas > 25) File.WriteAllBytes(p, Mp3GainSintetico.Tramas(tramas, _ => 150));
+        else Mp3Fixture.WriteMinMp3(p, tramas);
         Mp3Fixture.SetTags(p, "Monaco", "Bad Bunny", null);
         return p;
     }
@@ -66,7 +68,9 @@ public class DeshacerAplicadasTests : IDisposable
     /// <summary>Un ajuste de volumen anotado como lo hace la pestaña Volumen.</summary>
     private static string Volumen(string mp3, int pasos)
     {
+        var antes = File.ReadAllBytes(mp3);
         Assert.True(Mp3Gain.Apply(mp3, pasos).Ok);
+        Assert.NotEqual(antes, File.ReadAllBytes(mp3));   // el ajuste cambia el archivo de verdad
         var cambio = pasos >= 0 ? FieldChange.Num(0, (uint)pasos) : FieldChange.Num((uint)(-pasos), 0);
         return JsonSerializer.Serialize(new UndoRecord
         {

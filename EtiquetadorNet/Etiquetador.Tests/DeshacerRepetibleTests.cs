@@ -19,16 +19,21 @@ public class DeshacerRepetibleTests
     private static string Linea(UndoRecord r) => JsonSerializer.Serialize(r);
 
     /// <summary>
-    /// Un MP3 con margen para subir y bajar (global_gain 6 en todas las tramas) que hace de
+    /// Un MP3 con margen para subir y bajar (global_gain 150 en todas las tramas) que hace de
     /// «original», y el mismo archivo con el ajuste aplicado como lo hace la pestaña Volumen.
     /// Devuelve los bytes originales y la línea de manifiesto con el formato de LoudnessViewModel.
+    ///
+    /// Las tramas llevan audio: antes salía de Mp3Fixture.WriteMinMp3, con todos los gránulos vacíos,
+    /// y desde que Mp3Gain no toca los gránulos sin audio ni el ajuste ni el deshacer cambiaban un byte.
+    /// Las comparaciones con el original pasaban aunque el deshacer volviera a aplicar el volumen, que
+    /// es justo lo que vigilan. Por eso se comprueba que el ajuste cambia el archivo.
     /// </summary>
     private static (byte[] Original, string Linea) AjustarVolumen(string mp3, int pasos)
     {
-        Mp3Fixture.WriteMinMp3(mp3, frames: 30);
-        Assert.True(Mp3Gain.Apply(mp3, +6).Ok);           // nivel de partida con margen
+        File.WriteAllBytes(mp3, Mp3GainSintetico.Tramas(30, _ => 150));
         var original = File.ReadAllBytes(mp3);
         Assert.True(Mp3Gain.Apply(mp3, pasos).Ok);         // el ajuste de la pestaña Volumen
+        Assert.NotEqual(original, File.ReadAllBytes(mp3));
         var cambio = pasos >= 0 ? FieldChange.Num(0, (uint)pasos) : FieldChange.Num((uint)(-pasos), 0);
         var rec = new UndoRecord
         {

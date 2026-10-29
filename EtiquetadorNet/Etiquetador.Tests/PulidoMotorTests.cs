@@ -228,10 +228,12 @@ public class PulidoMotorTests
             var paths = new AppPaths(dir);
             Directory.CreateDirectory(paths.UndoDir);
             var mp3 = Path.Combine(dir, "Burna Boy - Last Last.mp3");
-            Mp3Fixture.WriteMinMp3(mp3, frames: 30);
-            Assert.True(Mp3Gain.Apply(mp3, +6).Ok);
+            // Tramas con audio: con las de WriteMinMp3 (gránulos vacíos) Mp3Gain no cambia ni un byte, y
+            // la prueba pasaría aunque el reintento repitiera el volumen.
+            File.WriteAllBytes(mp3, Mp3GainSintetico.Tramas(30, _ => 150));
             var original = File.ReadAllBytes(mp3);
             Assert.True(Mp3Gain.Apply(mp3, -2).Ok);   // la pestaña Volumen baja 3 dB
+            Assert.NotEqual(original, File.ReadAllBytes(mp3));
 
             var mf = Path.Combine(paths.UndoDir, "run_20261009_210831.jsonl");
             File.WriteAllText(mf, Linea(new UndoRecord
