@@ -59,6 +59,13 @@ public sealed partial class LoudnessRow : ObservableObject
     /// <summary>Objetivo con el que se calculó la ganancia.</summary>
     public double Target { get; init; }
 
+    /// <summary>
+    /// La medida de la fila ya no vale para el archivo: ha cambiado desde que se midió (un deshacer,
+    /// otro programa) y la fila conserva los valores de antes. No entra en el ajuste hasta volver a
+    /// analizarla: con el nivel y el pico de antes, una subida podía saturar.
+    /// </summary>
+    public bool MedidaCaducada { get; init; }
+
     public string LufsText => $"{Lufs:0.0}";
     public string PeakText => $"{PicoDecision:0.0}";
 
@@ -74,6 +81,7 @@ public sealed partial class LoudnessRow : ObservableObject
 
     /// <summary>Situación de la grabación respecto al nivel de referencia.</summary>
     public string Estado =>
+        MedidaCaducada ? "Por medir" :
         EnNivel ? "Correcto" :
         Gain > 3 ? "Muy bajo" :
         Gain > 0 ? "Bajo" :
@@ -81,7 +89,7 @@ public sealed partial class LoudnessRow : ObservableObject
 
     /// <summary>Corrección que necesitaría para alcanzar el nivel de referencia.</summary>
     public string Accion =>
-        EnNivel ? "—"
+        MedidaCaducada || EnNivel ? "—"
         : Gain > 0 ? $"Aumentar {Gain:0.0} dB" : $"Reducir {-Gain:0.0} dB";
 
     /// <summary>Si al aplicar esa ganancia el pico se pasaría de 0 dBFS (saturaría).</summary>
@@ -100,7 +108,8 @@ public sealed partial class LoudnessRow : ObservableObject
     /// también en filas «Correcto» con el pico alto, que nadie iba a tocar.
     /// </summary>
     public string Aviso =>
-        !Ajustable ? "Se mide, pero no se ajusta: solo los MP3 admiten el cambio sin pérdida"
+        MedidaCaducada ? "Ha cambiado desde que se midió: pulsa Analizar para volver a medirla"
+        : !Ajustable ? "Se mide, pero no se ajusta: solo los MP3 admiten el cambio sin pérdida"
         : Exclusion == ExclusionVolumen.Carpeta ? "Excluida del ajuste: su carpeta está en las exclusiones"
         : Exclusion == ExclusionVolumen.Cancion ? "Excluida del ajuste"
         : Gain > LoudnessViewModel.UmbralAjuste && PicoDesconocidoTrasBajar
@@ -115,9 +124,10 @@ public sealed partial class LoudnessRow : ObservableObject
 
     /// <summary>
     /// Requiere ajuste y se puede ajustar: MP3, desviada más del umbral y con algún paso que aplicar
-    /// (una que solo podría subir y no tiene margen se queda fuera). Es el criterio de siempre.
+    /// (una que solo podría subir y no tiene margen se queda fuera). Es el criterio de siempre, con
+    /// una medida que siga valiendo para el archivo.
     /// </summary>
-    public bool Candidata => Ajustable && Math.Abs(Gain) > LoudnessViewModel.UmbralAjuste
+    public bool Candidata => !MedidaCaducada && Ajustable && Math.Abs(Gain) > LoudnessViewModel.UmbralAjuste
                              && LoudnessViewModel.PasosAplicables(Gain, PicoDecision) != 0;
 
     /// <summary>Excluida del ajuste por su carpeta o por ella misma (se mide igual).</summary>
@@ -150,6 +160,7 @@ public sealed partial class LoudnessRow : ObservableObject
     }
 
     public IBrush StateBrush =>
+        MedidaCaducada ? Brushes.Transparent :
         EnNivel ? OkBrush :
         Gain < 0 ? AltaBrush : BajaBrush;
 }
@@ -164,7 +175,15 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     private readonly AppEngine _engine;
     private CancellationTokenSource? _cts;
 
-    public ObservableCollection<LoudnessRow> Rows { get; } = new();
+    /// <summary>
+    /// Las filas, que se rehacen enteras con un solo aviso a la tabla (ver <see cref="ListaEnBloque{T}"/>).
+    /// Cambiar el nivel, excluir o quitar una exclusión pueden mover la referencia y rehacer la tabla:
+    /// antes se vaciaba y se volvía a llenar fila a fila, y con 20.000 filas agrupadas por carpeta eso
+    /// bloqueaba la pestaña casi un segundo (0,7-1,1 s medidos sin dibujar la tabla).
+    /// </summary>
+    private readonly ListaEnBloque<LoudnessRow> _filas = new();
+
+    public ObservableCollection<LoudnessRow> Rows => _filas;
     public DataGridCollectionView RowsView { get; }
 
     /// <summary>
@@ -335,11 +354,9 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     private void Recalcular()
     {
         if (Rows.Count == 0) return;
-        var previas = Rows.ToList();
         var excl = Exclusiones();
-        Rows.Clear();
-        foreach (var r in previas)
-            Rows.Add(Fila(r.FileName, r.Folder, r.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, r.GananciaAplicada, excl));
+        _filas.Reemplazar(Rows.Select(r => Fila(r.FileName, r.Folder, r.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb,
+                                                r.GananciaAplicada, excl, r.MedidaCaducada)).ToList());
         AplicarFiltro();
         Resumir();
     }
@@ -380,14 +397,15 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
 
             await _engine.Loudness.MeasureManyAsync(rutas, force, prog, _cts.Token, mono);
 
-            Rows.Clear();
             var excl = Exclusiones();
+            var filas = new List<LoudnessRow>(tracks.Count);
             foreach (var t in tracks)
             {
                 var m = _engine.Loudness.Get(t.FilePath);
                 if (m is not { Ok: true } r) continue;
-                Rows.Add(Fila(t.FileName, t.Folder, t.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, r.GananciaAplicada, excl));
+                filas.Add(Fila(t.FileName, t.Folder, t.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, r.GananciaAplicada, excl));
             }
+            _filas.Reemplazar(filas);
             RefrescarListaExclusiones();   // ya se sabe qué canciones excluidas siguen en la biblioteca
 
             // En el modo automático la referencia sale de la propia música, así que hasta ahora no
@@ -497,30 +515,71 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     internal static bool EsParcial(double ganancia, int pasos)
         => ganancia > 0 && ganancia - pasos * Mp3Gain.DbPerStep > Mp3Gain.DbPerStep / 2;
 
-    /// <summary>Lo que se va a aplicar a una grabación, con los picos de los que se partió.</summary>
+    /// <summary>Lo que se va a aplicar a una grabación, con la medida de la que se partió.</summary>
     /// <param name="Pasos">Pasos de 1,5 dB (0: no se toca).</param>
+    /// <param name="Lufs">
+    /// Nivel del archivo antes del ajuste: el de su medida vigente, que no tiene por qué ser el de la
+    /// fila (ver <see cref="Decidir"/>).
+    /// </param>
     /// <param name="PicoMuestra">Pico de muestra antes del ajuste.</param>
-    /// <param name="PicoReal">Pico real antes del ajuste (null si no se pudo medir).</param>
-    /// <param name="Medida">Hubo que medir el pico real en ese momento.</param>
-    internal readonly record struct DecisionAjuste(int Pasos, double PicoMuestra, double? PicoReal, bool Medida);
+    /// <param name="PicoReal">Pico real antes del ajuste (null si no se conoce).</param>
+    /// <param name="Medida">Hubo que medir el archivo en ese momento.</param>
+    /// <param name="NoSePudoMedir">
+    /// Hacía falta medirlo y no se pudo (movido, renombrado, borrado o ilegible): no se toca, y cuenta
+    /// como un fallo, no como falta de margen.
+    /// </param>
+    internal readonly record struct DecisionAjuste(int Pasos, double Lufs, double PicoMuestra, double? PicoReal, bool Medida,
+                                                   bool NoSePudoMedir = false);
 
     /// <summary>
-    /// Última barrera antes de escribir: ninguna subida se aplica sin el pico real. Si la grabación
-    /// iba a subir y su pico real no se conoce, se mide en ese momento con <paramref name="medir"/>
-    /// (decodifica el archivo: hay que llamarlo fuera del hilo de la interfaz) y los pasos se
-    /// recalculan con él; si no se puede medir, no se sube. Bajar no depende del pico.
+    /// Última barrera antes de escribir. Decide con la medida del archivo TAL COMO ESTÁ AHORA, no con
+    /// la de la fila: la guardada (<paramref name="guardada"/>) si sigue valiendo para su fecha y su
+    /// tamaño, y si no, una nueva (<paramref name="medir"/>, que decodifica el archivo: hay que
+    /// llamarlo fuera del hilo de la interfaz). Ninguna subida se aplica sin el pico real: si no se
+    /// conoce, se mide en ese momento. Si hace falta medir y no se puede, no se toca.
+    ///
+    /// POR QUÉ. Antes solo se medía si la fila no tenía pico real, y la fila podía no ser ya la del
+    /// archivo: las filas se rehacen con sus valores al cambiar el nivel, y el deshacer de Enriquecer
+    /// cambia el volumen sin que la pestaña se entere. Caso visto en revisión: un MP3 a −10,0 LUFS y
+    /// −0,3 dBTP se baja 2 pasos (la fila queda en −13,0 y −3,3), «Deshacer última» lo devuelve a
+    /// −10,0 y, sin volver a analizar, se elige «Nivel de club». Con la fila se aplicaba +1 paso: el
+    /// archivo acababa a −8,5 LUFS y +1,2 dBTP, recortado al reproducir. Con la medida vigente está a
+    /// 1 dB de la referencia y no se toca.
     /// </summary>
-    internal static DecisionAjuste Decidir(LoudnessRow fila, Func<string, LoudnessResult?> medir)
+    internal static DecisionAjuste Decidir(LoudnessRow fila, Func<string, LoudnessResult?> guardada, Func<string, LoudnessResult?> medir)
     {
-        var pasos = PasosAplicables(fila.Gain, fila.PicoDecision);
-        if (pasos <= 0 || fila.TruePeakDb != null)
-            return new DecisionAjuste(pasos, fila.PeakDb, fila.TruePeakDb, false);
+        var medida = false;
+        if (guardada(fila.FilePath) is not { Ok: true } m)
+        {
+            if (medir(fila.FilePath) is not { Ok: true } nueva) return NoSePudoMedir(fila);
+            m = nueva;
+            medida = true;
+        }
 
-        var m = medir(fila.FilePath);
-        if (m is not { Ok: true, TruePeakDb: { } real } medida)
-            return new DecisionAjuste(0, fila.PeakDb, null, true);
-        var pico = Math.Max(real, medida.PeakDb);
-        return new DecisionAjuste(PasosAplicables(fila.Gain, pico), medida.PeakDb, real, true);
+        // Una subida sin pico real: se mide (una medida recién hecha ya lo trae).
+        if (fila.Target - m.Lufs > UmbralAjuste && m.TruePeakDb == null)
+        {
+            if (medida || medir(fila.FilePath) is not { Ok: true, TruePeakDb: not null } conPico) return NoSePudoMedir(fila);
+            m = conPico;
+            medida = true;
+        }
+        return new DecisionAjuste(PasosHasta(fila.Target, m), m.Lufs, m.PeakDb, m.TruePeakDb, medida);
+    }
+
+    private static DecisionAjuste NoSePudoMedir(LoudnessRow fila)
+        => new(0, fila.Lufs, fila.PeakDb, fila.TruePeakDb, Medida: true, NoSePudoMedir: true);
+
+    /// <summary>
+    /// Pasos para llevar una medida a <paramref name="referencia"/>: ninguno si ya está dentro de la
+    /// banda «Correcto» (<see cref="UmbralAjuste"/>), y las subidas limitadas por el pico, el real si
+    /// se conoce (ver <see cref="PasosAplicables"/>).
+    /// </summary>
+    private static int PasosHasta(double referencia, LoudnessResult m)
+    {
+        var ganancia = referencia - m.Lufs;
+        if (Math.Abs(ganancia) <= UmbralAjuste) return 0;
+        var pico = m.TruePeakDb is { } t ? Math.Max(t, m.PeakDb) : m.PeakDb;
+        return PasosAplicables(ganancia, pico);
     }
 
     /// <summary>
@@ -559,7 +618,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 Status = $"{texto}  {p.done} de {p.total}";
             });
             await _engine.Loudness.MeasureManyAsync(faltan.Select(r => r.FilePath).ToList(), force: true, prog, ct);
-            RecargarDesdeCache(recalcularReferencia: true);
+            RecargarDesdeCache(recalcularReferencia: true, await MedidasGuardadasAsync());
         }
     }
 
@@ -616,7 +675,7 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         var manifiesto = _engine.Paths.NuevoManifiesto();
         _engine.Logger.Head($"Volumen: ajustando {objetivo.Count} grabaciones (referencia {Target:0.0} LUFS)");
 
-        int hechas = 0, parciales = 0, fallidas = 0, sinMargen = 0, i = 0;
+        int hechas = 0, parciales = 0, fallidas = 0, sinMargen = 0, enNivel = 0, sinLeer = 0, i = 0;
         var sinHistorial = false;
         try
         {
@@ -628,21 +687,33 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                 Progress = i * 100.0 / objetivo.Count;
                 Status = $"Ajustando {i} de {objetivo.Count}…  {fila.FileName}";
 
-                // Una subida sin pico real conocido lo mide antes (decodifica: fuera de la interfaz).
-                // Cancelar a mitad de esa medida es como cancelar entre dos canciones.
+                // Con la medida vigente del archivo; si hay que medirlo (ha cambiado, o va a subir sin
+                // pico real conocido) se decodifica fuera de la interfaz. Cancelar a mitad de esa
+                // medida es como cancelar entre dos canciones.
                 DecisionAjuste decision;
-                try { decision = await Task.Run(() => Decidir(fila, p => _engine.Loudness.Measure(p, force: true, ct)), ct); }
+                try
+                {
+                    decision = await Task.Run(() => Decidir(fila, _engine.Loudness.Get,
+                                                            p => _engine.Loudness.Measure(p, force: true, ct)), ct);
+                }
                 catch (OperationCanceledException) { break; }
+                if (decision.NoSePudoMedir)
+                {
+                    sinLeer++;
+                    _engine.Logger.Err($"Volumen: no se pudo leer '{fila.FileName}' para medirla antes de ajustarla; se deja como estaba");
+                    continue;
+                }
                 var pasos = decision.Pasos;
+                var ganancia = fila.Target - decision.Lufs;
                 if (pasos == 0)
                 {
-                    if (fila.Gain > 0) sinMargen++;
+                    if (Math.Abs(ganancia) <= UmbralAjuste) enNivel++;   // había cambiado y ya no lo requiere
+                    else if (ganancia > 0) sinMargen++;
                     continue;
                 }
 
                 var sello = SelloArchivo.De(fila.FilePath);   // la huella y la identificación siguen valiendo
                 var res = await Task.Run(() => Mp3Gain.Apply(fila.FilePath, pasos), ct);
-                if (res.Ok) _engine.VolumenAjustado(fila.FilePath, sello);
                 if (!res.Ok)
                 {
                     fallidas++;
@@ -650,9 +721,16 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                     continue;
                 }
 
+                // El archivo ya ha cambiado, pase lo que pase después con el historial: la medida se
+                // pone al día ahora, sin volver a analizarlo (con el pico en el tope y sin pico real si
+                // estaba recortado, ver LoudnessScanner.TrasAjustar). Antes iba detrás del manifiesto,
+                // y si este fallaba la fila volvía con el nivel de antes, marcada: un segundo «Ajustar»
+                // le aplicaba los mismos pasos otra vez, y la ganancia no quedaba anotada.
+                _engine.VolumenAjustado(fila.FilePath, sello);
+                _engine.Loudness.Ajustado(fila.FilePath, decision.Lufs, decision.PicoMuestra, decision.PicoReal, res.Db);
                 hechas++;
                 _marcasAMano.Remove(fila.FilePath);   // ya ajustada: su casilla vuelve a la regla de siempre
-                if (EsParcial(fila.Gain, pasos)) parciales++;
+                if (EsParcial(ganancia, pasos)) parciales++;
 
                 // El ajuste se anuncia como reversible. Si el historial no se puede escribir, esa
                 // promesa deja de ser cierta a partir de aquí, así que se para: seguir tocando
@@ -662,25 +740,24 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
                     sinHistorial = true;
                     break;
                 }
-
-                // El archivo ha cambiado: se actualiza la medida sin volver a analizarlo (con el pico
-                // en el tope y sin pico real si estaba recortado, ver LoudnessScanner.TrasAjustar).
-                _engine.Loudness.Ajustado(fila.FilePath, fila.Lufs, decision.PicoMuestra, decision.PicoReal, res.Db);
                 _engine.Logger.Detail($"    {fila.FileName}: {res.Db:+0.0;-0.0} dB ({res.Frames} tramas)");
             }
 
             _engine.Loudness.Save();
-            RecargarDesdeCache(recalcularReferencia: false);
+            RecargarDesdeCache(recalcularReferencia: false, await MedidasGuardadasAsync());
 
             Status = $"Ajustadas {hechas} de {objetivo.Count}"
                    + (parciales > 0 ? $" · {parciales} solo en parte (sin margen para más)" : "")
                    + AjusteVolumenSeleccion.TextoSinMargen(sinMargen)
-                   + (fallidas > 0 ? $" · {fallidas} sin cambios" : "")
+                   + AjusteVolumenSeleccion.TextoYaEnNivel(enNivel)
+                   + AjusteVolumenSeleccion.TextoSinLeer(sinLeer)
+                   + AjusteVolumenSeleccion.TextoFallidas(fallidas)
                    + (sinHistorial
                         ? ". ⚠ SE DETUVO: no se pudo escribir el historial para deshacer, y la última canción ajustada NO se puede revertir automáticamente. Revisa que la carpeta de datos tenga permiso de escritura."
                         : $". Se puede deshacer desde Enriquecer. {Resumen}");
             if (sinHistorial) _engine.Logger.Err($"Volumen: detenido tras {hechas} por no poder escribir el manifiesto de deshacer");
-            _engine.Logger.Sum($"Volumen: ajustadas {hechas}, parciales {parciales}, sin margen por el pico real {sinMargen}, fallidas {fallidas}");
+            _engine.Logger.Sum($"Volumen: ajustadas {hechas}, parciales {parciales}, sin margen por el pico real {sinMargen}, "
+                             + $"ya en nivel {enNivel}, sin poder leerlas {sinLeer}, fallidas {fallidas}");
         }
         catch (OperationCanceledException)
         {
@@ -745,18 +822,25 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
     /// segundo caso, en el modo automático, también la referencia (el alcance de cada grabación
     /// depende de su pico). Tras ajustar NO se recalcula: la referencia con la que se ajustó sigue
     /// siendo la de la tabla hasta el siguiente análisis.
+    ///
+    /// Una fila cuya medida ya no vale (el archivo ha cambiado desde que se midió) se queda con sus
+    /// valores, pero como pendiente de medir y fuera del ajuste (ver <see cref="LoudnessRow.MedidaCaducada"/>):
+    /// antes se rehacía como si siguieran siendo los del archivo, y salía marcada para ajustar.
     /// </summary>
-    private void RecargarDesdeCache(bool recalcularReferencia)
+    /// <param name="recalcularReferencia">Recalcular también la referencia automática.</param>
+    /// <param name="medidas">Las medidas guardadas de las filas, ya leídas (ver <see cref="MedidasGuardadasAsync"/>); si falta, se leen aquí.</param>
+    private void RecargarDesdeCache(bool recalcularReferencia, IReadOnlyDictionary<string, LoudnessResult?>? medidas = null)
     {
-        var previas = Rows.ToList();
         var excl = Exclusiones();
-        Rows.Clear();
-        foreach (var r in previas)
+        var filas = new List<LoudnessRow>(Rows.Count);
+        foreach (var r in Rows)
         {
-            var m = _engine.Loudness.Get(r.FilePath);
-            if (m is { Ok: true } v) Rows.Add(Fila(r.FileName, r.Folder, r.FilePath, v.Lufs, v.PeakDb, v.TruePeakDb, v.GananciaAplicada, excl));
-            else Rows.Add(Fila(r.FileName, r.Folder, r.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, r.GananciaAplicada, excl));
+            var m = medidas != null && medidas.TryGetValue(r.FilePath, out var leida) ? leida : _engine.Loudness.Get(r.FilePath);
+            filas.Add(m is { Ok: true } v
+                ? Fila(r.FileName, r.Folder, r.FilePath, v.Lufs, v.PeakDb, v.TruePeakDb, v.GananciaAplicada, excl)
+                : Fila(r.FileName, r.Folder, r.FilePath, r.Lufs, r.PeakDb, r.TruePeakDb, r.GananciaAplicada, excl, caducada: true));
         }
+        _filas.Reemplazar(filas);
         if (recalcularReferencia && EsAutomatico && Rows.Count > 0) ActualizarReferenciaAutomatica();
         else if (EsAutomatico && Rows.Count > 0)
         {
@@ -766,6 +850,22 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
         }
         AplicarFiltro();
         Resumir();
+    }
+
+    /// <summary>
+    /// Las medidas guardadas de todas las filas, leídas fuera del hilo de la interfaz: cada una
+    /// comprueba la fecha y el tamaño del archivo, y con 20.000 filas son 0,2-0,3 s (medido en una
+    /// biblioteca real) que antes bloqueaban la pestaña al terminar de medir el pico real y al ajustar.
+    /// </summary>
+    private async Task<Dictionary<string, LoudnessResult?>> MedidasGuardadasAsync()
+    {
+        var rutas = Rows.Select(r => r.FilePath).ToList();
+        return await Task.Run(() =>
+        {
+            var medidas = new Dictionary<string, LoudnessResult?>(rutas.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var ruta in rutas) medidas.TryAdd(ruta, _engine.Loudness.Get(ruta));
+            return medidas;
+        });
     }
 
     // =============================================================================================
@@ -793,13 +893,14 @@ public partial class LoudnessViewModel : ViewModelBase, IEstadoPagina, IProgreso
             new HashSet<string>(_engine.Config.VolumenCancionesExcluidas, StringComparer.OrdinalIgnoreCase));
 
     /// <summary>Una fila nueva, con su exclusión y su casilla como tocan.</summary>
+    /// <param name="caducada">Sus valores ya no son los del archivo (ver <see cref="LoudnessRow.MedidaCaducada"/>).</param>
     private LoudnessRow Fila(string nombre, string carpeta, string ruta, double lufs, double pico, double? picoReal,
-                             double aplicada, (List<string> Carpetas, HashSet<string> Canciones) excl)
+                             double aplicada, (List<string> Carpetas, HashSet<string> Canciones) excl, bool caducada = false)
     {
         var r = new LoudnessRow
         {
             FileName = nombre, Folder = carpeta, FilePath = ruta, Lufs = lufs, PeakDb = pico, TruePeakDb = picoReal,
-            GananciaAplicada = aplicada, Target = Target,
+            GananciaAplicada = aplicada, Target = Target, MedidaCaducada = caducada,
             Exclusion = AjusteVolumenSeleccion.De(ruta, excl.Carpetas, excl.Canciones),
         };
         r.Marcar(AjusteVolumenSeleccion.MarcaInicial(r.PuedeMarcarse, _marcasAMano.TryGetValue(ruta, out var m) ? m : null));

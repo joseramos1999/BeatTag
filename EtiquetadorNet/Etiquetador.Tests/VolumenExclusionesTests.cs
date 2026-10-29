@@ -192,6 +192,43 @@ public class VolumenExclusionesTests
         Assert.EndsWith("Queda fuera 1 seleccionada que no lo requiere.", c3);
     }
 
+    // Revisión final: los parciales de la confirmación salen del pico de muestra cuando aún no hay pico
+    // real, y el ajuste lo mide antes y puede aplicar menos. Con −16 LUFS, pico de muestra −6 y
+    // referencia −11 se anunciaban 3 pasos sin aviso, y con el pico real a −3,4 se aplicaba 1.
+    [Fact]
+    public void La_confirmacion_avisa_de_los_aumentos_sin_pico_real_medido()
+    {
+        var sinReal = Fila(Reggaeton, "a.mp3", -16, pico: -6);
+        Assert.False(LoudnessViewModel.AumentoParcial(sinReal));   // con el de muestra no parece parcial
+        var (_, c1, _) = AjusteVolumenSeleccion.TextosConfirmacion(new SeleccionAjuste(new[] { sinReal }, 0, 0, 0), false, parciales: 0);
+        Assert.Contains("1 grabación que se aumentará aún no tiene el pico real medido: se medirá antes de aumentarla", c1);
+        Assert.Contains("Analizar lo mide de antemano.", c1);
+
+        // Con el pico real medido, o si solo se reduce, no hace falta decir nada.
+        var conReal = new LoudnessRow { FileName = "b.mp3", Folder = Raiz, FilePath = Path.Combine(Reggaeton, "b.mp3"), Lufs = -16, PeakDb = -6, TruePeakDb = -5.5, Target = -11 };
+        var (_, c2, _) = AjusteVolumenSeleccion.TextosConfirmacion(new SeleccionAjuste(new[] { conReal, Fila(Reggaeton, "c.mp3", -6) }, 0, 0, 0), false, 0);
+        Assert.DoesNotContain("pico real", c2);
+
+        var (_, c3, _) = AjusteVolumenSeleccion.TextosConfirmacion(
+            new SeleccionAjuste(new[] { sinReal, Fila(Reggaeton, "d.mp3", -15), conReal }, 0, 0, 0), false, 0);
+        Assert.Contains("2 grabaciones que se aumentarán aún no tienen el pico real medido", c3);
+        Assert.Contains("de una en una", c3);
+    }
+
+    [Fact]
+    public void Los_textos_del_resultado_dan_el_motivo_de_cada_grabacion_sin_cambios()
+    {
+        Assert.Equal("", AjusteVolumenSeleccion.TextoYaEnNivel(0));
+        Assert.Equal(" · 1 sin cambios: había cambiado desde el análisis y ya está en el nivel de referencia", AjusteVolumenSeleccion.TextoYaEnNivel(1));
+        Assert.EndsWith("habían cambiado desde el análisis y ya están en el nivel de referencia", AjusteVolumenSeleccion.TextoYaEnNivel(2));
+        Assert.Equal("", AjusteVolumenSeleccion.TextoSinLeer(0));
+        Assert.Equal(" · 1 sin cambios: no se pudo leer para medirla antes del ajuste (ver el registro)", AjusteVolumenSeleccion.TextoSinLeer(1));
+        Assert.StartsWith(" · 3 sin cambios: no se pudieron leer para medirlas", AjusteVolumenSeleccion.TextoSinLeer(3));
+        Assert.Equal("", AjusteVolumenSeleccion.TextoFallidas(0));
+        Assert.Equal(" · 1 no se pudo ajustar (ver el registro)", AjusteVolumenSeleccion.TextoFallidas(1));
+        Assert.Equal(" · 4 no se pudieron ajustar (ver el registro)", AjusteVolumenSeleccion.TextoFallidas(4));
+    }
+
     [Fact]
     public void Los_textos_de_estado_distinguen_por_que_no_hay_nada_que_ajustar()
     {

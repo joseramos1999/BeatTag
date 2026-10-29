@@ -97,6 +97,9 @@ public class AyudaTests
             // Tanda 4 (Novedades): las correcciones y exclusiones de artistas hechas a mano. Las
             // búsquedas en Deezer van a la caché de red y no hace falta copiarlas; esto sí.
             AlmacenArtistasDeezer.NombreArchivo,
+            // Volumen: la ganancia ya aplicada. sonoridad.json se regenera; esto no, y sin ello el
+            // siguiente ajuste vuelve a bajar lo que ya se había bajado.
+            Path.GetFileName(p.VolumenAplicadoPath),
         };
 
         var ayuda = TodaLaAyuda();
@@ -285,6 +288,7 @@ public class AyudaTests
     [InlineData("Margen (dB)", "Views/LoudnessView.axaml")]
     [InlineData("Ajuste necesario", "Views/LoudnessView.axaml")]
     [InlineData("Ajustar volumen", "Views/LoudnessView.axaml")]
+    [InlineData("Por medir", "ViewModels/LoudnessViewModel.cs")]
     // Copia de seguridad y restauración (T15).
     [InlineData("Copia de seguridad…", "Views/SettingsView.axaml")]
     [InlineData("Restaurar copia…", "Views/SettingsView.axaml")]
@@ -335,6 +339,12 @@ public class AyudaTests
         Assert.Contains($"menos de {ReferenciaVolumen.MinimoGrabaciones} grabaciones", volumen);
         // Cambiar el nivel de referencia ya no lanza mediciones por su cuenta.
         Assert.Contains("Cambiar el nivel de referencia o las exclusiones no mide nada", volumen);
+        // Revisión final: la ganancia aplicada no se borra con las mediciones, y el ajuste parte de la
+        // medida del archivo tal como está (tras un deshacer, con su nivel de ahora).
+        Assert.Contains("volumen-aplicado.json", volumen);
+        Assert.Contains("no las borra aunque borre las mediciones", volumen);
+        Assert.DoesNotContain("esas anotaciones se borran con ellas", volumen);
+        Assert.Contains("se parte siempre de la medida del archivo tal como está", volumen);
     }
 
     // La norma de registro del producto: neutro y profesional, sin coloquialismos. Son los que ya se

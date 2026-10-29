@@ -180,7 +180,7 @@ public sealed class AppEngine
         Candidates = new CandidateFinder(Api);
         Charts = new ChartsProvider(Api);
         Playlists = new PlaylistProvider(Api, Http);
-        Loudness = new LoudnessScanner(Paths.LoudnessCachePath, Logger);
+        Loudness = new LoudnessScanner(Paths.LoudnessCachePath, Logger, Paths.VolumenAplicadoPath);
         Itunes = new ItunesProvider(Api);
         Spotify = new SpotifyProvider(Api, Logger);
         Links = new LinkResolver(Api, Spotify);
@@ -532,16 +532,36 @@ public sealed class AppEngine
     /// limpieza de packs, hacía caducar sus huellas y sus respuestas de «Comprobar audio» por la fecha,
     /// y la siguiente comprobación volvía a mandar al servicio de pago las que AcoustID no reconoce.
     /// </summary>
-    private void SeguirDeshecho(ArchivoDeshecho a) => SeguirDeshecho(a, SeguirArchivo, VolumenAjustado);
+    private void SeguirDeshecho(ArchivoDeshecho a) => SeguirDeshecho(a, SeguirArchivo, VolumenDeshecho);
+
+    /// <summary>
+    /// Un deshacer acaba de devolver el volumen del archivo <paramref name="db"/> dB. Como al ajustar
+    /// (<see cref="VolumenAjustado"/>), la huella y la identificación siguen valiendo; y además la
+    /// medida de sonoridad se desplaza con los pasos que se conocen, con su ganancia aplicada al día.
+    ///
+    /// POR QUÉ. Antes la medida solo caducaba por la fecha. La pestaña Volumen seguía con el nivel de
+    /// antes del deshacer, y el siguiente análisis tenía que volver a medir el archivo y deducir los
+    /// pasos con una tolerancia (ver LoudnessScanner.GananciaTrasMedir).
+    /// </summary>
+    private void VolumenDeshecho(string ruta, SelloArchivo antes, double db)
+    {
+        VolumenAjustado(ruta, antes);
+        if (!antes.Existe) return;
+        try { Loudness.Reajustar(ruta, antes.M, antes.S, db); }
+        catch (Exception e) { Logger.Error($"No se pudo poner al día la medida de volumen de «{Path.GetFileName(ruta)}»", e); }
+    }
 
     /// <summary>La regla de <see cref="SeguirDeshecho(ArchivoDeshecho)"/>, aparte para poder probarla sin el motor.</summary>
-    internal static void SeguirDeshecho(ArchivoDeshecho a, Action<string, string, SelloArchivo> seguir, Action<string, SelloArchivo> volumen)
+    /// <param name="a">Lo que ha hecho el deshacer con el archivo.</param>
+    /// <param name="seguir">Las cachés siguen al archivo (renombrado, etiquetas): origen, destino y sello de antes.</param>
+    /// <param name="volumen">Se ha devuelto el volumen: ruta, sello de antes y los dB aplicados.</param>
+    internal static void SeguirDeshecho(ArchivoDeshecho a, Action<string, string, SelloArchivo> seguir, Action<string, SelloArchivo, double> volumen)
     {
         var sello = a.ExistiaAntes ? new SelloArchivo(a.FechaAntes, a.TamanoAntes, true) : default;
         if (a.Volumen)
         {
             if (!string.Equals(a.Desde, a.Hasta, StringComparison.Ordinal)) seguir(a.Desde, a.Hasta, default);
-            volumen(a.Hasta, sello);
+            volumen(a.Hasta, sello, a.PasosVolumen * Etiquetador.Core.Analysis.Mp3Gain.DbPerStep);
         }
         // Solo renombrado (sin sello): las entradas se mueven y nada más, porque la fecha no cambia.
         else seguir(a.Desde, a.Hasta, a.Etiquetas ? sello : default);

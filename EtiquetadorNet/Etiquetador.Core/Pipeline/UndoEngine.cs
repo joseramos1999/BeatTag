@@ -79,8 +79,13 @@ public sealed record UndoResult(string File, int Reverted, int Errors, int Missi
 /// <param name="FechaAntes">Fecha de modificación (ticks UTC) justo antes de tocarlo.</param>
 /// <param name="TamanoAntes">Tamaño en bytes justo antes de tocarlo.</param>
 /// <param name="ExistiaAntes">Se pudieron leer la fecha y el tamaño antes de tocarlo.</param>
+/// <param name="PasosVolumen">
+/// Pasos de global_gain que ha aplicado el deshacer (negativo si ha bajado el volumen; 0 si no lo ha
+/// tocado). Con ellos, la medida de sonoridad y la ganancia ya aplicada se ponen al día sin volver a
+/// medir el archivo.
+/// </param>
 public readonly record struct ArchivoDeshecho(string Desde, string Hasta, bool Etiquetas, bool Volumen,
-                                              long FechaAntes, long TamanoAntes, bool ExistiaAntes);
+                                              long FechaAntes, long TamanoAntes, bool ExistiaAntes, int PasosVolumen = 0);
 
 /// <summary>Resultado de <see cref="UndoEngine.DarPorPerdidos"/>.</summary>
 /// <param name="Archivo">El manifiesto que se ha sacado de la cola ("" si no había ninguno).</param>
@@ -200,6 +205,7 @@ public sealed class UndoEngine
     {
         public string Desde = "", Hasta = "";
         public bool Movido, Etiquetas, Volumen;
+        public int PasosVolumen;
         public long M, S;
         public bool Existia;
 
@@ -219,7 +225,7 @@ public sealed class UndoEngine
     private void Avisar(Efecto e)
     {
         if (AlDeshacer == null || !(e.Movido || e.Etiquetas || e.Volumen)) return;
-        try { AlDeshacer(new ArchivoDeshecho(e.Desde, e.Hasta, e.Etiquetas, e.Volumen, e.M, e.S, e.Existia)); }
+        try { AlDeshacer(new ArchivoDeshecho(e.Desde, e.Hasta, e.Etiquetas, e.Volumen, e.M, e.S, e.Existia, e.PasosVolumen)); }
         catch (Exception x) { _log?.Log($"  deshacer: no se pudieron poner al día las cachés de audio de «{Path.GetFileName(e.Hasta)}»: {x.Message}", LogKind.Err); }
     }
 
@@ -1056,7 +1062,7 @@ public sealed class UndoEngine
             if (pasos != 0)
             {
                 var res = Analysis.Mp3Gain.Apply(path, -pasos);
-                if (res.Ok) { restoredAny = volumenDevuelto = ef.Volumen = true; _log?.Log($"  deshacer: volumen devuelto ({-pasos * Analysis.Mp3Gain.DbPerStep:+0.0;-0.0} dB) [{Path.GetFileName(path)}]", LogKind.Ok); }
+                if (res.Ok) { restoredAny = volumenDevuelto = ef.Volumen = true; ef.PasosVolumen += res.Steps; _log?.Log($"  deshacer: volumen devuelto ({-pasos * Analysis.Mp3Gain.DbPerStep:+0.0;-0.0} dB) [{Path.GetFileName(path)}]", LogKind.Ok); }
                 else
                 {
                     // El audio sigue con el volumen cambiado. Antes esto solo se anotaba y el

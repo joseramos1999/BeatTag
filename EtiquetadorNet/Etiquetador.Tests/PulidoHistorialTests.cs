@@ -394,7 +394,7 @@ public class PulidoHistorialTests : IDisposable
             if (!string.Equals(de, para, StringComparison.Ordinal)) huellas.Mover(de, para);
             if (antes.Existe) huellas.Retocar(para, antes.M, antes.S);
         }
-        new UndoEngine(_paths) { AlDeshacer = x => AppEngine.SeguirDeshecho(x, Seguir, (r, antes) => huellas.Retocar(r, antes.M, antes.S)) }.UndoLastRun();
+        new UndoEngine(_paths) { AlDeshacer = x => AppEngine.SeguirDeshecho(x, Seguir, (r, antes, _) => huellas.Retocar(r, antes.M, antes.S)) }.UndoLastRun();
 
         Assert.Equal("pista01", Mp3Fixture.GetTitle(a));
         Assert.Equal(new[] { 1, 2, 3 }, huellas.Get(a));
@@ -407,8 +407,8 @@ public class PulidoHistorialTests : IDisposable
         var de = Rutas.Archivo("b.mp3");
         var a = Rutas.Archivo("a.mp3");
         var seguidos = new List<(string De, string A, SelloArchivo S)>();
-        var volumenes = new List<(string Ruta, SelloArchivo S)>();
-        void Aviso(ArchivoDeshecho x) => AppEngine.SeguirDeshecho(x, (o, d, s) => seguidos.Add((o, d, s)), (r, s) => volumenes.Add((r, s)));
+        var volumenes = new List<(string Ruta, SelloArchivo S, double Db)>();
+        void Aviso(ArchivoDeshecho x) => AppEngine.SeguirDeshecho(x, (o, d, s) => seguidos.Add((o, d, s)), (r, s, db) => volumenes.Add((r, s, db)));
         var sello = new SelloArchivo(10, 20, true);
 
         Aviso(new ArchivoDeshecho(de, a, Etiquetas: true, Volumen: false, 10, 20, true));   // nombre y etiquetas
@@ -419,9 +419,10 @@ public class PulidoHistorialTests : IDisposable
         Assert.Equal((de, a, default(SelloArchivo)), Assert.Single(seguidos));
         seguidos.Clear();
 
-        Aviso(new ArchivoDeshecho(a, a, Etiquetas: false, Volumen: true, 10, 20, true));    // el volumen: la huella y la identificación siguen
+        // El volumen: la huella y la identificación siguen, y la sonoridad se desplaza los pasos devueltos.
+        Aviso(new ArchivoDeshecho(a, a, Etiquetas: false, Volumen: true, 10, 20, true, PasosVolumen: 2));
         Assert.Empty(seguidos);
-        Assert.Equal((a, sello), Assert.Single(volumenes));
+        Assert.Equal((a, sello, 3.0), Assert.Single(volumenes));
     }
 
     // ---------------------------------------------------------------- interfaz-9

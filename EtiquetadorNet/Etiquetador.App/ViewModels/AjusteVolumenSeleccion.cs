@@ -210,6 +210,56 @@ public static class AjusteVolumenSeleccion
             _ => $" · {n} sin cambios: su pico real no deja margen para aumentarlas",
         };
 
+    /// <summary>
+    /// Las que habían cambiado desde el análisis (un deshacer, otro programa) y, con su nivel de
+    /// ahora, ya no requerían ajuste: se dejan como estaban. "" si no hay ninguna.
+    /// </summary>
+    public static string TextoYaEnNivel(int n)
+        => n switch
+        {
+            0 => "",
+            1 => " · 1 sin cambios: había cambiado desde el análisis y ya está en el nivel de referencia",
+            _ => $" · {n} sin cambios: habían cambiado desde el análisis y ya están en el nivel de referencia",
+        };
+
+    /// <summary>
+    /// Las que había que medir antes de tocarlas y no se pudieron leer (movidas, renombradas,
+    /// borradas o ilegibles). Antes se contaban como «sin margen», y el estado atribuía al pico real
+    /// lo que era un archivo que ya no estaba. "" si no hay ninguna.
+    /// </summary>
+    public static string TextoSinLeer(int n)
+        => n switch
+        {
+            0 => "",
+            1 => " · 1 sin cambios: no se pudo leer para medirla antes del ajuste (ver el registro)",
+            _ => $" · {n} sin cambios: no se pudieron leer para medirlas antes del ajuste (ver el registro)",
+        };
+
+    /// <summary>Las que no se pudieron ajustar al escribir el archivo, con dónde mirar el motivo. "" si no hay ninguna.</summary>
+    public static string TextoFallidas(int n)
+        => n switch
+        {
+            0 => "",
+            1 => " · 1 no se pudo ajustar (ver el registro)",
+            _ => $" · {n} no se pudieron ajustar (ver el registro)",
+        };
+
+    /// <summary>
+    /// Para la confirmación: cuántas de las que se van a aumentar aún no tienen el pico real medido.
+    /// Los aumentos parciales del diálogo se calculan con el pico de muestra, y el ajuste mide antes el
+    /// real, que nunca es menor: puede aplicar menos pasos, o ninguno. "" si no hay ninguna.
+    /// </summary>
+    public static string TextoAumentosSinPicoReal(int n)
+        => n switch
+        {
+            0 => "",
+            1 => " 1 grabación que se aumentará aún no tiene el pico real medido: se medirá antes de aumentarla, "
+               + "así que puede quedar con un aumento parcial o sin ninguno, y el ajuste tardará algo más. Analizar lo mide de antemano.",
+            _ => $" {n} grabaciones que se aumentarán aún no tienen el pico real medido: se medirá antes de aumentar cada una, "
+               + "de una en una, así que algunas pueden quedar con un aumento parcial o sin ninguno, y el ajuste tardará más. "
+               + "Analizar lo mide de antemano.",
+        };
+
     /// <summary>Al terminar de analizar, si hubo que volver a medir grabaciones mono.</summary>
     public static string TextoMonoMedidas(int n)
         => n == 1
@@ -277,6 +327,9 @@ public static class AjusteVolumenSeleccion
             1 => " En 1 el aumento será parcial, porque no admite más sin distorsionar.",
             _ => $" En {parciales} el aumento será parcial, porque no admiten más sin distorsionar.",
         };
+        // Los parciales salen del pico que se conoce; sin el real, el ajuste lo mide antes y puede
+        // aplicar menos de lo anunciado (tras cambiar el nivel o las exclusiones sin volver a analizar).
+        parcial += TextoAumentosSinPicoReal(s.Ajustar.Count(r => r.Gain > 0 && r.TruePeakDb == null));
 
         var fuera = new List<string>();
         if (s.Desmarcadas > 0) fuera.Add(N(s.Desmarcadas, "desmarcada", "desmarcadas"));

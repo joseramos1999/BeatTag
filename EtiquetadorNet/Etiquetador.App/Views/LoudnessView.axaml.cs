@@ -59,7 +59,9 @@ public partial class LoudnessView : UserControl
             return;
         }
 
-        // El mismo criterio que usa el ajuste: con el aumento redondeado hacia abajo por el pico.
+        // El mismo criterio que usa el ajuste, con el aumento redondeado hacia abajo por el pico que se
+        // conoce. Donde aún no hay pico real, el ajuste lo mide antes y puede aplicar menos: la
+        // confirmación lo dice aparte (AjusteVolumenSeleccion.TextoAumentosSinPicoReal).
         var parciales = s.Ajustar.Count(LoudnessViewModel.AumentoParcial);
         var (titulo, cuerpo, nota) = AjusteVolumenSeleccion.TextosConfirmacion(s, porSeleccion, parciales);
         var ok = await ConfirmDialog.AskAsync(owner, titulo, cuerpo, nota, "Ajustar volumen");

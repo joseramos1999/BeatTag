@@ -178,6 +178,7 @@ regenerar:
 | `generos-por-carpeta.json` | Reglas de «Género por carpeta y artista» |
 | `bandeja-sustituidas.json` | Sustituciones de la Bandeja que aún se pueden deshacer, con la ficha de DJ de la copia antigua |
 | `novedades-artistas.json` | Artistas de Deezer que corresponden a los de la biblioteca en Novedades, con las correcciones y exclusiones hechas a mano |
+| `volumen-aplicado.json` | Ganancia que el ajuste de Volumen ha aplicado a cada grabación: con ella, el nivel común se calcula con el nivel original y lo ya ajustado no se vuelve a tocar |
 | `ArtistAliases.json`, `ArtistsExceptions.json` | Nombres de artista (ver más abajo) |
 
 **Ajustes → Copia de seguridad…** los incluye todos en un archivo ZIP, junto con lo aplicado,

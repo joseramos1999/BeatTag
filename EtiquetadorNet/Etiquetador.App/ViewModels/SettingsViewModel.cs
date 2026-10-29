@@ -674,6 +674,12 @@ public partial class SettingsViewModel : ViewModelBase, IEstadoPagina
 
         // Las cachés viven además en memoria: sin esto seguirían sirviendo datos ya borrados.
         try { _engine.Library.ClearScanCache(); _engine.ClearAnalysisCache(); } catch { }
+        // Las mediciones de volumen también. Sin esto, la pestaña seguía usándolas y el siguiente
+        // guardado (al medir, al ajustar, al renombrar una canción…) volvía a escribir el archivo
+        // entero: el borrado se deshacía o no según lo que se hiciera antes de cerrar. La ganancia
+        // que ya se ha aplicado se conserva (ver LoudnessScanner.Clear).
+        if (rutas.Contains(_engine.Paths.LoudnessCachePath, StringComparer.OrdinalIgnoreCase))
+            try { _engine.Loudness.Clear(); } catch { }
 
         Status = $"Carpeta de datos limpiada: {borrados} {(borrados == 1 ? "archivo" : "archivos")}. Se conservan ajustes, listas de artista y el historial de deshacer.";
     }

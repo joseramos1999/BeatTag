@@ -148,9 +148,27 @@ public class CopiaSeguridadTests : IDisposable
                      Path.GetFileName(AlmacenSustituciones.RutaEn("datos")), "descartadas.json", "aplicadas.json",
                      "marcas-aplicar.json", "ArtistAliases.json", "ArtistsExceptions.json", "identificacion.json", "config.net.json",
                      Etiquetador.Core.Providers.AlmacenArtistasDeezer.NombreArchivo,
+                     // La ganancia que ya ha aplicado el ajuste de volumen (revisión final de Volumen).
+                     "volumen-aplicado.json",
                  })
             Assert.Contains(n, nombres);
         Assert.DoesNotContain(p.ArchivosDeTrabajo(), r => p.FueraDeLaCopia().Contains(r));
+    }
+
+    // sonoridad.json es una caché y no viaja; la ganancia aplicada sí, aparte, con su descripción.
+    [Fact]
+    public void La_ganancia_aplicada_por_el_volumen_entra_en_la_copia()
+    {
+        var p = new AppPaths(Path.Combine(_dir, "datos-volumen"));
+        Directory.CreateDirectory(p.DataDir);
+        File.WriteAllText(p.LoudnessCachePath, "{}");
+        File.WriteAllText(p.VolumenAplicadoPath, "{}");
+
+        var incluidos = CopiaSeguridad.ArchivosAIncluir(p);
+
+        Assert.Contains(p.VolumenAplicadoPath, incluidos);
+        Assert.DoesNotContain(p.LoudnessCachePath, incluidos);
+        Assert.Equal("Ganancia aplicada por el ajuste de volumen", CopiaSeguridad.Descripcion("volumen-aplicado.json", p));
     }
 
     // ------------------------------------------------------------------ copia automática

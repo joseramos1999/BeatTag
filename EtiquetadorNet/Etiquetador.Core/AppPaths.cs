@@ -26,6 +26,14 @@ public sealed class AppPaths
     public string ScanCachePath { get; }
     public string AnalysisCachePath { get; }
     public string LoudnessCachePath { get; }
+
+    /// <summary>
+    /// La ganancia que el ajuste de Volumen ha aplicado a cada grabación (volumen-aplicado.json). Las
+    /// medidas de sonoridad.json se regeneran analizando; esto no, y sin ello la referencia automática
+    /// se calcula con el nivel ya ajustado. Es trabajo del usuario: entra en la copia de seguridad y
+    /// «Limpiar carpeta de datos» no lo borra.
+    /// </summary>
+    public string VolumenAplicadoPath { get; }
     public string FingerprintCachePath { get; }
 
     /// <summary>Nombre de la caché de la calidad real por espectro (P4).</summary>
@@ -75,6 +83,7 @@ public sealed class AppPaths
         ScanCachePath = Path.Combine(DataDir, "scan-cache.json");
         AnalysisCachePath = Path.Combine(DataDir, "analysis-cache.json");
         LoudnessCachePath = Path.Combine(DataDir, "sonoridad.json");
+        VolumenAplicadoPath = Path.Combine(DataDir, "volumen-aplicado.json");
         FingerprintCachePath = Path.Combine(DataDir, "huellas.json");
         EspectroCachePath = Path.Combine(DataDir, EspectroCacheNombre);
         IdentificacionCachePath = Path.Combine(DataDir, "identificacion.json");
@@ -126,6 +135,9 @@ public sealed class AppPaths
         ArtistAliasesPath,
         ArtistExceptionsPath,
         IdentificacionCachePath,
+        // La ganancia que ya ha aplicado el ajuste de volumen: sin ella, el siguiente ajuste tras
+        // restaurar vuelve a bajar lo que ya se había bajado.
+        VolumenAplicadoPath,
         Path.Combine(DataDir, Dj.AlmacenPendientes.NombreArchivo),
         Path.Combine(DataDir, Dj.AlmacenListasSeguidas.NombreArchivo),
         Dj.MapaGenerosCarpeta.RutaEn(this),

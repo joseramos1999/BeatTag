@@ -56,12 +56,29 @@ public sealed class LoudnessScanner
 
         /// <summary>
         /// Ganancia que BeatTag ha aplicado al archivo desde que se midió su audio original (dB), o
-        /// null si ninguna. Restándola de Lufs sale el nivel original, que es con el que se calcula
-        /// la referencia automática (ver <see cref="ReferenciaVolumen"/>): sin ella, cada «Ajustar»
-        /// movía la referencia y el siguiente volvía a tocar las mismas canciones.
+        /// null si nunca lo ha ajustado. Restándola de Lufs sale el nivel original, que es con el que
+        /// se calcula la referencia automática (ver <see cref="ReferenciaVolumen"/>): sin ella, cada
+        /// «Ajustar» movía la referencia y el siguiente volvía a tocar las mismas canciones. Un 0 no
+        /// es lo mismo que null: es un archivo ajustado cuyos cambios se han compensado (ver
+        /// <see cref="SumarGanancia"/>).
         /// </summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public double? G { get; set; }
+    }
+
+    /// <summary>
+    /// Lo que se guarda de cada archivo ajustado en volumen-aplicado.json (ver
+    /// <see cref="_archivoAplicada"/>): la ganancia aplicada y el nivel y la versión de la medida con
+    /// la que se anotó, que es lo que necesita <see cref="GananciaTrasMedir"/> para conservarla al
+    /// volver a medir.
+    /// </summary>
+    private sealed class Aplicada
+    {
+        public double G { get; set; }
+        public double Lufs { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? V { get; set; }
     }
 
     private readonly string _file;
@@ -76,10 +93,42 @@ public sealed class LoudnessScanner
     /// </summary>
     private bool _noSobrescribir;
 
-    public LoudnessScanner(string cacheFile, Logger? log = null)
+    // --- La ganancia aplicada, también fuera de la caché ---
+    //
+    // sonoridad.json es una caché: no entra en la copia de seguridad y «Limpiar carpeta de datos» la
+    // borra. Las medidas se regeneran analizando; la ganancia que BeatTag ya ha aplicado (G), no. Sin
+    // ella, la referencia se calcula con el nivel ya ajustado: en el caso de
+    // ReferenciaVolumenTests.Una_grabacion_ajustada_cuenta_con_su_nivel_original pasa de −12 a −15 y
+    // el siguiente «Ajustar volumen» vuelve a bajar 3 dB lo que ya se había bajado. Por eso cada
+    // entrada con G se copia en un archivo de trabajo aparte, pequeño (solo lo ajustado), que sí entra
+    // en la copia y que «Limpiar» no toca. Al arrancar, lo que falte en sonoridad.json se recupera de
+    // ahí como una medida que hay que repetir: al volver a analizar, la ganancia se conserva si el
+    // audio es el mismo, como con cualquier otra medida caducada.
+
+    /// <summary>volumen-aplicado.json, o null si no se lleva (las pruebas que no lo necesitan).</summary>
+    private readonly string? _archivoAplicada;
+
+    /// <summary>Lo último escrito en <see cref="_archivoAplicada"/>, para no reescribirlo si no cambia.</summary>
+    private string? _aplicadaEscrita;
+
+    /// <summary>
+    /// <see cref="_archivoAplicada"/> refleja lo que hay en memoria. Empieza en false para que el
+    /// primer guardado lo escriba si hace falta, y vuelve a false si una escritura falla, para
+    /// reintentarla en el siguiente guardado aunque no haya cambiado nada más.
+    /// </summary>
+    private bool _aplicadaAlDia;
+
+    /// <summary>Como <see cref="_noSobrescribir"/>, para <see cref="_archivoAplicada"/>.</summary>
+    private bool _aplicadaNoSobrescribir;
+
+    /// <param name="cacheFile">sonoridad.json: las medidas, que se regeneran.</param>
+    /// <param name="log">Registro, si lo hay.</param>
+    /// <param name="archivoAplicada">volumen-aplicado.json: la ganancia aplicada, que no se regenera.</param>
+    public LoudnessScanner(string cacheFile, Logger? log = null, string? archivoAplicada = null)
     {
         _file = cacheFile;
         _log = log;
+        _archivoAplicada = archivoAplicada;
         Load();
     }
 
@@ -111,9 +160,49 @@ public sealed class LoudnessScanner
             _map[path] = new Entry
             {
                 M = m, S = s, Lufs = lufs, Peak = peak, T = Finito(truePeak), V = anterior?.V,
-                G = SinCero((anterior?.G ?? 0) + db),
+                G = SumarGanancia(anterior?.G, db),
             };
             _dirty = true;
+        }
+    }
+
+    /// <summary>
+    /// La ganancia aplicada tras sumarle <paramref name="db"/>. Null es «nunca ajustada», y solo sigue
+    /// siéndolo si no se suma nada; una que vuelve a 0 se guarda como 0.
+    ///
+    /// POR QUÉ. Antes un 0 se guardaba como null, igual que la de un archivo sin tocar. Caso visto en
+    /// revisión: el modo automático baja un archivo 1 paso (G −1,5), «Nivel de club» lo sube 1 paso
+    /// (G 0, guardada como null) y «Deshacer última» deshace solo la subida. El archivo queda 1,5 dB
+    /// por debajo de su original, pero al volver a medirlo no había ganancia que seguir
+    /// (<see cref="GananciaTrasMedir"/> parte de la guardada) y su nivel ya ajustado contaba como el
+    /// original: en una biblioteca simulada de 2.000 grabaciones, 178 la perdían, la referencia bajaba
+    /// 0,2 dB y la siguiente pasada volvía a tocar 91 archivos.
+    /// </summary>
+    internal static double? SumarGanancia(double? aplicada, double db)
+    {
+        if (!double.IsFinite(db)) db = 0;
+        if (aplicada is { } g && double.IsFinite(g)) return g + db;
+        return db == 0 ? null : db;
+    }
+
+    /// <summary>
+    /// La aplicación acaba de cambiar el volumen del archivo <paramref name="db"/> dB por su cuenta:
+    /// el deshacer de un ajuste, que aplica los pasos inversos. Si la medida valía justo antes (fecha y
+    /// tamaño <paramref name="mAntes"/> y <paramref name="sAntes"/>), se desplaza como al ajustar (ver
+    /// <see cref="TrasAjustar"/>) y la ganancia aplicada se pone al día con los pasos que se conocen,
+    /// sin depender de volver a medir ni de la tolerancia de <see cref="ToleranciaMismoAudio"/>. Si ya
+    /// no valía, se deja: al volver a medirla se decide con el audio. Devuelve si la puso al día.
+    /// </summary>
+    public bool Reajustar(string ruta, long mAntes, long sAntes, double db)
+    {
+        if (!double.IsFinite(db) || db == 0 || !Stat(ruta, out var m, out var s)) return false;
+        lock (_lock)
+        {
+            if (!_map.TryGetValue(ruta, out var e) || e.M != mAntes || e.S != sAntes) return false;
+            var (l, p, t) = TrasAjustar(e.Lufs, e.Peak, e.T, db);
+            _map[ruta] = new Entry { M = m, S = s, Lufs = l, Peak = p, T = Finito(t), V = e.V, G = SumarGanancia(e.G, db) };
+            _dirty = true;
+            return true;
         }
     }
 
@@ -160,23 +249,24 @@ public sealed class LoudnessScanner
     ///     el que se acaba de medir.
     /// Una medida de un mono anterior al mono doble se compara con lo que habría medido como mono
     /// doble (+3,01 dB), para no tomar esa diferencia por dos pasos.
+    ///
+    /// Una ganancia de 0 (un archivo ajustado con los cambios compensados) se trata como cualquier
+    /// otra: los pasos que se le hayan cambiado después se siguen sumando (ver <see cref="SumarGanancia"/>).
     /// </summary>
-    /// <param name="aplicada">Ganancia guardada (null si ninguna).</param>
+    /// <param name="aplicada">Ganancia guardada (null si nunca se ha ajustado).</param>
     /// <param name="version">Versión de la medida guardada.</param>
     /// <param name="lufsGuardado">Nivel guardado.</param>
     /// <param name="lufsMedido">Nivel recién medido.</param>
     /// <param name="canales">Canales del archivo recién medido.</param>
     internal static double? GananciaTrasMedir(double? aplicada, int? version, double lufsGuardado, double lufsMedido, int canales)
     {
-        if (aplicada is not { } g || !double.IsFinite(lufsGuardado) || !double.IsFinite(lufsMedido)) return null;
+        if (aplicada is not { } g || !double.IsFinite(g) || !double.IsFinite(lufsGuardado) || !double.IsFinite(lufsMedido)) return null;
         if (MonoSinDoble(version, canales)) lufsGuardado += 10 * Math.Log10(2);
         var diferencia = lufsMedido - lufsGuardado;
         var pasos = Math.Round(diferencia / PasoReal);
         if (Math.Abs(diferencia - pasos * PasoReal) > ToleranciaMismoAudio) return null;
-        return SinCero(g + pasos * Mp3Gain.DbPerStep);
+        return g + pasos * Mp3Gain.DbPerStep;
     }
-
-    private static double? SinCero(double g) => !double.IsFinite(g) || Math.Abs(g) < 1e-6 ? null : g;
 
     /// <summary>
     /// Lo que se guarda tras ajustar sin volver a medir. El nivel se desplaza exactamente la ganancia
@@ -236,7 +326,11 @@ public sealed class LoudnessScanner
             var meter = new LoudnessMeter(fmt.SampleRate, fmt.Channels);
             // El pico real va en la misma pasada y sobre el mismo búfer: no hay que decodificar dos veces.
             var picoReal = new TruePeakMeter(fmt.Channels);
-            var buf = new float[fmt.SampleRate * fmt.Channels / 4];   // ~250 ms
+            // ~250 ms, en tramas completas (una muestra por canal). Antes era SampleRate·Channels/4,
+            // y a 22,05 kHz en estéreo daba 11.025 muestras: un número impar. Un WAV así no se podía
+            // medir («Must read complete blocks»), y en un MP3 los medidores perdían la muestra
+            // sobrante de cada búfer y tomaban el canal derecho por el izquierdo en el siguiente.
+            var buf = new float[Math.Max(1, fmt.SampleRate / 4) * fmt.Channels];
             int n;
             while ((n = reader.Read(buf, 0, buf.Length)) > 0)
             {
@@ -313,6 +407,9 @@ public sealed class LoudnessScanner
     {
         lock (_lock)
         {
+            // La ganancia aplicada va primero y aunque sonoridad.json no se pueda escribir: es lo que
+            // no se regenera.
+            if (_dirty || !_aplicadaAlDia) GuardarAplicada();
             if (!_dirty) return;
             if (_noSobrescribir)
             {
@@ -325,20 +422,66 @@ public sealed class LoudnessScanner
         }
     }
 
-    public void Clear()
+    /// <summary>
+    /// Escribe volumen-aplicado.json con las entradas que tienen ganancia aplicada, si ha cambiado
+    /// desde la última vez. Se llama con el cerrojo tomado.
+    /// </summary>
+    private void GuardarAplicada()
     {
-        lock (_lock)
+        _aplicadaAlDia = true;
+        if (_archivoAplicada == null || _aplicadaNoSobrescribir) return;
+        var aplicadas = new Dictionary<string, Aplicada>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (ruta, e) in _map)
+            if (e.G is { } g) aplicadas[ruta] = new Aplicada { G = g, Lufs = e.Lufs, V = e.V };
+        string texto;
+        try { texto = JsonSerializer.Serialize(aplicadas); }
+        catch (Exception x) { _log?.Err("Volumen: no se pudo preparar la ganancia aplicada: " + x.Message); _aplicadaAlDia = false; return; }
+        if (texto == _aplicadaEscrita) return;
+        // Sin nada ajustado y sin archivo, no se crea uno vacío.
+        if (aplicadas.Count == 0 && !File.Exists(_archivoAplicada)) { _aplicadaEscrita = texto; return; }
+        var error = ArchivoDatos.Escribir(_archivoAplicada, texto);
+        if (error.Length == 0) _aplicadaEscrita = texto;
+        else
         {
-            _map.Clear();
-            _dirty = false;
-            try { if (File.Exists(_file)) File.Delete(_file); } catch { }
+            _aplicadaAlDia = false;
+            _log?.Err("Volumen: no se pudo guardar la ganancia aplicada: " + error);
         }
     }
 
     /// <summary>
+    /// Borra las mediciones, en memoria y en disco («Limpiar carpeta de datos»). La ganancia que
+    /// BeatTag ya ha aplicado se conserva, porque no se regenera (ver <see cref="_archivoAplicada"/>):
+    /// sus entradas se quedan como medidas que hay que repetir, y al volver a analizar se sigue
+    /// contando con ella.
+    /// </summary>
+    public void Clear()
+    {
+        lock (_lock)
+        {
+            var conservadas = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (ruta, e) in _map)
+                if (e.G != null) conservadas[ruta] = SinMedidaVigente(e.Lufs, e.V, e.G);
+            _map = conservadas;
+            try { if (File.Exists(_file)) File.Delete(_file); } catch { }
+            if (!File.Exists(_file)) _noSobrescribir = false;   // ya no hay nada que proteger
+            _dirty = conservadas.Count > 0;
+        }
+    }
+
+    /// <summary>
+    /// Una entrada que solo sirve para no perder la ganancia aplicada: sin fecha ni tamaño, así que
+    /// <see cref="Get"/> no la da por vigente y el archivo se vuelve a medir.
+    /// </summary>
+    private static Entry SinMedidaVigente(double lufs, int? version, double? ganancia)
+        => new() { M = 0, S = 0, Lufs = lufs, Peak = 0, V = version, G = ganancia };
+
+    /// <summary>
     /// Lee las mediciones guardadas. Si el archivo está dañado se aparta como
     /// «sonoridad.json.ilegible_fecha» y se anota en el registro, en vez de tratarlo como vacío en
-    /// silencio y pisarlo en el siguiente guardado.
+    /// silencio y pisarlo en el siguiente guardado. Lo que falte en él y esté en volumen-aplicado.json
+    /// (tras «Limpiar», o al restaurar una copia de seguridad) se recupera como medida que hay que
+    /// repetir, con su ganancia aplicada. Si un archivo está en los dos, manda sonoridad.json, que es
+    /// el que sigue al archivo tal como está ahora.
     /// </summary>
     private void Load()
     {
@@ -346,6 +489,15 @@ public sealed class LoudnessScanner
         if (leido.Aviso.Length > 0) _log?.Err("Volumen: " + leido.Aviso);
         _noSobrescribir = leido.NoSobrescribir;
         if (leido.Datos != null) _map = new Dictionary<string, Entry>(leido.Datos, StringComparer.OrdinalIgnoreCase);
+
+        if (_archivoAplicada == null) return;
+        var aplicadas = ArchivoDatos.LeerJson<Dictionary<string, Aplicada>>(_archivoAplicada);
+        if (aplicadas.Aviso.Length > 0) _log?.Err("Volumen: " + aplicadas.Aviso);
+        _aplicadaNoSobrescribir = aplicadas.NoSobrescribir;
+        if (aplicadas.Datos == null) return;
+        foreach (var (ruta, a) in aplicadas.Datos)
+            if (!_map.ContainsKey(ruta) && double.IsFinite(a.G) && double.IsFinite(a.Lufs))
+                _map[ruta] = SinMedidaVigente(a.Lufs, a.V, a.G);
     }
 
     private static bool Stat(string path, out long m, out long s)

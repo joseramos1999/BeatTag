@@ -28,48 +28,9 @@ public class RevisionTanda4Tests : IDisposable
         return r;
     }
 
-    /// <summary>
-    /// El motor real sin su constructor (que solo trabaja sobre la carpeta de datos de Documentos), con
-    /// las cachés de audio, la configuración y las colas que usan SeguirArchivo y los guardados.
-    /// </summary>
+    /// <summary>El motor real sin su constructor (ver <see cref="MotorDePrueba"/>), con los datos en la carpeta temporal.</summary>
     private AppEngine Motor(Logger log, LibraryStore? biblioteca = null)
-    {
-        var motor = (AppEngine)RuntimeHelpers.GetUninitializedObject(typeof(AppEngine));
-        void Poner(string campo, object valor)
-        {
-            var f = typeof(AppEngine).GetField(campo, BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.True(f != null, $"AppEngine ya no tiene el campo {campo}: actualiza Motor");
-            f!.SetValue(motor, valor);
-        }
-        var datos = Ruta("datos", "x");
-        var paths = new AppPaths(Path.GetDirectoryName(datos)!);
-        var api = new ApiClient(paths);
-        var huellas = new Fingerprint(paths, log);
-        Poner("<Paths>k__BackingField", paths);
-        Poner("<Logger>k__BackingField", log);
-        Poner("<Avisos>k__BackingField", new AvisosApp());
-        Poner("<Config>k__BackingField", new AppConfig());
-        Poner("<Api>k__BackingField", api);
-        Poner("<AudioAceptadas>k__BackingField", new IgnoreList(paths.AudioAceptadasPath));
-        Poner("<Loudness>k__BackingField", new LoudnessScanner(paths.LoudnessCachePath, log));
-        Poner("<Fingerprints>k__BackingField", new FingerprintScanner(paths.FingerprintCachePath, huellas.FpcalcPath, log));
-        Poner("<Identificacion>k__BackingField", new IdentificationScanner(paths.IdentificacionCachePath, huellas, new AcoustIdProvider(api),
-                                                                          new AuddProvider(new HttpClient(), log), new HttpClient(), log));
-        Poner("<Analysis>k__BackingField", new AnalysisCache(paths.AnalysisCachePath));
-        Poner("<Marks>k__BackingField", new ApplyMarks(paths.ApplyMarksPath));
-        Poner("<Applied>k__BackingField", new IgnoreList(paths.AppliedPath));
-        Poner("<Ignored>k__BackingField", new IgnoreList(paths.IgnoredPath));
-        Poner("_cerrojoSustituciones", new object());
-        Poner("_sustituciones", new AlmacenSustituciones(AlmacenSustituciones.RutaEn(paths.DataDir)));
-        Poner("_cerrojoHuellas", new object());
-        Poner("_colaHuellas", Task.CompletedTask);
-        Poner("_cerrojoEspectro", new object());
-        Poner("_cerrojoCargaEspectro", new object());
-        Poner("_relojPunto", System.Diagnostics.Stopwatch.StartNew());
-        if (biblioteca != null) Poner("<Library>k__BackingField", biblioteca);
-        motor.EnLaInterfaz = a => a();   // en la aplicación, Dispatcher.UIThread.Post
-        return motor;
-    }
+        => MotorDePrueba.Crear(Path.GetDirectoryName(Ruta("datos", "x"))!, log, biblioteca);
 
     private static object? Privado(AppEngine motor, string metodo, params object[] args)
     {

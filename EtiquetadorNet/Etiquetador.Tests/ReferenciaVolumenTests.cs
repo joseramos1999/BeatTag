@@ -261,7 +261,7 @@ public class ReferenciaVolumenTests
         {
             var f = Fila(c, referencia, conGanancia);
             if (!f.Candidata) continue;
-            var d = LoudnessViewModel.Decidir(f, _ => c.Medir());
+            var d = LoudnessViewModel.Decidir(f, _ => new LoudnessResult(c.L, c.P, 0, c.T, c.G), _ => c.Medir());
             if (d.Medida) { c.P = d.PicoMuestra; c.T = d.PicoReal; }
             if (d.Pasos == 0) continue;
             var db = d.Pasos * Mp3Gain.DbPerStep;
