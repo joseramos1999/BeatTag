@@ -73,38 +73,52 @@ public sealed class TruePeakMeter
         }
     }
 
-    /// <summary>Añade muestras INTERCALADAS (L,R,L,R…) en coma flotante, -1..1.</summary>
+    /// <summary>Canal de la siguiente muestra: una trama puede llegar partida entre dos búferes.</summary>
+    private int _canal;
+
+    /// <summary>
+    /// Añade muestras INTERCALADAS (L,R,L,R…) en coma flotante, -1..1. El búfer no tiene por qué
+    /// acabar en una trama completa: lo que falte de la última llega con el siguiente. Antes se
+    /// descartaba la muestra sobrante, esa muestra no contaba para el pico y el historial del filtro
+    /// mezclaba los dos canales en cada frontera (ver <see cref="LoudnessMeter.Add"/>).
+    /// </summary>
     public void Add(float[] buffer, int count)
     {
-        for (int i = 0; i + _ch <= count; i += _ch)
+        for (int i = 0; i < count; i++)
         {
-            _pos = _pos + 1 == Taps ? 0 : _pos + 1;
-            var b = _pos + Taps;   // h[b - k] = x[n - k]
-            for (int c = 0; c < _ch; c++)
-            {
-                var h = _hist[c];
-                double x = buffer[i + c];
-                h[_pos] = x;
-                h[b] = x;
-
-                var a = Math.Abs(x);
-                if (a > _max) { _max = a; _umbral = a * FraccionVentana; }
-                if (a > 0 && a >= _umbral) _ultimaAlta[c] = _n;
-
-                // Ninguna de las 12 muestras de la ventana está cerca del máximo: la salida no lo bate.
-                if (!_completo && _n - _ultimaAlta[c] >= Taps) continue;
-
-                Interpoladas++;
-                for (int f = 0; f < 4; f++)
-                {
-                    var co = Fases[f];
-                    double y = 0;
-                    for (int k = 0; k < Taps; k++) y += co[k] * h[b - k];
-                    var ay = Math.Abs(y);
-                    if (ay > _max) { _max = ay; _umbral = ay * FraccionVentana; }
-                }
-            }
+            // La primera muestra de cada trama avanza el historial de todos los canales.
+            if (_canal == 0) _pos = _pos + 1 == Taps ? 0 : _pos + 1;
+            Muestra(_canal, buffer[i]);
+            if (++_canal < _ch) continue;
+            _canal = 0;
             _n++;
+        }
+    }
+
+    /// <summary>Una muestra del canal <paramref name="c"/> de la trama en curso.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private void Muestra(int c, double x)
+    {
+        var b = _pos + Taps;   // h[b - k] = x[n - k]
+        var h = _hist[c];
+        h[_pos] = x;
+        h[b] = x;
+
+        var a = Math.Abs(x);
+        if (a > _max) { _max = a; _umbral = a * FraccionVentana; }
+        if (a > 0 && a >= _umbral) _ultimaAlta[c] = _n;
+
+        // Ninguna de las 12 muestras de la ventana está cerca del máximo: la salida no lo bate.
+        if (!_completo && _n - _ultimaAlta[c] >= Taps) return;
+
+        Interpoladas++;
+        for (int f = 0; f < 4; f++)
+        {
+            var co = Fases[f];
+            double y = 0;
+            for (int k = 0; k < Taps; k++) y += co[k] * h[b - k];
+            var ay = Math.Abs(y);
+            if (ay > _max) { _max = ay; _umbral = ay * FraccionVentana; }
         }
     }
 

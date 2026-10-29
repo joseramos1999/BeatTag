@@ -181,4 +181,32 @@ public class LoudnessMeterTests
         Assert.True(r.Lufs > -25.0 && r.Lufs <= -22.9,
             $"la puerta debería dejarlo cerca de -23 (y muy lejos de los -26 sin puerta), midió {r.Lufs:0.00}");
     }
+
+    // Revisión final: a 22,05 kHz en estéreo, el búfer de 250 ms de LoudnessScanner tenía 11.025
+    // muestras. El medidor descartaba la sobrante y el búfer siguiente empezaba por el canal derecho
+    // tomándolo por el izquierdo. Ahora lo que falta de una trama llega con el siguiente búfer, y medir
+    // por trozos impares da exactamente lo mismo que de una vez.
+    [Fact]
+    public void Una_trama_partida_entre_dos_buferes_no_cruza_los_canales()
+    {
+        const int fs = 22050, porBufer = 11025;
+        var x = new float[porBufer * 40];   // 10 s en estéreo
+        for (int i = 0; i < x.Length / 2; i++)
+        {
+            x[2 * i] = (float)(0.3 * Math.Sin(2 * Math.PI * 997 * i / fs));   // izquierdo
+            x[2 * i + 1] = (float)(0.05 * Math.Sin(2 * Math.PI * 211 * i / fs));   // derecho, más bajo
+        }
+        x[porBufer - 1] = 0.9f;   // un pico justo en la muestra que sobraba del primer búfer
+
+        var entero = new LoudnessMeter(fs, 2);
+        entero.Add(x, x.Length);
+        var partido = new LoudnessMeter(fs, 2);
+        for (int i = 0; i < x.Length; i += porBufer) partido.Add(x[i..(i + porBufer)], porBufer);
+
+        var a = entero.GetResult();
+        var b = partido.GetResult();
+        Assert.Equal(a.Lufs, b.Lufs);
+        Assert.Equal(a.PeakDb, b.PeakDb);
+        Assert.Equal(a.Seconds, b.Seconds);
+    }
 }

@@ -78,21 +78,31 @@ public sealed class LoudnessMeter
         for (int c = 0; c < _channels; c++) _acc[c] = new double[_blockSize];
     }
 
-    /// <summary>Añade muestras INTERCALADAS (L,R,L,R…) en punto flotante -1..1.</summary>
+    /// <summary>Canal de la siguiente muestra: una trama puede llegar partida entre dos búferes.</summary>
+    private int _canal;
+
+    /// <summary>
+    /// Añade muestras INTERCALADAS (L,R,L,R…) en punto flotante -1..1. El búfer no tiene por qué
+    /// acabar en una trama completa: lo que falte de la última llega con el siguiente. Antes se
+    /// descartaba la muestra sobrante, y el búfer siguiente empezaba por el canal derecho tomándolo
+    /// por el izquierdo (a 22,05 kHz en estéreo, el búfer de 250 ms tenía 11.025 muestras).
+    /// </summary>
     public void Add(float[] buffer, int count)
     {
-        for (int i = 0; i + _channels <= count; i += _channels)
+        for (int i = 0; i < count; i++)
         {
-            for (int c = 0; c < _channels; c++)
-            {
-                double x = buffer[i + c];
-                var a = Math.Abs(x);
-                if (a > _peak) _peak = a;
+            var c = _canal;
+            double x = buffer[i];
+            var a = Math.Abs(x);
+            if (a > _peak) _peak = a;
 
-                // Filtro K: realce de agudos + paso alto (aproxima cómo oye el oído).
-                var y = _hp[c].Process(_shelf[c].Process(x));
-                _acc[c][_accCount] = y * y;
-            }
+            // Filtro K: realce de agudos + paso alto (aproxima cómo oye el oído).
+            var y = _hp[c].Process(_shelf[c].Process(x));
+            _acc[c][_accCount] = y * y;
+
+            if (++_canal < _channels) continue;
+            // Trama completa: una muestra de cada canal.
+            _canal = 0;
             _accCount++;
             _samples++;
 

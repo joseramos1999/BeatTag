@@ -166,6 +166,50 @@ public class TruePeakMeterTests
         Assert.True(rapida.Interpoladas <= completa.Interpoladas);
     }
 
+    // Revisión final: un búfer no tiene por qué acabar en una trama completa. A 22,05 kHz en estéreo, el
+    // de 250 ms tenía 11.025 muestras: se descartaba la sobrante, el siguiente empezaba por el canal
+    // derecho tomándolo por el izquierdo, y el historial del filtro mezclaba los dos canales. En trozos
+    // de cualquier tamaño, también impar, el resultado tiene que ser el de medirlo de una vez.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void Una_trama_partida_entre_dos_buferes_da_lo_mismo_que_entera(int semilla)
+    {
+        var x = Senal(semilla, 2);
+        var entero = new TruePeakMeter(2);
+        entero.Add(x, x.Length);
+
+        var partido = new TruePeakMeter(2);
+        var rnd = new Random(semilla + 2000);
+        for (int i = 0; i < x.Length;)
+        {
+            var k = Math.Min(x.Length - i, 1 + rnd.Next(3001));
+            partido.Add(x[i..(i + k)], k);
+            i += k;
+        }
+
+        Assert.Equal(entero.Db, partido.Db);   // exactamente el mismo double
+    }
+
+    // El caso de la revisión: un transitorio justo en la muestra que sobraba del primer búfer de 11.025.
+    // Antes no contaba: el pico real salía a −26 dBTP (el del resto de la señal) en vez de −0,45.
+    [Fact]
+    public void Un_transitorio_en_la_muestra_sobrante_cuenta()
+    {
+        const int porBufer = 11025;
+        var x = new float[porBufer * 4];
+        for (int i = 0; i < x.Length; i += 2) x[i] = 0.05f;   // izquierdo a 0,05; derecho en silencio
+        x[porBufer - 1] = 0.95f;                              // la última muestra del primer búfer (canal izquierdo)
+
+        var m = new TruePeakMeter(2);
+        for (int i = 0; i < x.Length; i += porBufer) m.Add(x[i..(i + porBufer)], porBufer);
+
+        Assert.True(m.Db >= 20 * Math.Log10(0.95f) - 1e-6, $"pico real {m.Db:0.00} dBTP");
+    }
+
     // Y el atajo ahorra trabajo de verdad en una señal con dinámica (ráfagas tras silencio).
     [Fact]
     public void La_variante_rapida_interpola_una_fraccion_de_las_muestras()
