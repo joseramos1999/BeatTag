@@ -6,7 +6,7 @@ namespace Etiquetador.Tests;
 /// <summary>
 /// Volumen: casilla «Ajustar» por fila, «Ajustar solo las seleccionadas» y exclusiones guardadas
 /// (E15, equipo «volumen_copias», tanda 4). El caso real: acapellas, intros y ediciones que el DJ
-/// quiere más bajas a propósito, y que «Nivel medio de la biblioteca» subía junto al resto.
+/// quiere más bajas a propósito, y que el modo automático (antes «Nivel medio de la biblioteca») subía junto al resto.
 /// </summary>
 public class VolumenExclusionesTests
 {
@@ -221,6 +221,39 @@ public class VolumenExclusionesTests
                           AjusteVolumenSeleccion.TextoCarpetasExcluidas(new[] { Acapellas, Reggaeton }, 2, 7));
         Assert.Equal("Esa carpeta ya está excluida del ajuste.", AjusteVolumenSeleccion.TextoCarpetasExcluidas(new[] { Acapellas }, 0, 0));
         Assert.StartsWith("Excluidas del ajuste 2 canciones. Se siguen midiendo", AjusteVolumenSeleccion.TextoCancionesExcluidas(2, 2));
+    }
+
+    // El umbral se cita desde la constante: si cambia, los textos cambian con él.
+    [Fact]
+    public void Los_textos_citan_el_umbral_de_1_dB()
+    {
+        var vacia = Array.Empty<LoudnessRow>();
+        var nada = AjusteVolumenSeleccion.TextoNadaQueAjustar(new SeleccionAjuste(vacia, 0, 0, 2), true, 0);
+        Assert.Contains("1 dB", nada);
+        Assert.DoesNotContain("2 dB", nada);
+
+        var (_, cuerpo, _) = AjusteVolumenSeleccion.TextosConfirmacion(new SeleccionAjuste(new[] { Fila(Reggaeton, "a.mp3", -16) }, 0, 0, 0), false, 0);
+        Assert.Contains("más de 1 dB del nivel de referencia", cuerpo);
+    }
+
+    [Fact]
+    public void Los_textos_nuevos_concuerdan_en_numero()
+    {
+        Assert.Equal("El nivel de la grabación analizada es correcto.", AjusteVolumenSeleccion.TextoResumen(1, 1, 0, 0, 0));
+        Assert.Equal("El nivel es uniforme en las 12 grabaciones analizadas.", AjusteVolumenSeleccion.TextoResumen(12, 12, 0, 0, 0));
+        Assert.Equal("9 con el nivel correcto · 1 por debajo · 0 por encima. 1 requiere ajuste.", AjusteVolumenSeleccion.TextoResumen(10, 9, 1, 0, 1));
+        Assert.Equal("8 con el nivel correcto · 1 por debajo · 1 por encima. 2 requieren ajuste.", AjusteVolumenSeleccion.TextoResumen(10, 8, 1, 1, 2));
+        Assert.Equal("", AjusteVolumenSeleccion.TextoResumen(0, 0, 0, 0, 0));
+
+        Assert.Equal("Comprobando el pico real de 1 grabación que se aumentaría…", AjusteVolumenSeleccion.TextoComprobandoPicoReal(1));
+        Assert.Equal("Comprobando el pico real de 7 grabaciones que se aumentarían…", AjusteVolumenSeleccion.TextoComprobandoPicoReal(7));
+
+        Assert.Equal("", AjusteVolumenSeleccion.TextoSinMargen(0));
+        Assert.Equal(" · 1 sin cambios: su pico real no deja margen para aumentarla", AjusteVolumenSeleccion.TextoSinMargen(1));
+        Assert.EndsWith("margen para aumentarlas", AjusteVolumenSeleccion.TextoSinMargen(3));
+
+        Assert.StartsWith("1 grabación mono se ha vuelto a medir", AjusteVolumenSeleccion.TextoMonoMedidas(1));
+        Assert.StartsWith("4 grabaciones mono se han vuelto a medir", AjusteVolumenSeleccion.TextoMonoMedidas(4));
     }
 
     // ------------------------------------------------------------------ se guardan

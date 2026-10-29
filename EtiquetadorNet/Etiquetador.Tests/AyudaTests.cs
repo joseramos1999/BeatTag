@@ -280,6 +280,11 @@ public class AyudaTests
     [InlineData("Excluir esta carpeta del ajuste", "Views/LoudnessView.axaml")]
     [InlineData("Exclusiones del ajuste", "ViewModels/AjusteVolumenSeleccion.cs")]
     [InlineData("ya no está en la biblioteca", "ViewModels/AjusteVolumenSeleccion.cs")]
+    // Volumen: el modo automático, la columna del pico y el ajuste.
+    [InlineData("Nivel común de la biblioteca", "ViewModels/LoudnessViewModel.cs")]
+    [InlineData("Margen (dB)", "Views/LoudnessView.axaml")]
+    [InlineData("Ajuste necesario", "Views/LoudnessView.axaml")]
+    [InlineData("Ajustar volumen", "Views/LoudnessView.axaml")]
     // Copia de seguridad y restauración (T15).
     [InlineData("Copia de seguridad…", "Views/SettingsView.axaml")]
     [InlineData("Restaurar copia…", "Views/SettingsView.axaml")]
@@ -304,6 +309,27 @@ public class AyudaTests
 
         Assert.True(TodaLaAyuda().Contains(rotulo, StringComparison.Ordinal), $"la Ayuda ya no cita «{rotulo}»");
         Assert.True(fuente.Contains(rotulo, StringComparison.Ordinal), $"«{rotulo}» no aparece en {archivo}: actualiza la Ayuda");
+    }
+
+    // Volumen: la Ayuda cita el umbral, la referencia y el margen de pico que usa el código, no los de
+    // antes (2 dB y la mediana a secas).
+    [Fact]
+    public void La_seccion_de_Volumen_cita_los_valores_del_codigo()
+    {
+        var textos = TextosAyuda().Select(t => t.Texto).ToList();
+        var inicio = textos.FindIndex(t => t == "🔊 Volumen");
+        Assert.True(inicio >= 0, "no hay sección de Volumen en la Ayuda");
+        var fin = textos.FindIndex(inicio + 1, t => t.StartsWith("📊", StringComparison.Ordinal));
+        var volumen = string.Join("\n", textos.Skip(inicio).Take((fin < 0 ? textos.Count : fin) - inicio));
+
+        var umbral = Etiquetador.App.ViewModels.LoudnessViewModel.UmbralAjuste;
+        Assert.Contains($"más de {umbral:0.#} dB", volumen);
+        Assert.DoesNotContain("2 dB", volumen);
+        Assert.DoesNotContain("Nivel medio de la biblioteca", volumen);
+        Assert.Contains($"el {(1 - ReferenciaVolumen.PercentilAlcance) * 100:0} %", volumen);
+        Assert.Contains($"más de {ReferenciaVolumen.DescensoMaximo:0} dB por debajo", volumen);
+        Assert.Contains("−0,5 dBTP", volumen);
+        Assert.Contains($"pasos de {Mp3Gain.DbPerStep:0.0} dB".Replace('.', ','), volumen);
     }
 
     // La norma de registro del producto: neutro y profesional, sin coloquialismos. Son los que ya se
