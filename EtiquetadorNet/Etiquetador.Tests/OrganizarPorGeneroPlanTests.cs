@@ -514,6 +514,47 @@ public class OrganizarPorGeneroPlanTests
                      plan.Movimientos.Single(m => m.Genero == "Moombah").Destino);
     }
 
+    // Revisión 2: solo contaba lo que se queda en la primera pasada. Las que se quedan por su destino
+    // (una pieza que cambiaría de tipo, otra unidad…) también contaban. REPRODUCIDO con las opciones
+    // por defecto: 4 intros de «Hype Intros» que se quedan y 1 canción que se mueve creaban una carpeta
+    // «Moombah» con esa sola canción.
+    [Fact]
+    public void Agrupar_no_cuenta_las_que_se_quedan_por_su_destino()
+    {
+        var intros = Enumerable.Range(1, 4).Select(i => T("Hype Intros", $"Tema {i}.mp3", "Moombah")).ToList();
+        var normal = T("Descargas", "normal.mp3", "Moombah");
+        var op = new OpcionesOrganizar { AgruparMenosDe = 3 };
+
+        var plan = Plan(intros.Append(normal).ToList(), op);
+
+        Assert.Equal(Path.Combine(PorGenero, OrganizarPorGenero.CarpetaOtros, "normal.mp3"), Unico(plan).Destino);
+        Assert.Equal(4, plan.CuantasOmitidas(MotivoOmision.TipoPorCarpeta));
+
+        // Sin agrupar, la misma canción va a la carpeta de su género.
+        Assert.Equal(Path.Combine(PorGenero, "Moombah", "normal.mp3"), Unico(Plan(intros.Append(normal).ToList())).Destino);
+    }
+
+    [Fact]
+    public void Agrupar_no_cuenta_las_que_estan_en_otra_unidad()
+    {
+        var otraRaiz = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "USB");
+        var fuera = Enumerable.Range(1, 4).Select(i => T("Packs", $"{i}.mp3", "Moombah", raiz: otraRaiz)).ToList();
+        var normal = T("Descargas", "normal.mp3", "Moombah");
+        var grande = new[] { T("Descargas", "r1.mp3", "Reggaeton"), T("Descargas", "r2.mp3", "Reggaeton"), T("Descargas", "r3.mp3", "Reggaeton") };
+        var canciones = fuera.Append(normal).Concat(grande).ToList();
+        var disco = Disco(canciones);
+        disco.Unidad = r => Etiquetador.Core.Rutas.EstaDentroDe(r, otraRaiz) || Etiquetador.Core.Rutas.MismaCarpeta(r, otraRaiz) ? "usb" : "interna";
+        var op = new OpcionesOrganizar { Destino = DestinoOrganizar.Carpeta, CarpetaDestino = PorGenero, AgruparMenosDe = 3 };
+
+        var plan = Plan(canciones, op, disco, new[] { Raiz, otraRaiz });
+
+        Assert.Equal(Path.Combine(PorGenero, OrganizarPorGenero.CarpetaOtros, "normal.mp3"), plan.Movimientos.Single(m => m.Genero == "Moombah").Destino);
+        Assert.Equal(3, plan.Movimientos.Count(m => m.CarpetaGenero == "Reggaeton"));
+        Assert.Equal(4, plan.CuantasOmitidas(MotivoOmision.OtraUnidad));
+        Assert.Equal(new[] { OrganizarPorGenero.CarpetaOtros, "Reggaeton" }, plan.PorDestino.Select(d => d.Nombre));
+        Assert.Equal(2, plan.PorOrigen.Single(o => o.Carpeta == Path.Combine(Raiz, "Descargas")).Reparto.Split(" · ").Length);
+    }
+
     [Fact]
     public void Agrupar_cuenta_tambien_las_que_ya_estan_en_su_carpeta_y_volver_a_organizar_no_las_mueve()
     {

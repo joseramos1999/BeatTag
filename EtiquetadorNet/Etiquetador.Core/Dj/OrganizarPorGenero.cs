@@ -197,7 +197,8 @@ public sealed record OpcionesOrganizar
     /// <summary>
     /// Los géneros con menos canciones que esto van a «Otros géneros». Cuentan solo las canciones que
     /// se organizan (también las que ya están en la carpeta de su género), no las que se quedan donde
-    /// están. 0, desactivado; al activarlo, <see cref="OrganizarPorGenero.AgruparPorDefecto"/>.
+    /// están, tampoco las que se quedarían por su destino (otra unidad, una ruta demasiado larga, un
+    /// nombre ocupado…). 0, desactivado; al activarlo, <see cref="OrganizarPorGenero.AgruparPorDefecto"/>.
     /// </summary>
     public int AgruparMenosDe { get; init; }
 
@@ -545,15 +546,21 @@ public static class OrganizarPorGenero
             if (!firmas.TryGetValue(carpeta, out var f)) firmas[carpeta] = f = LoQueDiceLaRuta.De(Path.Combine(carpeta, "x"));
             return f;
         }
+        // Mirar una pieza es leer su nombre: se guarda, porque la segunda pasada puede repetirse (ver más abajo).
+        var cambios = new Dictionary<string, string?>(StringComparer.Ordinal);
         string? CambioPorCarpeta(string origen, string destino, string nombreDestino)
         {
             if (Firma(Path.GetDirectoryName(origen) ?? "") == Firma(Path.GetDirectoryName(destino) ?? "")) return null;
+            var clave = origen + "\0" + destino;
+            if (cambios.TryGetValue(clave, out var ya)) return ya;
             var antes = LoQueDiceLaRuta.De(origen);
             var despues = LoQueDiceLaRuta.De(destino);
-            if (antes == despues) return null;   // lo dice ya su nombre, esté donde esté
-            if (antes.LoQueNoDice(despues) is { } pierde) return $"Su carpeta la marca como {pierde}: fuera de ella dejaría de contar como tal";
-            if (despues.LoQueNoDice(antes) is { } gana) return $"En «{nombreDestino}» pasaría a contar como {gana}";
-            return TextoMotivo(MotivoOmision.TipoPorCarpeta);
+            var cambio = antes == despues ? null   // lo dice ya su nombre, esté donde esté
+                       : antes.LoQueNoDice(despues) is { } pierde ? $"Su carpeta la marca como {pierde}: fuera de ella dejaría de contar como tal"
+                       : despues.LoQueNoDice(antes) is { } gana ? $"En «{nombreDestino}» pasaría a contar como {gana}"
+                       : TextoMotivo(MotivoOmision.TipoPorCarpeta);
+            cambios[clave] = cambio;
+            return cambio;
         }
 
         string Base(string raiz) => op.Destino switch
@@ -563,17 +570,13 @@ public static class OrganizarPorGenero
             _ => op.CarpetaDestino,
         };
 
-        var movimientos = new List<MovimientoOrganizar>();
         var omitidas = new List<OmisionOrganizar>();
-        var ocupados = new HashSet<string>(ComparadorRutas.Instancia);
-        var destinos = new Dictionary<string, (string Nombre, int Canciones)>(ComparadorRutas.Instancia);
-        var origenes = new Dictionary<string, (int Total, Dictionary<string, int> Reparto)>(ComparadorRutas.Instancia);
+        var totales = new Dictionary<string, int>(ComparadorRutas.Instancia);   // canciones de cada carpeta de origen
         var miradas = 0;
 
-        // PRIMERA PASADA: qué canciones se organizan (las que no se quedan por lo que son o por dónde
-        // están) y cuántas hay de cada género. «Agrupar en Otros géneros» cuenta solo estas: un género
-        // con 4 mashups que se quedan y 1 canción que se mueve tiene 1, no 5 (revisión 1). Cuentan
-        // también las que ya están en la carpeta de su género, para que volver a organizar decida igual.
+        // PRIMERA PASADA: qué canciones se pueden organizar (las que no se quedan por lo que son o por
+        // dónde están) y cuántas hay de cada género. Es el máximo que puede tener cada género para
+        // «Agrupar en Otros géneros»: la segunda pasada solo puede dejar fuera más.
         var candidatas = new List<(Track T, string Dir, string Raiz, (string Genero, int Canciones)? Genero)>();
         var porGenero = new Dictionary<string, int>(StringComparer.Ordinal);
         var ordenadas = canciones.OrderBy(t => t.FilePath, StringComparer.Ordinal).ToList();
@@ -587,9 +590,12 @@ public static class OrganizarPorGenero
             var k = ClaveNombre(Path.GetDirectoryName(t.FilePath) ?? "", t.FilePath);
             mismoNombre[k] = mismoNombre.GetValueOrDefault(k) + 1;
         }
+        var asociadosDe = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         List<string> Asociados(string ruta, string dir)
         {
+            if (asociadosDe.TryGetValue(ruta, out var ya)) return ya;
             var res = new List<string>();
+            asociadosDe[ruta] = res;
             if (disco.ArchivoReal(ruta + ".asd") is { } asd) res.Add(asd);
             if (mismoNombre.GetValueOrDefault(ClaveNombre(dir, ruta)) > 1) return res;
             var sinExtension = Path.Combine(dir, Path.GetFileNameWithoutExtension(ruta));
@@ -608,8 +614,7 @@ public static class OrganizarPorGenero
             if (raiz == null) continue;   // fuera de las carpetas marcadas: no es de la biblioteca
 
             miradas++;
-            if (!origenes.TryGetValue(dir, out var origen)) origen = (0, new Dictionary<string, int>(StringComparer.Ordinal));
-            origenes[dir] = (origen.Total + 1, origen.Reparto);
+            totales[dir] = totales.GetValueOrDefault(dir) + 1;
 
             void Omitir(MotivoOmision m, string texto) => omitidas.Add(new OmisionOrganizar(t.FilePath, m, texto));
 
@@ -631,91 +636,141 @@ public static class OrganizarPorGenero
             if (genero is { } g) porGenero[g.Genero] = porGenero.GetValueOrDefault(g.Genero) + 1;
         }
 
-        // SEGUNDA PASADA: adónde va cada una, en el mismo orden.
-        for (var i = 0; i < candidatas.Count; i++)
+        // SEGUNDA PASADA: adónde va cada una, en el mismo orden. Aquí también se quedan algunas, por su
+        // destino: otra unidad, una pieza que cambiaría de tipo, una ruta larga, una colisión… «Agrupar en
+        // Otros géneros» cuenta solo las que se organizan: las que se mueven y las que ya están en la
+        // carpeta de su género (así volver a organizar decide igual). Un género con 4 intros que se
+        // quedan y 1 canción que se mueve tiene 1, no 5 (revisiones 1 y 2). Como eso solo se sabe al
+        // terminar la pasada, el género que se queda por debajo del mínimo pasa a «Otros géneros» y se
+        // vuelve a pasar. Los géneros que van a «Otros» solo aumentan, así que termina; casi siempre
+        // basta una vuelta más, y lo que se mira del disco ya está guardado de la primera.
+        Pasada SegundaPasada(HashSet<string> haciaOtros)
         {
-            if (i % 256 == 0) ct.ThrowIfCancellationRequested();
-            var (t, dir, raiz, genero) = candidatas[i];
-            var origen = origenes[dir];
-
-            void Omitir(MotivoOmision m, string texto) => omitidas.Add(new OmisionOrganizar(t.FilePath, m, texto));
-
-            var nombreGenero = genero == null ? CarpetaSinGenero
-                             : op.AgruparMenosDe > 0 && porGenero[genero.Value.Genero] < op.AgruparMenosDe ? CarpetaOtros
-                             : NombreCarpetaGenero(genero.Value.Genero);
-            var baseDir = Base(raiz);
-            var carpetaGenero = Real(baseDir, nombreGenero);
-            var relativa = op.ConservarEstructura
-                ? Relativa(dir, raiz, baseDir, op.Destino == DestinoOrganizar.PorGeneroEnCadaRaiz ? null : carpetasDeGenero)
-                : "";
-            var destinoDir = Path.Combine(baseDir, carpetaGenero);
-            foreach (var tramo in Tramos(relativa)) destinoDir = Path.Combine(destinoDir, Real(destinoDir, tramo));
-            var destino = Path.Combine(destinoDir, Path.GetFileName(t.FilePath));
-            var nombreDestino = relativa.Length == 0 ? carpetaGenero : Path.Combine(carpetaGenero, relativa);
-
-            if (ComparadorRutas.Instancia.Equals(destino, t.FilePath)) { Omitir(MotivoOmision.YaEnSuSitio, TextoMotivo(MotivoOmision.YaEnSuSitio)); continue; }
-            if (!ComparadorRutas.Instancia.Equals(Unidad(dir), Unidad(baseDir))) { Omitir(MotivoOmision.OtraUnidad, TextoMotivo(MotivoOmision.OtraUnidad)); continue; }
-            if (ConAjustes(destinoDir)) { Omitir(MotivoOmision.DestinoConAjustes, TextoDestinoConAjustes(nombreDestino)); continue; }
-            if (CambioPorCarpeta(t.FilePath, destino, nombreDestino) is { } cambio) { Omitir(MotivoOmision.TipoPorCarpeta, cambio); continue; }
-            // Los archivos que la acompañan por su nombre van con ella: valen para ellos los mismos límites
-            // y tampoco pueden pisar nada.
-            var asociados = Asociados(t.FilePath, dir);
-            var destinosAsociados = asociados.Select(a => Path.Combine(destinoDir, Path.GetFileName(a))).ToList();
-            if (destino.Length >= LargoMaximoRuta || destinosAsociados.Any(a => a.Length >= LargoMaximoRuta))
+            var p = new Pasada();
+            var ocupados = new HashSet<string>(ComparadorRutas.Instancia);
+            for (var i = 0; i < candidatas.Count; i++)
             {
-                Omitir(MotivoOmision.RutaLarga, TextoMotivo(MotivoOmision.RutaLarga));
-                continue;
-            }
-            if (Tramos(destino).Any(s => Encoding.UTF8.GetByteCount(s) > BytesMaximoTramo)
-                || destinosAsociados.Any(a => Encoding.UTF8.GetByteCount(Path.GetFileName(a)) > BytesMaximoTramo))
-            {
-                Omitir(MotivoOmision.TramoLargo, TextoMotivo(MotivoOmision.TramoLargo));
-                continue;
-            }
-            if (ocupados.Contains(destino) || disco.ExisteArchivo(destino))
-            {
-                Omitir(MotivoOmision.Colision, TextoColision(nombreDestino));
-                continue;
-            }
-            if (destinosAsociados.FirstOrDefault(a => ocupados.Contains(a) || disco.ExisteArchivo(a)) is { } ocupado)
-            {
-                Omitir(MotivoOmision.Colision, TextoColisionAsociado(Path.GetFileName(ocupado), nombreDestino));
-                continue;
-            }
+                if (i % 256 == 0) ct.ThrowIfCancellationRequested();
+                var (t, dir, raiz, genero) = candidatas[i];
 
-            ocupados.Add(destino);
-            ocupados.UnionWith(destinosAsociados);
-            movimientos.Add(new MovimientoOrganizar(t.FilePath, destino, genero?.Genero ?? "", carpetaGenero) { Asociados = asociados });
-            destinos[destinoDir] = destinos.TryGetValue(destinoDir, out var d) ? (d.Nombre, d.Canciones + 1) : (nombreDestino, 1);
-            origen.Reparto[carpetaGenero] = origen.Reparto.GetValueOrDefault(carpetaGenero) + 1;
+                void Omitir(MotivoOmision m, string texto) => p.Omitidas.Add(new OmisionOrganizar(t.FilePath, m, texto));
+                void Organizada() { if (genero is { } g) p.Organizadas[g.Genero] = p.Organizadas.GetValueOrDefault(g.Genero) + 1; }
+
+                var nombreGenero = genero == null ? CarpetaSinGenero
+                                 : haciaOtros.Contains(genero.Value.Genero) ? CarpetaOtros
+                                 : NombreCarpetaGenero(genero.Value.Genero);
+                var baseDir = Base(raiz);
+                var carpetaGenero = Real(baseDir, nombreGenero);
+                var relativa = op.ConservarEstructura
+                    ? Relativa(dir, raiz, baseDir, op.Destino == DestinoOrganizar.PorGeneroEnCadaRaiz ? null : carpetasDeGenero)
+                    : "";
+                var destinoDir = Path.Combine(baseDir, carpetaGenero);
+                foreach (var tramo in Tramos(relativa)) destinoDir = Path.Combine(destinoDir, Real(destinoDir, tramo));
+                var destino = Path.Combine(destinoDir, Path.GetFileName(t.FilePath));
+                var nombreDestino = relativa.Length == 0 ? carpetaGenero : Path.Combine(carpetaGenero, relativa);
+
+                if (ComparadorRutas.Instancia.Equals(destino, t.FilePath))
+                {
+                    Omitir(MotivoOmision.YaEnSuSitio, TextoMotivo(MotivoOmision.YaEnSuSitio));
+                    Organizada();
+                    continue;
+                }
+                if (!ComparadorRutas.Instancia.Equals(Unidad(dir), Unidad(baseDir))) { Omitir(MotivoOmision.OtraUnidad, TextoMotivo(MotivoOmision.OtraUnidad)); continue; }
+                if (ConAjustes(destinoDir)) { Omitir(MotivoOmision.DestinoConAjustes, TextoDestinoConAjustes(nombreDestino)); continue; }
+                if (CambioPorCarpeta(t.FilePath, destino, nombreDestino) is { } cambio) { Omitir(MotivoOmision.TipoPorCarpeta, cambio); continue; }
+                // Los archivos que la acompañan por su nombre van con ella: valen para ellos los mismos límites
+                // y tampoco pueden pisar nada.
+                var asociados = Asociados(t.FilePath, dir);
+                var destinosAsociados = asociados.Select(a => Path.Combine(destinoDir, Path.GetFileName(a))).ToList();
+                if (destino.Length >= LargoMaximoRuta || destinosAsociados.Any(a => a.Length >= LargoMaximoRuta))
+                {
+                    Omitir(MotivoOmision.RutaLarga, TextoMotivo(MotivoOmision.RutaLarga));
+                    continue;
+                }
+                if (Tramos(destino).Any(s => Encoding.UTF8.GetByteCount(s) > BytesMaximoTramo)
+                    || destinosAsociados.Any(a => Encoding.UTF8.GetByteCount(Path.GetFileName(a)) > BytesMaximoTramo))
+                {
+                    Omitir(MotivoOmision.TramoLargo, TextoMotivo(MotivoOmision.TramoLargo));
+                    continue;
+                }
+                if (ocupados.Contains(destino) || disco.ExisteArchivo(destino))
+                {
+                    Omitir(MotivoOmision.Colision, TextoColision(nombreDestino));
+                    continue;
+                }
+                if (destinosAsociados.FirstOrDefault(a => ocupados.Contains(a) || disco.ExisteArchivo(a)) is { } ocupado)
+                {
+                    Omitir(MotivoOmision.Colision, TextoColisionAsociado(Path.GetFileName(ocupado), nombreDestino));
+                    continue;
+                }
+
+                ocupados.Add(destino);
+                ocupados.UnionWith(destinosAsociados);
+                p.Movimientos.Add(new MovimientoOrganizar(t.FilePath, destino, genero?.Genero ?? "", carpetaGenero) { Asociados = asociados });
+                Organizada();
+                p.Destinos[destinoDir] = p.Destinos.TryGetValue(destinoDir, out var d) ? (d.Nombre, d.Canciones + 1) : (nombreDestino, 1);
+                if (!p.Repartos.TryGetValue(dir, out var reparto)) p.Repartos[dir] = reparto = new Dictionary<string, int>(StringComparer.Ordinal);
+                reparto[carpetaGenero] = reparto.GetValueOrDefault(carpetaGenero) + 1;
+            }
+            return p;
         }
 
-        var porDestino = destinos
+        var aOtros = new HashSet<string>(StringComparer.Ordinal);
+        if (op.AgruparMenosDe > 0) aOtros.UnionWith(porGenero.Where(g => g.Value < op.AgruparMenosDe).Select(g => g.Key));
+        var pasada = SegundaPasada(aOtros);
+        while (op.AgruparMenosDe > 0)
+        {
+            var pocos = porGenero.Keys.Where(g => !aOtros.Contains(g) && pasada.Organizadas.GetValueOrDefault(g) < op.AgruparMenosDe).ToList();
+            if (pocos.Count == 0) break;
+            aOtros.UnionWith(pocos);
+            pasada = SegundaPasada(aOtros);
+        }
+        omitidas.AddRange(pasada.Omitidas);
+
+        var porDestino = pasada.Destinos
             .Select(kv => new CarpetaDestinoPlan(kv.Key, kv.Value.Nombre, kv.Value.Canciones, ExisteCarpeta(disco, kv.Key)))
             .OrderBy(c => c.Nombre, StringComparer.CurrentCultureIgnoreCase).ThenBy(c => c.Carpeta, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
-        var porOrigen = origenes
+        var sinReparto = new Dictionary<string, int>(StringComparer.Ordinal);
+        var porOrigen = totales
             .Select(kv =>
             {
-                var mueven = kv.Value.Reparto.Values.Sum();
-                var reparto = string.Join(" · ", kv.Value.Reparto.OrderByDescending(r => r.Value).ThenBy(r => r.Key, StringComparer.CurrentCultureIgnoreCase)
-                                                                 .Take(3).Select(r => $"{N(r.Value)} a {r.Key}"));
-                return new CarpetaOrigenPlan(kv.Key, kv.Value.Total, mueven, kv.Value.Total - mueven, reparto,
-                                             excluidos.Contains(kv.Key.TrimEnd('\\', '/')));
+                var repartoDe = pasada.Repartos.GetValueOrDefault(kv.Key) ?? sinReparto;
+                var mueven = repartoDe.Values.Sum();
+                var reparto = string.Join(" · ", repartoDe.OrderByDescending(r => r.Value).ThenBy(r => r.Key, StringComparer.CurrentCultureIgnoreCase)
+                                                          .Take(3).Select(r => $"{N(r.Value)} a {r.Key}"));
+                return new CarpetaOrigenPlan(kv.Key, kv.Value, mueven, kv.Value - mueven, reparto, excluidos.Contains(kv.Key.TrimEnd('\\', '/')));
             })
             .OrderBy(c => c.Carpeta, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
-        var conMovimientos = origenes.Values.Where(o => o.Reparto.Count > 0).ToList();
 
         return new PlanOrganizar
         {
-            Movimientos = movimientos,
+            Movimientos = pasada.Movimientos,
             Omitidas = omitidas.OrderBy(o => o.Ruta, StringComparer.Ordinal).ToList(),   // en el orden de la biblioteca, como antes de las dos pasadas
             PorDestino = porDestino,
             PorOrigen = porOrigen,
-            MediaGenerosPorOrigen = conMovimientos.Count == 0 ? 0 : conMovimientos.Average(o => o.Reparto.Count),
+            MediaGenerosPorOrigen = pasada.Repartos.Count == 0 ? 0 : pasada.Repartos.Values.Average(r => r.Count),
             Canciones = miradas,
         };
+    }
+
+    /// <summary>Lo que da una vuelta de la segunda pasada de <see cref="Planear"/>.</summary>
+    private sealed class Pasada
+    {
+        public List<MovimientoOrganizar> Movimientos { get; } = new();
+
+        /// <summary>Las que se quedan por su destino (las de la primera pasada van aparte).</summary>
+        public List<OmisionOrganizar> Omitidas { get; } = new();
+
+        /// <summary>Por carpeta de destino, su nombre desde el destino y cuántas canciones llegan.</summary>
+        public Dictionary<string, (string Nombre, int Canciones)> Destinos { get; } = new(ComparadorRutas.Instancia);
+
+        /// <summary>Por carpeta de origen, cuántas de sus canciones van a cada carpeta de género (solo las que mueven algo).</summary>
+        public Dictionary<string, Dictionary<string, int>> Repartos { get; } = new(ComparadorRutas.Instancia);
+
+        /// <summary>Por género, las canciones que se organizan: las que se mueven y las que ya están en la carpeta de su género.</summary>
+        public Dictionary<string, int> Organizadas { get; } = new(StringComparer.Ordinal);
     }
 
     /// <summary>

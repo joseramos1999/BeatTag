@@ -45,7 +45,7 @@
                     <WrapPanel ItemSpacing="8" LineSpacing="4">
                         <CheckBox Content="Agrupar en «Otros géneros» los que tengan menos de" IsChecked="{Binding Agrupar}"
                                   IsEnabled="{Binding Libre}" VerticalAlignment="Center"
-                                  ToolTip.Tip="Cuentan las canciones de cada género que se organizan, también las que ya están en su carpeta; no las que se quedan donde están." />
+                                  ToolTip.Tip="Cuentan las canciones de cada género que se organizan, también las que ya están en su carpeta; no las que se quedan donde están por otro motivo, aunque dependa de su destino (otro disco, una ruta demasiado larga, un nombre ocupado…)." />
                         <NumericUpDown Value="{Binding MinimoGrupo}" Minimum="2" Maximum="1000" Increment="1" FormatString="0" Width="120"
                                        IsEnabled="{Binding Agrupar}" />
                         <TextBlock Text="canciones" VerticalAlignment="Center" />
