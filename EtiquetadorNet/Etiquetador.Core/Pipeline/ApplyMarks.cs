@@ -53,6 +53,39 @@ public sealed class ApplyMarks
         return fuera.Count;
     }
 
+    /// <summary>
+    /// Separa la ruta de la huella en la clave de una casilla («ruta␟huella», EnrichViewModel.ClaveMarca).
+    /// Las casillas de versiones antiguas se guardaban solo con la ruta.
+    /// </summary>
+    public const char SeparadorHuella = '\u001F';
+
+    /// <summary>
+    /// El archivo se ha movido (Organizar por género, o deshacerlo): sus casillas pasan a la ruta nueva,
+    /// la que lleva solo la ruta y las de cada propuesta («ruta␟huella»). Devuelve cuántas. Sin esto,
+    /// MEDIDO en una biblioteca real, organizarla perdía 142 decisiones tomadas a mano en Enriquecer.
+    /// </summary>
+    public int Mover(string origen, string destino)
+    {
+        if (string.IsNullOrWhiteSpace(destino) || string.Equals(origen, destino, System.StringComparison.Ordinal)) return 0;
+        var prefijo = origen + SeparadorHuella;
+        var suyas = new List<string>();
+        foreach (var clave in _map.Keys)
+            if (string.Equals(clave, origen, System.StringComparison.OrdinalIgnoreCase)
+                || clave.StartsWith(prefijo, System.StringComparison.OrdinalIgnoreCase))
+                suyas.Add(clave);
+        foreach (var clave in suyas)
+        {
+            var valor = _map[clave];
+            _map.Remove(clave);
+            if (_noSobrescribir) _olvidadas.Add(clave);
+            var nueva = destino + clave[origen.Length..];
+            _map[nueva] = valor;
+            _olvidadas.Remove(nueva);
+        }
+        if (suyas.Count > 0) _dirty = true;
+        return suyas.Count;
+    }
+
     public void Clear()
     {
         if (_noSobrescribir) { _vaciadas = true; _dirty = true; }

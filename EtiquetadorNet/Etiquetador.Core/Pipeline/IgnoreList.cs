@@ -49,6 +49,22 @@ public sealed class IgnoreList
     // (ver Save) no puede volver.
     private readonly HashSet<string> _quitadas = new(System.StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// El archivo se ha movido (Organizar por género, o deshacerlo): si estaba en la lista, pasa a su
+    /// ruta nueva. Devuelve si estaba. Sin esto, MEDIDO en una biblioteca real, se perdían 296
+    /// aplicadas (Enriquecer las volvía a proponer) y 80 descartadas al organizarla.
+    /// </summary>
+    public bool Mover(string origen, string destino)
+    {
+        if (string.IsNullOrWhiteSpace(destino) || string.Equals(origen, destino, System.StringComparison.Ordinal)) return false;
+        if (!_set.Remove(origen)) return false;
+        if (_noSobrescribir) _quitadas.Add(origen);
+        _set.Add(destino);
+        _quitadas.Remove(destino);
+        _dirty = true;
+        return true;
+    }
+
     /// <summary>Olvida las descartadas cuyos archivos ya no existen en la biblioteca.</summary>
     public void Prune(ISet<string> livePaths)
     {

@@ -39,6 +39,10 @@ public sealed class ScanCache
     private Dictionary<string, Entry> _map = new(StringComparer.OrdinalIgnoreCase);
     private bool _dirty;
 
+    // Organizar por género mueve archivos desde un hilo de fondo (Mover) mientras la biblioteca puede
+    // estar leyendo o guardando la caché en otro: todo lo que toca el mapa pasa por aquí.
+    private readonly object _cerrojo = new();
+
     public ScanCache(string file)
     {
         _file = file;
@@ -54,7 +58,9 @@ public sealed class ScanCache
         // Un AIFF guardado sin frecuencia y sin la marca del lector de cabecera es uno que TagLib no pudo
         // abrir (un AIFF-C de macOS) antes de que el escáner supiera leer su cabecera: se vuelve a leer
         // en lugar de seguir vacío. Con la marca ya se intentó, y releerlo no daría otra cosa.
-        if (_map.TryGetValue(path, out var e) && e.M == m && e.S == s && !(e.Sr == 0 && !e.La && LectorAiff.EsAiff(path)))
+        Entry? e;
+        lock (_cerrojo) _map.TryGetValue(path, out e);
+        if (e != null && e.M == m && e.S == s && !(e.Sr == 0 && !e.La && LectorAiff.EsAiff(path)))
             return new Track
             {
                 FilePath = path,
@@ -63,15 +69,40 @@ public sealed class ScanCache
                 Bitrate = e.Br, SampleRate = e.Sr, Channels = e.Ch,
             };
 
+        // Leer el archivo, fuera del cerrojo: es lo que tarda.
         var t = LibraryScanner.ReadTrack(path);
-        _map[path] = new Entry
+        var nueva = new Entry
         {
             M = m, S = s, Ti = t.Title, Ar = t.Artist, Al = t.Album, Ge = t.Genre,
             Yr = t.Year, Bp = t.Bpm, Ke = t.Key, Du = t.DurationSeconds, Br = t.Bitrate, Sr = t.SampleRate, Ch = t.Channels,
             La = LectorAiff.EsAiff(path),   // ReadTrack ya prueba el lector de cabecera con los AIFF
         };
-        _dirty = true;
+        lock (_cerrojo)
+        {
+            _map[path] = nueva;
+            _dirty = true;
+        }
         return t;
+    }
+
+    /// <summary>
+    /// La entrada de un archivo que la aplicación acaba de mover (Organizar por género) pasa a su ruta
+    /// nueva, con su fecha y su tamaño: mover un archivo dentro de la misma unidad no cambia ninguno de
+    /// los dos, así que sigue valiendo. Devuelve si había entrada.
+    ///
+    /// POR QUÉ. Sin esto, el escaneo de después veía 10.896 archivos nuevos y volvía a leerlos con
+    /// TagLib: MEDIDO en una biblioteca real, releerla entera costó 340.680 ms frente a 7.774 ms con la caché.
+    /// </summary>
+    public bool Mover(string origen, string destino)
+    {
+        if (string.Equals(origen, destino, StringComparison.Ordinal)) return false;
+        lock (_cerrojo)
+        {
+            if (!_map.Remove(origen, out var e)) return false;
+            _map[destino] = e;
+            _dirty = true;
+            return true;
+        }
     }
 
     /// <summary>
@@ -88,17 +119,20 @@ public sealed class ScanCache
     public List<Track> Guardadas(Func<string, string?> raizDe)
     {
         var lista = new List<Track>();
-        foreach (var (path, e) in _map)
+        lock (_cerrojo)
         {
-            var raiz = raizDe(path);
-            if (raiz == null) continue;
-            lista.Add(new Track
+            foreach (var (path, e) in _map)
             {
-                FilePath = path, Folder = raiz,
-                Title = e.Ti, Artist = e.Ar, Album = e.Al, Genre = e.Ge,
-                Year = e.Yr, Bpm = e.Bp, Key = e.Ke, DurationSeconds = e.Du,
-                Bitrate = e.Br, SampleRate = e.Sr, Channels = e.Ch,
-            });
+                var raiz = raizDe(path);
+                if (raiz == null) continue;
+                lista.Add(new Track
+                {
+                    FilePath = path, Folder = raiz,
+                    Title = e.Ti, Artist = e.Ar, Album = e.Al, Genre = e.Ge,
+                    Year = e.Yr, Bpm = e.Bp, Key = e.Ke, DurationSeconds = e.Du,
+                    Bitrate = e.Br, SampleRate = e.Sr, Channels = e.Ch,
+                });
+            }
         }
         return lista;
     }
@@ -114,16 +148,22 @@ public sealed class ScanCache
     /// </summary>
     public void Prune(ISet<string> livePaths, IReadOnlyCollection<string> raices)
     {
-        var stale = _map.Keys.Where(k => !livePaths.Contains(k) && raices.Any(r => Rutas.EstaDentroDe(k, r))).ToList();
-        foreach (var k in stale) { _map.Remove(k); _dirty = true; }
+        lock (_cerrojo)
+        {
+            var stale = _map.Keys.Where(k => !livePaths.Contains(k) && raices.Any(r => Rutas.EstaDentroDe(k, r))).ToList();
+            foreach (var k in stale) { _map.Remove(k); _dirty = true; }
+        }
     }
 
     /// <summary>Vacía la caché en memoria Y borra el archivo (para "Vaciar caché" en caliente).</summary>
     public void Clear()
     {
-        _map.Clear();
-        _dirty = false;
-        try { if (File.Exists(_file)) File.Delete(_file); } catch { /* best-effort */ }
+        lock (_cerrojo)
+        {
+            _map.Clear();
+            _dirty = false;
+            try { if (File.Exists(_file)) File.Delete(_file); } catch { /* best-effort */ }
+        }
     }
 
     /// <summary>"" si se cargó con normalidad; si no, qué pasó con el archivo (apartado por ilegible…).</summary>
@@ -140,11 +180,14 @@ public sealed class ScanCache
     /// </summary>
     public string Save()
     {
-        if (!_dirty) return "";
-        if (_noSobrescribir && !Releer()) return AvisoCarga;
-        var error = ArchivoDatos.EscribirJson(_file, _map);
-        if (error.Length == 0) _dirty = false;
-        return error;
+        lock (_cerrojo)
+        {
+            if (!_dirty) return "";
+            if (_noSobrescribir && !Releer()) return AvisoCarga;
+            var error = ArchivoDatos.EscribirJson(_file, _map);
+            if (error.Length == 0) _dirty = false;
+            return error;
+        }
     }
 
     /// <summary>

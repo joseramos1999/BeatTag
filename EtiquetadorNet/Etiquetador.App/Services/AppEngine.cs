@@ -532,7 +532,82 @@ public sealed class AppEngine
     /// limpieza de packs, hacía caducar sus huellas y sus respuestas de «Comprobar audio» por la fecha,
     /// y la siguiente comprobación volvía a mandar al servicio de pago las que AcoustID no reconoce.
     /// </summary>
-    private void SeguirDeshecho(ArchivoDeshecho a) => SeguirDeshecho(a, SeguirArchivo, VolumenDeshecho);
+    private void SeguirDeshecho(ArchivoDeshecho a) => SeguirDeshecho(a, SeguirArchivo, VolumenDeshecho, TrasladoDeshecho);
+
+    // --- Lo que sigue a un archivo que cambia de carpeta (Organizar por género, B6) ---
+
+    /// <summary>
+    /// La aplicación acaba de mover un archivo a OTRA carpeta sin tocar su contenido (Organizar por
+    /// género, o deshacer un traslado): además de las cachés de audio (<see cref="SeguirArchivo"/>), lo
+    /// siguen lo leído por el escaneo, su ficha de DJ y lo decidido sobre él en Enriquecer (aplicada,
+    /// descartada y sus casillas). <paramref name="antes"/> es el sello tomado justo antes de moverlo.
+    ///
+    /// POR QUÉ. MEDIDO al organizar una biblioteca real: sin seguir la caché de escaneo, el escaneo de
+    /// después releía con TagLib las 13.352 canciones (340.680 ms frente a 7.774 ms); sin lo demás se
+    /// perdían 296 aplicadas (Enriquecer las volvía a proponer), 80 descartadas, 142 casillas y las
+    /// fichas. Va en un método aparte, y no dentro de SeguirArchivo, para no cambiar el camino de
+    /// escritura de etiquetas de Enriquecer y del Asistente. La caché de análisis no se mueve: guarda la
+    /// ruta dentro de cada resultado, y moverla dejaría propuestas con la ruta vieja; el coste es que
+    /// Enriquecer vuelva a consultar las propuestas que quedaran pendientes.
+    ///
+    /// Se puede llamar desde un hilo de fondo; no guarda en disco (ver <see cref="GuardarLoQueSigueAlArchivo"/>).
+    /// </summary>
+    public void SeguirTraslado(string origen, string destino, SelloArchivo antes)
+    {
+        SeguirArchivo(origen, destino, antes);
+        if (string.Equals(origen, destino, StringComparison.Ordinal)) return;
+        try
+        {
+            Fichas.Mover(origen, destino);
+            Library.SeguirArchivo(origen, destino);
+            // Aplicadas, descartadas y casillas no tienen cerrojo: se tocan en el hilo de la interfaz, y
+            // aquí desde el de Organizar por género o el de deshacer, que bloquean el resto de la
+            // aplicación mientras duran (como aplicar en Enriquecer).
+            Applied.Mover(origen, destino);
+            Ignored.Mover(origen, destino);
+            Marks.Mover(origen, destino);
+        }
+        catch (Exception e) { Logger.Error($"No se pudo poner al día lo guardado de «{Path.GetFileName(destino)}» tras moverlo", e); }
+    }
+
+    // Un deshacer ha seguido algún traslado y hay que guardar lo que lo sigue (lo mira TrasDeshacer).
+    private int _trasladosSinGuardar;
+
+    private void TrasladoDeshecho(string origen, string destino, SelloArchivo antes)
+    {
+        SeguirTraslado(origen, destino, antes);
+        Interlocked.Exchange(ref _trasladosSinGuardar, 1);
+    }
+
+    /// <summary>
+    /// Guarda lo que <see cref="SeguirTraslado"/> pone al día en memoria: las fichas, lo decidido en
+    /// Enriquecer y la caché de escaneo. Fuera del hilo de la interfaz.
+    /// </summary>
+    private void GuardarLoQueSigueAlArchivo()
+    {
+        Registrar("las fichas de DJ", Fichas.Guardar());
+        Registrar("las canciones aplicadas", Applied.Save());
+        Registrar("las canciones descartadas", Ignored.Save());
+        Registrar("las casillas «Aplicar»", Marks.Save());
+        Registrar("la caché de escaneo", Library.GuardarCache());
+    }
+
+    /// <summary>
+    /// Organizar por género: mueve lo que dice el plan, con el historial para deshacer abierto de
+    /// principio a fin (si no se puede abrir, no se mueve nada), y deja guardado todo lo que sigue a
+    /// los archivos. Hay que llamarlo fuera del hilo de la interfaz y con el reproductor parado
+    /// (<see cref="ReleaseAudio"/>); después, la biblioteca se vuelve a escanear (rápido: la caché ya
+    /// siguió a cada archivo).
+    /// </summary>
+    public ResultadoOrganizar OrganizarPorGenero(PlanOrganizar plan, IProgress<double>? progreso, CancellationToken ct)
+    {
+        ResultadoOrganizar res;
+        using (var manifiesto = ManifiestoDeshacer.Abrir(Paths.NuevoManifiesto(), out var error))
+            res = OrganizadorPorGenero.Ejecutar(plan, manifiesto, error, SeguirTraslado, Logger, progreso, ct);
+        if (res.Movidas > 0) GuardarLoQueSigueAlArchivo();
+        GuardarCachesDeAudio();
+        return res;
+    }
 
     /// <summary>
     /// Un deshacer acaba de devolver el volumen del archivo <paramref name="db"/> dB. Como al ajustar
@@ -562,9 +637,18 @@ public sealed class AppEngine
     /// Se ha devuelto el volumen: ruta, sello de antes, los dB aplicados y la parte de ellos que deshace
     /// ajustes anotados en la ganancia aplicada.
     /// </param>
+    /// <param name="traslado">
+    /// Lo mismo que <paramref name="seguir"/> cuando el archivo vuelve a OTRA carpeta (traslados de la
+    /// Bandeja, sustituciones, Organizar por género): ahí le siguen además la caché de escaneo, la ficha
+    /// y lo decidido en Enriquecer (<see cref="SeguirTraslado"/>). Un renombrado dentro de la misma
+    /// carpeta sigue como siempre. Null: siempre <paramref name="seguir"/>.
+    /// </param>
     internal static void SeguirDeshecho(ArchivoDeshecho a, Action<string, string, SelloArchivo> seguir,
-                                        Action<string, SelloArchivo, double, double> volumen)
+                                        Action<string, SelloArchivo, double, double> volumen,
+                                        Action<string, string, SelloArchivo>? traslado = null)
     {
+        if (traslado != null && !Rutas.MismaCarpeta(Path.GetDirectoryName(a.Desde) ?? "", Path.GetDirectoryName(a.Hasta) ?? ""))
+            seguir = traslado;
         var sello = a.ExistiaAntes ? new SelloArchivo(a.FechaAntes, a.TamanoAntes, true) : default;
         if (a.Volumen)
         {
@@ -597,6 +681,8 @@ public sealed class AppEngine
     {
         if (res.None || res.Tocadas.Count == 0) return res;
         GuardarCachesLigeras();
+        // Un traslado deshecho movió en memoria la ficha, lo decidido en Enriquecer y la caché de escaneo.
+        if (Interlocked.Exchange(ref _trasladosSinGuardar, 0) == 1) GuardarLoQueSigueAlArchivo();
         return res;
     }
 
