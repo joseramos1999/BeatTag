@@ -34,7 +34,10 @@ public sealed record EstiloVersion(string Estilo, string Texto, FuenteEstilo Fue
 /// Nunca cuentan «Latin», «Latino» ni «Latina» sueltos («Extended Latino» es el nombre de un pool:
 /// 204 falsos positivos más), ni un fragmento de transición («Trap To Mambo Transition», «Transition
 /// House To Reggaeton»), que junta dos estilos, ni el estilo detrás de un artículo («Llegamos A La
-/// Disco Remix»: la palabra es parte del nombre de la canción).
+/// Disco Remix»: la palabra es parte del nombre de la canción) o de «DJ» o «MC» («DJ Mambo Remix» es
+/// un remixer, no el estilo mambo). «Disco» solo cuenta en el contexto (c) («(Disco)») o como «Nu
+/// Disco»: «(Disco Mix)», «(Disco Version)» o «Versión Disco» son el nombre clásico de la versión de
+/// 12" (la extendida) de cualquier tema de los 80, no el estilo.
 ///
 /// No se leen el comentario, el remixer (TPE4), el subtítulo (TIT3) ni la agrupación: medido, no
 /// aportan ningún caso en 2.441 archivos, y leerlos costaría unos 8 minutos en una biblioteca así.
@@ -110,6 +113,17 @@ public static class EstiloDeVersion
     /// <summary>Pueden nombrar varios estilos: «Afro» (Afro House, Afrobeats…) y «Electro» (Electro House, electro latino…).</summary>
     private static readonly HashSet<string> Ambiguos = new(StringComparer.Ordinal) { "Afro", "Electro" };
 
+    /// <summary>
+    /// Junto a una palabra de versión nombran un tipo de versión, no el estilo: «(Disco Mix)» y
+    /// «(Disco Version)» son la versión de 12" de cualquier tema de los 80 (Synth-Pop, Hi-NRG, Italo
+    /// Disco…). Solo cuentan cuando el paréntesis no dice nada más («(Disco)»). «Nu Disco» es otra
+    /// entrada del vocabulario y no se ve afectado.
+    /// </summary>
+    private static readonly HashSet<string> SoloSueltos = new(StringComparer.Ordinal) { "Disco" };
+
+    /// <summary>El estilo leído junto a una palabra de versión (contextos a y b) cuenta como estilo.</summary>
+    private static bool ValeJuntoAVersion(string escrito) => !SoloSueltos.Contains(Nombre(escrito));
+
     // El estilo como palabra completa: «Mambo» no está en «Mambos», ni «Trap» en «Trapero».
     private static readonly string Estilo = @"\b(?:" + string.Join("|", Vocabulario.Select(v => v.Patron)) + @")\b";
 
@@ -173,9 +187,11 @@ public static class EstiloDeVersion
 
     // Un artículo o una preposición delante dice que la palabra es parte del nombre de la canción, no
     // su estilo: «Llegamos A La Disco Remix», «El Mambo Remix». Visto al validar en una biblioteca real.
+    // «DJ» y «MC» delante dicen que es el nombre artístico de quien hizo la versión: «(DJ Mambo Remix)».
     private static readonly HashSet<string> Articulos = new(StringComparer.OrdinalIgnoreCase)
     {
         "la", "el", "los", "las", "lo", "un", "una", "de", "del", "al", "a", "en", "the", "mi", "tu", "su", "my",
+        "dj", "mc",
     };
 
     private static bool TrasArticulo(string texto, int posicion)
@@ -191,9 +207,11 @@ public static class EstiloDeVersion
     {
         if (!AlgunEstilo.IsMatch(fragmento) || Transicion.IsMatch(fragmento)) return null;
         foreach (Match a in EstiloYVersion.Matches(fragmento))
-            if (!TrasArticulo(fragmento, a.Index)) return (a.Groups["estilo"].Value, a.Value.Trim());
+            if (!TrasArticulo(fragmento, a.Index) && ValeJuntoAVersion(a.Groups["estilo"].Value))
+                return (a.Groups["estilo"].Value, a.Value.Trim());
         var limpio = Limpio(fragmento);
-        if (VersionYEstilo.Match(limpio) is { Success: true } b) return (b.Groups["estilo"].Value, b.Value.Trim());
+        if (VersionYEstilo.Match(limpio) is { Success: true } b && ValeJuntoAVersion(b.Groups["estilo"].Value))
+            return (b.Groups["estilo"].Value, b.Value.Trim());
         if (SoloEstilo.Match(limpio) is { Success: true } c) return (c.Groups["estilo"].Value, "(" + fragmento.Trim() + ")");
         return null;
     }
@@ -207,12 +225,13 @@ public static class EstiloDeVersion
         if (!AlgunEstilo.IsMatch(trozo) || Transicion.IsMatch(trozo)) return null;
         foreach (Match a in EstiloYVersion.Matches(trozo))
         {
-            if (TrasArticulo(trozo, a.Index)) continue;
+            if (TrasArticulo(trozo, a.Index) || !ValeJuntoAVersion(a.Groups["estilo"].Value)) continue;
             var delante = trozo[..a.Index].Trim().Length > 0;
             var alFinal = Limpio(trozo[(a.Index + a.Length)..]).Length == 0;
             if (trasGuion || delante || alFinal) return (a.Groups["estilo"].Value, a.Value.Trim());
         }
-        if (trasGuion && VersionYEstilo.Match(Limpio(trozo)) is { Success: true } b) return (b.Groups["estilo"].Value, b.Value.Trim());
+        if (trasGuion && VersionYEstilo.Match(Limpio(trozo)) is { Success: true } b && ValeJuntoAVersion(b.Groups["estilo"].Value))
+            return (b.Groups["estilo"].Value, b.Value.Trim());
         return null;
     }
 

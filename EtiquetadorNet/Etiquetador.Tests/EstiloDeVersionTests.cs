@@ -61,8 +61,26 @@ public class EstiloDeVersionTests
     // Visto al validar en una biblioteca real: «La Disco» es parte del nombre de la canción.
     [InlineData("Que Le De x Llegamos A La Disco Remix - Rauw", null)]
     [InlineData("El Mambo Remix", null)]
+    // «Disco Mix» y «Disco Version» son el nombre clásico de la versión de 12" (la extendida) de
+    // cualquier tema de los 80, no el estilo disco; en español, «Versión Disco».
+    [InlineData("Smalltown Boy (Disco Mix)", "Bronski Beat")]
+    [InlineData("Tainted Love (Disco Version)", "Soft Cell")]
+    [InlineData("You Spin Me Round (Extended Disco Mix)", "Dead Or Alive")]
+    [InlineData("Bailar Pegados - Versión Disco", "Sergio Dalma")]
+    [InlineData("Vamos A La Playa [Disco Edit]", "Righeira")]
+    // Un remixer que se llama como un estilo: lo que va detrás de «DJ» o de «MC» es un nombre.
+    [InlineData("Gasolina (DJ Mambo Remix)", "Daddy Yankee")]
+    [InlineData("Tema (MC Trap Edit)", null)]
     public void Un_estilo_fuera_del_contexto_de_version_no_cuenta(string titulo, string? artista)
         => Assert.Null(EstiloDeVersion.De(titulo, titulo, artista, null));
+
+    // El estilo disco sí cuenta cuando el paréntesis no dice otra cosa, o como Nu Disco.
+    [Theory]
+    [InlineData("Got To Be Real (Disco)", "Disco")]
+    [InlineData("Midnight City (Nu Disco Remix)", "Nu Disco")]
+    [InlineData("Tema (DJ Pepe Techno Remix)", "Techno")]
+    public void Disco_suelto_y_Nu_Disco_si_son_estilos(string titulo, string estilo)
+        => Assert.Equal(estilo, EstiloDeVersion.De(titulo, null, null, null)?.Estilo);
 
     [Fact]
     public void Afro_y_Electro_son_ambiguos()

@@ -24,7 +24,10 @@ public enum AlcanceGenero
     SinGenero,
     /// <summary>También a las que tienen un género genérico («Latin», «Dance», «Mashup»…).</summary>
     SinGeneroYGenericos,
-    /// <summary>También a las que tienen otro estilo concreto: esas salen desmarcadas, para revisarlas.</summary>
+    /// <summary>
+    /// También a las que tienen otro estilo concreto: esas salen desmarcadas, para revisarlas, salvo
+    /// cuando la propia versión indica su estilo (ver <see cref="GeneroPorReglas.Calcular"/>).
+    /// </summary>
     Todas,
 }
 
@@ -105,7 +108,8 @@ public sealed record CarpetaSinGenero(string Ruta, int SinGenero, int Total, str
 ///
 /// Qué sale marcado depende del género que ya tiene la canción (ver <see cref="Calcular"/>): si no
 /// tiene o tiene uno genérico, se rellena o se sustituye; si tiene otro estilo, la propuesta sale
-/// desmarcada para revisarla; los mashups y los remixes firmados conservan su estilo. No usa la IA:
+/// desmarcada para revisarla, salvo la de la versión, que manda; frente a las reglas de carpeta y de
+/// artista, los mashups y los remixes firmados conservan su estilo. No usa la IA:
 /// está medido que en lote acierta 1 de cada 20 y que el modelo de 8B confunde estilos («Urban House»
 /// → Hip Hop). Tampoco el BPM: medido, por sí solo acierta el estilo un 30,6 %, lo mismo que decir
 /// siempre el género más frecuente, porque a 90-100 BPM conviven reggaeton, hip hop, pop y flamenco.
@@ -600,8 +604,9 @@ public static class GeneroPorReglas
     ///   · Otro estilo concreto: nada si está protegida o es de la misma familia (se perdería detalle:
     ///     Trap bajo Hip Hop); si no, desmarcada para revisar. MEDIDO: un 82 % eran arreglos, pero no
     ///     todos, y el dominante fuerte solo coincide con las carpetas del usuario un 56 %.
-    /// La versión sale marcada salvo que su estilo sea ambiguo, que solo lo diga el álbum o que la
-    /// canción tenga otro estilo de la misma familia.
+    /// La versión sale marcada, también sobre otro estilo concreto (es lo que pide un DJ: si el remix
+    /// o la versión dice su estilo, ese manda), salvo que su estilo sea ambiguo, que solo lo diga el
+    /// álbum o que la canción tenga otro estilo de la misma familia: entonces se propone desmarcada.
     /// </summary>
     public static CalculoGeneroReglas Calcular(IReadOnlyList<Track> canciones, OpcionesGeneroReglas op, CancellationToken ct = default)
     {

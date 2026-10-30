@@ -483,7 +483,7 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
         => reglas == 0
             ? "Empieza por las carpetas o los artistas con más canciones: selecciónalos en su pestaña, elige su género y ponlo con el botón de al lado."
             : paraRevisar > 0
-                ? "Las propuestas para canciones que ya tienen otro estilo, o en las que la regla no es tan segura, salen desmarcadas: revísalas con «Mostrar: Para revisar»."
+                ? "Salen desmarcadas las propuestas en las que la regla no es tan segura y las de canciones que ya tienen otro estilo, salvo cuando la propia versión indica su estilo: revísalas con «Mostrar: Para revisar»."
                 : "Revisa las propuestas y aplica las marcadas.";
 
     /// <summary>Las canciones con varios géneros no se tocan: es cosa de «Unificar géneros».</summary>

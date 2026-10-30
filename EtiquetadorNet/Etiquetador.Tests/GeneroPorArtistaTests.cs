@@ -1,3 +1,6 @@
+using System.Net;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Etiquetador.App.Services;
 using Etiquetador.App.ViewModels;
 using Etiquetador.Core;
@@ -369,6 +372,59 @@ public class GeneroPorArtistaTests : IDisposable
         var p = Proponer(canciones);
         Assert.Null(De(p, junto));
         Assert.Null(De(p, hipHop));
+    }
+
+    // Revisión: «(Disco Mix)» es la versión de 12" de cualquier tema de los 80, y «DJ Mambo» un
+    // remixer. La regla de la versión los tomaba por estilos y proponía, MARCADO, pisar el género.
+    [Fact]
+    public void La_version_de_12_pulgadas_y_un_remixer_que_se_llama_como_un_estilo_no_pisan_el_genero()
+    {
+        var disco = T("Bronski Beat", "Smalltown Boy (Disco Mix)", "Synth-Pop");
+        var version = T("Soft Cell", "Tainted Love (Disco Version)", "Pop");
+        var mambo = T("Daddy Yankee", "Gasolina (DJ Mambo Remix)", "Reggaeton");
+        var vacia = T("Alphaville", "Big In Japan (Disco Mix)", null);
+        Assert.Empty(Proponer(new List<Track> { disco, version, mambo, vacia }));
+    }
+
+    // Revisión: la Ayuda, la descripción de la pestaña, el desplegable «Proponer para», el consejo del
+    // estado y el README decían que con otro estilo la propuesta sale SIEMPRE desmarcada. La que
+    // indica la propia versión sale marcada (es lo que pide un DJ: el estilo de la versión manda), y
+    // la de la misma familia sí se propone, desmarcada.
+    [Fact]
+    public void Los_textos_dicen_que_la_version_que_indica_su_estilo_sale_marcada_aunque_la_cancion_tenga_otro()
+    {
+        var bachata = T("Romeo Santos", "Dividimos (Bachata Version)", "Reggaeton");
+        var familia = T("Fisher", "Losing It (Afro House Remix)", "Tech House");
+        var dile = T("Don Omar", "Dile", "Pop");
+        var p = Proponer(DelArtista("Don Omar", ("Reggaeton", 9)).Concat(new[] { bachata, familia, dile }).ToList());
+        Assert.Equal(("Bachata", true, CambioGenero.Revisar), (De(p, bachata)!.Genero, De(p, bachata)!.Marcada, De(p, bachata)!.Cambio));
+        Assert.Equal(("Afro House", false), (De(p, familia)!.Genero, De(p, familia)!.Marcada));
+        Assert.Equal(("Reggaeton", false), (De(p, dile)!.Genero, De(p, dile)!.Marcada));
+
+        static string Plano(string s) => Regex.Replace(WebUtility.HtmlDecode(s), @"\s+", " ");
+        string Atributo(string archivo, string patron)
+        {
+            var m = Regex.Match(File.ReadAllText(RevisionUnionTests.Fuente("Etiquetador.App", "Views", archivo)), patron);
+            Assert.True(m.Success, $"no se encontró {patron} en {archivo}");
+            return Plano(m.Groups[1].Value);
+        }
+        var textos = new Dictionary<string, string>
+        {
+            ["Ayuda"] = Atributo("HelpView.axaml", @"Text=""(\s*· «Proponer para»[^""]*)"""),
+            ["descripción de la pestaña"] = Atributo("AsistenteView.axaml", @"Text=""(Pone o corrige el género con reglas[^""]*)"""),
+            ["«Proponer para»"] = Atributo("AsistenteView.axaml", @"ToolTip.Tip=""(Con «Todas»[^""]*)"""),
+            ["consejo"] = GeneroPorReglasViewModel.Consejo(3, 5),
+            ["README"] = Plano(File.ReadAllText(RevisionUnionTests.Fuente("..", "README.md"))),
+        };
+        foreach (var (donde, texto) in textos)
+        {
+            Assert.True(texto.Contains("salvo cuando la propia versión indica su estilo", StringComparison.Ordinal),
+                        $"{donde}: no dice que la propuesta de la versión sale marcada sobre otro estilo");
+            Assert.DoesNotContain("y si es de la misma familia (Trap y Hip Hop, Tech House y EDM) no se propone nada", texto);
+        }
+        // La regla automática del artista solo marca las canciones sin género cuando es fuerte.
+        Assert.Contains("solo cuando es fuerte", textos["descripción de la pestaña"]);
+        Assert.Contains("la versión propone el suyo desmarcado", textos["Ayuda"]);
     }
 
     // =================================================================================================

@@ -249,13 +249,16 @@ respeta el momento de la sesión de las fichas), **limpiar la publicidad de los 
 Álbum que es el nombre del pool y propone el artista del nombre del archivo, escrito como en el resto
 de la biblioteca, cuando el Artista es un «@usuario»; lo dudoso sale desmarcado y lo retirado puede
 guardarse en el comentario) y **género por carpeta y artista**. Manda el estilo que indica la
-propia versión («(Bachata Version)», «(Moombahton Remix)»); después, las reglas que se guardan por
-carpeta (con subcarpetas que se pueden excluir de la regla de su carpeta madre) y por artista
+propia versión («(Bachata Version)», «(Moombahton Remix)»; no «(Disco Mix)», que es la versión de 12
+pulgadas de los temas de los 80, ni un remixer como «DJ Mambo»); después, las reglas que se guardan
+por carpeta (con subcarpetas que se pueden excluir de la regla de su carpeta madre) y por artista
 («Anuel AA» → Reggaeton, con la sugerencia de la biblioteca y artistas que se pueden excluir); y, para
 el resto, el género dominante del artista sin contar los genéricos como Latin o Dance. Rellena y
-sustituye géneros genéricos con la propuesta marcada; si la canción ya tiene otro estilo, la
-propuesta sale desmarcada para revisarla, y los mashups y los remixes firmados conservan el suyo.
-Solo escribe en las canciones que siguen como estaban al proponer. El BPM no se usa, porque no
+sustituye géneros genéricos con la propuesta marcada (con el dominante automático del artista, las
+canciones sin género solo cuando es fuerte); si la canción ya tiene otro estilo, la propuesta sale
+desmarcada para revisarla, salvo cuando la propia versión indica su estilo («(Bachata Version)» en una
+canción con Reggaeton), que sale marcada; y los mashups y los remixes firmados conservan el suyo
+frente a las reglas de carpeta y de artista. Solo escribe en las canciones que siguen como estaban al proponer. El BPM no se usa, porque no
 distingue estilos, y Spotify ya no publica los géneros de los artistas. Para las canciones sin
 género que ninguna regla cubre (y que no son mashups), se puede consultar Deezer: solo propone el
 subgénero del álbum cuando es concreto (Reggaeton, Cumbia, Flamenco…), y siempre desmarcado.
