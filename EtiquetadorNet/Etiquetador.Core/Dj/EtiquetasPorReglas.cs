@@ -21,8 +21,16 @@ public sealed record CambioEtiquetas(string Ruta)
     /// <summary>El artista que se escribe (null = no se toca el artista).</summary>
     public string? ArtistaNuevo { get; init; }
 
-    /// <summary>El género que se pone, solo si el archivo sigue sin género (null = no se toca).</summary>
+    /// <summary>El género que se pone (null = no se toca). Cuándo, lo dice <see cref="GeneroVisto"/>.</summary>
     public string? GeneroNuevo { get; init; }
+
+    /// <summary>
+    /// El género tal como estaba al proponer (como lo lee la biblioteca: los valores unidos por «; »).
+    /// Con él, el género se sustituye solo si el archivo sigue con ese mismo valor. Null = solo se pone
+    /// si el archivo sigue sin género, que es como funcionaba antes de que «Género por carpeta y
+    /// artista» pudiera sustituir géneros.
+    /// </summary>
+    public string? GeneroVisto { get; init; }
 
     /// <summary>
     /// Lo que se quita del álbum y del artista se guarda en el comentario («[Pack: …]», «[Editor: …]»)
@@ -80,9 +88,17 @@ public static class EtiquetasPorReglas
         if (c.GeneroNuevo is { } genero && genero.Trim().Length > 0)
         {
             var antes = tag.Genres ?? Array.Empty<string>();
-            // Nunca se pisa un género: si ya tiene uno (puesto después de proponer), se respeta.
-            if (antes.Any(g => !string.IsNullOrWhiteSpace(g))) respetados++;
-            else cambios["Genre"] = FieldChange.Arr(antes, Ai.GenerosIa.ValoresParaEscribir(genero));
+            var nuevo = Ai.GenerosIa.ValoresParaEscribir(genero);
+            if (c.GeneroVisto == null)
+            {
+                // Sin lo visto, nunca se pisa un género: si ya tiene uno (puesto después de proponer), se respeta.
+                if (antes.Any(g => !string.IsNullOrWhiteSpace(g))) respetados++;
+                else cambios["Genre"] = FieldChange.Arr(antes, nuevo);
+            }
+            // Con lo visto, se sustituye solo lo que sigue igual: lo que el usuario cambió después en el
+            // Editor, en rekordbox o en Mp3tag se respeta, como el álbum y el artista.
+            else if (!string.Equals(tag.JoinedGenres ?? "", c.GeneroVisto, StringComparison.Ordinal)) respetados++;
+            else if (!antes.SequenceEqual(nuevo, StringComparer.Ordinal)) cambios["Genre"] = FieldChange.Arr(antes, nuevo);
         }
 
         if (bloques.Count > 0)

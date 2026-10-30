@@ -238,6 +238,7 @@ public static class CopiaSeguridad
             _ when Igual(nombre, Dj.AlmacenPendientes.NombreArchivo) => "Lista de pendientes",
             _ when Igual(nombre, Dj.AlmacenListasSeguidas.NombreArchivo) => "Listas seguidas",
             _ when Igual(nombre, Dj.MapaGenerosCarpeta.NombreArchivo) => "Reglas de género por carpeta",
+            _ when Igual(nombre, Dj.MapaGenerosArtista.NombreArchivo) => "Reglas de género por artista",
             _ when Igual(nombre, N(Dj.AlmacenSustituciones.RutaEn(p.DataDir))) => "Sustituciones de la Bandeja que se pueden deshacer",
             _ when Igual(nombre, Providers.AlmacenArtistasDeezer.NombreArchivo) => "Artistas de Novedades: correcciones y exclusiones",
             _ => "Otros datos de BeatTag",
