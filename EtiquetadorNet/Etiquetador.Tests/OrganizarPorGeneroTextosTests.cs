@@ -343,6 +343,11 @@ public class OrganizarPorGeneroTextosTests : IDisposable
         Assert.Equal("", vm.ElegirCarpeta(Path.Combine(musica, "Organizada")));
         Assert.True(vm.DestinoCarpeta);
         Assert.Equal("carpeta", config.OrganizarDestino);
+
+        // Ni una carpeta con ajustes propios de Volumen: lo que entrase ahí ganaría la exclusión.
+        config.VolumenCarpetasExcluidas.Add(Path.Combine(musica, "Acapellas"));
+        Assert.Contains("ajustes propios en Duplicados o en Volumen", vm.ElegirCarpeta(Path.Combine(musica, "Acapellas", "Sub")));
+        Assert.Equal(Path.Combine(musica, "Organizada"), vm.CarpetaDestino);
     }
 
     // --- B9: lo que la Ayuda cita existe en la pantalla ---

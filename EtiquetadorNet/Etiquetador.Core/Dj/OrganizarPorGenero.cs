@@ -139,6 +139,8 @@ public enum MotivoOmision
     HerramientaDj,
     /// <summary>Está en una carpeta con ajustes propios de Duplicados o de Volumen.</summary>
     CarpetaConAjustes,
+    /// <summary>Iría a parar dentro de una carpeta con ajustes propios de Duplicados o de Volumen, y ganaría esos ajustes.</summary>
+    DestinoConAjustes,
     /// <summary>Su carpeta de origen está desmarcada en la vista previa.</summary>
     OrigenDesmarcado,
     OtraUnidad,
@@ -331,9 +333,12 @@ public static class OrganizarPorGenero
     /// Por qué no vale <paramref name="carpeta"/> como destino, o "" si vale. Es el revés de
     /// <see cref="RevisionBandeja.ValidarCarpeta"/>: aquí la carpeta tiene que ser de la biblioteca
     /// (una de sus carpetas o estar dentro de una), porque si no las canciones saldrían de ella; y no
-    /// puede estar dentro de una carpeta desmarcada, donde dejarían de verse en todas las pestañas.
+    /// puede estar dentro de una carpeta desmarcada, donde dejarían de verse en todas las pestañas, ni
+    /// dentro de una carpeta con ajustes propios (<paramref name="carpetasConAjustes"/>), donde las
+    /// canciones ganarían la exclusión o la prioridad de Duplicados o de Volumen sin que nadie la pida.
     /// </summary>
-    public static string ValidarDestino(string carpeta, IEnumerable<string> raicesHabilitadas, IEnumerable<string> carpetasDesmarcadas)
+    public static string ValidarDestino(string carpeta, IEnumerable<string> raicesHabilitadas, IEnumerable<string> carpetasDesmarcadas,
+                                        IEnumerable<string>? carpetasConAjustes = null)
     {
         if (string.IsNullOrWhiteSpace(carpeta)) return "Elige la carpeta de destino.";
         foreach (var d in carpetasDesmarcadas)
@@ -342,6 +347,10 @@ public static class OrganizarPorGenero
                      + "las canciones que se movieran ahí dejarían de verse en todas las pestañas.";
         if (!raicesHabilitadas.Any(r => Rutas.MismaCarpeta(carpeta, r) || Rutas.EstaDentroDe(carpeta, r)))
             return "La carpeta de destino tiene que ser una carpeta de la biblioteca o estar dentro de una: si no, las canciones saldrían de la biblioteca.";
+        foreach (var c in carpetasConAjustes ?? Array.Empty<string>())
+            if (!string.IsNullOrWhiteSpace(c) && (Rutas.MismaCarpeta(carpeta, c) || Rutas.EstaDentroDe(carpeta, c)))
+                return $"Esa carpeta está dentro de «{GeneroPorReglas.NombreCarpeta(c)}», que tiene ajustes propios en Duplicados o en Volumen: "
+                     + "las canciones que se movieran ahí ganarían esos ajustes.";
         return "";
     }
 
@@ -386,7 +395,16 @@ public static class OrganizarPorGenero
 
         var raices = raicesHabilitadas.Where(r => !string.IsNullOrWhiteSpace(r)).OrderByDescending(r => r.Length).ToList();
         var raizDe = new Dictionary<string, string?>(ComparadorRutas.Instancia);
+        // Las carpetas con ajustes propios protegen en los dos sentidos: lo que hay dentro no sale (perdería
+        // la exclusión de Duplicados o de Volumen, o la prioridad) y lo de fuera no entra (la ganaría).
         var conAjustes = new Dictionary<string, bool>(ComparadorRutas.Instancia);
+        var carpetasConAjustes = op.CarpetasConAjustes.Where(c => !string.IsNullOrWhiteSpace(c)).ToList();
+        bool ConAjustes(string carpeta)
+        {
+            if (!conAjustes.TryGetValue(carpeta, out var si))
+                conAjustes[carpeta] = si = carpetasConAjustes.Any(c => Rutas.MismaCarpeta(carpeta, c) || Rutas.EstaDentroDe(carpeta, c));
+            return si;
+        }
         var excluidos = new HashSet<string>(op.OrigenesExcluidos.Where(c => !string.IsNullOrWhiteSpace(c))
                                                                 .Select(c => c.TrimEnd('\\', '/')), ComparadorRutas.Instancia);
         var unidades = new Dictionary<string, string>(ComparadorRutas.Instancia);
@@ -443,9 +461,7 @@ public static class OrganizarPorGenero
 
             void Omitir(MotivoOmision m, string texto) => omitidas.Add(new OmisionOrganizar(t.FilePath, m, texto));
 
-            if (!conAjustes.TryGetValue(dir, out var ajustes))
-                conAjustes[dir] = ajustes = op.CarpetasConAjustes.Any(c => Rutas.MismaCarpeta(dir, c) || Rutas.EstaDentroDe(dir, c));
-            if (ajustes) { Omitir(MotivoOmision.CarpetaConAjustes, TextoMotivo(MotivoOmision.CarpetaConAjustes)); continue; }
+            if (ConAjustes(dir)) { Omitir(MotivoOmision.CarpetaConAjustes, TextoMotivo(MotivoOmision.CarpetaConAjustes)); continue; }
             if (excluidos.Contains(dir.TrimEnd('\\', '/'))) { Omitir(MotivoOmision.OrigenDesmarcado, TextoMotivo(MotivoOmision.OrigenDesmarcado)); continue; }
 
             var genero = GeneroDe(t);
@@ -484,6 +500,7 @@ public static class OrganizarPorGenero
 
             if (ComparadorRutas.Instancia.Equals(destino, t.FilePath)) { Omitir(MotivoOmision.YaEnSuSitio, TextoMotivo(MotivoOmision.YaEnSuSitio)); continue; }
             if (!ComparadorRutas.Instancia.Equals(Unidad(dir), Unidad(baseDir))) { Omitir(MotivoOmision.OtraUnidad, TextoMotivo(MotivoOmision.OtraUnidad)); continue; }
+            if (ConAjustes(destinoDir)) { Omitir(MotivoOmision.DestinoConAjustes, TextoDestinoConAjustes(nombreDestino)); continue; }
             if (destino.Length >= LargoMaximoRuta) { Omitir(MotivoOmision.RutaLarga, TextoMotivo(MotivoOmision.RutaLarga)); continue; }
             if (Tramos(destino).Any(s => Encoding.UTF8.GetByteCount(s) > BytesMaximoTramo))
             {
@@ -593,6 +610,7 @@ public static class OrganizarPorGenero
         MotivoOmision.YaEnSuSitio => "Ya está en la carpeta de su género",
         MotivoOmision.HerramientaDj => "Herramienta de DJ",
         MotivoOmision.CarpetaConAjustes => "Su carpeta tiene ajustes propios en Duplicados o en Volumen",
+        MotivoOmision.DestinoConAjustes => "Su carpeta de destino tiene ajustes propios en Duplicados o en Volumen",
         MotivoOmision.OrigenDesmarcado => "Su carpeta de origen está desmarcada",
         MotivoOmision.OtraUnidad => "Está en otra unidad",
         MotivoOmision.RutaLarga => $"La ruta de destino tendría {LargoMaximoRuta} caracteres o más",
@@ -602,6 +620,10 @@ public static class OrganizarPorGenero
 
     /// <summary>«Ya hay un archivo con ese nombre en «Latin»».</summary>
     public static string TextoColision(string carpeta) => $"Ya hay un archivo con ese nombre en «{carpeta}»";
+
+    /// <summary>«Su carpeta de destino, «House», tiene ajustes propios en Duplicados o en Volumen».</summary>
+    public static string TextoDestinoConAjustes(string carpeta)
+        => $"Su carpeta de destino, «{carpeta}», tiene ajustes propios en Duplicados o en Volumen";
 
     /// <summary>«Se moverá 1 canción a 1 carpeta» / «Se moverán 10.896 canciones a 181 carpetas».</summary>
     public static string TextoMovimientos(int canciones, int carpetas)
@@ -627,6 +649,9 @@ public static class OrganizarPorGenero
             MotivoOmision.CarpetaConAjustes => uno
                 ? "1 se queda porque su carpeta tiene ajustes propios en Duplicados o en Volumen"
                 : $"{cuantas} se quedan porque su carpeta tiene ajustes propios en Duplicados o en Volumen",
+            MotivoOmision.DestinoConAjustes => uno
+                ? "1 se queda porque su carpeta de destino tiene ajustes propios en Duplicados o en Volumen"
+                : $"{cuantas} se quedan porque su carpeta de destino tiene ajustes propios en Duplicados o en Volumen",
             MotivoOmision.OrigenDesmarcado => uno ? "1 se queda porque su carpeta está desmarcada" : $"{cuantas} se quedan porque su carpeta está desmarcada",
             MotivoOmision.OtraUnidad => uno ? "1 se omite porque está en otra unidad" : $"{cuantas} se omiten porque están en otra unidad",
             MotivoOmision.RutaLarga => uno
@@ -642,7 +667,7 @@ public static class OrganizarPorGenero
     /// <summary>El orden en que el resumen cuenta lo que no se mueve.</summary>
     private static readonly MotivoOmision[] OrdenResumen =
     {
-        MotivoOmision.SinGenero, MotivoOmision.HerramientaDj, MotivoOmision.CarpetaConAjustes, MotivoOmision.OrigenDesmarcado,
+        MotivoOmision.SinGenero, MotivoOmision.HerramientaDj, MotivoOmision.CarpetaConAjustes, MotivoOmision.DestinoConAjustes, MotivoOmision.OrigenDesmarcado,
         MotivoOmision.YaEnSuSitio, MotivoOmision.Colision, MotivoOmision.OtraUnidad, MotivoOmision.RutaLarga, MotivoOmision.TramoLargo,
     };
 

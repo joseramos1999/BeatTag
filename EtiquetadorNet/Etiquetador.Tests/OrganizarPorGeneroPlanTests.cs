@@ -269,6 +269,39 @@ public class OrganizarPorGeneroPlanTests
         Assert.Equal("Elige la carpeta de destino.", OrganizarPorGenero.ValidarDestino(" ", raices, desmarcadas));
     }
 
+    // Revisión 1: solo se protegía la SALIDA de las carpetas con ajustes, no la entrada. COMPROBADO:
+    // con «En la raíz» y «Raíz/House» excluida de Duplicados, las canciones de House entraban en ella
+    // y ganaban esa exclusión sin que nadie la pidiera.
+    [Theory]
+    [InlineData(DestinoOrganizar.EnLaRaiz)]
+    [InlineData(DestinoOrganizar.PorGeneroEnCadaRaiz)]
+    public void Una_cancion_no_entra_en_una_carpeta_con_ajustes_propios(DestinoOrganizar destino)
+    {
+        var house = destino == DestinoOrganizar.EnLaRaiz ? Path.Combine(Raiz, "House") : Path.Combine(PorGenero, "House");
+        var canciones = new[] { T("Descargas", "a.mp3", "House"), T("Descargas", "b.mp3", "House"), T("Descargas", "c.mp3", "Pop") };
+        var disco = Disco(canciones).Carpeta(house);
+
+        var plan = Plan(canciones, new OpcionesOrganizar { Destino = destino, CarpetasConAjustes = new[] { house } }, disco);
+
+        Assert.Equal("c.mp3", Path.GetFileName(Unico(plan).Origen));
+        Assert.Equal(2, plan.CuantasOmitidas(MotivoOmision.DestinoConAjustes));
+        Assert.All(plan.Omitidas, o => Assert.Contains("ajustes propios en Duplicados o en Volumen", o.Texto));
+        Assert.Contains("2 se quedan porque su carpeta de destino tiene ajustes propios", OrganizarPorGenero.Resumen(plan));
+    }
+
+    [Fact]
+    public void El_destino_elegido_no_puede_estar_en_una_carpeta_con_ajustes_propios()
+    {
+        var raices = new[] { Raiz };
+        var conAjustes = new[] { Path.Combine(Raiz, "Acapellas") };
+
+        Assert.Contains("«Acapellas», que tiene ajustes propios en Duplicados o en Volumen",
+                        OrganizarPorGenero.ValidarDestino(Path.Combine(Raiz, "Acapellas"), raices, Array.Empty<string>(), conAjustes));
+        Assert.Contains("ajustes propios",
+                        OrganizarPorGenero.ValidarDestino(Path.Combine(Raiz, "Acapellas", "Sub"), raices, Array.Empty<string>(), conAjustes));
+        Assert.Equal("", OrganizarPorGenero.ValidarDestino(Path.Combine(Raiz, "Organizada"), raices, Array.Empty<string>(), conAjustes));
+    }
+
     [Fact]
     public void Caso_13_en_la_raiz_una_cancion_de_trap_en_la_carpeta_trap_ya_esta_en_su_sitio()
     {

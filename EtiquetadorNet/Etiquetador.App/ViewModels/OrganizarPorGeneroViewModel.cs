@@ -270,7 +270,7 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
     /// </summary>
     public string ElegirCarpeta(string carpeta)
     {
-        var motivo = OrganizarPorGenero.ValidarDestino(carpeta, _engine.Library.EnabledPaths(), CarpetasDesmarcadas());
+        var motivo = OrganizarPorGenero.ValidarDestino(carpeta, _engine.Library.EnabledPaths(), CarpetasDesmarcadas(), CarpetasConAjustes());
         if (motivo.Length > 0)
         {
             Status = motivo;
@@ -290,7 +290,7 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         var destino = Destino;
         if (destino == DestinoOrganizar.Carpeta)
         {
-            motivo = OrganizarPorGenero.ValidarDestino(CarpetaDestino ?? "", _engine.Library.EnabledPaths(), CarpetasDesmarcadas());
+            motivo = OrganizarPorGenero.ValidarDestino(CarpetaDestino ?? "", _engine.Library.EnabledPaths(), CarpetasDesmarcadas(), CarpetasConAjustes());
             if (motivo.Length > 0) return null;
         }
         return new OpcionesOrganizar

@@ -29,7 +29,7 @@
                                      Content="En otra carpeta de la biblioteca…" VerticalAlignment="Center" />
                         <TextBox Text="{Binding CarpetaDestino}" IsReadOnly="True" PlaceholderText="Sin elegir" MinWidth="320" />
                         <Button Content="Elegir…" Click="ElegirCarpeta_Click" IsEnabled="{Binding Libre}"
-                                ToolTip.Tip="Tiene que ser una carpeta de la biblioteca o estar dentro de una." />
+                                ToolTip.Tip="Tiene que ser una carpeta de la biblioteca o estar dentro de una, y no puede estar dentro de una carpeta con ajustes propios de Duplicados o de Volumen." />
                     </WrapPanel>
 
                     <TextBlock Text="Qué se mueve" FontWeight="SemiBold" Margin="0,6,0,0" />
