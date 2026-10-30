@@ -676,7 +676,11 @@ public static class OrganizarPorGenero
                     Organizada();
                     continue;
                 }
-                if (!ComparadorRutas.Instancia.Equals(Unidad(dir), Unidad(baseDir))) { Omitir(MotivoOmision.OtraUnidad, TextoMotivo(MotivoOmision.OtraUnidad)); continue; }
+                // La unidad de la carpeta a la que va de verdad, no la de la base (revisión 3): una carpeta de
+                // género que ya existe, o una subcarpeta conservada, puede ser una unión, un enlace o el punto
+                // de montaje de otro disco. Si aún no existe, UnidadDe sube hasta la carpeta existente más
+                // cercana, que es lo mismo que mirar la base.
+                if (!ComparadorRutas.Instancia.Equals(Unidad(dir), Unidad(destinoDir))) { Omitir(MotivoOmision.OtraUnidad, TextoMotivo(MotivoOmision.OtraUnidad)); continue; }
                 if (ConAjustes(destinoDir)) { Omitir(MotivoOmision.DestinoConAjustes, TextoDestinoConAjustes(nombreDestino)); continue; }
                 if (CambioPorCarpeta(t.FilePath, destino, nombreDestino) is { } cambio) { Omitir(MotivoOmision.TipoPorCarpeta, cambio); continue; }
                 // Los archivos que la acompañan por su nombre van con ella: valen para ellos los mismos límites

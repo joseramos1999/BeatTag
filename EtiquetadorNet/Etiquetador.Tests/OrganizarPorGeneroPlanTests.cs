@@ -791,6 +791,97 @@ public class OrganizarPorGeneroPlanTests
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
+    // Revisión 3: la unidad del destino era la de la BASE («Musica/Por género»), no la de la carpeta a
+    // la que va de verdad. REPRODUCIDO con una unión real: «Por género/House» llevaba a otro disco y la
+    // canción de «Descargas» se movía igual, y File.Move copiaba el archivo entero y borraba el original.
+    // Se simula con el volumen inyectado, para comprobarlo en cualquier sistema.
+    [Fact]
+    public void Una_carpeta_de_genero_que_ya_existe_en_otro_disco_es_otra_unidad()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var musica = Directory.CreateDirectory(Path.Combine(dir, "Musica")).FullName;
+            var descargas = Directory.CreateDirectory(Path.Combine(musica, "Descargas")).FullName;
+            var house = Directory.CreateDirectory(Path.Combine(musica, OrganizarPorGenero.CarpetaPorGenero, "House")).FullName;
+            File.WriteAllText(Path.Combine(descargas, "a.mp3"), "x");
+            File.WriteAllText(Path.Combine(descargas, "b.mp3"), "x");
+            // «Por género/House» (y lo que tenga dentro) está en otro volumen; lo demás, en el de la biblioteca.
+            string Volumen(string c) => Etiquetador.Core.Rutas.MismaCarpeta(c, house) || Etiquetador.Core.Rutas.EstaDentroDe(c, house) ? "vol-usb" : "vol-interno";
+            var canciones = new[]
+            {
+                new Track { FilePath = Path.Combine(descargas, "a.mp3"), Folder = musica, Genre = "House" },
+                new Track { FilePath = Path.Combine(descargas, "b.mp3"), Folder = musica, Genre = "Pop" },
+            };
+
+            var plan = OrganizarPorGenero.Planear(canciones, new[] { musica }, new OpcionesOrganizar(), new DiscoReal(Array.Empty<string>(), _ => null, Volumen));
+
+            Assert.Equal(Path.Combine(musica, OrganizarPorGenero.CarpetaPorGenero, "Pop", "b.mp3"), Unico(plan).Destino);
+            var o = Assert.Single(plan.Omitidas);
+            Assert.Equal((Path.Combine(descargas, "a.mp3"), MotivoOmision.OtraUnidad), (o.Ruta, o.Motivo));
+
+            // Con «Conservar las subcarpetas», la que se conserva dentro de un género que está en otro disco, igual.
+            var conservando = OrganizarPorGenero.Planear(canciones, new[] { musica }, new OpcionesOrganizar { ConservarEstructura = true },
+                                                         new DiscoReal(Array.Empty<string>(), _ => null, Volumen));
+            Assert.Equal(MotivoOmision.OtraUnidad, Assert.Single(conservando.Omitidas).Motivo);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Lo mismo con «En la raíz»: una carpeta de la raíz que se llama como el género y está en otro disco.
+    [Fact]
+    public void En_la_raiz_una_carpeta_de_genero_en_otro_disco_es_otra_unidad()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var musica = Directory.CreateDirectory(Path.Combine(dir, "Musica")).FullName;
+            var descargas = Directory.CreateDirectory(Path.Combine(musica, "Descargas")).FullName;
+            var techno = Directory.CreateDirectory(Path.Combine(musica, "Techno")).FullName;
+            File.WriteAllText(Path.Combine(descargas, "b.mp3"), "x");
+            File.WriteAllText(Path.Combine(descargas, "c.mp3"), "x");
+            string Volumen(string c) => Etiquetador.Core.Rutas.MismaCarpeta(c, techno) || Etiquetador.Core.Rutas.EstaDentroDe(c, techno) ? "vol-usb" : "vol-interno";
+            var canciones = new[]
+            {
+                new Track { FilePath = Path.Combine(descargas, "b.mp3"), Folder = musica, Genre = "Techno" },
+                new Track { FilePath = Path.Combine(descargas, "c.mp3"), Folder = musica, Genre = "House" },
+            };
+
+            var plan = OrganizarPorGenero.Planear(canciones, new[] { musica }, new OpcionesOrganizar { Destino = DestinoOrganizar.EnLaRaiz },
+                                                  new DiscoReal(Array.Empty<string>(), _ => null, Volumen));
+
+            Assert.Equal(Path.Combine(musica, "House", "c.mp3"), Unico(plan).Destino);
+            Assert.Equal((Path.Combine(descargas, "b.mp3"), MotivoOmision.OtraUnidad), (Assert.Single(plan.Omitidas).Ruta, plan.Omitidas[0].Motivo));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Y sin nombre de volumen (macOS, una carpeta en red), por la ruta real: una carpeta de género que es
+    // un enlace simbólico a otro disco.
+    [Fact]
+    public void Una_carpeta_de_genero_que_enlaza_con_otro_disco_es_otra_unidad()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var musica = Directory.CreateDirectory(Path.Combine(dir, "Musica")).FullName;
+            var descargas = Directory.CreateDirectory(Path.Combine(musica, "Descargas")).FullName;
+            var house = Directory.CreateDirectory(Path.Combine(musica, OrganizarPorGenero.CarpetaPorGenero, "House")).FullName;
+            var usb = Path.Combine(dir, "Volumes", "USB");
+            File.WriteAllText(Path.Combine(descargas, "a.mp3"), "x");
+            var disco = new DiscoReal(new[] { dir, usb },
+                                      c => Etiquetador.Core.Rutas.MismaCarpeta(c, house) ? Path.Combine(usb, "House") : null,
+                                      _ => null);
+            var canciones = new[] { new Track { FilePath = Path.Combine(descargas, "a.mp3"), Folder = musica, Genre = "House" } };
+
+            var plan = OrganizarPorGenero.Planear(canciones, new[] { musica }, new OpcionesOrganizar(), disco);
+
+            Assert.Empty(plan.Movimientos);
+            Assert.Equal(MotivoOmision.OtraUnidad, Assert.Single(plan.Omitidas).Motivo);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
     [Fact]
     public void Un_enlace_simbolico_de_verdad_se_resuelve_si_el_sistema_deja_crearlo()
     {
