@@ -227,6 +227,40 @@ public class OrganizarPorGeneroTextosTests : IDisposable
         Assert.False(Directory.Exists(porGenero));
     }
 
+    // Revisión 3: la recomendación de pasar antes «Género por carpeta y artista» solo salía con variantes
+    // sin unificar o canciones sin género. Con géneros genéricos (Latin, Dance), que esa herramienta
+    // sustituye con la propuesta marcada, no salía, y se creaban «Por género/Latin» y «Por género/Dance».
+    [Fact]
+    public async Task Con_generos_genericos_la_pagina_recomienda_pasar_antes_el_Asistente()
+    {
+        var (motor, _, musica) = Motor();
+        Cancion(Path.Combine(musica, "Descargas"), "a.mp3", "Latin");
+        Cancion(Path.Combine(musica, "Descargas"), "b.mp3", "Pop");
+        var vm = new OrganizarPorGeneroViewModel(motor);
+
+        await vm.CalcularCommand.ExecuteAsync(null);
+
+        Assert.Equal(2, vm.Plan!.Movimientos.Count);
+        Assert.Equal(0, vm.Plan.CuantasOmitidas(MotivoOmision.SinGenero));
+        Assert.Equal(OrganizarPorGeneroViewModel.Recomendar, vm.Recomendacion);
+        Assert.Contains("también uno genérico como Latin o Dance", OrganizarPorGeneroViewModel.Recomendar);
+
+        // Sin genéricos, sin variantes y sin canciones sin género, no hay nada que recomendar.
+        var (motor2, _, musica2) = Motor();
+        File.Delete(Path.Combine(musica2, "Descargas", "a.mp3"));
+        var limpia = new OrganizarPorGeneroViewModel(motor2);
+        await limpia.CalcularCommand.ExecuteAsync(null);
+        Assert.Equal("", limpia.Recomendacion);
+    }
+
+    [Fact]
+    public void Las_ejecuciones_anteriores_que_bloquea_organizar_incluyen_la_que_la_pagina_recomienda()
+    {
+        Assert.Contains("«Género por carpeta y artista»", OrganizarPorGeneroViewModel.AvisoEjecucionesAnteriores);
+        Assert.Contains(OrganizarPorGeneroViewModel.AvisoEjecucionesAnteriores, SeccionDeLaAyuda());
+        Assert.Contains("también uno genérico como Latin o Dance", SeccionDeLaAyuda());
+    }
+
     [Fact]
     public async Task La_vista_previa_se_desfasa_si_la_biblioteca_cambia_por_otro_lado()
     {

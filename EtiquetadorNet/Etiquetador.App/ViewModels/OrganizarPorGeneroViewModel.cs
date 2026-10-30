@@ -102,7 +102,7 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
     // está desfasada (ver CancionesCambiadas).
     private IReadOnlyList<Track>? _leidas;
     private IReadOnlyList<string> _raices = Array.Empty<string>();
-    private int _variantes, _sinGenero;
+    private int _variantes, _sinGenero, _genericos;
     // Los puntos de montaje, una vez por vista previa: con una unidad de red caída, preguntar por ellos
     // puede tardar segundos, y replanificar tras cambiar una opción tiene que ser inmediato.
     private IReadOnlyList<string>? _puntos;
@@ -361,8 +361,8 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
             var canciones = leidas.Select(t => t.Copia()).ToList();
             _raices = _engine.Library.EnabledPaths();
             Status = "Calculando la vista previa…";
-            (_variantes, _sinGenero, _puntos) = await Task.Run(() => (GeneroPorReglas.VariantesSinUnificar(canciones), canciones.Count(GeneroPorReglas.SinGenero),
-                                                                      Rutas.PuntosDeMontaje()), ct);
+            (_variantes, _sinGenero, _genericos, _puntos) = await Task.Run(() => (GeneroPorReglas.VariantesSinUnificar(canciones), canciones.Count(GeneroPorReglas.SinGenero),
+                                                                                 GeneroPorReglas.ConGeneroGenerico(canciones), Rutas.PuntosDeMontaje()), ct);
             _canciones = canciones;
             _leidas = leidas;
             if (!await PlanearAsync(ct)) return;
@@ -441,7 +441,7 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         Desfasado = desfase.Length > 0;
         Aviso = desfase;
         Resumen = OrganizarPorGenero.Resumen(plan);
-        Recomendacion = _variantes > 0 || _sinGenero > 0 ? Recomendar : "";
+        Recomendacion = _variantes > 0 || _sinGenero > 0 || _genericos > 0 ? Recomendar : "";
         OnPropertyChanged(nameof(Plan));
         OnPropertyChanged(nameof(PuedeOrganizar));
 
@@ -678,9 +678,13 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
     public const string AvisoAjustesCambiados =
         "Las carpetas con ajustes propios de Duplicados o de Volumen han cambiado desde la vista previa: vuelve a calcularla antes de organizar.";
 
-    /// <summary>La recomendación de la vista previa si hay géneros sin unificar o canciones sin género.</summary>
+    /// <summary>
+    /// La recomendación de la vista previa si hay géneros sin unificar, canciones sin género o canciones
+    /// con un género genérico (revisión 3: «Género por carpeta y artista» los sustituye con la propuesta
+    /// marcada, y sin pasarla se crean carpetas como «Latin» o «Dance»).
+    /// </summary>
     public const string Recomendar =
-        "Antes de organizar, pasa «Unificar géneros» y «Género por carpeta y artista» del Asistente: las carpetas se crean con el género que tenga cada canción.";
+        "Antes de organizar, pasa «Unificar géneros» y «Género por carpeta y artista» del Asistente: las carpetas se crean con el género que tenga cada canción, también uno genérico como Latin o Dance.";
 
     public const string AvisoRekordbox =
         "rekordbox guarda los cue points ligados a la ruta: después, abre la página rekordbox y repara las rutas en «Rutas rotas», o reubica las pistas desde el propio rekordbox, porque el nombre de cada archivo no cambia.";
@@ -697,10 +701,11 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
     /// <summary>
     /// El historial no deshace un cambio de un archivo que una ejecución posterior movió (deshacer lo
     /// buscaría donde ya no está): con miles de canciones movidas, deshacer un ajuste de volumen de ayer
-    /// exigiría deshacer antes la organización entera. Se avisa antes de mover (revisión 1).
+    /// exigiría deshacer antes la organización entera. Se avisa antes de mover (revisión 1), con el ejemplo
+    /// de la herramienta que esta misma página recomienda pasar antes (revisión 3).
     /// </summary>
     public const string AvisoEjecucionesAnteriores =
-        "Las ejecuciones anteriores que sigan pendientes en el historial (por ejemplo, un ajuste de volumen) solo se podrán deshacer en las canciones movidas después de deshacer esta organización.";
+        "Las ejecuciones anteriores que sigan pendientes en el historial (por ejemplo, «Género por carpeta y artista» o un ajuste de volumen) solo se podrán deshacer en las canciones movidas después de deshacer esta organización.";
 
     /// <summary>El título, el cuerpo y la nota del diálogo de confirmación.</summary>
     public static (string Titulo, string Cuerpo, string Nota) TextosConfirmacion(PlanOrganizar plan)

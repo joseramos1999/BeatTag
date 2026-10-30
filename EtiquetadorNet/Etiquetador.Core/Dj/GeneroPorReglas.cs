@@ -757,6 +757,20 @@ public static class GeneroPorReglas
     public static int VariantesSinUnificar(IEnumerable<Track> canciones)
         => GenerosIa.Contar(canciones).Count(x => GenerosIa.PorReglas(x.Original, x.Canciones).Cambia);
 
+    /// <summary>
+    /// Cuántas canciones tienen un género genérico («Latin», «Dance», «Mashup») o algo que no es un
+    /// género («@usuario»): las que <see cref="Calcular"/> clasifica como
+    /// <see cref="CambioGenero.SustituirGenerico"/>. No cuentan las que no tienen género ni las que
+    /// tienen una lista (eso es de «Unificar géneros»).
+    /// </summary>
+    public static int ConGeneroGenerico(IEnumerable<Track> canciones)
+    {
+        var normalizado = Normalizador();
+        var generico = DetectorGenerico();
+        return canciones.Count(t => (t.Genre ?? "").Trim() is { Length: > 0 } g && !GenerosIa.EsLista(g)
+                                    && (normalizado(g) is not { } n || generico(n)));
+    }
+
     /// <summary>El nombre de la carpeta para enseñarlo («Flamenco Rumbas»), o la ruta si es una raíz.</summary>
     public static string NombreCarpeta(string ruta)
     {
