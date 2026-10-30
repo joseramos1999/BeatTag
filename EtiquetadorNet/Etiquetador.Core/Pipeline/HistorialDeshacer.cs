@@ -49,6 +49,12 @@ public enum TipoEjecucion
 
     /// <summary>«Sustituir» desde la Bandeja: la descarga ocupa el lugar de su copia de la biblioteca.</summary>
     Sustitucion,
+
+    /// <summary>
+    /// «Organizar por género»: cada canción pasa a la carpeta de su género. Sin su origen se deduciría
+    /// como Traslado (cambia de carpeta y no toca etiquetas), que es lo que verá una versión anterior.
+    /// </summary>
+    OrganizarPorGenero,
 }
 
 /// <summary>Cómo está una ejecución en el historial.</summary>
@@ -474,6 +480,7 @@ public sealed class HistorialDeshacer
         TipoEjecucion.LimpiezaPacks => "Limpieza de publicidad de packs",
         TipoEjecucion.GeneroPorReglas => "Género por carpeta y artista",
         TipoEjecucion.Sustitucion => "Sustitución desde la Bandeja",
+        TipoEjecucion.OrganizarPorGenero => "Organización por género",
         _ => "Sin identificar",
     };
 

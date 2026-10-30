@@ -148,6 +148,16 @@ public sealed class LibraryStore
     public void ClearScanCache() => _cache.Clear();
 
     /// <summary>
+    /// La aplicación acaba de mover un archivo a otra carpeta (Organizar por género, o deshacerlo): lo
+    /// leído de él sigue valiendo en su ruta nueva y el siguiente escaneo no lo vuelve a leer. Se puede
+    /// llamar desde cualquier hilo; se guarda con el escaneo.
+    /// </summary>
+    public bool SeguirArchivo(string origen, string destino) => _cache.Mover(origen, destino);
+
+    /// <summary>Guarda la caché de escaneo si ha cambiado. "" o el motivo del fallo.</summary>
+    public string GuardarCache() => _cache.Save();
+
+    /// <summary>
     /// Cómo ha ido un intento de añadir carpeta. El <see cref="Aviso"/> interesa incluso cuando sí
     /// se añade: puede haber absorbido otras, y eso hay que contarlo en vez de hacerlo callando.
     /// </summary>

@@ -78,4 +78,11 @@ public class Track
 
     /// <summary>"Clean"/"Explícito"/"" deducido del nombre y título (para columna/filtros).</summary>
     public string Explicit => Analysis.ExplicitDetector.Label(this);
+
+    /// <summary>
+    /// Una copia con los mismos datos, que no cambia si se cambia esta. Sirve para trabajar sobre la
+    /// biblioteca tal como estaba en un momento: algunas páginas cambian la canción en memoria al
+    /// guardar (el Editor pone ahí el género y la ruta nuevos).
+    /// </summary>
+    public Track Copia() => (Track)MemberwiseClone();
 }

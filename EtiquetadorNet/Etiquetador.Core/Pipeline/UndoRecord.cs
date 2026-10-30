@@ -83,9 +83,10 @@ public sealed class UndoRecord
     /// quien llama), el Editor, Volumen, Unificar géneros, Renombrar con IA y Completar nombres, las
     /// fichas al comentario, la importación de rekordbox, «Pasar a la biblioteca» de la Bandeja
     /// (Traslado), las dos herramientas de reglas del Asistente (EscrituraPorReglas: LimpiezaPacks y
-    /// GeneroPorReglas) y «Sustituir» de la Bandeja (Sustitucion: el traslado y las etiquetas
-    /// copiadas). Un escritor nuevo debe ponerlo también: sin él, el historial deduce el tipo por los
-    /// campos y puede confundirlo con otra herramienta.
+    /// GeneroPorReglas), «Sustituir» de la Bandeja (Sustitucion: el traslado y las etiquetas
+    /// copiadas) y «Organizar por género» (OrganizadorPorGenero: OrganizarPorGenero, solo traslados).
+    /// Un escritor nuevo debe ponerlo también: sin él, el historial deduce el tipo por los campos y
+    /// puede confundirlo con otra herramienta.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? Origen { get; set; }
@@ -105,4 +106,20 @@ public sealed class UndoRecord
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public bool? GananciaAnotada { get; set; }
+
+    /// <summary>
+    /// Carpetas que creó la ejecución para llevar ahí este archivo, de la más alta a la más profunda
+    /// («…/Por género» y «…/Por género/Pop»). Las lleva el PRIMER registro de la ejecución que movió un
+    /// archivo a cada una. Al deshacer cualquier parte de la ejecución, al terminar se quitan las que
+    /// hayan quedado vacías de las que contienen el destino de lo deshecho, de la más profunda a la más
+    /// alta, cuente quien las cuente (ver UndoEngine.QuitarCarpetasCreadas).
+    ///
+    /// POR QUÉ. Organizar por género crea unas 181 carpetas en una biblioteca real; deshacerlo sin esto
+    /// las dejaba vacías. Se miran las de toda la ejecución, y no solo las del registro que las lleva,
+    /// porque se puede deshacer por partes desde el historial y en cualquier orden (revisión 1).
+    ///
+    /// Sin valor no se escribe: los manifiestos de antes y los de las demás herramientas quedan igual.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? CarpetasCreadas { get; set; }
 }

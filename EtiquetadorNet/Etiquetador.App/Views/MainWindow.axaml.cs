@@ -92,6 +92,7 @@ public partial class MainWindow : Window
         [18] = (() => new PendientesView(),  vm => vm.Pendientes),   // equipo «listas», tanda 3
         [19] = (() => new RekordboxView(),   vm => vm.Rekordbox),    // equipo «rekordbox», tanda 4
         [20] = (() => new NovedadesView(),   vm => vm.Novedades),    // equipo «novedades», tanda 4 (P5)
+        [21] = (() => new OrganizarPorGeneroView(), vm => vm.OrganizarGenero),   // Organizar por género (B8)
     };
 
     private readonly Dictionary<int, Control> _creadas = new();

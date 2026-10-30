@@ -89,6 +89,9 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>Novedades de los artistas de la biblioteca (equipo «novedades», tanda 4, P5).</summary>
     public NovedadesViewModel Novedades { get; }
 
+    /// <summary>Organizar por género: cada canción a la carpeta de su género (B8).</summary>
+    public OrganizarPorGeneroViewModel OrganizarGenero { get; }
+
     [ObservableProperty] private int _selectedTabIndex;
 
     /// <summary>
@@ -172,6 +175,8 @@ public partial class MainViewModel : ViewModelBase
         // Página rekordbox (equipo «rekordbox», tanda 4): las listas abiertas en otras páginas se las da el shell.
         Rekordbox = new RekordboxViewModel(engine, ListasAbiertasParaRekordbox);
         Novedades = new NovedadesViewModel(engine);   // equipo «novedades», tanda 4 (P5)
+        // Nace con el shell: vigila la biblioteca para avisar de que una vista previa ya no vale (B8).
+        OrganizarGenero = new OrganizarPorGeneroViewModel(engine);
 
         // El ÍNDICE de cada página es su hueco en el contenido de MainWindow.axaml; el ORDEN en que
         // aparecen aquí es el de la barra lateral, y no tiene por qué ser el mismo.
@@ -192,6 +197,10 @@ public partial class MainViewModel : ViewModelBase
                     // Sin «Ocupada»: solo lee el XML exportado y escribe otros XML y listas, nunca la música,
                     // así que no bloquea el resto de la aplicación (equipo «rekordbox», tanda 4).
                     new() { Indice = 19, Icono = "🎛", Nombre = "rekordbox", Vm = Rekordbox },
+                    // Mueve archivos de toda la biblioteca, como la Bandeja: bloquea las demás páginas mientras
+                    // dura, y al cerrar se cancela entre un archivo y el siguiente (Organizar por género, B8).
+                    new() { Indice = 21, Icono = "📂", Nombre = "Organizar por género", Vm = OrganizarGenero,
+                            Ocupada = () => OrganizarGenero.IsBusy, Cancelar = OrganizarGenero.Cancelar },
                 },
             },
             new()
@@ -276,6 +285,7 @@ public partial class MainViewModel : ViewModelBase
             vm.PropertyChanged += OnChildChanged;
         Pendientes.PropertyChanged += OnChildChanged;   // equipo «listas», tanda 3
         Novedades.PropertyChanged += OnChildChanged;    // equipo «novedades», tanda 4 (P5)
+        OrganizarGenero.PropertyChanged += OnChildChanged;   // Organizar por género (B8)
 
         // La biblioteca avisa al escanearse y al cambiar las carpetas: es lo que abre el resto de
         // pestañas. Folders es una ObservableCollection, así que también hay que seguirla: quitar
@@ -321,6 +331,8 @@ public partial class MainViewModel : ViewModelBase
 
         // La reparación de rekordbox está en su página; Ajustes lleva hasta ella (equipo «rekordbox», tanda 4).
         Settings.AbrirRekordboxPedido += () => SelectedTabIndex = RekordboxTabIndex;
+        // Y también el resumen de Organizar por género, para reparar las rutas de lo movido (B8).
+        OrganizarGenero.AbrirRekordboxPedido += () => SelectedTabIndex = RekordboxTabIndex;
 
         _ = InitAsync();
     }
