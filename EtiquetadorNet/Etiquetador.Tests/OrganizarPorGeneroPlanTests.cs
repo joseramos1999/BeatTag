@@ -827,6 +827,39 @@ public class OrganizarPorGeneroPlanTests
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
+    // Revisión 2: la unidad era solo el número de serie del volumen, y las herramientas de clonado lo
+    // conservan: un USB y su clon contaban como la misma unidad y File.Move copiaba y borraba. Ahora es
+    // el nombre del volumen («\\?\Volume{…}\»), único en el equipo aunque dos discos compartan número.
+    [WindowsFact]
+    public void En_Windows_el_volumen_es_su_nombre_unico_y_no_su_numero_de_serie()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var a = Directory.CreateDirectory(Path.Combine(dir, "A")).FullName;
+            var b = Directory.CreateDirectory(Path.Combine(dir, "B", "C")).FullName;
+
+            var volumen = Etiquetador.Core.Rutas.VolumenDe(a);
+
+            Assert.NotNull(volumen);
+            Assert.Matches(@"^\\\\\?\\Volume\{[0-9A-Fa-f-]{36}\}\\$", volumen);
+            Assert.Equal(volumen, Etiquetador.Core.Rutas.VolumenDe(b));
+            Assert.Equal("volumen:" + volumen, new DiscoReal(Array.Empty<string>()).UnidadDe(Path.Combine(b, "x.mp3")));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void El_nombre_del_volumen_sale_de_la_ruta_final_y_una_carpeta_en_red_no_lo_tiene()
+    {
+        const string Volumen = @"\\?\Volume{0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0}\";
+
+        Assert.Equal(Volumen, Etiquetador.Core.Rutas.NombreDeVolumen(Volumen + @"Musica\Pop"));
+        Assert.Equal(Volumen, Etiquetador.Core.Rutas.NombreDeVolumen(Volumen));
+        Assert.Null(Etiquetador.Core.Rutas.NombreDeVolumen(@"\\?\UNC\servidor\recurso\Musica"));
+        Assert.Null(Etiquetador.Core.Rutas.NombreDeVolumen(@"\\?\C:\Musica"));
+    }
+
     [Fact]
     public void El_disco_real_lee_la_carpeta_sin_distinguir_mayusculas_ni_NFC()
     {

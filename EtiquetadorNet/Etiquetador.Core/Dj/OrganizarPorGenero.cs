@@ -124,9 +124,10 @@ public sealed class DiscoReal : IAccesoDisco
 
     /// <summary>
     /// El disco donde está de verdad la ruta, aunque una carpeta del camino sea una unión, un enlace o
-    /// el punto de montaje de otro disco: en Windows, el número de serie del volumen de la carpeta
-    /// existente más cercana («volumen:…»); si no se tiene, el punto de montaje de la ruta con los
-    /// enlaces resueltos. Ver el comentario de unidades en <see cref="Rutas"/>.
+    /// el punto de montaje de otro disco: en Windows, el nombre del volumen de la carpeta existente más
+    /// cercana («volumen:\\?\Volume{…}\», ver <see cref="Rutas.VolumenDe"/>); si no se tiene (fuera de
+    /// Windows, una carpeta compartida en red), el punto de montaje de la ruta con los enlaces
+    /// resueltos. Ver el comentario de unidades en <see cref="Rutas"/>.
     /// </summary>
     public string UnidadDe(string ruta)
     {

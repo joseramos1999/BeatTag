@@ -35,9 +35,10 @@ public static class Rutas
     //     los montados en cualquier carpeta), y una carpeta puede ser un enlace simbólico a otro disco;
     //   · en Windows DriveInfo solo da letras de unidad (revisión 1: «C:\, D:\, E:\»), y una carpeta puede
     //     ser una unión, un enlace o el punto de montaje de otro disco.
-    // DiscoReal (Organizar por género) compara en Windows el número de serie del volumen de cada carpeta
-    // (VolumenDe, que sigue uniones, enlaces y montajes) y, si no lo tiene, el punto de montaje de la
-    // ruta con los enlaces resueltos (RutaReal + UnidadDe). UnidadDe por sí sola solo mira la ruta.
+    // DiscoReal (Organizar por género) compara en Windows el nombre del volumen de cada carpeta
+    // («\\?\Volume{…}\», con VolumenDe, que sigue uniones, enlaces y montajes; no el número de serie, que
+    // un disco clonado repite) y, si no lo tiene, el punto de montaje de la ruta con los enlaces
+    // resueltos (RutaReal + UnidadDe). UnidadDe por sí sola solo mira la ruta.
 
     /// <summary>
     /// La unidad de una ruta: el punto de montaje MÁS LARGO que la contiene («/Volumes/USB» antes que
@@ -142,10 +143,16 @@ public static class Rutas
     }
 
     /// <summary>
-    /// En Windows, el número de serie del volumen donde está de verdad <paramref name="carpeta"/>, que
-    /// tiene que existir: abrirla sigue las uniones, los enlaces y las carpetas donde está montado otro
-    /// disco, así que dos carpetas con el mismo número están en el mismo disco aunque la ruta diga otra
-    /// cosa. null fuera de Windows o si no se puede abrir.
+    /// En Windows, el nombre del volumen donde está de verdad <paramref name="carpeta"/>, que tiene que
+    /// existir: «\\?\Volume{…}\». Abrirla sigue las uniones, los enlaces y las carpetas donde está montado
+    /// otro disco, así que dos carpetas con el mismo nombre están en el mismo disco aunque la ruta diga
+    /// otra cosa. null fuera de Windows, si no se puede abrir o si el volumen no tiene nombre (una carpeta
+    /// compartida en red): entonces vale la ruta (ver DiscoReal.UnidadDe).
+    ///
+    /// POR QUÉ EL NOMBRE Y NO EL NÚMERO DE SERIE (revisión 2). El número de serie no es único: las
+    /// herramientas de clonado lo conservan, así que un USB y su clon contaban como la misma unidad, y
+    /// File.Move entre los dos copiaba el archivo entero y borraba el original, sin atomicidad. El nombre
+    /// del volumen lo da Windows a cada disco que monta y no se repite en el equipo.
     /// </summary>
     public static string? VolumenDe(string carpeta)
     {
@@ -161,25 +168,40 @@ public static class Rutas
         const uint CompartirTodo = 0x1 | 0x2 | 0x4;      // FILE_SHARE_READ | WRITE | DELETE
         const uint AbrirExistente = 3;                    // OPEN_EXISTING
         const uint Carpetas = 0x02000000;                 // FILE_FLAG_BACKUP_SEMANTICS: deja abrir una carpeta
+        const uint ConNombreDeVolumen = 0x1;              // VOLUME_NAME_GUID: «\\?\Volume{…}\carpeta»
         using var h = CreateFile(carpeta, LeerAtributos, CompartirTodo, IntPtr.Zero, AbrirExistente, Carpetas, IntPtr.Zero);
-        if (h.IsInvalid || !GetFileInformationByHandle(h, out var info)) return null;
-        return info.VolumeSerialNumber.ToString("X8", System.Globalization.CultureInfo.InvariantCulture);
+        if (h.IsInvalid) return null;
+        var buffer = new char[1024];
+        var largo = GetFinalPathNameByHandle(h, buffer, (uint)buffer.Length, ConNombreDeVolumen);
+        if (largo >= buffer.Length)   // no cabía: devuelve cuánto hace falta
+        {
+            buffer = new char[largo + 1];
+            largo = GetFinalPathNameByHandle(h, buffer, (uint)buffer.Length, ConNombreDeVolumen);
+        }
+        if (largo == 0 || largo >= buffer.Length) return null;
+        return NombreDeVolumen(new string(buffer, 0, (int)largo));
     }
 
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
-    private struct InformacionArchivo   // BY_HANDLE_FILE_INFORMATION
+    /// <summary>
+    /// De una ruta con el nombre del volumen («\\?\Volume{…}\Musica\Pop»), el volumen («\\?\Volume{…}\»);
+    /// null si no empieza así.
+    /// </summary>
+    internal static string? NombreDeVolumen(string rutaFinal)
     {
-        public uint FileAttributes;
-        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime, LastAccessTime, LastWriteTime;
-        public uint VolumeSerialNumber, FileSizeHigh, FileSizeLow, NumberOfLinks, FileIndexHigh, FileIndexLow;
+        const string Prefijo = @"\\?\Volume{";
+        if (!rutaFinal.StartsWith(Prefijo, StringComparison.OrdinalIgnoreCase)) return null;
+        var cierre = rutaFinal.IndexOf('}', Prefijo.Length);
+        if (cierre < 0) return null;
+        return rutaFinal[..(cierre + 1)] + @"\";
     }
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true, EntryPoint = "CreateFileW")]
     private static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(string nombre, uint acceso, uint compartir, IntPtr seguridad,
                                                                                 uint disposicion, uint opciones, IntPtr plantilla);
 
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool GetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle archivo, out InformacionArchivo info);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true, EntryPoint = "GetFinalPathNameByHandleW")]
+    private static extern uint GetFinalPathNameByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle archivo, [System.Runtime.InteropServices.Out] char[] ruta,
+                                                        uint largo, uint opciones);
 
     private static string ConBarra(string ruta)
     {
