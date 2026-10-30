@@ -94,13 +94,16 @@ public static class GeneroDeezer
 
             var titulo = string.IsNullOrWhiteSpace(t.Title) ? Path.GetFileNameWithoutExtension(t.FilePath) : t.Title!;
             var version = RemixParser.Parse(titulo);
+            // Los dos contadores se suman juntos, al terminar la canción: si se cancela mientras se pide
+            // su álbum, no cuenta ni como buscada ni como encontrada (Encontradas <= Buscadas siempre).
+            var encontrada = false;
             try
             {
                 var r = await deezer.SearchAsync(t.Artist ?? "", titulo, wantRemix: GeneroPorReglas.RemixFirmado(t), wantLive: false,
                                                  localDur: t.DurationSeconds, isEdit: version.IsVersion, ct: ct, conFicha: false).ConfigureAwait(false);
                 if (r is { AlbumId.Length: > 0 })
                 {
-                    encontradas++;
+                    encontrada = true;
                     if (!albumes.TryGetValue(r.AlbumId, out var album))
                     {
                         var generos = await deezer.AlbumGenresAsync(r.AlbumId, ct).ConfigureAwait(false);
@@ -114,10 +117,11 @@ public static class GeneroDeezer
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                // Cancelada a mitad de esta canción: no cuenta como buscada.
+                // Cancelada a mitad de esta canción (en la búsqueda o en su álbum): no cuenta.
                 return new BusquedaGeneroDeezer(res, buscadas, encontradas, true);
             }
             buscadas++;
+            if (encontrada) encontradas++;
             progreso?.Report((i + 1, candidatas.Count));
         }
         return new BusquedaGeneroDeezer(res, buscadas, encontradas, false);

@@ -823,6 +823,36 @@ public class GeneroPorArtistaTests : IDisposable
         Assert.Equal(2, m.Red.Cuantas("api.deezer.com/search"));
     }
 
+    // Revisión (ronda 2): si se cancelaba mientras pedía el álbum, la canción contaba como encontrada
+    // pero no como buscada, y el estado decía «tras 1 de 3 canciones: … Deezer ha encontrado 2».
+    [Fact]
+    public async Task Deezer_cancelado_mientras_pide_el_album_no_cuenta_la_cancion_como_encontrada()
+    {
+        static string Busqueda(string titulo, int album) => $$$"""
+            {"data":[{"id":{{{album}}},"title":"{{{titulo}}}","duration":178,"artist":{"name":"KAROL G"},"album":{"title":"Album {{{album}}}","id":{{{album}}},"cover_big":"x"}}]}
+            """;
+        using var m = new MontajeApi();
+        using var cts = new CancellationTokenSource();
+        m.Red.Cuando("api.deezer.com/search", (n, req, _) => Task.FromResult(RedFalsa.Respuesta(req, n == 1 ? Busqueda("Bichota", 77) : Busqueda("Tusa", 88))))
+             .Responde("api.deezer.com/album/77", """{"genres":{"data":[{"id":197,"name":"Latino"}]}}""")
+             .Cuando("api.deezer.com/album/88", async (_, _, ct) =>
+             {
+                 cts.Cancel();   // se cancela mientras espera el álbum de la segunda canción
+                 await Task.Delay(Timeout.Infinite, ct);
+                 throw new InvalidOperationException("inalcanzable");
+             });
+        var canciones = new List<Track> { T("KAROL G", "Bichota", null), T("KAROL G", "Tusa", null), T("KAROL G", "Provenza", null) };
+
+        var r = await GeneroDeezer.BuscarAsync(canciones, new Etiquetador.Core.Providers.DeezerProvider(m.Api), null, cts.Token);
+
+        Assert.Equal(1, m.Red.Cuantas("api.deezer.com/album/88"));
+        Assert.Empty(r.Propuestas);
+        Assert.Equal((1, 1, true), (r.Buscadas, r.Encontradas, r.Cancelada));
+        Assert.True(r.Encontradas <= r.Buscadas);
+        Assert.Equal("Búsqueda en Deezer cancelada a medias, tras 1 de 3 canciones: ninguna propuesta: Deezer ha encontrado 1, pero su álbum solo trae géneros amplios, que no distinguen estilos.",
+                     GeneroPorReglasViewModel.TextoDeezer(r, 3));
+    }
+
     // Revisión: con 1 canción decía «Buscadas en Deezer 1 canción», y sin propuestas siempre culpaba a
     // los géneros de los álbumes, aunque Deezer no hubiera encontrado las canciones.
     [Fact]
