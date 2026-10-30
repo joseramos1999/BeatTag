@@ -119,8 +119,9 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   previa muestra adónde va cada canción, cómo se reparte cada carpeta de origen (que se puede
   desmarcar) y qué se queda y por qué: sin género, mashups y otras herramientas de DJ, carpetas con
   ajustes propios, otra unidad, rutas demasiado largas o un archivo con el mismo nombre en el destino,
-  porque nunca se sobrescribe ni se renombra nada. Se cancela entre un archivo y el siguiente; la ficha
-  de DJ, lo decidido en Enriquecer y la caché de la biblioteca siguen a cada archivo, y se deshace desde
+  porque nunca se sobrescribe ni se renombra nada. La vista previa queda desfasada si la biblioteca
+  cambia después de calcularla, y hay que volver a calcularla para organizar. Calcularla se puede
+  cancelar, y mover se cancela entre un archivo y el siguiente; la ficha de DJ, lo decidido en Enriquecer y la caché de la biblioteca siguen a cada archivo, y se deshace desde
   el historial, que también recrea las carpetas de origen y quita las que creó si se han quedado
   vacías. Después, la página rekordbox repara las rutas; Serato, Traktor, Engine DJ y VirtualDJ tienen
   su propia opción para localizar archivos movidos.

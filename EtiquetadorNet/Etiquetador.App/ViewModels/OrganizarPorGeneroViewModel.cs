@@ -332,27 +332,47 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         ConAvance = false;
         Progress = 0;
         Resultado = "";
+        // La vista previa anterior deja de verse: si este cálculo se cancela o falla, no puede quedar
+        // a la vista como si correspondiera a la biblioteca que se acaba de leer.
+        LimpiarPlan();
+        _version++;           // y un recálculo que estuviera en marcha ya no se enseña
+        Calculando = false;
         Status = "Escaneando la biblioteca…";
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
         try
         {
-            await _engine.Library.ScanAsync();
+            // El escaneo de la biblioteca no se puede parar a mitad (es de todas las páginas): al
+            // cancelar se deja de esperarlo, se suelta el bloqueo y el escaneo termina en segundo plano.
+            await _engine.Library.ScanAsync().WaitAsync(ct);
             // Primero cuántos cambios lleva y después la lectura: un aviso que llegara entre las dos
             // desfasaría la vista previa sin motivo, nunca al revés.
             _cambiosAlLeer = Volatile.Read(ref _cambiosBiblioteca);
             var canciones = _engine.Library.Tracks.ToList();
             _raices = _engine.Library.EnabledPaths();
             Status = "Calculando la vista previa…";
-            (_variantes, _sinGenero) = await Task.Run(() => (GeneroPorReglas.VariantesSinUnificar(canciones), canciones.Count(GeneroPorReglas.SinGenero)));
+            (_variantes, _sinGenero) = await Task.Run(() => (GeneroPorReglas.VariantesSinUnificar(canciones), canciones.Count(GeneroPorReglas.SinGenero)), ct);
             _canciones = canciones;
-            if (!await PlanearAsync()) return;
+            if (!await PlanearAsync(ct)) return;
             Status = Resumen;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            LimpiarPlan();
+            Status = "Cancelado: no se ha calculado la vista previa."
+                   + (_engine.Library.IsScanning ? " La biblioteca termina de leerse en segundo plano." : "");
         }
         catch (Exception e)
         {
             _engine.Logger.Error("Organizar por género: no se pudo calcular la vista previa", e);
             Status = "No se ha podido calcular la vista previa: " + e.Message;
         }
-        finally { IsBusy = false; }
+        finally
+        {
+            IsBusy = false;
+            _cts.Dispose();
+            _cts = null;
+        }
     }
 
     /// <summary>Vuelve a planear sobre la misma biblioteca tras cambiar una opción o una casilla, en segundo plano.</summary>
@@ -370,7 +390,7 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
     }
 
     /// <summary>Calcula el plan con las opciones de ahora y lo enseña. false si no se pudo, o si otro más reciente lo ha sustituido.</summary>
-    private async Task<bool> PlanearAsync()
+    private async Task<bool> PlanearAsync(CancellationToken ct = default)
     {
         if (_canciones is not { } canciones) return false;
         var op = Opciones(out var motivo);
@@ -386,7 +406,7 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         Calculando = true;
         try
         {
-            var plan = await Task.Run(() => OrganizarPorGenero.Planear(canciones, raices, op, new DiscoReal()));
+            var plan = await Task.Run(() => OrganizarPorGenero.Planear(canciones, raices, op, new DiscoReal(), ct), ct);
             if (version != _version) return false;
             Mostrar(plan, op);
             return true;

@@ -289,6 +289,32 @@ public class OrganizarPorGeneroTextosTests : IDisposable
         Assert.False(vm.PuedeOrganizar);
     }
 
+    // Revisión 1: «Calcular la vista previa» no se podía cancelar y mantenía el bloqueo global mientras
+    // escaneaba (un primer escaneo real tardó 340 s).
+    [Fact]
+    public async Task Calcular_la_vista_previa_se_puede_cancelar_mientras_se_escanea()
+    {
+        var musica = Directory.CreateDirectory(Path.Combine(_dir, "Musica")).FullName;
+        Cancion(Path.Combine(musica, "A"), "a.mp3", "Pop");
+        var datos = Path.Combine(_dir, "datos");
+        using var soltar = new ManualResetEventSlim(false);
+        var biblioteca = new LibraryStore(new AppConfig { Folders = new() { musica } }, () => { }, new ScanCache(Path.Combine(datos, "scan.json")),
+                                          r => { soltar.Wait(TimeSpan.FromSeconds(30)); return LibraryScanner.Recorrer(r, recursive: true); });
+        var motor = MotorDePrueba.Crear(datos, new Logger(), biblioteca);
+        var vm = new OrganizarPorGeneroViewModel(motor);
+
+        var calculo = vm.CalcularCommand.ExecuteAsync(null);
+        await Esperar(() => vm.IsBusy && biblioteca.IsScanning);
+        vm.Cancelar();
+        var termino = await Task.WhenAny(calculo, Task.Delay(TimeSpan.FromSeconds(10)));
+        soltar.Set();
+
+        Assert.Same(calculo, termino);   // no espera a que termine el escaneo
+        Assert.False(vm.IsBusy);
+        Assert.False(vm.HayPlan);
+        Assert.StartsWith("Cancelado", vm.Status);
+    }
+
     [Fact]
     public void Las_opciones_de_la_pagina_salen_de_la_configuracion_y_se_guardan_al_cambiar()
     {

@@ -60,8 +60,8 @@
                 <Button Content="Organizar" Click="Organizar_Click" IsEnabled="{Binding PuedeOrganizar}"
                         Background="#16A34A" Foreground="White" FontWeight="SemiBold"
                         ToolTip.Tip="Mueve lo que muestra la vista previa. Nunca sobrescribe ni renombra un archivo y se puede deshacer." />
-                <Button Content="Cancelar el proceso" Command="{Binding CancelarProcesoCommand}" IsVisible="{Binding ConAvance}"
-                        ToolTip.Tip="Para entre un archivo y el siguiente: lo ya movido se queda y se puede deshacer." />
+                <Button Content="Cancelar el proceso" Command="{Binding CancelarProcesoCommand}" IsVisible="{Binding IsBusy}"
+                        ToolTip.Tip="Al calcular la vista previa, deja de esperarla. Al organizar, para entre un archivo y el siguiente: lo ya movido se queda y se puede deshacer." />
             </WrapPanel>
 
             <TextBlock Text="{Binding Resumen}" TextWrapping="Wrap" FontWeight="SemiBold" IsVisible="{Binding HayPlan}" />
