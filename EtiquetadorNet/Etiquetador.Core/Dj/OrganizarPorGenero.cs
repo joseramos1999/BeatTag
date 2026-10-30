@@ -114,8 +114,9 @@ public sealed record OpcionesOrganizar
     public bool DejarHerramientas { get; init; } = true;
 
     /// <summary>
-    /// Los géneros con menos canciones que esto van a «Otros géneros». 0, desactivado; al activarlo,
-    /// <see cref="OrganizarPorGenero.AgruparPorDefecto"/>.
+    /// Los géneros con menos canciones que esto van a «Otros géneros». Cuentan solo las canciones que
+    /// se organizan (también las que ya están en la carpeta de su género), no las que se quedan donde
+    /// están. 0, desactivado; al activarlo, <see cref="OrganizarPorGenero.AgruparPorDefecto"/>.
     /// </summary>
     public int AgruparMenosDe { get; init; }
 
@@ -419,6 +420,12 @@ public static class OrganizarPorGenero
         var origenes = new Dictionary<string, (int Total, Dictionary<string, int> Reparto)>(ComparadorRutas.Instancia);
         var miradas = 0;
 
+        // PRIMERA PASADA: qué canciones se organizan (las que no se quedan por lo que son o por dónde
+        // están) y cuántas hay de cada género. «Agrupar en Otros géneros» cuenta solo estas: un género
+        // con 4 mashups que se quedan y 1 canción que se mueve tiene 1, no 5 (revisión 1). Cuentan
+        // también las que ya están en la carpeta de su género, para que volver a organizar decida igual.
+        var candidatas = new List<(Track T, string Dir, string Raiz, (string Genero, int Canciones)? Genero)>();
+        var porGenero = new Dictionary<string, int>(StringComparer.Ordinal);
         var ordenadas = canciones.OrderBy(t => t.FilePath, StringComparer.Ordinal).ToList();
         for (var i = 0; i < ordenadas.Count; i++)
         {
@@ -432,7 +439,7 @@ public static class OrganizarPorGenero
 
             miradas++;
             if (!origenes.TryGetValue(dir, out var origen)) origen = (0, new Dictionary<string, int>(StringComparer.Ordinal));
-            origenes[dir] = origen = (origen.Total + 1, origen.Reparto);
+            origenes[dir] = (origen.Total + 1, origen.Reparto);
 
             void Omitir(MotivoOmision m, string texto) => omitidas.Add(new OmisionOrganizar(t.FilePath, m, texto));
 
@@ -449,8 +456,21 @@ public static class OrganizarPorGenero
                 continue;
             }
 
+            candidatas.Add((t, dir, raiz, genero));
+            if (genero is { } g) porGenero[g.Genero] = porGenero.GetValueOrDefault(g.Genero) + 1;
+        }
+
+        // SEGUNDA PASADA: adónde va cada una, en el mismo orden.
+        for (var i = 0; i < candidatas.Count; i++)
+        {
+            if (i % 256 == 0) ct.ThrowIfCancellationRequested();
+            var (t, dir, raiz, genero) = candidatas[i];
+            var origen = origenes[dir];
+
+            void Omitir(MotivoOmision m, string texto) => omitidas.Add(new OmisionOrganizar(t.FilePath, m, texto));
+
             var nombreGenero = genero == null ? CarpetaSinGenero
-                             : op.AgruparMenosDe > 0 && genero.Value.Canciones < op.AgruparMenosDe ? CarpetaOtros
+                             : op.AgruparMenosDe > 0 && porGenero[genero.Value.Genero] < op.AgruparMenosDe ? CarpetaOtros
                              : NombreCarpetaGenero(genero.Value.Genero);
             var baseDir = Base(raiz);
             var carpetaGenero = Real(baseDir, nombreGenero);
@@ -502,7 +522,7 @@ public static class OrganizarPorGenero
         return new PlanOrganizar
         {
             Movimientos = movimientos,
-            Omitidas = omitidas,
+            Omitidas = omitidas.OrderBy(o => o.Ruta, StringComparer.Ordinal).ToList(),   // en el orden de la biblioteca, como antes de las dos pasadas
             PorDestino = porDestino,
             PorOrigen = porOrigen,
             MediaGenerosPorOrigen = conMovimientos.Count == 0 ? 0 : conMovimientos.Average(o => o.Reparto.Count),

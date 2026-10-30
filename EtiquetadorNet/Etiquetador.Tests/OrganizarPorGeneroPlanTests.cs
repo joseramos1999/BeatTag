@@ -344,6 +344,44 @@ public class OrganizarPorGeneroPlanTests
         Assert.Equal(2, plan.PorDestino.Count);
     }
 
+    // Revisión 1: agrupar contaba el total del género en la biblioteca, también lo que se queda.
+    [Fact]
+    public void Agrupar_cuenta_solo_las_canciones_que_se_organizan()
+    {
+        var canciones = new[]
+        {
+            T("Mashups", "1 (Mashup).mp3", "Moombah"), T("Mashups", "2 (Mashup).mp3", "Moombah"),
+            T("Mashups", "3 (Mashup).mp3", "Moombah"), T("Mashups", "4 (Mashup).mp3", "Moombah"),
+            T("Descargas", "normal.mp3", "Moombah"),
+            T("Ajustes", "a.mp3", "Fado"), T("Ajustes", "b.mp3", "Fado"), T("Descargas", "c.mp3", "Fado"),
+        };
+        var op = new OpcionesOrganizar { AgruparMenosDe = 3, CarpetasConAjustes = new[] { Path.Combine(Raiz, "Ajustes") } };
+
+        var plan = Plan(canciones, op);
+
+        Assert.Equal(2, plan.Movimientos.Count);
+        Assert.All(plan.Movimientos, m => Assert.Equal(OrganizarPorGenero.CarpetaOtros, m.CarpetaGenero));
+        Assert.Equal(Path.Combine(PorGenero, OrganizarPorGenero.CarpetaOtros, "normal.mp3"),
+                     plan.Movimientos.Single(m => m.Genero == "Moombah").Destino);
+    }
+
+    [Fact]
+    public void Agrupar_cuenta_tambien_las_que_ya_estan_en_su_carpeta_y_volver_a_organizar_no_las_mueve()
+    {
+        // Tres de Fado: dos ya en «Por género/Fado» y una nueva. No se agrupan, y la nueva va con ellas.
+        var canciones = new[]
+        {
+            new Track { FilePath = Path.Combine(PorGenero, "Fado", "a.mp3"), Folder = Raiz, Genre = "Fado" },
+            new Track { FilePath = Path.Combine(PorGenero, "Fado", "b.mp3"), Folder = Raiz, Genre = "Fado" },
+            T("Descargas", "c.mp3", "Fado"),
+        };
+
+        var plan = Plan(canciones, new OpcionesOrganizar { AgruparMenosDe = 3 });
+
+        Assert.Equal(Path.Combine(PorGenero, "Fado", "c.mp3"), Unico(plan).Destino);
+        Assert.Equal(2, plan.CuantasOmitidas(MotivoOmision.YaEnSuSitio));
+    }
+
     [Fact]
     public void Una_carpeta_de_origen_desmarcada_se_queda_entera_y_el_reparto_lo_dice()
     {

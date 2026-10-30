@@ -44,7 +44,8 @@
                               ToolTip.Tip="Un mashup son dos canciones, a menudo de dos estilos: su género es el que menos se puede deducir." />
                     <WrapPanel ItemSpacing="8" LineSpacing="4">
                         <CheckBox Content="Agrupar en «Otros géneros» los que tengan menos de" IsChecked="{Binding Agrupar}"
-                                  IsEnabled="{Binding Libre}" VerticalAlignment="Center" />
+                                  IsEnabled="{Binding Libre}" VerticalAlignment="Center"
+                                  ToolTip.Tip="Cuentan las canciones de cada género que se organizan, también las que ya están en su carpeta; no las que se quedan donde están." />
                         <NumericUpDown Value="{Binding MinimoGrupo}" Minimum="2" Maximum="1000" Increment="1" FormatString="0" Width="120"
                                        IsEnabled="{Binding Agrupar}" />
                         <TextBlock Text="canciones" VerticalAlignment="Center" />
