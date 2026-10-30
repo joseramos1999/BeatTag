@@ -58,6 +58,9 @@ public class EstiloDeVersionTests
     [InlineData("Titanium (Extended Mix)", null)]
     [InlineData("Lovumba (Club Mix)", null)]
     [InlineData("Hello (Radio Edit)", null)]
+    // Visto al validar en una biblioteca real: «La Disco» es parte del nombre de la canción.
+    [InlineData("Que Le De x Llegamos A La Disco Remix - Rauw", null)]
+    [InlineData("El Mambo Remix", null)]
     public void Un_estilo_fuera_del_contexto_de_version_no_cuenta(string titulo, string? artista)
         => Assert.Null(EstiloDeVersion.De(titulo, titulo, artista, null));
 

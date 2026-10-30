@@ -359,6 +359,18 @@ public class GeneroPorArtistaTests : IDisposable
         Assert.False(De(p, familia)!.Marcada);   // Afro House sobre Tech House: la misma familia
     }
 
+    // Visto al validar en una biblioteca real: «(Afro House)» proponía cambiar «Afrohouse» por «Afro House».
+    [Fact]
+    public void El_mismo_genero_escrito_junto_o_separado_no_se_propone()
+    {
+        var junto = T("Hugel", "Cafe Con Ron (Afro House)", "Afrohouse");
+        var hipHop = T("Eminem", "Lose Yourself", "HipHop");
+        var canciones = DelArtista("Eminem", ("Hip Hop", 5)).Append(junto).Append(hipHop).ToList();
+        var p = Proponer(canciones);
+        Assert.Null(De(p, junto));
+        Assert.Null(De(p, hipHop));
+    }
+
     // =================================================================================================
     // A6 · Escribir solo lo que sigue como se vio al proponer
     // =================================================================================================

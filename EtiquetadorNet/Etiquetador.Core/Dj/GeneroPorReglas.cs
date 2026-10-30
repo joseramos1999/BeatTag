@@ -632,13 +632,13 @@ public static class GeneroPorReglas
             var esGenerico = !vacio && (actualNorm == null || generico(actualNorm));
             var cambio = vacio ? CambioGenero.Rellenar : esGenerico ? CambioGenero.SustituirGenerico : CambioGenero.Revisar;
             if (!Admite(op.Alcance, cambio)) continue;
-            var claveActual = actualNorm == null ? "" : ClaveGenero(actualNorm);
+            var claveActual = actualNorm == null ? "" : Compacta(actualNorm);
 
             // 1. El estilo que dice la propia versión. Si confirma el que tiene, no hay nada que hacer.
             if (EstiloDeVersion.De(t.Title, Path.GetFileNameWithoutExtension(t.FilePath), t.Artist, t.Album) is { } v)
             {
                 var estilo = Escrito(v.Estilo);
-                if (claveActual.Length > 0 && ClaveGenero(estilo) == claveActual) continue;
+                if (claveActual.Length > 0 && Compacta(estilo) == claveActual) continue;
                 var mismaFamilia = cambio == CambioGenero.Revisar && FamiliasGenero.MismaFamilia(actualNorm, estilo);
                 var marcada = !v.Ambiguo && v.Fuente != FuenteEstilo.Album && !mismaFamilia;
                 var porQue = v.Fuente == FuenteEstilo.Album
@@ -684,7 +684,7 @@ public static class GeneroPorReglas
             }
 
             // 3. La decisión, según el género que ya tiene.
-            if (claveActual.Length > 0 && ClaveGenero(genero) == claveActual) continue;
+            if (claveActual.Length > 0 && Compacta(genero) == claveActual) continue;
             // Una canción sin género con regla de carpeta sale marcada aunque sea un mashup: no hace falta mirarlo.
             var protegida = (regla != ReglaGenero.Carpeta || cambio != CambioGenero.Rellenar) && Protegida(t);
             bool marcar;
@@ -712,6 +712,13 @@ public static class GeneroPorReglas
         }
         return new CalculoGeneroReglas(res, protegidas, listas);
     }
+
+    /// <summary>
+    /// La clave del género sin espacios, para saber si una propuesta deja el mismo género: «Afrohouse»
+    /// y «Afro House», o «HipHop» y «Hip Hop», son el mismo. Visto al validar en una biblioteca real:
+    /// «(Afro House)» proponía cambiar «Afrohouse» por «Afro House».
+    /// </summary>
+    private static string Compacta(string genero) => ClaveGenero(genero).Replace(" ", "", StringComparison.Ordinal);
 
     /// <summary>El alcance elegido incluye canciones con ese género (ninguno, genérico u otro estilo).</summary>
     private static bool Admite(AlcanceGenero alcance, CambioGenero cambio) => alcance switch

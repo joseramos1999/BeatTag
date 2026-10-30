@@ -66,6 +66,7 @@ public class FamiliasGeneroTests
     [InlineData("Electro House", "EDM")]
     [InlineData("Tech House", "Melodic Techno")]
     [InlineData("Afro House", "House")]
+    [InlineData("Afrohouse", "Tech House")]   // escrito junto
     [InlineData("Bachata", "Salsa")]
     [InlineData("R&B", "Soul")]
     [InlineData("Afrobeats", "Amapiano")]

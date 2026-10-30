@@ -33,7 +33,8 @@ public sealed record EstiloVersion(string Estilo, string Texto, FuenteEstilo Fue
 ///       estilo («(Dembow)», «(Sevillanas)»).
 /// Nunca cuentan «Latin», «Latino» ni «Latina» sueltos («Extended Latino» es el nombre de un pool:
 /// 204 falsos positivos más), ni un fragmento de transición («Trap To Mambo Transition», «Transition
-/// House To Reggaeton»), que junta dos estilos.
+/// House To Reggaeton»), que junta dos estilos, ni el estilo detrás de un artículo («Llegamos A La
+/// Disco Remix»: la palabra es parte del nombre de la canción).
 ///
 /// No se leen el comentario, el remixer (TPE4), el subtítulo (TIT3) ni la agrupación: medido, no
 /// aportan ningún caso en 2.441 archivos, y leerlos costaría unos 8 minutos en una biblioteca así.
@@ -170,11 +171,27 @@ public static class EstiloDeVersion
         return null;
     }
 
+    // Un artículo o una preposición delante dice que la palabra es parte del nombre de la canción, no
+    // su estilo: «Llegamos A La Disco Remix», «El Mambo Remix». Visto al validar en una biblioteca real.
+    private static readonly HashSet<string> Articulos = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "la", "el", "los", "las", "lo", "un", "una", "de", "del", "al", "a", "en", "the", "mi", "tu", "su", "my",
+    };
+
+    private static bool TrasArticulo(string texto, int posicion)
+    {
+        var antes = texto[..posicion].TrimEnd();
+        var i = antes.Length;
+        while (i > 0 && char.IsLetter(antes[i - 1])) i--;
+        return i < antes.Length && Articulos.Contains(antes[i..]);
+    }
+
     /// <summary>Dentro de un paréntesis o un corchete valen los tres contextos.</summary>
     private static (string Estilo, string Texto)? EnParentesis(string fragmento)
     {
         if (!AlgunEstilo.IsMatch(fragmento) || Transicion.IsMatch(fragmento)) return null;
-        if (EstiloYVersion.Match(fragmento) is { Success: true } a) return (a.Groups["estilo"].Value, a.Value.Trim());
+        foreach (Match a in EstiloYVersion.Matches(fragmento))
+            if (!TrasArticulo(fragmento, a.Index)) return (a.Groups["estilo"].Value, a.Value.Trim());
         var limpio = Limpio(fragmento);
         if (VersionYEstilo.Match(limpio) is { Success: true } b) return (b.Groups["estilo"].Value, b.Value.Trim());
         if (SoloEstilo.Match(limpio) is { Success: true } c) return (c.Groups["estilo"].Value, "(" + fragmento.Trim() + ")");
@@ -190,6 +207,7 @@ public static class EstiloDeVersion
         if (!AlgunEstilo.IsMatch(trozo) || Transicion.IsMatch(trozo)) return null;
         foreach (Match a in EstiloYVersion.Matches(trozo))
         {
+            if (TrasArticulo(trozo, a.Index)) continue;
             var delante = trozo[..a.Index].Trim().Length > 0;
             var alFinal = Limpio(trozo[(a.Index + a.Length)..]).Length == 0;
             if (trasGuion || delante || alFinal) return (a.Groups["estilo"].Value, a.Value.Trim());

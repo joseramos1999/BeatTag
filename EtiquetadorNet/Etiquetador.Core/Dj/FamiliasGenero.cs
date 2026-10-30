@@ -88,8 +88,9 @@ public static class FamiliasGenero
     {
         var k = Clave(genero);
         if (k.Length == 0) return null;
-        // Antes que «Afro»: Afro House se pincha con la electrónica.
-        if (k == "house" || k == "techno" || k.EndsWith(" house", StringComparison.Ordinal) || k.EndsWith(" techno", StringComparison.Ordinal))
+        // Antes que «Afro»: Afro House se pincha con la electrónica. Sin exigir el espacio, porque
+        // también se escribe junto («Afrohouse», «Techhouse»).
+        if (k.EndsWith("house", StringComparison.Ordinal) || k.EndsWith("techno", StringComparison.Ordinal))
             return Electronica;
         foreach (var (familia, claves) in Familias)
             if (claves.Contains(k)) return familia;
