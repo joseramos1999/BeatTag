@@ -94,6 +94,11 @@ public class OrganizarPorGeneroTextosTests : IDisposable
         Assert.Contains("Ningún archivo se sobrescribe ni se renombra", cuerpo);
         foreach (var aviso in new[] { "«Rutas rotas»", "Serato, Traktor, Engine DJ y VirtualDJ", "M3U8 y XML", "Enriquecer, vuelve a analizar", "«Deshacer última»" })
             Assert.Contains(aviso, nota);
+        // Revisión 1: tras organizar, lo anterior que siga pendiente queda bloqueado en el historial
+        // para las canciones movidas (deshacer un ajuste de volumen de ayer exige deshacer antes esto).
+        Assert.Contains(OrganizarPorGeneroViewModel.AvisoEjecucionesAnteriores, nota);
+        Assert.Contains("Las ejecuciones anteriores que sigan pendientes", OrganizarPorGeneroViewModel.AvisoEjecucionesAnteriores);
+        Assert.Contains(OrganizarPorGeneroViewModel.AvisoEjecucionesAnteriores, SeccionDeLaAyuda());
 
         var uno = OrganizarPorGeneroViewModel.TextoResultado(new ResultadoOrganizar(new[] { ("a", "b") }, Array.Empty<string>(), false, "", ""), 1);
         Assert.StartsWith("Se ha movido 1 canción a 1 carpeta.", uno);

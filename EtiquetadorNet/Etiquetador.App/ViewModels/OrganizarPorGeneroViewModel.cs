@@ -654,6 +654,14 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
 
     public const string AvisoDeshacer = "Se puede deshacer desde Enriquecer («Deshacer última») o desde el historial de cambios.";
 
+    /// <summary>
+    /// El historial no deshace un cambio de un archivo que una ejecución posterior movió (deshacer lo
+    /// buscaría donde ya no está): con miles de canciones movidas, deshacer un ajuste de volumen de ayer
+    /// exigiría deshacer antes la organización entera. Se avisa antes de mover (revisión 1).
+    /// </summary>
+    public const string AvisoEjecucionesAnteriores =
+        "Las ejecuciones anteriores que sigan pendientes en el historial (por ejemplo, un ajuste de volumen) solo se podrán deshacer en las canciones movidas después de deshacer esta organización.";
+
     /// <summary>El título, el cuerpo y la nota del diálogo de confirmación.</summary>
     public static (string Titulo, string Cuerpo, string Nota) TextosConfirmacion(PlanOrganizar plan)
     {
@@ -662,7 +670,7 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
                    + (nuevas == 0 ? "" : nuevas == 1 ? " (1 se crea)" : $" ({N(nuevas)} se crean)")
                    + ". " + (plan.Omitidas.Count == 0 ? "" : "Las demás canciones se quedan donde están. ")
                    + "Ningún archivo se sobrescribe ni se renombra, y las etiquetas no se tocan.";
-        var nota = string.Join(" ", AvisoRekordbox, AvisoOtrosProgramas, AvisoListas, AvisoEnriquecer, AvisoDeshacer);
+        var nota = string.Join(" ", AvisoRekordbox, AvisoOtrosProgramas, AvisoListas, AvisoEnriquecer, AvisoDeshacer, AvisoEjecucionesAnteriores);
         return ("Organizar por género", cuerpo, nota);
     }
 
