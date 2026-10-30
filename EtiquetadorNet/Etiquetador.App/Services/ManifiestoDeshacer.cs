@@ -47,7 +47,8 @@ internal interface IHistorialPorLotes : IHistorialDeshacer
 /// máquina»); esto hace lo mismo para todos:
 ///   · Se abre UNA vez, antes de tocar nada. Si no se puede, no se toca ningún archivo.
 ///   · Tenerlo abierto mientras dura la ejecución impide que otro programa lo bloquee a mitad.
-///   · Cada línea se escribe entera y se vuelca al disco antes de seguir.
+///   · Cada línea se escribe entera y se vuelca al disco antes de seguir (o el lote entero, antes de
+///     moverlo, en Organizar por género: ver <see cref="AnotarLote"/>).
 /// </summary>
 public sealed class ManifiestoDeshacer : IDisposable, IHistorialPorLotes
 {

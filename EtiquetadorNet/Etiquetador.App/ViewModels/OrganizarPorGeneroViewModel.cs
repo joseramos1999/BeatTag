@@ -183,9 +183,15 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
     [ObservableProperty] private string _tituloOrigenes = "Por carpeta de origen";
     [ObservableProperty] private string _tituloOmitidas = "Se omiten";
 
-    public ObservableCollection<FilaDestinoOrganizar> Destinos { get; } = new();
-    public ObservableCollection<FilaOrigenOrganizar> Origenes { get; } = new();
-    public ObservableCollection<OmisionOrganizar> Omitidas { get; } = new();
+    // Se sustituyen enteras con un solo aviso a la tabla: «Se omiten» puede tener miles de filas, y
+    // añadirlas una a una, en el hilo de la interfaz, avisaba a la tabla miles de veces.
+    private readonly ListaEnBloque<FilaDestinoOrganizar> _destinos = new();
+    private readonly ListaEnBloque<FilaOrigenOrganizar> _origenes = new();
+    private readonly ListaEnBloque<OmisionOrganizar> _omitidas = new();
+
+    public ObservableCollection<FilaDestinoOrganizar> Destinos => _destinos;
+    public ObservableCollection<FilaOrigenOrganizar> Origenes => _origenes;
+    public ObservableCollection<OmisionOrganizar> Omitidas => _omitidas;
 
     public bool HayAviso => Aviso.Length > 0;
     public bool HayRecomendacion => Recomendacion.Length > 0;
@@ -383,22 +389,16 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         OnPropertyChanged(nameof(Plan));
         OnPropertyChanged(nameof(PuedeOrganizar));
 
-        Destinos.Clear();
-        foreach (var d in plan.PorDestino) Destinos.Add(new FilaDestinoOrganizar(d.Carpeta, NombreEnLaBiblioteca(d.Carpeta), d.Canciones, d.YaExiste));
+        _destinos.Reemplazar(plan.PorDestino.Select(d => new FilaDestinoOrganizar(d.Carpeta, NombreEnLaBiblioteca(d.Carpeta), d.Canciones, d.YaExiste)));
 
         // Las filas de origen se ponen al día en su sitio si son las mismas carpetas: así no se pierde la
         // posición de la tabla al desmarcar una.
         var porCarpeta = Origenes.ToDictionary(o => o.Carpeta, ComparadorRutas.Instancia);
         if (porCarpeta.Count == plan.PorOrigen.Count && plan.PorOrigen.All(o => porCarpeta.ContainsKey(o.Carpeta)))
             foreach (var o in plan.PorOrigen) porCarpeta[o.Carpeta].Poner(o);
-        else
-        {
-            Origenes.Clear();
-            foreach (var o in plan.PorOrigen) Origenes.Add(new FilaOrigenOrganizar(o, NombreEnLaBiblioteca(o.Carpeta), OrigenCambiado));
-        }
+        else _origenes.Reemplazar(plan.PorOrigen.Select(o => new FilaOrigenOrganizar(o, NombreEnLaBiblioteca(o.Carpeta), OrigenCambiado)));
 
-        Omitidas.Clear();
-        foreach (var o in plan.Omitidas) Omitidas.Add(o);
+        _omitidas.Reemplazar(plan.Omitidas);
 
         TituloDestinos = $"Carpetas de destino ({N(plan.Carpetas)})";
         TituloOrigenes = $"Por carpeta de origen ({N(plan.PorOrigen.Count)})";
@@ -440,9 +440,9 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         Aviso = "";
         Resumen = "";
         Recomendacion = "";
-        Destinos.Clear();
-        Origenes.Clear();
-        Omitidas.Clear();
+        _destinos.Reemplazar(Array.Empty<FilaDestinoOrganizar>());
+        _origenes.Reemplazar(Array.Empty<FilaOrigenOrganizar>());
+        _omitidas.Reemplazar(Array.Empty<OmisionOrganizar>());
         TituloDestinos = "Carpetas de destino";
         TituloOrigenes = "Por carpeta de origen";
         TituloOmitidas = "Se omiten";
