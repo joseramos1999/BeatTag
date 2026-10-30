@@ -940,6 +940,45 @@ public class OrganizarPorGeneroPlanTests
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
+    // Revisión 3: CreateFileW recibía la ruta sin «\\?\», y la aplicación no declara longPathAware: con
+    // una carpeta de 260 caracteres o más, VolumenDe daba null, la unidad salía de la ruta («C:\») y
+    // no coincidía con la de la base («volumen:…»). La canción se omitía como «Está en otra unidad»
+    // aunque estuviera en el mismo disco.
+    [WindowsFact]
+    public void En_Windows_una_carpeta_de_ruta_larga_tiene_volumen_y_su_cancion_se_mueve()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var musica = Directory.CreateDirectory(Path.Combine(dir, "Musica")).FullName;
+            var larga = musica;
+            while (larga.Length < 270) larga = Path.Combine(larga, "Carpeta con un nombre bastante largo");
+            Directory.CreateDirectory(larga);
+            File.WriteAllText(Path.Combine(larga, "a.mp3"), "x");
+            Assert.True(larga.Length >= 270);
+
+            Assert.NotNull(Etiquetador.Core.Rutas.VolumenDe(larga));
+            Assert.Equal(Etiquetador.Core.Rutas.VolumenDe(musica), Etiquetador.Core.Rutas.VolumenDe(larga));
+
+            var canciones = new[] { new Track { FilePath = Path.Combine(larga, "a.mp3"), Folder = musica, Genre = "Pop" } };
+            var plan = OrganizarPorGenero.Planear(canciones, new[] { musica }, new OpcionesOrganizar(), new DiscoReal(Array.Empty<string>()));
+
+            Assert.Empty(plan.Omitidas);
+            Assert.Equal(Path.Combine(musica, OrganizarPorGenero.CarpetaPorGenero, "Pop", "a.mp3"), Unico(plan).Destino);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void La_ruta_extendida_de_Windows_lleva_su_prefijo_una_vez()
+    {
+        Assert.Equal(@"\\?\C:\Musica\Pop", Etiquetador.Core.Rutas.RutaExtendida(@"C:\Musica\Pop"));
+        Assert.Equal(@"\\?\UNC\servidor\recurso\Musica", Etiquetador.Core.Rutas.RutaExtendida(@"\\servidor\recurso\Musica"));
+        Assert.Equal(@"\\?\C:\Musica", Etiquetador.Core.Rutas.RutaExtendida(@"\\?\C:\Musica"));
+        Assert.Equal(@"\\?\UNC\servidor\recurso", Etiquetador.Core.Rutas.RutaExtendida(@"\\?\UNC\servidor\recurso"));
+        Assert.Equal(@"\\.\PhysicalDrive0", Etiquetador.Core.Rutas.RutaExtendida(@"\\.\PhysicalDrive0"));
+    }
+
     [Fact]
     public void El_nombre_del_volumen_sale_de_la_ruta_final_y_una_carpeta_en_red_no_lo_tiene()
     {

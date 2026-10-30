@@ -153,6 +153,11 @@ public static class Rutas
     /// herramientas de clonado lo conservan, así que un USB y su clon contaban como la misma unidad, y
     /// File.Move entre los dos copiaba el archivo entero y borraba el original, sin atomicidad. El nombre
     /// del volumen lo da Windows a cada disco que monta y no se repite en el equipo.
+    ///
+    /// LA RUTA, EN FORMA EXTENDIDA (revisión 3). La aplicación no declara que admita rutas largas, así
+    /// que CreateFileW no abría una carpeta de 260 caracteres o más: daba null, la unidad salía de la
+    /// ruta («C:\») y no coincidía con la de la base («volumen:…»), y la canción se omitía como «Está en
+    /// otra unidad» aunque estuviera en el mismo disco. Con «\\?\» delante no hay ese límite.
     /// </summary>
     public static string? VolumenDe(string carpeta)
     {
@@ -169,7 +174,7 @@ public static class Rutas
         const uint AbrirExistente = 3;                    // OPEN_EXISTING
         const uint Carpetas = 0x02000000;                 // FILE_FLAG_BACKUP_SEMANTICS: deja abrir una carpeta
         const uint ConNombreDeVolumen = 0x1;              // VOLUME_NAME_GUID: «\\?\Volume{…}\carpeta»
-        using var h = CreateFile(carpeta, LeerAtributos, CompartirTodo, IntPtr.Zero, AbrirExistente, Carpetas, IntPtr.Zero);
+        using var h = CreateFile(RutaExtendida(Path.GetFullPath(carpeta)), LeerAtributos, CompartirTodo, IntPtr.Zero, AbrirExistente, Carpetas, IntPtr.Zero);
         if (h.IsInvalid) return null;
         var buffer = new char[1024];
         var largo = GetFinalPathNameByHandle(h, buffer, (uint)buffer.Length, ConNombreDeVolumen);
@@ -180,6 +185,17 @@ public static class Rutas
         }
         if (largo == 0 || largo >= buffer.Length) return null;
         return NombreDeVolumen(new string(buffer, 0, (int)largo));
+    }
+
+    /// <summary>
+    /// Una ruta completa de Windows en forma extendida, sin el límite de 260 caracteres: «\\?\C:\Musica»,
+    /// y las de red «\\?\UNC\servidor\recurso». La que ya empieza por «\\?\» o «\\.\» se deja como está.
+    /// </summary>
+    internal static string RutaExtendida(string completa)
+    {
+        if (completa.StartsWith(@"\\?\", StringComparison.Ordinal) || completa.StartsWith(@"\\.\", StringComparison.Ordinal)) return completa;
+        if (completa.StartsWith(@"\\", StringComparison.Ordinal)) return @"\\?\UNC\" + completa[2..];
+        return @"\\?\" + completa;
     }
 
     /// <summary>
