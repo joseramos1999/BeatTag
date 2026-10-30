@@ -486,19 +486,26 @@ public class GeneroPorArtistaTests : IDisposable
         return ruta;
     }
 
+    // Por el mismo camino que «Aplicar las marcadas»: EscribirConHistorial con el tipo de la herramienta.
     [Fact]
     public void Un_genero_generico_se_sustituye_y_se_deshace()
     {
-        var paths = new AppPaths(Path.Combine(_dir, "datos"));
+        var motor = MotorDePrueba.Crear(Path.Combine(_dir, "datos"), new Logger());
+        var paths = motor.Paths;
         var ruta = Mp3("a.mp3", "Latin");
-        using (var m = ManifiestoDeshacer.Abrir(paths.NuevoManifiesto(), out var error))
-        {
-            var res = EscrituraPorReglas.Escribir(new[] { new CambioEtiquetas(ruta) { GeneroNuevo = "Reggaeton", GeneroVisto = "Latin" } },
-                                                  m, error, null, null, null, CancellationToken.None, "prueba", TipoEjecucion.GeneroPorReglas);
-            Assert.Equal(new[] { ruta }, res.Escritos);
-            Assert.Equal(1, m!.Anotados);
-        }
+        var res = EscrituraPorReglas.EscribirConHistorial(motor, new[] { new CambioEtiquetas(ruta) { GeneroNuevo = "Reggaeton", GeneroVisto = "Latin" } },
+                                                          null, CancellationToken.None, "prueba", GeneroPorReglasViewModel.TipoEnElHistorial);
+        Assert.Equal(new[] { ruta }, res.Escritos);
         using (var f = TagLib.File.Create(ruta)) Assert.Equal(new[] { "Reggaeton" }, f.Tag.Genres);
+
+        // Una línea en el manifiesto, con el origen de la herramienta: sin él, el historial la
+        // deduciría de los campos y la llamaría «Géneros», como a «Unificar géneros».
+        var lineas = File.ReadAllLines(Assert.Single(Directory.GetFiles(paths.UndoDir, "*.jsonl"))).Where(l => l.Trim().Length > 0).ToList();
+        var registro = JsonNode.Parse(Assert.Single(lineas))!;
+        Assert.Equal(nameof(TipoEjecucion.GeneroPorReglas), (string?)registro[nameof(UndoRecord.Origen)]);
+        var ejecucion = Assert.Single(new HistorialDeshacer(paths.UndoDir).Listar());
+        Assert.Equal(TipoEjecucion.GeneroPorReglas, ejecucion.Tipo);
+        Assert.Equal("Género por carpeta y artista", ejecucion.TipoTexto);
 
         var u = new UndoEngine(paths).UndoLastRun();
 
