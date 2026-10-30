@@ -509,4 +509,28 @@ public sealed class AppConfig
 
     /// <summary>De cuántos días atrás son los lanzamientos que se enseñan en Novedades (30, 60 o 90).</summary>
     public int NovedadesDias { get; set; } = 30;
+
+    // --- Organizar por género (B8) ---
+
+    /// <summary>
+    /// Dónde se crean las carpetas de los géneros: «porgenero» (una carpeta «Por género» dentro de cada
+    /// carpeta de la biblioteca, lo recomendado), «raiz» (directamente en cada carpeta de la biblioteca)
+    /// o «carpeta» (en <see cref="OrganizarCarpeta"/>). Un valor desconocido cuenta como «porgenero».
+    /// </summary>
+    public string OrganizarDestino { get; set; } = "porgenero";
+
+    /// <summary>Con <see cref="OrganizarDestino"/> «carpeta», cuál: tiene que estar dentro de la biblioteca.</summary>
+    public string OrganizarCarpeta { get; set; } = "";
+
+    /// <summary>Dentro de cada género, las subcarpetas de origen.</summary>
+    public bool OrganizarConservarEstructura { get; set; }
+
+    /// <summary>Las canciones sin género van a «Sin género» (sin marcar, se quedan donde están).</summary>
+    public bool OrganizarSinGenero { get; set; }
+
+    /// <summary>Los mashups, las transiciones, las acapellas y los instrumentales se quedan donde están.</summary>
+    public bool OrganizarDejarHerramientas { get; set; } = true;
+
+    /// <summary>Los géneros con menos canciones que esto van a «Otros géneros»; 0, sin agrupar.</summary>
+    public int OrganizarAgruparMenosDe { get; set; }
 }
