@@ -114,6 +114,16 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   vuelve a la bandeja con su propia ficha de DJ y la copia antigua recupera la suya cuando vuelve de
   la papelera (la Ayuda explica los detalles). Una sustitución cortada por un cierre inesperado se
   recoge al volver a arrancar.
+- **Organizar por género**: mueve cada canción a una carpeta con el nombre de su género (por defecto,
+  `Por género/<género>` dentro de cada carpeta de la biblioteca), sin tocar sus etiquetas. Una vista
+  previa muestra adónde va cada canción, cómo se reparte cada carpeta de origen (que se puede
+  desmarcar) y qué se queda y por qué: sin género, mashups y otras herramientas de DJ, carpetas con
+  ajustes propios, otra unidad, rutas demasiado largas o un archivo con el mismo nombre en el destino,
+  porque nunca se sobrescribe ni se renombra nada. Se cancela entre un archivo y el siguiente; la ficha
+  de DJ, lo decidido en Enriquecer y la caché de la biblioteca siguen a cada archivo, y se deshace desde
+  el historial, que también recrea las carpetas de origen y quita las que creó si se han quedado
+  vacías. Después, la página rekordbox repara las rutas; Serato, Traktor, Engine DJ y VirtualDJ tienen
+  su propia opción para localizar archivos movidos.
 - **Ficha DJ**: lo que sabes de cada canción y no cabe en los tags — energía (1-10), momento de la
   sesión, voz, letra limpia o explícita, idioma, ambiente, etiquetas libres y «arma secreta». Se
   guarda en BeatTag sin tocar los archivos; se rellena por lotes (editar cuarenta a la vez no borra lo
