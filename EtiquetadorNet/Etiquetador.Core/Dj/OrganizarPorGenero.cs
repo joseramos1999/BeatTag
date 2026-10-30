@@ -171,6 +171,8 @@ public enum MotivoOmision
     TramoLargo,
     /// <summary>En el destino ya hay un archivo con ese nombre, o otra canción del plan va al mismo sitio.</summary>
     Colision,
+    /// <summary>Moverla cambiaría lo que BeatTag deduce de su carpeta: dejaría de contar como mashup, acapella, instrumental o edición de DJ, o pasaría a contar como tal.</summary>
+    TipoPorCarpeta,
 }
 
 /// <summary>Una canción que se mueve.</summary>
@@ -247,7 +249,10 @@ public sealed class PlanOrganizar
 ///     mashup son dos temas, a menudo de dos estilos, y su género es el que menos se puede deducir. Los
 ///     DJ los guardan por packs.
 ///   · Las carpetas con ajustes propios (Duplicados, Volumen) se quedan: fuera de ellas, la canción
-///     perdería la exclusión o la prioridad que el DJ le dio a esa carpeta.
+///     perdería la exclusión o la prioridad que el DJ le dio a esa carpeta. Y nada entra en ellas, que
+///     la ganaría (revisión 1).
+///   · Una pieza que cambiaría de tipo al moverla (una acapella que lo es solo por estar en
+///     «Acapellas», o lo que entraría en una carpeta «Instrumental») se queda: ver LoQueDiceLaRuta.
 ///   · La etiqueta solo coincidía con el género que nombra su carpeta en el 37 % de las canciones, y
 ///     cada carpeta de origen se repartiría de media entre 24 géneros: por eso hay vista previa y se
 ///     puede desmarcar cada carpeta de origen.
@@ -445,6 +450,25 @@ public static class OrganizarPorGenero
             return real;
         }
 
+        // Lo que la carpeta dice de una pieza, mirado con un nombre neutro, una vez por carpeta: si
+        // coincide en el origen y en el destino, moverla no cambia nada (ver LoQueDiceLaRuta).
+        var firmas = new Dictionary<string, LoQueDiceLaRuta>(ComparadorRutas.Instancia);
+        LoQueDiceLaRuta Firma(string carpeta)
+        {
+            if (!firmas.TryGetValue(carpeta, out var f)) firmas[carpeta] = f = LoQueDiceLaRuta.De(Path.Combine(carpeta, "x"));
+            return f;
+        }
+        string? CambioPorCarpeta(string origen, string destino, string nombreDestino)
+        {
+            if (Firma(Path.GetDirectoryName(origen) ?? "") == Firma(Path.GetDirectoryName(destino) ?? "")) return null;
+            var antes = LoQueDiceLaRuta.De(origen);
+            var despues = LoQueDiceLaRuta.De(destino);
+            if (antes == despues) return null;   // lo dice ya su nombre, esté donde esté
+            if (antes.LoQueNoDice(despues) is { } pierde) return $"Su carpeta la marca como {pierde}: fuera de ella dejaría de contar como tal";
+            if (despues.LoQueNoDice(antes) is { } gana) return $"En «{nombreDestino}» pasaría a contar como {gana}";
+            return TextoMotivo(MotivoOmision.TipoPorCarpeta);
+        }
+
         string Base(string raiz) => op.Destino switch
         {
             DestinoOrganizar.PorGeneroEnCadaRaiz => Path.Combine(raiz, Real(raiz, CarpetaPorGenero)),
@@ -525,6 +549,7 @@ public static class OrganizarPorGenero
             if (ComparadorRutas.Instancia.Equals(destino, t.FilePath)) { Omitir(MotivoOmision.YaEnSuSitio, TextoMotivo(MotivoOmision.YaEnSuSitio)); continue; }
             if (!ComparadorRutas.Instancia.Equals(Unidad(dir), Unidad(baseDir))) { Omitir(MotivoOmision.OtraUnidad, TextoMotivo(MotivoOmision.OtraUnidad)); continue; }
             if (ConAjustes(destinoDir)) { Omitir(MotivoOmision.DestinoConAjustes, TextoDestinoConAjustes(nombreDestino)); continue; }
+            if (CambioPorCarpeta(t.FilePath, destino, nombreDestino) is { } cambio) { Omitir(MotivoOmision.TipoPorCarpeta, cambio); continue; }
             if (destino.Length >= LargoMaximoRuta) { Omitir(MotivoOmision.RutaLarga, TextoMotivo(MotivoOmision.RutaLarga)); continue; }
             if (Tramos(destino).Any(s => Encoding.UTF8.GetByteCount(s) > BytesMaximoTramo))
             {
@@ -609,6 +634,61 @@ public static class OrganizarPorGenero
     }
 
     /// <summary>
+    /// Lo que BeatTag deduce de la RUTA de una pieza (no de sus etiquetas), tal como lo usa cada página:
+    /// el tipo de pieza de Duplicados, Pendientes y Tendencias (<see cref="IndiceVersiones.Clasificar"/>),
+    /// si es una edición de DJ para Duplicados (<see cref="Analysis.EdicionDj.Es"/>), si es una acapella
+    /// (Compatibles), si Comprobar audio la deja fuera (<see cref="Analysis.Identificacion.SeExcluye"/>), si
+    /// Enriquecer la salta (carpeta de mashups o nombre de mezcla) y si una lista la da por no tenida.
+    /// Varias cosas salen de la carpeta: «Mashups» (en toda la ruta), «Acapellas» (en toda la ruta),
+    /// «Instrumentales» o «Hype Intros» (la carpeta que la contiene).
+    ///
+    /// POR QUÉ (revisión 1). Al llevar a «Por género/Reggaeton» una acapella que lo era solo por estar en
+    /// «Acapellas Pack», dejaba de serlo para todas esas páginas: Comprobar audio podía mandarla al servicio
+    /// de pago y Duplicados emparejarla con el original. Al revés, el género «Instrumental» crea una
+    /// carpeta «Instrumental» que marcaría como instrumental todo lo que entrara. Una pieza que cambiaría
+    /// así se queda donde está, con su motivo.
+    ///
+    /// Con la misma carpeta, el mismo nombre da lo mismo: las reglas solo miran el nombre y la carpeta, y
+    /// el nombre nunca cambia al organizar. Por eso basta comparar una vez por carpeta con un nombre
+    /// neutro («x»), y solo si las carpetas difieren se mira cada pieza.
+    /// </summary>
+    private readonly record struct LoQueDiceLaRuta(TipoPieza Tipo, bool EdicionDj, bool Acapella, bool FueraDeComprobar,
+                                                   bool FueraDeEnriquecer, bool NoCuentaEnListas)
+    {
+        public static LoQueDiceLaRuta De(string ruta)
+        {
+            var carpetaDeMashups = Matching.IsMashupFolder(Path.GetDirectoryName(ruta));
+            var acapella = Analysis.Identificacion.EsAcapella(ruta);
+            var p = Pipeline.FileNameParser.Parse(Path.GetFileName(ruta));
+            return new LoQueDiceLaRuta(
+                IndiceVersiones.Clasificar(ruta),
+                Analysis.EdicionDj.Es(ruta),
+                acapella,
+                Analysis.Identificacion.SeExcluye(ruta, out _),
+                carpetaDeMashups || Matching.IsSkipMix(p.Base, p.FnTitle, p.FnArtist),
+                acapella || carpetaDeMashups || Matching.IsMezclaDeVariosTemas(Path.GetFileNameWithoutExtension(ruta)));
+        }
+
+        /// <summary>Lo que esta lectura dice y <paramref name="otra"/> no («acapella», «mashup»…), o null.</summary>
+        public string? LoQueNoDice(LoQueDiceLaRuta otra)
+        {
+            if (Tipo != otra.Tipo)
+                switch (Tipo)
+                {
+                    case TipoPieza.Mezcla: return "mashup o transición";
+                    case TipoPieza.Acapella: return "acapella";
+                    case TipoPieza.Instrumental: return "instrumental";
+                    case TipoPieza.EdicionDj: return "edición de DJ";
+                }
+            if (Acapella && !otra.Acapella) return "acapella";
+            if ((FueraDeComprobar && !otra.FueraDeComprobar) || (FueraDeEnriquecer && !otra.FueraDeEnriquecer)
+                || (NoCuentaEnListas && !otra.NoCuentaEnListas)) return "mashup";
+            if (EdicionDj && !otra.EdicionDj) return "edición de DJ";
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Si es una herramienta de DJ que se deja en su sitio (mashup, transición, acapella o
     /// instrumental, con el criterio de <see cref="IndiceVersiones.Clasificar"/>), el motivo; si no, null.
     /// </summary>
@@ -637,6 +717,7 @@ public static class OrganizarPorGenero
         MotivoOmision.DestinoConAjustes => "Su carpeta de destino tiene ajustes propios en Duplicados o en Volumen",
         MotivoOmision.OrigenDesmarcado => "Su carpeta de origen está desmarcada",
         MotivoOmision.NoDisponible => "Su carpeta no está disponible",
+        MotivoOmision.TipoPorCarpeta => "Moverla cambiaría lo que su carpeta indica de ella (mashup, acapella, instrumental o edición de DJ)",
         MotivoOmision.OtraUnidad => "Está en otra unidad",
         MotivoOmision.RutaLarga => $"La ruta de destino tendría {LargoMaximoRuta} caracteres o más",
         MotivoOmision.TramoLargo => $"Un tramo de la ruta de destino pasaría de {BytesMaximoTramo} bytes",
@@ -679,6 +760,9 @@ public static class OrganizarPorGenero
                 : $"{cuantas} se quedan porque su carpeta de destino tiene ajustes propios en Duplicados o en Volumen",
             MotivoOmision.OrigenDesmarcado => uno ? "1 se queda porque su carpeta está desmarcada" : $"{cuantas} se quedan porque su carpeta está desmarcada",
             MotivoOmision.NoDisponible => uno ? "1 se omite porque su carpeta no está disponible" : $"{cuantas} se omiten porque su carpeta no está disponible",
+            MotivoOmision.TipoPorCarpeta => uno
+                ? "1 se queda porque moverla cambiaría lo que su carpeta indica de ella (mashup, acapella, instrumental o edición de DJ)"
+                : $"{cuantas} se quedan porque moverlas cambiaría lo que su carpeta indica de ellas (mashups, acapellas, instrumentales o ediciones de DJ)",
             MotivoOmision.OtraUnidad => uno ? "1 se omite porque está en otra unidad" : $"{cuantas} se omiten porque están en otra unidad",
             MotivoOmision.RutaLarga => uno
                 ? $"1 se omite porque su ruta de destino tendría {LargoMaximoRuta} caracteres o más"
@@ -693,8 +777,9 @@ public static class OrganizarPorGenero
     /// <summary>El orden en que el resumen cuenta lo que no se mueve.</summary>
     private static readonly MotivoOmision[] OrdenResumen =
     {
-        MotivoOmision.SinGenero, MotivoOmision.HerramientaDj, MotivoOmision.CarpetaConAjustes, MotivoOmision.DestinoConAjustes, MotivoOmision.OrigenDesmarcado,
-        MotivoOmision.YaEnSuSitio, MotivoOmision.Colision, MotivoOmision.NoDisponible, MotivoOmision.OtraUnidad, MotivoOmision.RutaLarga, MotivoOmision.TramoLargo,
+        MotivoOmision.SinGenero, MotivoOmision.HerramientaDj, MotivoOmision.TipoPorCarpeta, MotivoOmision.CarpetaConAjustes,
+        MotivoOmision.DestinoConAjustes, MotivoOmision.OrigenDesmarcado, MotivoOmision.YaEnSuSitio, MotivoOmision.Colision,
+        MotivoOmision.NoDisponible, MotivoOmision.OtraUnidad, MotivoOmision.RutaLarga, MotivoOmision.TramoLargo,
     };
 
     /// <summary>

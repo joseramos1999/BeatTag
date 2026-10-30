@@ -54,6 +54,16 @@ public class OrganizarPorGeneroTextosTests : IDisposable
     }
 
     [Fact]
+    public void El_resumen_cuenta_cada_motivo()
+    {
+        foreach (var m in Enum.GetValues<MotivoOmision>())
+        {
+            var plan = new PlanOrganizar { Omitidas = new[] { new OmisionOrganizar("a", m, "") } };
+            Assert.Contains(OrganizarPorGenero.TextoOmision(m, 1), OrganizarPorGenero.Resumen(plan));
+        }
+    }
+
+    [Fact]
     public void El_resumen_junta_lo_que_se_mueve_lo_que_se_queda_y_el_reparto()
     {
         var plan = new PlanOrganizar

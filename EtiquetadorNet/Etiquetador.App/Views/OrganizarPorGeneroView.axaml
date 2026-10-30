@@ -41,7 +41,7 @@
                               ToolTip.Tip="Sin marcar, las canciones sin género se quedan donde están." />
                     <CheckBox Content="Dejar en su sitio los mashups, las transiciones, las acapellas y los instrumentales" IsChecked="{Binding DejarHerramientas}"
                               IsEnabled="{Binding Libre}"
-                              ToolTip.Tip="Un mashup son dos canciones, a menudo de dos estilos: su género es el que menos se puede deducir." />
+                              ToolTip.Tip="Un mashup son dos canciones, a menudo de dos estilos: su género es el que menos se puede deducir. Aunque la desmarques, una pieza que BeatTag reconoce por el nombre de su carpeta («Acapellas», «Mashups», «Hype Intros») se queda donde está, salvo que conserves las subcarpetas: fuera de ella dejaría de contar como tal." />
                     <WrapPanel ItemSpacing="8" LineSpacing="4">
                         <CheckBox Content="Agrupar en «Otros géneros» los que tengan menos de" IsChecked="{Binding Agrupar}"
                                   IsEnabled="{Binding Libre}" VerticalAlignment="Center"

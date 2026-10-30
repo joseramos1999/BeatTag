@@ -107,6 +107,66 @@ public class OrganizarPorGeneroPlanTests
         Assert.Equal(Path.Combine(PorGenero, "Dance", "Mashups Reggaeton2 C-E", t.FileName), estructura.Destino);
     }
 
+    // Revisión 1: algunas herramientas se reconocen solo por su carpeta. Una acapella de «Acapellas
+    // Pack» que pasaba a «Por género/Reggaeton» dejaba de serlo para Comprobar audio (que podría
+    // mandarla al servicio de pago), Duplicados, Pendientes y Tendencias.
+    [Fact]
+    public void Una_pieza_que_es_herramienta_por_su_carpeta_no_la_pierde_al_moverla()
+    {
+        var acapella = T("Acapellas Pack", "Bad Bunny - Titi Me Pregunto.mp3", "Reggaeton");
+        var sinHerramientas = new OpcionesOrganizar { DejarHerramientas = false };
+
+        var plan = Plan(new[] { acapella }, sinHerramientas);
+
+        Assert.Empty(plan.Movimientos);
+        var o = Assert.Single(plan.Omitidas);
+        Assert.Equal(MotivoOmision.TipoPorCarpeta, o.Motivo);
+        Assert.Equal("Su carpeta la marca como acapella: fuera de ella dejaría de contar como tal", o.Texto);
+        Assert.Contains("1 se queda porque moverla cambiaría lo que su carpeta indica de ella", OrganizarPorGenero.Resumen(plan));
+
+        // Conservando las subcarpetas, la carpeta va con ella y sigue siendo una acapella.
+        var conEstructura = Unico(Plan(new[] { acapella }, sinHerramientas with { ConservarEstructura = true }));
+        Assert.Equal(Path.Combine(PorGenero, "Reggaeton", "Acapellas Pack", acapella.FileName), conEstructura.Destino);
+    }
+
+    [Fact]
+    public void Una_edicion_de_DJ_por_su_carpeta_se_queda_tambien_con_las_opciones_por_defecto()
+    {
+        // «Hype Intros» marca sus canciones como ediciones de DJ (Duplicados no las empareja con el
+        // original), y no son herramientas que «Dejar en su sitio…» deje fuera.
+        var intro = T("Hype Intros", "Tema.mp3", "Reggaeton");
+        var normal = T("Descargas", "Otro.mp3", "Reggaeton");
+
+        var plan = Plan(new[] { intro, normal });
+
+        Assert.Equal(normal.FilePath, Unico(plan).Origen);
+        Assert.Equal("Su carpeta la marca como edición de DJ: fuera de ella dejaría de contar como tal", Assert.Single(plan.Omitidas).Texto);
+    }
+
+    [Fact]
+    public void Una_cancion_que_iria_a_una_carpeta_de_genero_que_la_marcaria_como_herramienta_se_queda()
+    {
+        // El género «Instrumental» crea «Por género/Instrumental», y esa carpeta marca como
+        // instrumental todo lo que haya dentro.
+        var t = T("Descargas", "Tema.mp3", "Instrumental");
+
+        var plan = Plan(new[] { t });
+
+        Assert.Empty(plan.Movimientos);
+        var o = Assert.Single(plan.Omitidas);
+        Assert.Equal(MotivoOmision.TipoPorCarpeta, o.Motivo);
+        Assert.Equal("En «Instrumental» pasaría a contar como instrumental", o.Texto);
+    }
+
+    [Fact]
+    public void Un_mashup_por_su_nombre_se_mueve_aunque_venga_de_una_carpeta_de_mashups_si_se_pide()
+    {
+        // El nombre ya dice que es un mashup: fuera de la carpeta, BeatTag lo sigue tratando igual.
+        var t = T("Mashups 2024", "La Reina x Lovumba (Try It Mashup 130Bpm).mp3", "Dance");
+
+        Assert.Equal(Path.Combine(PorGenero, "Dance", t.FileName), Unico(Plan(new[] { t }, new OpcionesOrganizar { DejarHerramientas = false })).Destino);
+    }
+
     [Fact]
     public void Caso_3_sin_genero_se_queda_o_va_a_sin_genero_si_se_pide()
     {
