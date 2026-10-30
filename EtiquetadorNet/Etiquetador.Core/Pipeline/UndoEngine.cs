@@ -470,8 +470,8 @@ public sealed class UndoEngine
         {
             try
             {
-                // La carpeta en que lo dejó la ejecución pudo quitarse al deshacer, si se quedó vacía
-                // (ver QuitarCarpetasCreadas): se vuelve a crear para devolverlo ahí.
+                // La carpeta en que lo dejó la ejecución puede no existir ya (la creó la ejecución y se
+                // quitó al quedarse vacía, ver QuitarCarpetasCreadas): se vuelve a crear para devolverlo ahí.
                 var carpeta = Path.GetDirectoryName(v.Desde);
                 if (!string.IsNullOrEmpty(carpeta)) Directory.CreateDirectory(carpeta);
                 Mover(v.Hasta, v.Desde);
@@ -618,6 +618,7 @@ public sealed class UndoEngine
         var vueltas = new List<Vuelta>();
         var tocadas = new List<string>();
         var legadoDeAplicar = ManifiestoAntiguoDeAplicar(lineas.Select(l => l.Nodo));
+        var procesadas = new List<int>();
         for (var i = lineas.Count - 1; i >= 0; i--)
         {
             // Lo que no se ha elegido (E14) se queda pendiente tal cual, sin mirar el archivo.
@@ -625,6 +626,7 @@ public sealed class UndoEngine
             if (aplazadas.Contains(i)) { pendiente[i] = true; resultado[i] = Outcome.Error; continue; }
             var node = lineas[i].Nodo;
             if (node == null) continue;
+            procesadas.Add(i);
             // Primero la de después y luego la de antes: al deshacer, el archivo acaba en la de antes,
             // y la biblioteca relee la lista del final al principio. Con un cambio solo de mayúsculas
             // («tema» → «Tema»), las dos rutas valen para el mismo archivo y debe entrar con «tema».
@@ -656,6 +658,9 @@ public sealed class UndoEngine
             SeguirEnEsteManifiesto(textos, pendiente, siguen);
             quedan.AddRange(siguen.Select(v => (v.Desde, v.Hasta)));
         }
+
+        // Con todo ya en su sitio, las carpetas que creó la ejecución y se han quedado vacías.
+        QuitarCarpetasCreadas(mf, lineas.Select(l => l.Nodo).ToList(), procesadas);
 
         // Las cuentas, al final: devolver un archivo a donde lo dejó la ejecución (arriba) cambia el
         // resultado de su registro.
@@ -1060,9 +1065,6 @@ public sealed class UndoEngine
         ef.Sellar(path);
         var renamedBack = RenameBack(r.Renamed, ref path, r.FinalPath, r.OrigPath);
         if (renamedBack) { ef.Movido = true; ef.Hasta = path; }
-        // Con el archivo ya en su sitio (devuelto ahora, o porque el traslado no llegó a hacerse), las
-        // carpetas que se crearon para él sobran si se han quedado vacías.
-        if (string.Equals(path, r.OrigPath, StringComparison.Ordinal)) QuitarCarpetasCreadas(r);
 
         bool restoredAny = false, skippedAny = false, volumenFallido = false, volumenDevuelto = false;
 
@@ -1194,18 +1196,57 @@ public sealed class UndoEngine
     }
 
     /// <summary>
-    /// Quita las carpetas que la ejecución creó para el archivo de este registro
-    /// (<see cref="UndoRecord.CarpetasCreadas"/>), de la más profunda a la más alta, SOLO si están
+    /// Tras deshacer los registros <paramref name="procesadas"/> de <paramref name="mf"/> (con cualquier
+    /// resultado), quita las carpetas que creó ESA ejecución (<see cref="UndoRecord.CarpetasCreadas"/>)
+    /// y que contienen el destino de alguno de ellos, de la más profunda a la más alta, SOLO si están
     /// vacías del todo. Nunca se borra nada recursivamente: si dentro hay algo (un desktop.ini, un
     /// .DS_Store, un archivo que el usuario dejó ahí después), la carpeta se queda con ello.
+    ///
+    /// POR QUÉ ASÍ (revisión 1). Las carpetas las lleva el primer registro que movió algo a cada una, y
+    /// antes solo las quitaba ese registro al deshacerse. Deshaciendo por partes desde el historial (ese
+    /// registro primero y el resto después), o si su archivo faltaba, se quedaban vacías para siempre.
+    /// Ahora cuentan las de toda la ejecución: las de este manifiesto y, si algo de lo deshecho cambió
+    /// de carpeta, las de lo que ya se deshizo o se dio por perdido en otras pasadas.
     /// </summary>
-    private void QuitarCarpetasCreadas(UndoRecord r)
+    private void QuitarCarpetasCreadas(string mf, IReadOnlyList<JsonNode?> nodos, IReadOnlyCollection<int> procesadas)
     {
-        if (r.CarpetasCreadas is not { Count: > 0 } carpetas) return;
-        for (var i = carpetas.Count - 1; i >= 0; i--)
+        if (procesadas.Count == 0) return;
+        var finales = new List<string>();
+        var trasladan = false;
+        foreach (var i in procesadas)
         {
-            var dir = carpetas[i];
-            if (string.IsNullOrWhiteSpace(dir)) continue;
+            if (Rutas3(nodos[i]) is not { } r) continue;
+            finales.Add(r.Despues);
+            trasladan |= !string.Equals(Path.GetDirectoryName(r.Antes), Path.GetDirectoryName(r.Despues), StringComparison.OrdinalIgnoreCase);
+        }
+        if (finales.Count == 0) return;
+
+        var creadas = new HashSet<string>(ComparadorRutas.Instancia);
+        void Anadir(JsonNode? n)
+        {
+            if (n is not JsonObject o || o["CarpetasCreadas"] is not JsonArray a) return;
+            foreach (var c in a)
+                if (c is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s))
+                    creadas.Add(s.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        }
+        foreach (var n in nodos) Anadir(n);
+        if (trasladan)
+            foreach (var archivado in ArchivadosDe(mf))
+                try
+                {
+                    foreach (var linea in File.ReadLines(archivado, Encoding.UTF8))
+                        if (linea.Contains("\"CarpetasCreadas\"", StringComparison.Ordinal))
+                            try { Anadir(JsonNode.Parse(linea)); } catch { /* una línea ilegible no cita carpetas */ }
+                }
+                catch (Exception e) { _log?.Log($"  deshacer: no se pudo leer {Path.GetFileName(archivado)}: {e.Message}", LogKind.Err); }
+        if (creadas.Count == 0) return;
+
+        var candidatas = new HashSet<string>(ComparadorRutas.Instancia);
+        foreach (var f in finales)
+            for (var c = Path.GetDirectoryName(f); !string.IsNullOrEmpty(c); c = Path.GetDirectoryName(c))
+                if (creadas.Contains(c)) candidatas.Add(c);
+        foreach (var dir in candidatas.OrderByDescending(c => c.Length))
+        {
             try
             {
                 if (!Directory.Exists(dir) || Directory.EnumerateFileSystemEntries(dir).Any()) continue;
@@ -1214,6 +1255,27 @@ public sealed class UndoEngine
             }
             catch (Exception e) { _log?.Log($"  deshacer: no se pudo quitar la carpeta vacía «{dir}»: {e.Message}", LogKind.Err); }
         }
+    }
+
+    /// <summary>
+    /// Lo ya archivado de la ejecución de <paramref name="mf"/>: «run_X.deshecho.jsonl», «run_X.deshecho-2.jsonl»…
+    /// y «run_X.perdidos.jsonl» (ver <see cref="RutaArchivado"/>).
+    /// </summary>
+    private static IEnumerable<string> ArchivadosDe(string mf)
+    {
+        var dir = Path.GetDirectoryName(mf);
+        var nombre = Path.GetFileName(mf);
+        if (string.IsNullOrEmpty(dir) || !nombre.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase) || !Directory.Exists(dir))
+            return Array.Empty<string>();
+        var raiz = nombre[..^6] + ".";
+        try
+        {
+            return Directory.EnumerateFiles(dir, raiz + "*.jsonl")
+                            .Where(f => !string.Equals(f, mf, StringComparison.OrdinalIgnoreCase)
+                                        && Path.GetFileName(f).StartsWith(raiz, StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+        }
+        catch { return Array.Empty<string>(); }
     }
 
     // Restaura un campo solo si el valor actual coincide con el que escribió la app. (restaurado, omitido).

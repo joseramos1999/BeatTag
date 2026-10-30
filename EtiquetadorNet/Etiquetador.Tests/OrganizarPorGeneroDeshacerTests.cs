@@ -274,6 +274,42 @@ public class OrganizarPorGeneroDeshacerTests : IDisposable
         Assert.Equal("mío", File.ReadAllText(ajeno));
     }
 
+    // Revisión 1: solo el registro que creó una carpeta la quitaba, y solo en su propio deshacer.
+    // REPRODUCIDO: deshacer primero la línea que lleva las carpetas y después el resto dejaba «Por
+    // género» y «Pop» vacías para siempre.
+    [Fact]
+    public void Deshacer_por_partes_quita_al_final_las_carpetas_que_creo_la_organizacion()
+    {
+        var archivos = Archivos(3);
+        Assert.Equal(3, Organizar(PlanA(archivos)).Movidas);
+        var mf = Assert.Single(Directory.GetFiles(_paths.UndoDir, "run_*.jsonl"));
+        var primera = File.ReadAllLines(mf)[0];
+        Assert.Contains("CarpetasCreadas", primera);
+        var motor = new UndoEngine(_paths);
+
+        Assert.Equal(1, motor.DeshacerCambios(mf, new[] { UndoEngine.HuellaLinea(primera) }).Reverted);
+        Assert.True(Directory.Exists(Path.Combine(PorGenero, "Pop")));   // quedan dos dentro
+        Assert.Equal(1, motor.DeshacerCambios(mf, new[] { UndoEngine.HuellaLinea(File.ReadAllLines(mf)[0]) }).Reverted);
+        Assert.Equal(1, motor.UndoLastRun().Reverted);
+
+        Assert.All(archivos, a => Assert.True(File.Exists(a)));
+        Assert.False(Directory.Exists(PorGenero));
+    }
+
+    [Fact]
+    public void Si_falta_el_archivo_que_creo_las_carpetas_se_quitan_igual_al_quedarse_vacias()
+    {
+        var archivos = Archivos(2);
+        Organizar(PlanA(archivos));
+        File.Delete(Path.Combine(PorGenero, "Pop", Path.GetFileName(archivos[0])));   // el usuario lo borra
+
+        var deshecho = new UndoEngine(_paths).UndoLastRun();
+
+        Assert.Equal((1, 1), (deshecho.Reverted, deshecho.Missing));
+        Assert.True(File.Exists(archivos[1]));
+        Assert.False(Directory.Exists(PorGenero));
+    }
+
     [Fact]
     public void Un_traslado_anotado_sin_carpetas_creadas_se_deshace_como_antes()
     {
