@@ -256,7 +256,9 @@ el resto, el género dominante del artista sin contar los genéricos como Latin 
 sustituye géneros genéricos con la propuesta marcada; si la canción ya tiene otro estilo, la
 propuesta sale desmarcada para revisarla, y los mashups y los remixes firmados conservan el suyo.
 Solo escribe en las canciones que siguen como estaban al proponer. El BPM no se usa, porque no
-distingue estilos, y Spotify ya no publica los géneros de los artistas.
+distingue estilos, y Spotify ya no publica los géneros de los artistas. Para las canciones sin
+género que ninguna regla cubre (y que no son mashups), se puede consultar Deezer: solo propone el
+subgénero del álbum cuando es concreto (Reggaeton, Cumbia, Flamenco…), y siempre desmarcado.
 
 Todas las tablas del Asistente tienen el **menú contextual** del resto de la aplicación: escuchar,
 editar etiquetas, marcar o desmarcar las seleccionadas, abrir la carpeta y enviar a la papelera

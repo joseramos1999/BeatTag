@@ -316,6 +316,7 @@ public class AyudaTests
     [InlineData("Proponer para", "Views/AsistenteView.axaml")]
     [InlineData("Para revisar", "Views/AsistenteView.axaml")]
     [InlineData("Para revisar", "ViewModels/GeneroPorReglasViewModel.cs")]
+    [InlineData("Buscar en Deezer las canciones sin género que siguen sin propuesta", "Views/AsistenteView.axaml")]
     public void Lo_que_cita_la_Ayuda_existe_en_la_pantalla(string rotulo, string archivo)
     {
         var fuente = Fuente(new[] { "Etiquetador.App" }.Concat(archivo.Split('/')).ToArray());

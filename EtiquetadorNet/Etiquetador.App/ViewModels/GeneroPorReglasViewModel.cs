@@ -136,6 +136,7 @@ public sealed partial class GeneroReglaFila : ObservableObject, IFilaConArchivo,
         ReglaGenero.Carpeta => "Carpeta",
         ReglaGenero.Version => "Versión",
         ReglaGenero.MapaArtista => "Tu regla de artista",
+        ReglaGenero.Deezer => "Deezer",
         _ => "Artista",
     };
 
@@ -352,12 +353,15 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
 
         var porRuta = new Dictionary<string, Track>(StringComparer.Ordinal);
         foreach (var t in canciones) porRuta.TryAdd(t.FilePath, t);
-        Propuestas = new ObservableCollection<GeneroReglaFila>(Filas(calculo.propuestas.Propuestas, porRuta, Propuestas));
+        // Lo que ya dio Deezer en esta sesión se conserva para las canciones que siguen sin género ni regla.
+        var conPropuesta = new HashSet<string>(calculo.propuestas.Propuestas.Select(x => x.Ruta), StringComparer.Ordinal);
+        var deDeezer = _deezer.Values.Where(x => !conPropuesta.Contains(x.Ruta) && porRuta.TryGetValue(x.Ruta, out var t) && GeneroPorReglas.SinGenero(t)).ToList();
+        Propuestas = new ObservableCollection<GeneroReglaFila>(Filas(calculo.propuestas.Propuestas.Concat(deDeezer), porRuta, Propuestas));
         ReglasSinAplicar = false;
 
         var p = calculo.propuestas;
         var marcadas = p.Propuestas.Count(x => x.Marcada);
-        var paraRevisar = p.Propuestas.Count - marcadas;
+        var paraRevisar = p.Propuestas.Count - marcadas + deDeezer.Count;
         ResumenCarpetas = TextoCarpetas(calculo.carpetas.Count, conRegla, excluidas);
         Resumen = TextoResumen(calculo.sinGenero, marcadas, paraRevisar, p.Protegidas);
         _p.Status = AvisoMapaUnaVez()
@@ -371,6 +375,67 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
                           + ": pasa antes «Unificar géneros» para que las cuentas por artista sean más fiables."
                         : "");
     });
+
+    // =================================================================================================
+    // Deezer, para lo que las reglas no cubren
+    // =================================================================================================
+
+    /// <summary>Lo que ha propuesto Deezer en esta sesión, por ruta: se conserva al volver a proponer.</summary>
+    private readonly Dictionary<string, PropuestaGeneroRegla> _deezer = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Busca en Deezer las canciones sin género que siguen sin propuesta y que no son mashups, y
+    /// propone el subgénero concreto de su álbum, desmarcado (ver <see cref="GeneroDeezer"/>). Va por
+    /// internet, con avance y cancelable; las consultas quedan en la caché de 30 días.
+    /// </summary>
+    [RelayCommand]
+    private Task BuscarEnDeezerAsync() => _p.TrabajarAsync("Buscando en Deezer…", async ct =>
+    {
+        if (!_p.Engine.Config.UseDeezer)
+        {
+            _p.Status = "Deezer está desactivado entre las fuentes de Ajustes: actívalo para usar esta búsqueda.";
+            return;
+        }
+        if (Resumen.Length == 0)
+        {
+            _p.Status = "Pulsa antes «Proponer géneros»: en Deezer solo se buscan las canciones que las reglas no cubren.";
+            return;
+        }
+        if (!_p.BibliotecaLista(out var motivo)) { _p.Status = motivo; return; }
+
+        var canciones = _p.Engine.Library.Tracks.ToList();
+        var conPropuesta = Propuestas.Select(f => f.Ruta).ToList();
+        var candidatas = await Task.Run(() => GeneroDeezer.Candidatas(canciones, conPropuesta), ct);
+        if (candidatas.Count == 0)
+        {
+            _p.Status = "No queda ninguna canción sin género y sin propuesta que no sea un mashup.";
+            return;
+        }
+
+        var progreso = new Progress<(int Hechas, int Total)>(x =>
+        {
+            if (!_p.IsBusy) return;
+            _p.Progress = x.Total > 0 ? 100.0 * x.Hechas / x.Total : 0;
+            _p.Status = $"Buscando en Deezer: {x.Hechas:N0} de {x.Total:N0}…";
+        });
+        var nuevas = await Task.Run(() => GeneroDeezer.BuscarAsync(candidatas, _p.Engine.Deezer, progreso, ct), ct);
+
+        foreach (var n in nuevas) _deezer[n.Ruta] = n;
+        var porRuta = new Dictionary<string, Track>(StringComparer.Ordinal);
+        foreach (var t in canciones) porRuta.TryAdd(t.FilePath, t);
+        var nuevasRutas = new HashSet<string>(nuevas.Select(n => n.Ruta), StringComparer.Ordinal);
+        var quedan = Propuestas.Where(f => !nuevasRutas.Contains(f.Ruta)).Select(f => f.Propuesta);
+        Propuestas = new ObservableCollection<GeneroReglaFila>(Filas(quedan.Concat(nuevas), porRuta, Propuestas));
+        _p.Status = TextoDeezer(candidatas.Count, nuevas.Count);
+    });
+
+    internal static string TextoDeezer(int buscadas, int propuestas)
+        => $"Buscadas en Deezer {EscrituraPorReglas.Cuenta(buscadas, "canción", "canciones")}: "
+           + (propuestas == 0
+               ? "ninguna propuesta, porque sus álbumes solo traen géneros que no distinguen estilos."
+               : propuestas == 1
+                   ? "1 propuesta con un subgénero concreto del álbum, desmarcada para que la revises."
+                   : $"{propuestas:N0} propuestas con un subgénero concreto del álbum, desmarcadas para que las revises.");
 
     /// <summary>
     /// Las filas de las propuestas: primero las marcadas, luego por regla y por ruta. Lo que ya habías

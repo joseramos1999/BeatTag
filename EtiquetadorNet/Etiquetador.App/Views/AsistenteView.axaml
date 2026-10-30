@@ -406,6 +406,9 @@
                         <TextBlock Text="Proponer para" VerticalAlignment="Center" Margin="0,0,6,4" />
                         <ComboBox ItemsSource="{Binding Alcances}" SelectedIndex="{Binding AlcanceIndice}" MinWidth="250" Margin="0,0,12,4"
                                   ToolTip.Tip="Con «Todas», las canciones que ya tienen otro estilo salen desmarcadas, para que decidas una a una." />
+                        <Button Content="Buscar en Deezer las canciones sin género que siguen sin propuesta" Command="{Binding BuscarEnDeezerCommand}" Margin="0,0,12,4"
+                                IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                ToolTip.Tip="Consulta Deezer por internet. Solo para canciones sin género que no son mashups, y necesita Deezer activado entre las fuentes de Ajustes. Propone el subgénero del álbum únicamente cuando es concreto, siempre desmarcado." />
                         <TextBlock Text="Mostrar" VerticalAlignment="Center" Margin="0,0,6,4" />
                         <ComboBox ItemsSource="{Binding OpcionesMostrar}" SelectedIndex="{Binding MostrarIndice}" MinWidth="130" Margin="0,0,12,4"
                                   ToolTip.Tip="«Para revisar» son las propuestas que salieron desmarcadas: la canción ya tiene otro estilo o la regla no es tan segura en su caso." />

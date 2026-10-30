@@ -13,6 +13,8 @@ public enum ReglaGenero
     Version,
     /// <summary>El género que el usuario ha asignado al artista (generos-por-artista.json).</summary>
     MapaArtista,
+    /// <summary>Un subgénero concreto del álbum en Deezer, para lo que las reglas no cubren (ver <see cref="GeneroDeezer"/>).</summary>
+    Deezer,
 }
 
 /// <summary>A qué canciones se proponen géneros.</summary>

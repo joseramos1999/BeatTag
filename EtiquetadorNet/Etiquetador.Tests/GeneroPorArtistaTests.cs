@@ -579,6 +579,113 @@ public class GeneroPorArtistaTests : IDisposable
         Assert.Equal(("Latin", "Sustituir genérico", "Artista"), (segunda[0].Ahora, segunda[0].Cambio, segunda[0].Regla));
     }
 
+    // =================================================================================================
+    // A11 · Deezer, solo para lo que las reglas no cubren y solo con subgéneros concretos
+    // =================================================================================================
+
+    private static (int Id, string Nombre)[] G(params (int, string)[] generos) => generos;
+
+    [Fact]
+    public void Deezer_solo_traduce_los_subgeneros_concretos()
+    {
+        Assert.Equal("Reggaeton", GeneroDeezer.Traducir(G((122, "Reggaeton"), (197, "Latino"))));
+        Assert.Equal("Reggaeton", GeneroDeezer.Traducir(G((197, "Latino"), (122, "Reggaeton"))));   // el concreto manda sobre el padre
+        Assert.Equal("Cumbia", GeneroDeezer.Traducir(G((71, "Cumbia"), (197, "Latino"))));
+        Assert.Equal("Flamenco", GeneroDeezer.Traducir(G((36, "Flamenco"))));
+        Assert.Equal("Salsa", GeneroDeezer.Traducir(G((169, "Salsa"))));
+        Assert.Null(GeneroDeezer.Traducir(G((116, "Rap/Hip Hop"), (197, "Latino"))));
+        Assert.Null(GeneroDeezer.Traducir(G((197, "Latino"))));
+        Assert.Null(GeneroDeezer.Traducir(G((132, "Pop"), (138, "Pop latino"))));
+        Assert.Null(GeneroDeezer.Traducir(G((85, "Alternativo"))));
+        Assert.Null(GeneroDeezer.Traducir(G((113, "Dance"), (106, "Electro"))));
+        Assert.Null(GeneroDeezer.Traducir(G()));
+    }
+
+    // El nombre llega en el idioma de la IP: se traduce por el identificador.
+    [Fact]
+    public void Deezer_da_lo_mismo_en_cualquier_idioma()
+    {
+        Assert.Equal(GeneroDeezer.Traducir(G((122, "Reggaeton"), (197, "Latino"))), GeneroDeezer.Traducir(G((122, "Reggaetón"), (197, "Latin Music"))));
+        Assert.Equal(GeneroDeezer.Traducir(G((197, "Latino"))), GeneroDeezer.Traducir(G((197, "Latin Music"))));
+    }
+
+    private const string BusquedaDeezer = """
+        {"data":[
+          {"id":1,"title":"Bichota","duration":178,"artist":{"name":"KAROL G"},"album":{"title":"KG0516","id":77,"cover_big":"x"}},
+          {"id":2,"title":"Tusa","duration":200,"artist":{"name":"KAROL G"},"album":{"title":"KG0516","id":77,"cover_big":"x"}}]}
+        """;
+
+    private const string AlbumDeezer = """{"genres":{"data":[{"id":122,"name":"Reggaeton"},{"id":197,"name":"Latino"}]}}""";
+
+    [Fact]
+    public async Task Deezer_pide_cada_album_una_vez_y_propone_desmarcado()
+    {
+        using var m = new MontajeApi();
+        m.Red.Responde("api.deezer.com/search", BusquedaDeezer).Responde("api.deezer.com/album/77", AlbumDeezer);
+        var canciones = new List<Track> { T("KAROL G", "Bichota", null), T("KAROL G", "Tusa", null) };
+
+        var p = await GeneroDeezer.BuscarAsync(canciones, new Etiquetador.Core.Providers.DeezerProvider(m.Api), null, CancellationToken.None);
+
+        Assert.Equal(2, p.Count);
+        Assert.All(p, x => Assert.Equal(("Reggaeton", ReglaGenero.Deezer, false), (x.Genero, x.Regla, x.Marcada)));
+        Assert.StartsWith("Deezer: álbum «KG0516» (Reggaeton, Latino) → Reggaeton", p[0].PorQue);
+        Assert.Equal(1, m.Red.Cuantas("api.deezer.com/album/"));
+    }
+
+    [Fact]
+    public async Task Deezer_no_busca_los_mashups()
+    {
+        using var m = new MontajeApi();
+        m.Red.Responde("api.deezer.com/search", BusquedaDeezer).Responde("api.deezer.com/album/77", AlbumDeezer);
+        var mashup = T("KAROL G", "Bichota x Tusa (Gery Mashup)", null);
+
+        Assert.Empty(GeneroDeezer.Candidatas(new[] { mashup }, Array.Empty<string>()));
+        var p = await GeneroDeezer.BuscarAsync(new[] { mashup }, new Etiquetador.Core.Providers.DeezerProvider(m.Api), null, CancellationToken.None);
+        Assert.Empty(p);
+        Assert.Equal(0, m.Red.Cuantas("api.deezer.com"));
+    }
+
+    [Fact]
+    public void Deezer_solo_busca_las_que_siguen_sin_genero_ni_propuesta()
+    {
+        var sin = T("KAROL G", "Bichota", null);
+        var conPropuesta = T("KAROL G", "Tusa", null);
+        var conGenero = T("KAROL G", "Provenza", "Reggaeton");
+        Assert.Equal(new[] { sin }, GeneroDeezer.Candidatas(new[] { sin, conPropuesta, conGenero }, new[] { conPropuesta.FilePath }));
+    }
+
+    [Fact]
+    public async Task Deezer_se_puede_cancelar_entre_una_cancion_y_la_siguiente()
+    {
+        using var m = new MontajeApi();
+        m.Red.Responde("api.deezer.com/search", BusquedaDeezer).Responde("api.deezer.com/album/77", AlbumDeezer);
+        using var cts = new CancellationTokenSource();
+        var canciones = new List<Track> { T("KAROL G", "Bichota", null), T("KAROL G", "Tusa", null) };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => GeneroDeezer.BuscarAsync(
+            canciones, new Etiquetador.Core.Providers.DeezerProvider(m.Api), new EnLinea(_ => cts.Cancel()), cts.Token));
+
+        Assert.Equal(1, m.Red.Cuantas("api.deezer.com/search"));
+    }
+
+    [Fact]
+    public void Los_textos_de_Deezer_distinguen_singular_y_plural()
+    {
+        Assert.Equal("Buscadas en Deezer 1 canción: 1 propuesta con un subgénero concreto del álbum, desmarcada para que la revises.",
+                     GeneroPorReglasViewModel.TextoDeezer(1, 1));
+        Assert.StartsWith("Buscadas en Deezer 3 canciones: ninguna propuesta", GeneroPorReglasViewModel.TextoDeezer(3, 0));
+        Assert.EndsWith("2 propuestas con un subgénero concreto del álbum, desmarcadas para que las revises.", GeneroPorReglasViewModel.TextoDeezer(3, 2));
+        Assert.Equal("Deezer", GeneroReglaFila.TextoRegla(ReglaGenero.Deezer));
+    }
+
+    /// <summary>Un avance que se ejecuta en el momento (Progress lo manda al contexto de sincronización).</summary>
+    private sealed class EnLinea : IProgress<(int Hechas, int Total)>
+    {
+        private readonly Action<(int, int)> _a;
+        public EnLinea(Action<(int, int)> a) => _a = a;
+        public void Report((int Hechas, int Total) valor) => _a(valor);
+    }
+
     private sealed class Historial : IHistorialDeshacer
     {
         private readonly List<UndoRecord> _lista;

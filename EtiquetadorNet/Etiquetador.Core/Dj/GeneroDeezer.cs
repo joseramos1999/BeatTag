@@ -1,0 +1,111 @@
+using Etiquetador.Core.Ai;
+using Etiquetador.Core.Providers;
+
+namespace Etiquetador.Core.Dj;
+
+/// <summary>
+/// Deezer para las canciones sin género que las reglas no cubren: se busca la canción y se mira el
+/// género de su álbum. Solo para ese hueco, y solo con los subgéneros concretos.
+///
+/// MEDIDO en una biblioteca real: Deezer encuentra el 93 % de las canciones que no son mashups, pero
+/// solo 1 de cada 30 mashups (y el 79 % de las canciones sin género lo son), así que los mashups ni se
+/// buscan. El género del álbum es grueso: coincide exactamente con el de la canción un 35 % y por
+/// familia un 69 %; «Rap/Hip Hop» era Reggaeton en 9 canciones y Hip Hop en 8. Solo el subgénero
+/// «Reggaeton» (id 122) acierta lo bastante: un 68 % exacto y un 82 % dentro del urbano latino, en 22
+/// casos. Por eso solo se traducen los subgéneros concretos, y la propuesta sale siempre desmarcada.
+///
+/// Se traduce por el IDENTIFICADOR de Deezer y no por el nombre, porque el nombre llega en el idioma de
+/// la IP («Latino» o «Latin Music»). Los identificadores se comprobaron en las respuestas de la medición.
+/// </summary>
+public static class GeneroDeezer
+{
+    /// <summary>Subgéneros concretos de Deezer, por su identificador.</summary>
+    private static readonly Dictionary<int, string> PorId = new()
+    {
+        [122] = "Reggaeton",
+        [71] = "Cumbia",
+        [36] = "Flamenco",
+    };
+
+    /// <summary>
+    /// Los gruesos, que nunca se proponen aunque su nombre se parezca a un estilo: Rap/Hip Hop (116),
+    /// Latino (197), Pop latino (138), Pop (132), Dance (113), Electro (106), Alternativo (85), Rock
+    /// (152), Techno/House (111).
+    /// </summary>
+    private static readonly HashSet<int> Gruesos = new() { 116, 197, 138, 132, 113, 106, 85, 152, 111 };
+
+    /// <summary>
+    /// Subgéneros concretos por su nombre, para los que no tienen un identificador comprobado. Se
+    /// escriben igual en español y en inglés; la clave no distingue acentos («Norteño», «Norteno»).
+    /// </summary>
+    private static readonly Dictionary<string, string> PorNombre =
+        new[] { "Salsa", "Bachata", "Merengue", "Reggae", "Dancehall", "Ranchera", "Norteño" }
+            .ToDictionary(VocabularioBiblioteca.Clave, x => x, StringComparer.Ordinal);
+
+    /// <summary>
+    /// El estilo que dicen los géneros de un álbum, o null si solo trae géneros gruesos. Un subgénero
+    /// concreto manda sobre su padre: [Reggaeton, Latino] → Reggaeton.
+    /// </summary>
+    public static string? Traducir(IEnumerable<(int Id, string Nombre)> generos)
+    {
+        var lista = generos.ToList();
+        foreach (var (id, _) in lista)
+            if (PorId.TryGetValue(id, out var estilo)) return estilo;
+        foreach (var (id, nombre) in lista)
+        {
+            if (Gruesos.Contains(id)) continue;
+            if (PorNombre.TryGetValue(VocabularioBiblioteca.Clave(nombre), out var estilo)) return estilo;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Las canciones que se buscan: sin género, que no son mashups ni transiciones y que no tienen
+    /// ninguna propuesta de las reglas.
+    /// </summary>
+    public static List<Track> Candidatas(IEnumerable<Track> canciones, IEnumerable<string> conPropuesta)
+    {
+        var ya = new HashSet<string>(conPropuesta, StringComparer.Ordinal);
+        return canciones.Where(t => GeneroPorReglas.SinGenero(t) && !ya.Contains(t.FilePath) && !GeneroPorReglas.EsMezcla(t)).ToList();
+    }
+
+    /// <summary>
+    /// Busca en Deezer cada candidata y propone el subgénero concreto de su álbum, siempre desmarcado.
+    /// Cada álbum se pide una sola vez. El ritmo lo pone el limitador de ApiClient (unas 9 peticiones
+    /// por segundo como mucho, con caché de 30 días), y se puede cancelar entre una canción y la
+    /// siguiente. Unas 3 peticiones por canción: la búsqueda, la ficha de la pista y, si es nuevo, el
+    /// álbum.
+    /// </summary>
+    public static async Task<List<PropuestaGeneroRegla>> BuscarAsync(IReadOnlyList<Track> candidatas, DeezerProvider deezer,
+        IProgress<(int Hechas, int Total)>? progreso, CancellationToken ct)
+    {
+        var res = new List<PropuestaGeneroRegla>();
+        var albumes = new Dictionary<string, (string? Estilo, string Nombres)>(StringComparer.Ordinal);
+        for (var i = 0; i < candidatas.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var t = candidatas[i];
+            // Por si llega alguna sin pasar por Candidatas: un mashup no se encuentra y gastaría peticiones.
+            if (!GeneroPorReglas.SinGenero(t) || GeneroPorReglas.EsMezcla(t)) { progreso?.Report((i + 1, candidatas.Count)); continue; }
+
+            var titulo = string.IsNullOrWhiteSpace(t.Title) ? Path.GetFileNameWithoutExtension(t.FilePath) : t.Title!;
+            var version = RemixParser.Parse(titulo);
+            var r = await deezer.SearchAsync(t.Artist ?? "", titulo, wantRemix: GeneroPorReglas.RemixFirmado(t), wantLive: false,
+                                             localDur: t.DurationSeconds, isEdit: version.IsVersion, ct: ct).ConfigureAwait(false);
+            if (r is { AlbumId.Length: > 0 })
+            {
+                if (!albumes.TryGetValue(r.AlbumId, out var album))
+                {
+                    var generos = await deezer.AlbumGenresAsync(r.AlbumId, ct).ConfigureAwait(false);
+                    albumes[r.AlbumId] = album = (Traducir(generos), string.Join(", ", generos.Select(g => g.Nombre).Where(n => n.Length > 0)));
+                }
+                if (album.Estilo is { } estilo)
+                    res.Add(new PropuestaGeneroRegla(t.FilePath, estilo, ReglaGenero.Deezer,
+                        $"Deezer: álbum «{r.Album}» ({album.Nombres}) → {estilo} · el género de Deezer es del álbum entero: revísalo",
+                        false, t.Genre ?? "", CambioGenero.Rellenar));
+            }
+            progreso?.Report((i + 1, candidatas.Count));
+        }
+        return res;
+    }
+}
