@@ -218,6 +218,77 @@ public class OrganizarPorGeneroTextosTests : IDisposable
         Assert.Contains("vuelve a calcularla", vm.Aviso);
     }
 
+    // Revisión 1, bloqueante: cambiar una opción o una casilla «Incluir» volvía a planear con la
+    // biblioteca de antes y quitaba el aviso; «Organizar» se reactivaba y movía según la biblioteca
+    // vieja. REPRODUCIDO: a.mp3 pasaba de Pop a Rock en otra pestaña y acababa en «Por género/Pop».
+    [Fact]
+    public async Task Cambiar_una_opcion_no_da_por_buena_una_vista_previa_desfasada()
+    {
+        var (motor, biblioteca, musica) = Motor();
+        var a = Cancion(Path.Combine(musica, "Descargas"), "a.mp3", "Pop");
+        var vm = new OrganizarPorGeneroViewModel(motor);
+        await vm.CalcularCommand.ExecuteAsync(null);
+        Assert.True(vm.PuedeOrganizar);
+
+        // Otra pestaña cambia el género y la biblioteca se vuelve a leer.
+        using (var f = TagLib.File.Create(a)) { f.Tag.Genres = new[] { "Rock" }; f.Save(); }
+        await biblioteca.ScanAsync();
+        Assert.True(vm.Desfasado);
+
+        vm.ConservarEstructura = true;
+        await Esperar(() => !vm.Calculando);
+        vm.Origenes.Single().Incluir = false;
+        await Esperar(() => !vm.Calculando);
+        vm.Origenes.Single().Incluir = true;
+        await Esperar(() => !vm.Calculando);
+
+        Assert.True(vm.Desfasado);
+        Assert.False(vm.PuedeOrganizar);
+        Assert.Contains("vuelve a calcularla", vm.Aviso);
+
+        // Y si aun así llega a «Organizar» (la confirmación ya estaba abierta), no mueve nada y lo dice.
+        await vm.OrganizarAsync();
+        Assert.True(File.Exists(a));
+        Assert.Contains("vuelve a calcularla", vm.Status);
+
+        // Solo «Calcular la vista previa» la pone al día, ya con el género nuevo.
+        await vm.CalcularCommand.ExecuteAsync(null);
+        Assert.False(vm.Desfasado);
+        Assert.Equal("Rock", Assert.Single(vm.Plan!.Movimientos).Genero);
+    }
+
+    [Fact]
+    public async Task Una_carpeta_con_ajustes_nueva_o_una_carpeta_desmarcada_tras_calcular_desfasan_la_vista_previa()
+    {
+        var config = new AppConfig();
+        var (motor, biblioteca, musica) = Motor(config);
+        var a = Cancion(Path.Combine(musica, "Descargas"), "a.mp3", "Pop");
+        var vm = new OrganizarPorGeneroViewModel(motor);
+        await vm.CalcularCommand.ExecuteAsync(null);
+        Assert.True(vm.PuedeOrganizar);
+
+        // En Duplicados se excluye la carpeta: sus canciones ya no deben moverse.
+        config.ExcludedDupFolders.Add(Path.Combine(musica, "Descargas"));
+        Assert.False(vm.ComprobarVistaPrevia());
+        Assert.True(vm.Desfasado);
+        Assert.False(vm.PuedeOrganizar);
+        await vm.OrganizarAsync();
+        Assert.True(File.Exists(a));
+
+        await vm.CalcularCommand.ExecuteAsync(null);
+        Assert.False(vm.PuedeOrganizar);   // ahora se queda por la carpeta con ajustes
+        config.ExcludedDupFolders.Clear();
+        await vm.CalcularCommand.ExecuteAsync(null);
+        Assert.True(vm.PuedeOrganizar);
+
+        // Una carpeta de la biblioteca que se desmarca después de calcular.
+        biblioteca.Folders.Single().Enabled = false;
+        vm.MoverSinGenero = true;   // y una opción que vuelve a planear
+        await Esperar(() => !vm.Calculando);
+        Assert.True(vm.Desfasado);
+        Assert.False(vm.PuedeOrganizar);
+    }
+
     [Fact]
     public void Las_opciones_de_la_pagina_salen_de_la_configuracion_y_se_guardan_al_cambiar()
     {

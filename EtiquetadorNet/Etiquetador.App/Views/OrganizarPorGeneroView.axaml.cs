@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -13,6 +14,15 @@ public partial class OrganizarPorGeneroView : UserControl
     {
         InitializeComponent();
         GridBehaviors.EnableWidthMemory(this, "OrganizarPorGenero");
+    }
+
+    // Al volver a la página se mira si la vista previa sigue al día (las carpetas con ajustes de
+    // Duplicados o de Volumen pueden haber cambiado en otra). El shell cambia IsVisible al cambiar de página.
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if ((change.Property == IsVisibleProperty || change.Property == DataContextProperty) && DataContext is IPaginaVisible p)
+            p.Visible = IsVisible;
     }
 
     private void Grid_DoubleTapped(object? sender, TappedEventArgs e) => GridBehaviors.AutoFitOnHeaderDoubleTap(sender, e);
@@ -38,7 +48,7 @@ public partial class OrganizarPorGeneroView : UserControl
     private async void Organizar_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not OrganizarPorGeneroViewModel vm || TopLevel.GetTopLevel(this) is not Window owner) return;
-        if (!vm.PuedeOrganizar || vm.Plan is not { } plan) return;
+        if (!vm.ComprobarVistaPrevia() || vm.Plan is not { } plan) return;   // desfasada: lo dice el aviso
         var (titulo, cuerpo, nota) = OrganizarPorGeneroViewModel.TextosConfirmacion(plan);
         var ok = await ConfirmDialog.AskAsync(owner, titulo, cuerpo, nota, "Organizar");
         if (ok) await vm.OrganizarAsync();

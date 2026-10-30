@@ -87,7 +87,7 @@ public sealed partial class FilaOrigenOrganizar : ObservableObject
 /// no se mueve nada hasta confirmar. Antes de calcularla se escanea la biblioteca: en la misma
 /// biblioteca la caché tenía 249 entradas de archivos que ya no existían y 297 audios sin escanear.
 /// </summary>
-public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstadoPagina, IProgresoPagina
+public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstadoPagina, IProgresoPagina, IPaginaVisible
 {
     private readonly AppEngine _engine;
     private CancellationTokenSource? _cts;
@@ -99,7 +99,15 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
     private int _variantes, _sinGenero;
     private readonly HashSet<string> _excluidos = new(ComparadorRutas.Instancia);
     private PlanOrganizar? _plan;
+    private OpcionesOrganizar? _opcionesDelPlan;
     private int _version;
+
+    // Cuántas veces ha avisado la biblioteca de un cambio y cuántas llevaba al leer la que usa la
+    // vista previa. Solo «Calcular la vista previa» vuelve a leerla: replanificar tras cambiar una
+    // opción o una casilla usa la misma lectura, así que NO puede dar por buena una vista previa
+    // desfasada (revisión 1: una canción que pasó de Pop a Rock en otra pestaña acababa en «Pop»).
+    private int _cambiosBiblioteca;
+    private int _cambiosAlLeer = -1;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PuedeOrganizar), nameof(Libre))]
@@ -285,7 +293,6 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
             motivo = OrganizarPorGenero.ValidarDestino(CarpetaDestino ?? "", _engine.Library.EnabledPaths(), CarpetasDesmarcadas());
             if (motivo.Length > 0) return null;
         }
-        var c = _engine.Config;
         return new OpcionesOrganizar
         {
             Destino = destino,
@@ -294,11 +301,20 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
             MoverSinGenero = MoverSinGenero,
             DejarHerramientas = DejarHerramientas,
             AgruparMenosDe = Agrupar ? Math.Max(2, MinimoGrupo) : 0,
-            // Fuera de sus carpetas, una canción perdería la exclusión de Duplicados o de Volumen, o la prioridad.
-            CarpetasConAjustes = c.ExcludedDupFolders.Concat(c.PriorityFolders).Concat(c.VolumenCarpetasExcluidas)
-                                  .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(ComparadorRutas.Instancia).ToList(),
+            CarpetasConAjustes = CarpetasConAjustes(),
             OrigenesExcluidos = _excluidos.ToList(),
         };
+    }
+
+    /// <summary>
+    /// Las carpetas con ajustes propios, tal como están ahora en la configuración: fuera de ellas (o al
+    /// entrar en ellas) una canción perdería o ganaría la exclusión de Duplicados o de Volumen, o la prioridad.
+    /// </summary>
+    private List<string> CarpetasConAjustes()
+    {
+        var c = _engine.Config;
+        return c.ExcludedDupFolders.Concat(c.PriorityFolders).Concat(c.VolumenCarpetasExcluidas)
+                .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(ComparadorRutas.Instancia).ToList();
     }
 
     // --- Vista previa ---
@@ -320,6 +336,9 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         try
         {
             await _engine.Library.ScanAsync();
+            // Primero cuántos cambios lleva y después la lectura: un aviso que llegara entre las dos
+            // desfasaría la vista previa sin motivo, nunca al revés.
+            _cambiosAlLeer = Volatile.Read(ref _cambiosBiblioteca);
             var canciones = _engine.Library.Tracks.ToList();
             _raices = _engine.Library.EnabledPaths();
             Status = "Calculando la vista previa…";
@@ -369,7 +388,7 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         {
             var plan = await Task.Run(() => OrganizarPorGenero.Planear(canciones, raices, op, new DiscoReal()));
             if (version != _version) return false;
-            Mostrar(plan);
+            Mostrar(plan, op);
             return true;
         }
         finally
@@ -378,12 +397,16 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         }
     }
 
-    private void Mostrar(PlanOrganizar plan)
+    private void Mostrar(PlanOrganizar plan, OpcionesOrganizar op)
     {
         _plan = plan;
+        _opcionesDelPlan = op;
         HayPlan = true;
-        Desfasado = false;
-        Aviso = "";
+        // Un plan nuevo con las opciones de ahora, pero sobre la biblioteca que se leyó al calcular: si
+        // desde entonces ha cambiado, sigue desfasado.
+        var desfase = MotivoDesfase();
+        Desfasado = desfase.Length > 0;
+        Aviso = desfase;
         Resumen = OrganizarPorGenero.Resumen(plan);
         Recomendacion = _variantes > 0 || _sinGenero > 0 ? Recomendar : "";
         OnPropertyChanged(nameof(Plan));
@@ -423,17 +446,79 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         return debajo.Length == 0 ? nombre : Path.Combine(nombre, debajo);
     }
 
-    /// <summary>La biblioteca ha cambiado por otro lado (otra página, el escaneo de fondo): el plan ya no vale.</summary>
+    /// <summary>
+    /// La biblioteca ha cambiado por otro lado (otra página, el escaneo de fondo, una carpeta
+    /// desmarcada): el plan ya no vale hasta volver a calcularlo. Se cuenta también mientras se
+    /// calcula o se mueve: lo que llegue después de leer la biblioteca desfasa lo calculado.
+    /// </summary>
     private void AlCambiarLaBiblioteca()
     {
-        if (IsBusy || !HayPlan || Desfasado) return;
+        Interlocked.Increment(ref _cambiosBiblioteca);
+        if (IsBusy || !HayPlan) return;
         Desfasado = true;
-        Aviso = "La biblioteca ha cambiado desde la vista previa: vuelve a calcularla antes de organizar.";
+        Aviso = AvisoBibliotecaCambiada;
     }
+
+    /// <summary>
+    /// Por qué la vista previa que se ve ya no corresponde a lo que hay ahora, o "" si sigue al día:
+    /// la biblioteca ha cambiado desde que se leyó, se han marcado o desmarcado carpetas de la
+    /// biblioteca, o han cambiado las carpetas con ajustes propios de Duplicados o de Volumen (eso no
+    /// avisa a nadie: se compara con las que usó el plan).
+    /// </summary>
+    private string MotivoDesfase()
+    {
+        if (Volatile.Read(ref _cambiosBiblioteca) != _cambiosAlLeer) return AvisoBibliotecaCambiada;
+        if (!MismasCarpetas(_raices, _engine.Library.EnabledPaths())) return AvisoCarpetasCambiadas;
+        if (_opcionesDelPlan != null && !MismasCarpetas(_opcionesDelPlan.CarpetasConAjustes, CarpetasConAjustes())) return AvisoAjustesCambiados;
+        return "";
+    }
+
+    private static bool MismasCarpetas(IEnumerable<string> a, IEnumerable<string> b)
+        => new HashSet<string>(a.Select(c => c.TrimEnd('\\', '/')), ComparadorRutas.Instancia)
+               .SetEquals(b.Select(c => c.TrimEnd('\\', '/')));
+
+    /// <summary>
+    /// Mira si la vista previa sigue al día (antes de pedir la confirmación, al volver a la página y
+    /// antes de mover) y, si no, la marca como desfasada con el motivo. Devuelve si se puede organizar.
+    /// </summary>
+    public bool ComprobarVistaPrevia()
+    {
+        if (!HayPlan) return false;
+        var desfase = MotivoDesfase();
+        if (desfase.Length > 0)
+        {
+            Desfasado = true;
+            Aviso = desfase;
+        }
+        return PuedeOrganizar;
+    }
+
+    /// <summary>Por qué no se puede organizar ahora, para decirlo en el estado (nunca se calla).</summary>
+    private string PorQueNoSePuedeOrganizar()
+        => !HayPlan ? "Calcula la vista previa antes de organizar."
+         : Aviso.Length > 0 ? Aviso
+         : Calculando ? "La vista previa se está recalculando: espera a que termine y vuelve a pulsar «Organizar»."
+         : IsBusy ? "Hay un proceso en marcha: espera a que termine."
+         : "La vista previa no tiene ninguna canción que mover.";
+
+    /// <summary>La página se ve o deja de verse: al volver a ella se mira si la vista previa sigue al día.</summary>
+    public bool Visible
+    {
+        get => _visible;
+        set
+        {
+            if (_visible == value) return;
+            _visible = value;
+            if (value && !IsBusy) ComprobarVistaPrevia();
+        }
+    }
+
+    private bool _visible;
 
     private void LimpiarPlan()
     {
         _plan = null;
+        _opcionesDelPlan = null;
         _canciones = null;
         HayPlan = false;
         Desfasado = false;
@@ -459,7 +544,14 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
     /// </summary>
     public async Task OrganizarAsync()
     {
-        if (!PuedeOrganizar || _plan is not { } plan) return;
+        // Entre abrir la confirmación y pulsar «Organizar» la vista previa puede haberse desfasado (por
+        // ejemplo, termina la comprobación de la biblioteca en segundo plano): no se mueve nada y se
+        // dice por qué.
+        if (!ComprobarVistaPrevia() || _plan is not { } plan)
+        {
+            Status = PorQueNoSePuedeOrganizar();
+            return;
+        }
         IsBusy = true;
         ConAvance = true;
         Progress = 0;
@@ -517,6 +609,14 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
 
     private static readonly CultureInfo Es = CultureInfo.GetCultureInfo("es-ES");
     private static string N(int n) => n.ToString("N0", Es);
+
+    public const string AvisoBibliotecaCambiada = "La biblioteca ha cambiado desde la vista previa: vuelve a calcularla antes de organizar.";
+
+    public const string AvisoCarpetasCambiadas =
+        "Las carpetas marcadas de la biblioteca han cambiado desde la vista previa: vuelve a calcularla antes de organizar.";
+
+    public const string AvisoAjustesCambiados =
+        "Las carpetas con ajustes propios de Duplicados o de Volumen han cambiado desde la vista previa: vuelve a calcularla antes de organizar.";
 
     /// <summary>La recomendación de la vista previa si hay géneros sin unificar o canciones sin género.</summary>
     public const string Recomendar =
