@@ -113,6 +113,15 @@ public class AyudaTests
         }
     }
 
+    // Revisión 3: la viñeta «Copia de seguridad» de Ajustes nombraba las reglas de género por carpeta y
+    // no las de artista, aunque la copia incluye generos-por-artista.json.
+    [Fact]
+    public void La_copia_de_seguridad_de_la_Ayuda_nombra_las_reglas_por_carpeta_y_por_artista()
+    {
+        var copia = TextosAyuda().Select(t => t.Texto).Single(t => t.StartsWith("• Copia de seguridad", StringComparison.Ordinal));
+        Assert.Contains("las reglas de género por carpeta y por artista", copia);
+    }
+
     // La copia de seguridad (tanda 4) mete en un ZIP los archivos de trabajo, pero las copias que
     // hace sola al arrancar viven en una carpeta propia de la carpeta de datos. Quien guarda esa
     // carpeta a mano tiene que saber que existe, cómo se llaman sus archivos y cuántos se conservan;
