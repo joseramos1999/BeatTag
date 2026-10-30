@@ -110,12 +110,13 @@ public sealed class UndoRecord
     /// <summary>
     /// Carpetas que creó la ejecución para llevar ahí este archivo, de la más alta a la más profunda
     /// («…/Por género» y «…/Por género/Pop»). Las lleva el PRIMER registro de la ejecución que movió un
-    /// archivo a cada una. Al deshacerlo, después de devolver su archivo, se quitan las que hayan
-    /// quedado vacías, de la más profunda a la más alta (ver UndoEngine.QuitarCarpetasCreadas).
+    /// archivo a cada una. Al deshacer cualquier parte de la ejecución, al terminar se quitan las que
+    /// hayan quedado vacías de las que contienen el destino de lo deshecho, de la más profunda a la más
+    /// alta, cuente quien las cuente (ver UndoEngine.QuitarCarpetasCreadas).
     ///
     /// POR QUÉ. Organizar por género crea unas 181 carpetas en una biblioteca real; deshacerlo sin esto
-    /// las dejaba vacías. Los registros se deshacen del último al primero, así que el que creó la
-    /// carpeta se procesa el último y la encuentra vacía si ya volvió todo lo demás.
+    /// las dejaba vacías. Se miran las de toda la ejecución, y no solo las del registro que las lleva,
+    /// porque se puede deshacer por partes desde el historial y en cualquier orden (revisión 1).
     ///
     /// Sin valor no se escribe: los manifiestos de antes y los de las demás herramientas quedan igual.
     /// </summary>
