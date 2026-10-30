@@ -122,6 +122,16 @@ public class AyudaTests
         Assert.Contains("las reglas de género por carpeta y por artista", copia);
     }
 
+    // Revisión 3: la viñeta del historial no nombraba Organizar por género entre lo que anota, aunque la
+    // siguiente cita su tipo, «Organización por género».
+    [Fact]
+    public void La_Ayuda_del_historial_nombra_Organizar_por_genero_entre_lo_que_anota()
+    {
+        var historial = TextosAyuda().Select(t => t.Texto).Single(t => t.StartsWith("• Cada vez que BeatTag escribe en tus archivos", StringComparison.Ordinal));
+        Assert.Contains("escribe en tus archivos o los mueve", historial);
+        Assert.Contains("Organizar por género", historial);
+    }
+
     // La copia de seguridad (tanda 4) mete en un ZIP los archivos de trabajo, pero las copias que
     // hace sola al arrancar viven en una carpeta propia de la carpeta de datos. Quien guarda esa
     // carpeta a mano tiene que saber que existe, cómo se llaman sus archivos y cuántos se conservan;
