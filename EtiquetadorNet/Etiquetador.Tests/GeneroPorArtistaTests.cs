@@ -112,6 +112,51 @@ public class GeneroPorArtistaTests : IDisposable
         Assert.Equal(MapaGenerosArtista.Clave("Antonio Orozco"), MapaGenerosArtista.Clave("Antonio Orozco; Pablo Alboran"));
         Assert.Equal("anuel aa", MapaGenerosArtista.Clave("ANUEL AA"));
         Assert.Equal(MapaGenerosArtista.Clave("Anuel AA"), MapaGenerosArtista.Clave("Anuel AA x Ozuna"));
+        // La «x» pegada a un signo no separa artistas.
+        Assert.Equal("dj x treme", MapaGenerosArtista.Clave("DJ X-Treme"));
+    }
+
+    // Revisión: la clave no se volvía a pasar por el artista principal sin estropearse. «dj x treme»
+    // tiene una «x» suelta, que separa artistas: la regla se guardaba como «dj» y no valía para nadie.
+    [Theory]
+    [InlineData("DJ X-Treme", "dj x treme")]
+    [InlineData("Mr.X Band", "mr x band")]
+    public void La_regla_de_un_artista_vale_despues_de_guardarla_y_volver_a_leerla(string artista, string clave)
+    {
+        var vacia = T(artista, "Nueva", null);
+        var canciones = DelArtista(artista, ("Techno", 1)).Append(vacia).ToList();
+        var fila = new ArtistaGeneroFila(GeneroPorReglas.ResumenArtistas(canciones).Single());
+        Assert.Equal(clave, fila.Clave);
+        var archivo = Path.Combine(_dir, MapaGenerosArtista.NombreArchivo);
+        var mapa = new MapaGenerosArtista(archivo);
+
+        Assert.Single(GeneroPorReglasViewModel.Aplicar(mapa, new[] { fila }, GeneroPorReglasViewModel.AccionArtista.Poner, _ => "Hardstyle"));
+        Assert.Equal(new[] { clave }, mapa.Reglas.Keys);
+        Assert.Equal("", mapa.Guardar());
+
+        var leido = new MapaGenerosArtista(archivo);
+        Assert.Equal(new[] { clave }, leido.Reglas.Keys);
+        Assert.Equal(new EntradaGeneroArtista(artista, "Hardstyle"), leido.De(artista));
+        var p = De(Proponer(canciones, leido.Generos()), vacia);
+        Assert.Equal(("Hardstyle", ReglaGenero.MapaArtista, true), (p?.Genero, p?.Regla, p?.Marcada));
+
+        // Excluir y quitar también van por la clave de la fila.
+        Assert.Single(GeneroPorReglasViewModel.Aplicar(leido, new[] { fila }, GeneroPorReglasViewModel.AccionArtista.Excluir, _ => ""));
+        Assert.Equal("", leido.Reglas[clave].Genero);
+        Assert.Single(GeneroPorReglasViewModel.Aplicar(leido, new[] { fila }, GeneroPorReglasViewModel.AccionArtista.Quitar, _ => ""));
+        Assert.Empty(leido.Reglas);
+    }
+
+    // Lo que ha escrito alguien a mano con el nombre como clave sigue valiendo, como antes.
+    [Fact]
+    public void Un_mapa_de_artistas_escrito_a_mano_con_el_nombre_sigue_valiendo()
+    {
+        var archivo = Path.Combine(_dir, MapaGenerosArtista.NombreArchivo);
+        File.WriteAllText(archivo, """
+            {"Anuel AA x Ozuna":{"Nombre":"Anuel AA","Genero":"Reggaeton"},"dj x treme":{"Nombre":"DJ X-Treme","Genero":"Hardstyle"}}
+            """);
+        var leido = new MapaGenerosArtista(archivo);
+        Assert.Equal(new Dictionary<string, string> { ["anuel aa"] = "Reggaeton", ["dj x treme"] = "Hardstyle" }, leido.Generos());
     }
 
     [Fact]

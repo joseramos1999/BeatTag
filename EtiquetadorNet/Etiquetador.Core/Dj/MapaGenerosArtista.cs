@@ -18,7 +18,9 @@ public sealed record EntradaGeneroArtista(string Nombre, string Genero);
 /// La clave es el artista PRINCIPAL (el primero del crédito), con <see cref="GeneroPorReglas.ClaveArtista"/>:
 /// sin mayúsculas, acentos ni signos. MEDIDO: en las colaboraciones, el primer artista acierta el estilo
 /// un 71,5 %, frente al 61,1 % del segundo y el 60,4 % de una votación entre todos; así «Besos Dorados
-/// (Antony Z; Pablo Alborán)», que es merengue, no cuenta para Pablo Alborán.
+/// (Antony Z; Pablo Alborán)», que es merengue, no cuenta para Pablo Alborán. Una clave ya calculada
+/// se usa tal cual (los métodos «…PorClave» y la lectura del archivo): no se puede volver a calcular
+/// sobre ella sin estropearla (ver <see cref="ClaveLeida"/>).
 ///
 /// Un artista con el género vacío ("") está EXCLUIDO: no recibe la regla automática del dominante.
 /// </summary>
@@ -41,8 +43,7 @@ public sealed class MapaGenerosArtista
         var leido = ArchivoJson.Leer(archivo, () => new Dictionary<string, EntradaGeneroArtista>(), out var aviso, out var soloLectura);
         foreach (var (clave, e) in leido)
         {
-            // La clave se vuelve a calcular: así un archivo editado a mano («Anuel AA») sigue valiendo.
-            var k = Clave(clave);
+            var k = ClaveLeida(clave);
             if (k.Length == 0 || e == null) continue;
             _reglas[k] = new EntradaGeneroArtista((e.Nombre ?? "").Trim(), (e.Genero ?? "").Trim());
         }
@@ -57,6 +58,14 @@ public sealed class MapaGenerosArtista
     /// Alboran» es la de Antonio Orozco, y «ANUEL AA» la misma que «Anuel AA».
     /// </summary>
     public static string Clave(string? artista) => GeneroPorReglas.ClaveArtista(artista);
+
+    /// <summary>
+    /// La clave de una entrada del archivo. La que escribe la aplicación ya es una clave y se usa tal
+    /// cual: volver a buscar en ella el artista principal la estropearía, porque al quitar los signos
+    /// una «x» queda suelta y separa artistas («DJ X-Treme» → «dj x treme» → «dj»). Una escrita a mano
+    /// con el nombre («Anuel AA», «Anuel AA x Ozuna») se convierte en la de su artista principal.
+    /// </summary>
+    private static string ClaveLeida(string clave) => IndiceArtistas.Clave(clave) == clave ? clave : Clave(clave);
 
     /// <summary>Las reglas, por clave del artista.</summary>
     public IReadOnlyDictionary<string, EntradaGeneroArtista> Reglas => _reglas;
@@ -73,27 +82,44 @@ public sealed class MapaGenerosArtista
     /// <summary>La regla de ese artista (o de ese crédito), o null si no tiene.</summary>
     public EntradaGeneroArtista? De(string artista) => _reglas.TryGetValue(Clave(artista), out var e) ? e : null;
 
-    /// <summary>Pone el género del artista. Con un género vacío, la quita. Devuelve si cambió algo. No guarda en disco.</summary>
-    public bool Poner(string artista, string nombre, string? genero)
+    /// <summary>
+    /// Pone el género del artista (un nombre o un crédito entero: cuenta su artista principal). Con un
+    /// género vacío, la quita. Devuelve si cambió algo. No guarda en disco.
+    /// </summary>
+    public bool Poner(string artista, string nombre, string? genero) => PonerPorClave(Clave(artista), NombreO(nombre, artista), genero);
+
+    /// <summary>
+    /// Lo mismo para quien ya tiene la clave (la fila del artista, <see cref="ResumenArtista.Clave"/>):
+    /// se usa tal cual, sin volver a buscar en ella el artista principal (ver <see cref="ClaveLeida"/>).
+    /// </summary>
+    public bool PonerPorClave(string clave, string nombre, string? genero)
     {
         var g = (genero ?? "").Trim();
-        if (g.Length == 0) return Quitar(artista);
-        return Cambiar(artista, nombre, g);
+        return g.Length == 0 ? QuitarPorClave(clave) : Cambiar(IndiceArtistas.Clave(clave), nombre, g);
     }
 
     /// <summary>Quita la regla del artista (también la exclusión): vuelve a valer la regla automática. Devuelve si cambió algo.</summary>
-    public bool Quitar(string artista) => _reglas.Remove(Clave(artista));
+    public bool Quitar(string artista) => QuitarPorClave(Clave(artista));
+
+    /// <summary>Lo mismo, por la clave del artista, tal cual.</summary>
+    public bool QuitarPorClave(string clave) => _reglas.Remove(IndiceArtistas.Clave(clave));
 
     /// <summary>Excluye al artista de la regla automática del dominante. Devuelve si cambió algo. No guarda en disco.</summary>
-    public bool Excluir(string artista, string nombre) => Cambiar(artista, nombre, "");
+    public bool Excluir(string artista, string nombre) => ExcluirPorClave(Clave(artista), NombreO(nombre, artista));
 
-    private bool Cambiar(string artista, string nombre, string genero)
+    /// <summary>Lo mismo, por la clave del artista, tal cual.</summary>
+    public bool ExcluirPorClave(string clave, string nombre) => Cambiar(IndiceArtistas.Clave(clave), nombre, "");
+
+    /// <summary>El nombre que se enseña: el que llega o, si no hay, el artista tal como se escribió.</summary>
+    private static string NombreO(string nombre, string artista) => nombre.Trim().Length > 0 ? nombre : artista;
+
+    private bool Cambiar(string k, string nombre, string genero)
     {
-        var k = Clave(artista);
         if (k.Length == 0) return false;
+        var n = nombre.Trim();
         if (_reglas.TryGetValue(k, out var antes) && string.Equals(antes.Genero, genero, StringComparison.Ordinal)
-            && (antes.Nombre.Length > 0 || nombre.Trim().Length == 0)) return false;
-        _reglas[k] = new EntradaGeneroArtista(nombre.Trim().Length > 0 ? nombre.Trim() : artista.Trim(), genero);
+            && (antes.Nombre.Length > 0 || n.Length == 0)) return false;
+        _reglas[k] = new EntradaGeneroArtista(n.Length > 0 ? n : k, genero);
         return true;
     }
 

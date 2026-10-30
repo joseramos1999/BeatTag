@@ -657,11 +657,12 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
         foreach (var f in artistas)
         {
             var valor = (genero(f) ?? "").Trim();
+            // La fila ya trae la clave: va tal cual (pasarla otra vez por el artista principal la estropearía).
             var cambia = accion switch
             {
-                AccionArtista.Excluir => mapa.Excluir(f.Clave, f.Nombre),
-                AccionArtista.Quitar => mapa.Quitar(f.Clave),
-                _ => valor.Length > 0 && mapa.Poner(f.Clave, f.Nombre, valor),
+                AccionArtista.Excluir => mapa.ExcluirPorClave(f.Clave, f.Nombre),
+                AccionArtista.Quitar => mapa.QuitarPorClave(f.Clave),
+                _ => valor.Length > 0 && mapa.PonerPorClave(f.Clave, f.Nombre, valor),
             };
             if (!cambia) continue;
             f.Genero = accion is AccionArtista.Poner or AccionArtista.Sugerencia ? valor : "";
