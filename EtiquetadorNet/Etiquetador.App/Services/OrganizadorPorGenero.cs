@@ -117,8 +117,9 @@ internal static class OrganizadorPorGenero
             var reescrito = historial.ReescribirDesde(posicion, hechosLote);
             if (reescrito.Length > 0)
             {
-                // Lo anotado antes de mover sigue ahí (es un superconjunto de lo hecho): todo lo movido
-                // se puede deshacer, pero no se sigue moviendo sin un historial que se deje escribir.
+                // ReescribirDesde nunca deja lo hecho solo en memoria: sigue anotado (en el lote tal como
+                // se anotó, que es un superconjunto, o en lo reescrito), así que todo lo movido se puede
+                // deshacer. Pero no se sigue moviendo sin un historial que se deje escribir.
                 detenido = $"Se ha detenido: no se pudo poner al día el historial para deshacer ({reescrito}). "
                          + "Lo movido hasta aquí se puede deshacer; lo demás se ha quedado como estaba. "
                          + "Revisa que la carpeta de datos tenga espacio libre y permiso de escritura.";

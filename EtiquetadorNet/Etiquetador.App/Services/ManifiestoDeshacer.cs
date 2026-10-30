@@ -85,8 +85,10 @@ public sealed class ManifiestoDeshacer : IDisposable, IHistorialPorLotes
         {
             var dir = Path.GetDirectoryName(ruta);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            // Se deja leer a otros (el antivirus, una copia de seguridad), pero no escribir.
-            var fs = new FileStream(ruta, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
+            // Se deja leer a otros (el antivirus, una copia de seguridad), pero no escribir. Sin búfer
+            // propio: cada escritura va entera al sistema, y una que falla no deja bytes pendientes que
+            // se escribirían después en otra posición (ver ReescribirDesde).
+            var fs = new FileStream(ruta, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read, bufferSize: 1);
             fs.Seek(0, SeekOrigin.End);
             error = "";
             return new ManifiestoDeshacer(ruta, fs);
@@ -170,20 +172,50 @@ public sealed class ManifiestoDeshacer : IDisposable, IHistorialPorLotes
     }
 
     /// <summary>
-    /// Deja desde <paramref name="posicion"/> solo <paramref name="hechos"/>, con un solo volcado. Si la
-    /// escritura falla, se vuelve a poner lo que había (el lote entero, que incluye lo hecho) y se
-    /// devuelve el motivo.
+    /// Deja desde <paramref name="posicion"/> (donde empieza el último lote anotado) solo
+    /// <paramref name="hechos"/>, los registros de ese lote cuyos traslados sí se hicieron.
+    ///
+    /// EN NINGÚN MOMENTO lo hecho queda solo en memoria (revisión 1: antes se recortaba primero y se
+    /// escribía después, y un cierre entre las dos cosas dejaba hasta 100 archivos movidos sin anotar):
+    ///   · Si lo hecho es el principio del lote tal como se anotó (se hizo todo, o se paró a mitad, que
+    ///     es lo normal), ya está escrito: basta recortar lo que sobra, o nada.
+    ///   · Si no (falló un traslado a mitad, o otro registro heredó sus carpetas creadas), se escribe
+    ///     primero una copia de lo hecho al final del archivo; después, lo hecho en el sitio del lote; y
+    ///     por último se recorta lo que sobra. Entre medias, lo hecho está entero en el lote anotado o en
+    ///     la copia (como mucho repetido, y deshacer da por devuelto lo que ya está en su sitio), y una
+    ///     línea cortada por un cierre a mitad la aparta deshacer sin tocar ningún archivo.
+    ///   · Si lo hecho ocupa más que el lote anotado, se deja el lote como está: es un superconjunto de
+    ///     lo hecho, y deshacer da por devuelto lo que no llegó a moverse.
+    /// Cada paso se vuelca al disco antes del siguiente. Si alguno falla, se intenta dejar el lote como
+    /// se anotó y se devuelve el motivo; lo hecho sigue anotado en cualquier caso.
     /// </summary>
     public string ReescribirDesde(long posicion, IReadOnlyList<UndoRecord> hechos)
     {
         if (_cerrado) return "el historial ya está cerrado";
+        // Solo se reescribe el último lote anotado: sin sus bytes no se podría dejar como estaba.
+        if (_ultimoLote is not { } lote || lote.Posicion != posicion) return "no es el último lote anotado";
         try
         {
             var bytes = Lineas(hechos);
-            _fs.SetLength(posicion);
-            _fs.Seek(posicion, SeekOrigin.Begin);
-            _fs.Write(bytes, 0, bytes.Length);
-            _fs.Flush(flushToDisk: true);
+            if (bytes.Length <= lote.Bytes.Length && lote.Bytes.AsSpan(0, bytes.Length).SequenceEqual(bytes))
+            {
+                if (bytes.Length < lote.Bytes.Length) Recortar(posicion + bytes.Length);
+            }
+            else if (bytes.Length < lote.Bytes.Length)
+            {
+                _fs.Seek(posicion + lote.Bytes.Length, SeekOrigin.Begin);
+                Escribir(bytes);
+                TrasCadaPaso?.Invoke("copia al final");
+                _fs.Seek(posicion, SeekOrigin.Begin);
+                Escribir(bytes);
+                TrasCadaPaso?.Invoke("en su sitio");
+                Recortar(posicion + bytes.Length);
+            }
+            else
+            {
+                _ultimoLote = null;
+                return "";
+            }
             Anotados = (_anotadosEn.TryGetValue(posicion, out var a) ? a : 0) + hechos.Count;
             foreach (var k in _anotadosEn.Keys.Where(k => k > posicion).ToList()) _anotadosEn.Remove(k);
             _ultimoLote = null;
@@ -191,18 +223,37 @@ public sealed class ManifiestoDeshacer : IDisposable, IHistorialPorLotes
         }
         catch (Exception e)
         {
-            if (_ultimoLote is { } lote && lote.Posicion == posicion)
-                try
-                {
-                    _fs.SetLength(posicion);
-                    _fs.Seek(posicion, SeekOrigin.Begin);
-                    _fs.Write(lote.Bytes, 0, lote.Bytes.Length);
-                    _fs.Flush(flushToDisk: true);
-                }
-                catch { /* el error ya se devuelve: quien llama se para */ }
+            // Volver a poner el lote anotado solo escribe dentro de su sitio: la copia del final, si
+            // llegó a hacerse, sigue entera hasta que el lote está escrito y se recorta.
+            try
+            {
+                _fs.Seek(posicion, SeekOrigin.Begin);
+                Escribir(lote.Bytes);
+                Recortar(posicion + lote.Bytes.Length);
+            }
+            catch { /* el error ya se devuelve: quien llama se para, y lo hecho sigue anotado */ }
             return e.Message;
         }
     }
+
+    /// <summary>Escribe en la posición actual y lo vuelca al disco.</summary>
+    private void Escribir(byte[] bytes)
+    {
+        _fs.Write(bytes, 0, bytes.Length);
+        _fs.Flush(flushToDisk: true);
+    }
+
+    /// <summary>Deja el archivo con <paramref name="largo"/> bytes, lo vuelca al disco y se pone al final.</summary>
+    private void Recortar(long largo)
+    {
+        _fs.SetLength(largo);
+        _fs.Flush(flushToDisk: true);
+        _fs.Seek(0, SeekOrigin.End);
+        TrasCadaPaso?.Invoke("recortado");
+    }
+
+    /// <summary>Para las pruebas: se llama tras cada paso de <see cref="ReescribirDesde"/> que deja algo en el disco.</summary>
+    internal Action<string>? TrasCadaPaso { get; set; }
 
     /// <summary>Los registros como líneas del manifiesto, en UTF-8.</summary>
     private static byte[] Lineas(IReadOnlyList<UndoRecord> registros)

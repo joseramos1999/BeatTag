@@ -349,6 +349,80 @@ public class OrganizarPorGeneroDeshacerTests : IDisposable
         Assert.Equal(new[] { "1", "2", "4" }, File.ReadAllLines(ruta).Select(l => JsonSerializer.Deserialize<UndoRecord>(l)!.OrigPath));
     }
 
+    /// <summary>Lo que hay ahora en el disco del manifiesto (abierto por otro), línea a línea: el OrigPath de cada una que se lee entera.</summary>
+    private static List<string> AnotadosEnElDisco(string ruta)
+    {
+        using var fs = new FileStream(ruta, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var sr = new StreamReader(fs);
+        var res = new List<string>();
+        foreach (var linea in sr.ReadToEnd().Split('\n'))
+        {
+            if (linea.Trim().Length == 0) continue;
+            try { res.Add(JsonSerializer.Deserialize<UndoRecord>(linea)!.OrigPath); }
+            catch (JsonException) { /* una línea a medias: deshacer la aparta sin tocar nada */ }
+        }
+        return res;
+    }
+
+    // Revisión 1: ReescribirDesde recortaba ANTES de escribir. Entre el recorte y el volcado, lo ya
+    // movido del lote solo estaba en memoria: un cierre ahí lo dejaba movido y sin anotar.
+    [Theory]
+    [InlineData(false)]   // un traslado falla a mitad del lote: hay que quitar su línea
+    [InlineData(true)]    // y además otro hereda las carpetas creadas: su línea crece
+    public void Reescribir_un_lote_nunca_deja_lo_hecho_sin_anotar_en_el_disco(bool heredaCarpetas)
+    {
+        var ruta = _paths.NuevoManifiesto();
+        UndoRecord R(string n) => new() { OrigPath = n, FinalPath = n + "-b", Renamed = true };
+        using var m = ManifiestoDeshacer.Abrir(ruta, out _)!;
+        m.AnotarLote(new[] { R("1"), R("2") });
+        var lote = m.Posicion;
+        var registros = new[] { R("3"), R("4"), R("5"), R("6") };
+        registros[0].CarpetasCreadas = new() { Path.Combine("m", "Por género"), Path.Combine("m", "Por género", "Pop") };
+        Assert.Equal("", m.AnotarLote(registros));
+        var hechos = new[] { R("4"), R("6") };
+        if (heredaCarpetas) hechos[0].CarpetasCreadas = registros[0].CarpetasCreadas;
+
+        var pasos = new List<string>();
+        m.TrasCadaPaso = paso =>
+        {
+            pasos.Add(paso);
+            var enDisco = AnotadosEnElDisco(ruta);
+            foreach (var h in new[] { "1", "2", "4", "6" })
+                Assert.True(enDisco.Contains(h), $"tras «{paso}», «{h}» está movido y no está anotado en el disco");
+        };
+
+        Assert.Equal("", m.ReescribirDesde(lote, hechos));
+
+        Assert.NotEmpty(pasos);
+        Assert.Equal(new[] { "1", "2", "4", "6" }, AnotadosEnElDisco(ruta));
+        Assert.Equal(4, m.Anotados);
+    }
+
+    [Fact]
+    public void Si_reescribir_falla_en_cualquier_paso_lo_hecho_sigue_anotado_y_se_dice()
+    {
+        UndoRecord R(string n) => new() { OrigPath = n, FinalPath = n + "-b", Renamed = true };
+        for (var fallaEn = 1; ; fallaEn++)
+        {
+            var ruta = _paths.NuevoManifiesto();
+            using var m = ManifiestoDeshacer.Abrir(ruta, out _)!;
+            var lote = m.Posicion;
+            m.AnotarLote(new[] { R("1"), R("2"), R("3") });
+            var paso = 0;
+            m.TrasCadaPaso = _ => { if (++paso == fallaEn) throw new IOException("No hay espacio suficiente en el disco."); };
+
+            var error = m.ReescribirDesde(lote, new[] { R("1"), R("3") });
+
+            if (paso < fallaEn) { Assert.Equal("", error); break; }   // ya no quedan pasos que hacer fallar
+            Assert.Contains("espacio", error);
+            var enDisco = AnotadosEnElDisco(ruta);
+            Assert.Contains("1", enDisco);
+            Assert.Contains("3", enDisco);
+            m.Dispose();
+            File.Delete(ruta);
+        }
+    }
+
     // --- B4: el tipo en el historial ---
 
     [Fact]
