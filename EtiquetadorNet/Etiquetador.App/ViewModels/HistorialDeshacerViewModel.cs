@@ -460,7 +460,8 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
         var cuerpo = $"{(cuantos == 1 ? "1 archivo volverá" : $"{cuantos} archivos volverán")} a como estaba{(cuantos == 1 ? "" : "n")} antes de esa ejecución"
                    + (renombran > 0 ? $"; {renombran} {QueRecupera(renombrados, renombran == 1)}." : ".");
 
-        if (bloqueo.Length > 0) cuerpo += "\n\n" + bloqueo + " Se quedan pendientes.";
+        if (bloqueo.Length > 0)
+            cuerpo += "\n\n" + bloqueo + (Distintos(a.Bloqueados.Select(b => b.Cambio)) == 1 ? " Se queda pendiente." : " Se quedan pendientes.");
         if (ocupado.Length > 0) cuerpo += "\n\n" + ocupado;
 
         if (a.Solapes.Count > 0)

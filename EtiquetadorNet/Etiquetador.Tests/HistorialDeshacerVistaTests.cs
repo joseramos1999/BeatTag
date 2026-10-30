@@ -249,6 +249,27 @@ public class HistorialDeshacerVistaTests : IDisposable
                      + "lo que cambió en él se queda y se podrá deshacer después.", HistorialDeshacerViewModel.TextoPierdeDeshacer(pierden));
     }
 
+    // Revisión 3: al bloqueo siempre se le añadía «Se quedan pendientes.», también con un solo archivo.
+    [Fact]
+    public void Un_solo_archivo_bloqueado_se_queda_pendiente_en_singular()
+    {
+        var uno = new AnalisisDeshacer(Organizacion, new[] { Movido("Descargas", "a.mp3") },
+                                       new[] { new BloqueoDeshacer(Movido("WarmUp", "b.mp3"), Ia, Rutas.Archivo("b.mp3"), false) },
+                                       Array.Empty<SolapeDeshacer>(), Array.Empty<CambioDeshacer>());
+        var dos = new AnalisisDeshacer(Organizacion, new[] { Movido("Descargas", "a.mp3") },
+                                       new[]
+                                       {
+                                           new BloqueoDeshacer(Movido("WarmUp", "b.mp3"), Ia, Rutas.Archivo("b.mp3"), false),
+                                           new BloqueoDeshacer(Movido("WarmUp", "c.mp3"), Ia, Rutas.Archivo("c.mp3"), false),
+                                       },
+                                       Array.Empty<SolapeDeshacer>(), Array.Empty<CambioDeshacer>());
+
+        var p = HistorialDeshacerViewModel.Planificar(uno, soloMarcadas: false);
+        Assert.EndsWith("Para deshacerlo, deshaz antes esa ejecución. Se queda pendiente.", p.Cuerpo);
+        Assert.DoesNotContain("Se quedan pendientes", p.Cuerpo);
+        Assert.EndsWith("Para deshacerlos, deshaz antes esa ejecución. Se quedan pendientes.", HistorialDeshacerViewModel.Planificar(dos, soloMarcadas: false).Cuerpo);
+    }
+
     [Fact]
     public void Tras_deshacer_se_dice_como_reintentar_lo_pendiente()
     {
