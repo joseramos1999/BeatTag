@@ -329,58 +329,107 @@
             <!-- ============================ GÉNERO POR CARPETA Y POR ARTISTA (P9) ============================ -->
             <TabItem Header="Género por carpeta y artista">
                 <Grid DataContext="{Binding GeneroReglas}" x:DataType="vm:GeneroPorReglasViewModel" Margin="0,8,0,0"
-                      RowDefinitions="Auto,Auto,*,6,Auto,1.4*">
+                      RowDefinitions="Auto,*,6,Auto,1.4*">
                     <TextBlock Grid.Row="0" Classes="desc" Margin="0,0,0,6"
-                               Text="Pone género a las canciones que no tienen, sin IA y sin pisar nunca un género existente. Primera regla: el género que asignes a una carpeta, que vale también para sus subcarpetas (si dos reglas cubren la misma canción, manda la carpeta más concreta). La lista incluye las carpetas que agrupan otras, y sus cifras cuentan las subcarpetas. Deja sin regla las carpetas que mezclan estilos, y excluye de la regla de su carpeta madre las subcarpetas que no le correspondan. Segunda regla, para lo que no cubre ninguna carpeta: el género que llevan casi todas las canciones del mismo artista, solo si tiene al menos 3 con género y 7 de cada 10 llevan el mismo. Las de carpeta salen marcadas; las de artista, solo cuando son 5 o más y al menos 9 de cada 10 coinciden. Conviene pasar antes «Unificar géneros». Se puede deshacer desde Enriquecer." />
-                    <WrapPanel Grid.Row="1" Margin="0,0,0,6">
+                               Text="Pone o corrige el género con reglas, sin IA. Manda, por este orden: el estilo que indica la propia versión en el título o el nombre del archivo («Moombahton Remix», «(Bachata Version)»); el género que asignes a una carpeta, que vale también para sus subcarpetas; el género que asignes a un artista; y el que llevan casi todas las canciones del artista (al menos 3 con género y 7 de cada 10 iguales, sin contar géneros genéricos como Latin o Dance). Las canciones sin género y las que tienen un género genérico salen marcadas; si la canción ya tiene otro estilo, la propuesta sale desmarcada para que la revises. Los mashups y los remixes firmados conservan su género. Conviene pasar antes «Unificar géneros». Se puede deshacer desde Enriquecer." />
+
+                    <!-- Arriba, las reglas: por carpeta y por artista. -->
+                    <TabControl Grid.Row="1">
+                        <TabItem Header="Por carpeta">
+                            <DockPanel Margin="0,6,0,0">
+                                <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                                    <ComboBox Name="GeneroCarpeta" IsEditable="True" ItemsSource="{Binding GenerosDisponibles}" Text="{Binding GeneroElegido}"
+                                              PlaceholderText="Elige o escribe un género" MinWidth="220" Margin="0,0,6,4" MaxDropDownHeight="360" />
+                                    <Button Content="Poner a las seleccionadas" Click="PonerReglaCarpeta_Click" Margin="0,0,6,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                            ToolTip.Tip="Asigna el género a las carpetas seleccionadas en la lista. Puedes seleccionar varias con Ctrl o Mayús." />
+                                    <Button Content="Quitar la regla" Click="QuitarReglaCarpeta_Click" Margin="0,0,6,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                            ToolTip.Tip="Quita el género asignado a las carpetas seleccionadas o hace que dejen de estar excluidas. Vuelve a valer el de su carpeta madre, si lo tiene." />
+                                    <Button Content="Excluir de la regla de su carpeta madre" Click="ExcluirReglaCarpeta_Click" Margin="0,0,12,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                            ToolTip.Tip="Para una subcarpeta que mezcla estilos (por ejemplo, «WarmUp» dentro de «Reggaeton»): no recibe el género de su carpeta madre, y sus canciones dependen del artista." />
+                                    <Button Content="Añadir otra carpeta…" Click="AnadirCarpetaGenero_Click" Margin="0,0,12,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                            ToolTip.Tip="Para dar una regla a una carpeta que agrupa otras: vale para todas sus subcarpetas que no tengan regla propia." />
+                                    <TextBlock Text="{Binding ResumenCarpetas}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" />
+                                </WrapPanel>
+                                <DataGrid Name="TablaCarpetasGenero" ItemsSource="{Binding Carpetas}" x:CompileBindings="False" AutoGenerateColumns="False"
+                                          IsReadOnly="True" SelectionMode="Extended" SelectionChanged="CarpetasGenero_SelectionChanged"
+                                          CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Carpeta" Binding="{Binding Nombre}" Width="1.2*" />
+                                        <DataGridTextColumn Header="Sin género" Binding="{Binding SinGenero}" Width="100" />
+                                        <DataGridTextColumn Header="Canciones" Binding="{Binding Canciones}" Width="100" />
+                                        <DataGridTextColumn Header="Lo que llevan las que tienen género" Binding="{Binding Pista}" Width="*" />
+                                        <DataGridTextColumn Header="Género asignado" Binding="{Binding Regla}" Width="160" />
+                                        <DataGridTextColumn Header="Ubicación" Binding="{Binding Ubicacion}" Width="*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
+                        </TabItem>
+                        <TabItem Header="Por artista">
+                            <DockPanel Margin="0,6,0,0">
+                                <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                                    <TextBox Text="{Binding FiltroArtista}" PlaceholderText="Buscar artista" MinWidth="180" Margin="0,0,6,4" />
+                                    <ComboBox ItemsSource="{Binding VistasArtistas}" SelectedIndex="{Binding VistaArtistasIndice}" MinWidth="140" Margin="0,0,12,4" />
+                                    <ComboBox Name="GeneroArtista" IsEditable="True" ItemsSource="{Binding GenerosDisponibles}" Text="{Binding GeneroElegido}"
+                                              PlaceholderText="Elige o escribe un género" MinWidth="220" Margin="0,0,6,4" MaxDropDownHeight="360" />
+                                    <Button Content="Poner a los seleccionados" Click="PonerReglaArtista_Click" Margin="0,0,6,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                            ToolTip.Tip="Asigna el género a los artistas seleccionados: vale para todas las canciones en las que son el artista principal. Puedes seleccionar varios con Ctrl o Mayús." />
+                                    <Button Content="Usar la sugerencia" Click="UsarSugerenciaArtista_Click" Margin="0,0,6,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                            ToolTip.Tip="Pone a cada artista seleccionado el género que sugiere su biblioteca, si lo hay. A los que no tienen sugerencia no les pone nada." />
+                                    <Button Content="Quitar la regla" Click="QuitarReglaArtista_Click" Margin="0,0,6,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                            ToolTip.Tip="Quita el género asignado a los artistas seleccionados o hace que dejen de estar excluidos: vuelve a valer la regla automática." />
+                                    <Button Content="Excluir de la regla automática" Click="ExcluirArtista_Click" Margin="0,0,12,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
+                                            ToolTip.Tip="Para un artista que de verdad mezcla estilos: sus canciones no reciben el género que llevan casi todas las demás suyas. Siguen recibiendo el de su carpeta o el que indique la versión." />
+                                    <TextBlock Text="{Binding ResumenArtistas}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" />
+                                </WrapPanel>
+                                <DataGrid Name="TablaArtistasGenero" ItemsSource="{Binding ArtistasVista}" x:CompileBindings="False" AutoGenerateColumns="False"
+                                          IsReadOnly="True" SelectionMode="Extended" SelectionChanged="ArtistasGenero_SelectionChanged"
+                                          CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Artista" Binding="{Binding Nombre}" Width="*" />
+                                        <DataGridTextColumn Header="Canciones" Binding="{Binding Canciones}" Width="100" />
+                                        <DataGridTextColumn Header="Sin género" Binding="{Binding SinGenero}" Width="100" />
+                                        <DataGridTextColumn Header="Reparto" Binding="{Binding Reparto}" Width="1.6*" />
+                                        <DataGridTextColumn Header="Sugerencia" Binding="{Binding Sugerencia}" Width="150" />
+                                        <DataGridTextColumn Header="Tu regla" Binding="{Binding Regla}" Width="190" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
+                        </TabItem>
+                    </TabControl>
+                    <GridSplitter Grid.Row="2" ResizeDirection="Rows" Background="Transparent" />
+
+                    <!-- Abajo, lo que proponen las reglas. -->
+                    <WrapPanel Grid.Row="3" Margin="0,4,0,6">
                         <Button Content="Proponer géneros" Command="{Binding ProponerCommand}" Margin="0,0,12,4"
                                 IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
                                 Background="#2563EB" Foreground="White" FontWeight="SemiBold" />
-                        <ComboBox Name="GeneroCarpeta" IsEditable="True" ItemsSource="{Binding GenerosDisponibles}" Text="{Binding GeneroElegido}"
-                                  PlaceholderText="Elige o escribe un género" MinWidth="220" Margin="0,0,6,4" MaxDropDownHeight="360" />
-                        <Button Content="Poner a las seleccionadas" Click="PonerReglaCarpeta_Click" Margin="0,0,6,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
-                                ToolTip.Tip="Asigna el género a las carpetas seleccionadas en la lista. Puedes seleccionar varias con Ctrl o Mayús." />
-                        <Button Content="Quitar la regla" Click="QuitarReglaCarpeta_Click" Margin="0,0,6,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
-                                ToolTip.Tip="Quita el género asignado a las carpetas seleccionadas o hace que dejen de estar excluidas. Vuelve a valer el de su carpeta madre, si lo tiene." />
-                        <Button Content="Excluir de la regla de su carpeta madre" Click="ExcluirReglaCarpeta_Click" Margin="0,0,12,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
-                                ToolTip.Tip="Para una subcarpeta que mezcla estilos (por ejemplo, «WarmUp» dentro de «Reggaeton»): no recibe el género de su carpeta madre, y sus canciones solo dependen del artista." />
-                        <Button Content="Añadir otra carpeta…" Click="AnadirCarpetaGenero_Click" Margin="0,0,12,4" IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
-                                ToolTip.Tip="Para dar una regla a una carpeta que agrupa otras: vale para todas sus subcarpetas que no tengan regla propia." />
-                        <TextBlock Text="{Binding ResumenCarpetas}" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource TextoSecundario}" />
-                    </WrapPanel>
-                    <DataGrid Grid.Row="2" Name="TablaCarpetasGenero" ItemsSource="{Binding Carpetas}" x:CompileBindings="False" AutoGenerateColumns="False"
-                              IsReadOnly="True" SelectionMode="Extended" SelectionChanged="CarpetasGenero_SelectionChanged"
-                              CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Carpeta" Binding="{Binding Nombre}" Width="1.2*" />
-                            <DataGridTextColumn Header="Sin género" Binding="{Binding SinGenero}" Width="100" />
-                            <DataGridTextColumn Header="Canciones" Binding="{Binding Canciones}" Width="100" />
-                            <DataGridTextColumn Header="Lo que llevan las que tienen género" Binding="{Binding Pista}" Width="*" />
-                            <DataGridTextColumn Header="Género asignado" Binding="{Binding Regla}" Width="160" />
-                            <DataGridTextColumn Header="Ubicación" Binding="{Binding Ubicacion}" Width="*" />
-                        </DataGrid.Columns>
-                    </DataGrid>
-                    <GridSplitter Grid.Row="3" ResizeDirection="Rows" Background="Transparent" />
-                    <WrapPanel Grid.Row="4" Margin="0,4,0,6">
-                        <Button Content="Marcar todas" Command="{Binding MarcarTodasCommand}" Margin="0,0,6,4" />
+                        <TextBlock Text="Proponer para" VerticalAlignment="Center" Margin="0,0,6,4" />
+                        <ComboBox ItemsSource="{Binding Alcances}" SelectedIndex="{Binding AlcanceIndice}" MinWidth="250" Margin="0,0,12,4"
+                                  ToolTip.Tip="Con «Todas», las canciones que ya tienen otro estilo salen desmarcadas, para que decidas una a una." />
+                        <TextBlock Text="Mostrar" VerticalAlignment="Center" Margin="0,0,6,4" />
+                        <ComboBox ItemsSource="{Binding OpcionesMostrar}" SelectedIndex="{Binding MostrarIndice}" MinWidth="130" Margin="0,0,12,4"
+                                  ToolTip.Tip="«Para revisar» son las propuestas que salieron desmarcadas: la canción ya tiene otro estilo o la regla no es tan segura en su caso." />
+                        <Button Content="Marcar las visibles" Command="{Binding MarcarTodasCommand}" Margin="0,0,6,4" />
                         <Button Content="Desmarcar todas" Command="{Binding MarcarNingunaCommand}" Margin="0,0,12,4" />
                         <Button Content="Aplicar las marcadas" Click="AplicarGeneroReglas_Click" Margin="0,0,12,4"
                                 IsEnabled="{Binding !$parent[UserControl].((vm:AsistenteViewModel)DataContext).IsBusy}"
                                 Background="#16A34A" Foreground="White" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding Resumen}" VerticalAlignment="Center" Margin="0,0,12,4" Foreground="{DynamicResource TextoSecundario}" TextWrapping="Wrap" />
-                        <TextBlock Text="Has cambiado reglas: vuelve a pulsar «Proponer géneros» para verlas aplicadas." IsVisible="{Binding ReglasSinAplicar}"
+                        <TextBlock Text="Has cambiado reglas o el alcance: vuelve a pulsar «Proponer géneros» para verlo aplicado." IsVisible="{Binding ReglasSinAplicar}"
                                    VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource AvisoTexto}" TextWrapping="Wrap" />
                     </WrapPanel>
-                    <DataGrid Grid.Row="5" Name="TablaGeneroReglas" ItemsSource="{Binding Propuestas}" x:CompileBindings="False" AutoGenerateColumns="False"
+                    <DataGrid Grid.Row="4" Name="TablaGeneroReglas" ItemsSource="{Binding PropuestasVista}" x:CompileBindings="False" AutoGenerateColumns="False"
                               CanUserResizeColumns="True" CanUserSortColumns="True" GridLinesVisibility="Horizontal">
                         <DataGrid.Columns>
                             <DataGridCheckBoxColumn Header="Aplicar" Binding="{Binding Aplicar}" Width="80" />
                             <DataGridTextColumn Header="Artista" Binding="{Binding Artist}" Width="*" IsReadOnly="True" />
                             <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="*" IsReadOnly="True" />
-                            <DataGridTextColumn Header="Género" Binding="{Binding Genero}" Width="140" />
-                            <DataGridTextColumn Header="Regla" Binding="{Binding Regla}" Width="80" IsReadOnly="True" />
-                            <DataGridTextColumn Header="Por qué" Binding="{Binding PorQue}" Width="1.3*" IsReadOnly="True" />
-                            <DataGridTextColumn Header="Carpeta" Binding="{Binding Carpeta}" Width="140" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Ahora" Binding="{Binding Ahora}" Width="110" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Género" Binding="{Binding Genero}" Width="130" />
+                            <DataGridTextColumn Header="Cambio" Binding="{Binding Cambio}" Width="130" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Regla" Binding="{Binding Regla}" Width="120" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Por qué" Binding="{Binding PorQue}" Width="1.5*" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Carpeta" Binding="{Binding Carpeta}" Width="120" IsReadOnly="True" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
