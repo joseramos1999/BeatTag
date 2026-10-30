@@ -452,12 +452,13 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
 
         // Archivos, no registros: un archivo con su registro corrector es uno solo (interfaz-9).
         var cuantos = Distintos(a.ADeshacer);
-        var renombran = Distintos(a.ADeshacer.Where(c => c.Renombra));
+        var renombrados = a.ADeshacer.Where(c => c.Renombra).ToList();
+        var renombran = Distintos(renombrados);
         var titulo = soloMarcadas
             ? $"Deshacer {(cuantos == 1 ? "1 canción" : $"{cuantos} canciones")} de {Nombre(e)}"
             : $"Deshacer {Nombre(e)}";
         var cuerpo = $"{(cuantos == 1 ? "1 archivo volverá" : $"{cuantos} archivos volverán")} a como estaba{(cuantos == 1 ? "" : "n")} antes de esa ejecución"
-                   + (renombran > 0 ? $"; {(renombran == 1 ? "1 recupera" : $"{renombran} recuperan")} su nombre anterior." : ".");
+                   + (renombran > 0 ? $"; {renombran} {QueRecupera(renombrados, renombran == 1)}." : ".");
 
         if (bloqueo.Length > 0) cuerpo += "\n\n" + bloqueo + " Se quedan pendientes.";
         if (ocupado.Length > 0) cuerpo += "\n\n" + ocupado;
@@ -491,9 +492,32 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
         return new PlanDeshacer(e, huellas, cuantos, titulo, cuerpo, nota, $"Deshacer ({cuantos})", "");
     }
 
+    /// <summary>Qué recuperan los archivos que la ejecución renombró o movió (ver <see cref="QueRecupera"/>).</summary>
+    private enum Vuelta { Nombre, Carpeta, NombreYCarpeta, NombreOCarpeta }
+
+    private static Vuelta VueltaDe(IReadOnlyCollection<CambioDeshacer> renombrados)
+        => renombrados.All(c => c.CambiaCarpeta && !c.CambiaNombre) ? Vuelta.Carpeta
+         : renombrados.All(c => !c.CambiaCarpeta) ? Vuelta.Nombre
+         : renombrados.All(c => c.CambiaCarpeta && c.CambiaNombre) ? Vuelta.NombreYCarpeta
+         : Vuelta.NombreOCarpeta;
+
     /// <summary>
-    /// Qué pasa con las ejecuciones posteriores cuando esta devuelve un archivo a su nombre anterior,
-    /// o "" (<see cref="SolapeDeshacer.PierdeDeshacer"/>).
+    /// Lo que recuperan al deshacer los archivos que la ejecución renombró o movió: «recupera su nombre
+    /// anterior», «vuelven a su carpeta anterior» o, si se mezclan, «recuperan su nombre o su carpeta
+    /// anterior». Revisión 3: Organizar por género mueve miles de archivos sin cambiarles el nombre, y la
+    /// confirmación decía que recuperaban su nombre.
+    /// </summary>
+    private static string QueRecupera(IReadOnlyCollection<CambioDeshacer> renombrados, bool uno) => VueltaDe(renombrados) switch
+    {
+        Vuelta.Carpeta => uno ? "vuelve a su carpeta anterior" : "vuelven a su carpeta anterior",
+        Vuelta.Nombre => uno ? "recupera su nombre anterior" : "recuperan su nombre anterior",
+        Vuelta.NombreYCarpeta => uno ? "recupera su nombre y su carpeta anteriores" : "recuperan su nombre y su carpeta anteriores",
+        _ => uno ? "recupera su nombre o su carpeta anterior" : "recuperan su nombre o su carpeta anterior",
+    };
+
+    /// <summary>
+    /// Qué pasa con las ejecuciones posteriores cuando esta devuelve un archivo a su nombre o a su
+    /// carpeta anterior, o "" (<see cref="SolapeDeshacer.PierdeDeshacer"/>).
     ///
     /// POR QUÉ ASÍ (hallazgo datos-1). Antes la posterior se quedaba apuntando al nombre que le dejó
     /// esta ejecución: su registro salía como no encontrado y, si después aparecía OTRO archivo con
@@ -510,9 +534,17 @@ public sealed partial class HistorialDeshacerViewModel : ObservableObject
         var uno = n == 1;
         var posteriores = pierden.SelectMany(x => x.Posteriores).Select(p => p.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         var unaPosterior = posteriores == 1;
-        return $" {(uno ? "1 archivo vuelve" : $"{n} archivos vuelven")} a su nombre anterior, y el historial se pone al día para que "
+        var vuelta = VueltaDe(pierden.Select(x => x.Cambio).ToList());
+        var aDonde = vuelta switch
+        {
+            Vuelta.Carpeta => "a su carpeta anterior",
+            Vuelta.Nombre => "a su nombre anterior",
+            Vuelta.NombreYCarpeta => "a su nombre y su carpeta anteriores",
+            _ => "a su nombre o su carpeta anterior",
+        };
+        return $" {(uno ? "1 archivo vuelve" : $"{n} archivos vuelven")} {aDonde}, y el historial se pone al día para que "
              + (unaPosterior ? "la ejecución posterior " : "las ejecuciones posteriores ")
-             + $"{(uno ? "lo" : "los")} {(unaPosterior ? "encuentre" : "encuentren")} con ese nombre: "
+             + $"{(uno ? "lo" : "los")} {(unaPosterior ? "encuentre" : "encuentren")} {(vuelta == Vuelta.Nombre ? "con ese nombre" : "ahí")}: "
              + $"lo que {(unaPosterior ? "cambió" : "cambiaron")} en {(uno ? "él" : "ellos")} se queda y se podrá deshacer después.";
     }
 }

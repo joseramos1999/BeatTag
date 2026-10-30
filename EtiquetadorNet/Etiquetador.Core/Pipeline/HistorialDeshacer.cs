@@ -92,11 +92,25 @@ public sealed record CambioDeshacer(string Huella, string Antes, string Despues,
     /// <summary>Nombre del archivo antes de la ejecución.</summary>
     public string ArchivoAntes => Path.GetFileName(Antes);
 
-    /// <summary>Lo que se cambió, en claro: «Título, Artista, nombre».</summary>
+    /// <summary>
+    /// La ejecución lo llevó a otra carpeta (Organizar por género, los traslados de la Bandeja). Un
+    /// renombrado en su carpeta no la cambia.
+    /// </summary>
+    public bool CambiaCarpeta => Renombra && Despues.Length > 0
+                                 && !Rutas.MismaCarpeta(Path.GetDirectoryName(Antes) ?? "", Path.GetDirectoryName(Despues) ?? "");
+
+    /// <summary>La ejecución le cambió el nombre del archivo (también solo en mayúsculas).</summary>
+    public bool CambiaNombre => Renombra && (!CambiaCarpeta || !string.Equals(ArchivoAntes, Archivo, StringComparison.Ordinal));
+
+    /// <summary>
+    /// Lo que se cambió, en claro: «Título, Artista, nombre», o «carpeta» si solo se movió (revisión 3:
+    /// una canción organizada por género no cambia de nombre).
+    /// </summary>
     public string CamposTexto => !Legible
         ? "(registro ilegible)"
         : string.Join(", ", Campos.Select(HistorialDeshacer.NombreCampo)
-                                  .Concat(Renombra ? new[] { "nombre" } : Array.Empty<string>()));
+                                  .Concat(CambiaNombre ? new[] { "nombre" } : Array.Empty<string>())
+                                  .Concat(CambiaCarpeta ? new[] { "carpeta" } : Array.Empty<string>()));
 }
 
 /// <summary>Una ejecución del historial: todo lo que escribió una operación de una vez.</summary>

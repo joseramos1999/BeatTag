@@ -198,6 +198,57 @@ public class HistorialDeshacerVistaTests : IDisposable
         Assert.Equal("", HistorialDeshacerViewModel.TextoPierdeDeshacer(Array.Empty<SolapeDeshacer>()));
     }
 
+    // Revisión 3: al deshacer una organización por género, la confirmación decía que los archivos
+    // «recuperan su nombre anterior», y lo que recuperan es su carpeta: el nombre no cambia.
+    private static readonly EjecucionDeshacer Organizacion = Ejecucion("run_20261030_120000", TipoEjecucion.OrganizarPorGenero, 2);
+
+    private static CambioDeshacer Movido(string carpeta, string nombre)
+        => new(nombre, Rutas.De("m", carpeta, nombre), Rutas.De("m", "Por género", "Latin", nombre), true, Array.Empty<string>(), EstadoCambio.Pendiente);
+
+    [Fact]
+    public void Deshacer_una_organizacion_dice_que_vuelven_a_su_carpeta()
+    {
+        var a = new AnalisisDeshacer(Organizacion, new[] { Movido("Descargas", "a.mp3"), Movido("WarmUp", "b.mp3") },
+                                     Array.Empty<BloqueoDeshacer>(), Array.Empty<SolapeDeshacer>(), Array.Empty<CambioDeshacer>());
+
+        var p = HistorialDeshacerViewModel.Planificar(a, soloMarcadas: false);
+
+        Assert.Equal("2 archivos volverán a como estaban antes de esa ejecución; 2 vuelven a su carpeta anterior.", p.Cuerpo);
+        Assert.DoesNotContain("nombre", p.Cuerpo);
+        Assert.Contains("rekordbox", p.Nota);
+        Assert.Equal("carpeta", Movido("Descargas", "a.mp3").CamposTexto);
+
+        // Uno solo, en singular.
+        var uno = new AnalisisDeshacer(Organizacion, new[] { Movido("Descargas", "a.mp3") },
+                                       Array.Empty<BloqueoDeshacer>(), Array.Empty<SolapeDeshacer>(), Array.Empty<CambioDeshacer>());
+        Assert.Equal("1 archivo volverá a como estaba antes de esa ejecución; 1 vuelve a su carpeta anterior.",
+                     HistorialDeshacerViewModel.Planificar(uno, soloMarcadas: false).Cuerpo);
+    }
+
+    [Fact]
+    public void Si_unos_cambian_de_nombre_y_otros_de_carpeta_se_dicen_las_dos_cosas()
+    {
+        var ambos = new CambioDeshacer("c.mp3", Rutas.De("m", "Descargas", "c (1).mp3"), Rutas.De("m", "Pop", "c.mp3"), true,
+                                       Array.Empty<string>(), EstadoCambio.Pendiente);
+        var mezcla = new AnalisisDeshacer(Lote, new[] { Cambio("a.mp3", true, "Title"), Movido("Descargas", "b.mp3") },
+                                          Array.Empty<BloqueoDeshacer>(), Array.Empty<SolapeDeshacer>(), Array.Empty<CambioDeshacer>());
+        var solo = new AnalisisDeshacer(Lote, new[] { ambos }, Array.Empty<BloqueoDeshacer>(), Array.Empty<SolapeDeshacer>(), Array.Empty<CambioDeshacer>());
+
+        Assert.EndsWith("; 2 recuperan su nombre o su carpeta anterior.", HistorialDeshacerViewModel.Planificar(mezcla, soloMarcadas: false).Cuerpo);
+        Assert.EndsWith("; 1 recupera su nombre y su carpeta anteriores.", HistorialDeshacerViewModel.Planificar(solo, soloMarcadas: false).Cuerpo);
+        Assert.Equal("nombre, carpeta", ambos.CamposTexto);
+    }
+
+    [Fact]
+    public void Si_vuelve_a_su_carpeta_se_dice_que_la_posterior_lo_encuentra_ahi()
+    {
+        var movido = Movido("Descargas", "a.mp3");
+        var pierden = new[] { new SolapeDeshacer(movido, new[] { Editor }, Array.Empty<string>(), PierdeDeshacer: true) };
+
+        Assert.Equal(" 1 archivo vuelve a su carpeta anterior, y el historial se pone al día para que la ejecución posterior lo encuentre ahí: "
+                     + "lo que cambió en él se queda y se podrá deshacer después.", HistorialDeshacerViewModel.TextoPierdeDeshacer(pierden));
+    }
+
     [Fact]
     public void Tras_deshacer_se_dice_como_reintentar_lo_pendiente()
     {
