@@ -436,6 +436,137 @@ public class GeneroPorArtistaTests : IDisposable
         Assert.Equal(new[] { "Latin" }, registro.Fields!["Genre"].OldArr);
     }
 
+    // =================================================================================================
+    // A7 · La herramienta: textos, confirmación, instantánea y el mapa desde la tabla
+    // =================================================================================================
+
+    private static GeneroReglaFila Fila(string titulo, string? actual, CambioGenero cambio, bool marcada = true, string genero = "Reggaeton")
+    {
+        var t = T("Feid", titulo, actual);
+        return new GeneroReglaFila(new PropuestaGeneroRegla(t.FilePath, genero, ReglaGenero.Artista, "Artista", marcada, actual ?? "", cambio), t);
+    }
+
+    [Fact]
+    public void La_confirmacion_cuenta_por_tipo_de_cambio()
+    {
+        var filas = new[]
+        {
+            Fila("a", null, CambioGenero.Rellenar),
+            Fila("b", "Latin", CambioGenero.SustituirGenerico), Fila("c", "Dance", CambioGenero.SustituirGenerico),
+            Fila("d", "Trap", CambioGenero.Revisar, marcada: false),
+        };
+        var (cuerpo, nota) = GeneroPorReglasViewModel.Confirmacion(filas);
+        Assert.Equal("Se cambiará el género de 4 canciones: 1 sin género, 2 con un género genérico y 1 con otro estilo.", cuerpo);
+        Assert.StartsWith("⚠ 1 no salía marcada", nota);
+        Assert.Contains("Solo se escribe en las canciones que sigan como estaban al proponer; lo que hayas cambiado después se respeta.", nota);
+
+        Assert.Equal("Se cambiará el género de 2 canciones: 2 con un género genérico.", GeneroPorReglasViewModel.Confirmacion(filas[1..3]).Cuerpo);
+        Assert.Equal("Se cambiará el género de 2 canciones: 1 sin género y 1 con un género genérico.", GeneroPorReglasViewModel.Confirmacion(filas[..2]).Cuerpo);
+    }
+
+    [Fact]
+    public void Se_escribe_con_lo_que_tenia_al_proponer()
+    {
+        var vacia = Fila("a", null, CambioGenero.Rellenar);
+        var latin = Fila("b", "Latin", CambioGenero.SustituirGenerico);
+        latin.Track.Genre = "Pop";   // la biblioteca ya dice otra cosa: manda lo visto al proponer
+
+        var cambios = GeneroPorReglasViewModel.Cambios(new[] { vacia, latin }, new[] { "Reggaeton" });
+
+        Assert.Null(cambios[0].GeneroVisto);         // sin género: solo si sigue sin ninguno, como antes
+        Assert.Equal("Latin", cambios[1].GeneroVisto);
+        Assert.All(cambios, c => Assert.Equal("Reggaeton", c.GeneroNuevo));
+    }
+
+    [Fact]
+    public void Los_textos_del_resumen_distinguen_singular_y_plural()
+    {
+        Assert.Equal("1 artista · 0 con tu regla", GeneroPorReglasViewModel.TextoArtistas(1, 0, 0));
+        Assert.Equal($"{2767:N0} artistas · 3 con tu regla · 1 excluido", GeneroPorReglasViewModel.TextoArtistas(2767, 3, 1));
+        Assert.EndsWith("· 2 excluidos", GeneroPorReglasViewModel.TextoArtistas(10, 0, 2));
+        Assert.Equal("", GeneroPorReglasViewModel.TextoListas(0));
+        Assert.Contains("1 canción tiene varios géneros y no se toca", GeneroPorReglasViewModel.TextoListas(1));
+        Assert.Contains("3 canciones tienen varios géneros y no se tocan", GeneroPorReglasViewModel.TextoListas(3));
+        Assert.Equal($"{2640:N0} canciones sin género · 314 propuestas marcadas · 890 para revisar · 250 protegidas (mashups y remixes firmados)",
+                     GeneroPorReglasViewModel.TextoResumen(2640, 314, 890, 250));
+    }
+
+    private static ArtistaGeneroFila Artista(string nombre, string sugerencia)
+        => new(new ResumenArtista(MapaGenerosArtista.Clave(nombre), nombre, 10, 1, Array.Empty<RepartoGenero>(), sugerencia, 9, 10, true));
+
+    [Fact]
+    public void Usar_la_sugerencia_no_pone_nada_a_los_que_no_tienen()
+    {
+        var mapa = new MapaGenerosArtista(Path.Combine(_dir, MapaGenerosArtista.NombreArchivo));
+        var ozuna = Artista("Ozuna", "Reggaeton");
+        var guetta = Artista("David Guetta", "");
+
+        var cambiados = GeneroPorReglasViewModel.Aplicar(mapa, new[] { ozuna, guetta }, GeneroPorReglasViewModel.AccionArtista.Sugerencia,
+                                                         f => f.Datos.Sugerencia);
+
+        Assert.Equal(new[] { ozuna }, cambiados);
+        Assert.Equal("Reggaeton", ozuna.Genero);
+        Assert.Equal("Sin asignar", guetta.Regla);
+        Assert.Null(mapa.De("David Guetta"));
+        Assert.Equal("Reggaeton", mapa.De("Ozuna")?.Genero);
+        Assert.Equal("Ninguno de esos artistas tiene sugerencia: sus canciones no muestran un estilo claro. Elige tú su género.",
+                     GeneroPorReglasViewModel.TextoSinCambios(new[] { guetta, Artista("Pitbull", "") }, GeneroPorReglasViewModel.AccionArtista.Sugerencia));
+    }
+
+    [Fact]
+    public void Excluir_y_quitar_dicen_lo_que_ha_pasado()
+    {
+        var mapa = new MapaGenerosArtista(Path.Combine(_dir, MapaGenerosArtista.NombreArchivo));
+        var anuel = Artista("Anuel AA", "");
+        var bunny = Artista("Bad Bunny", "Reggaeton");
+
+        var excluidos = GeneroPorReglasViewModel.Aplicar(mapa, new[] { anuel, bunny }, GeneroPorReglasViewModel.AccionArtista.Excluir, _ => "");
+        Assert.Equal(2, excluidos.Count);
+        Assert.Equal("Excluido de la regla automática", anuel.Regla);
+        Assert.Equal(2, mapa.Excluidos);
+        Assert.StartsWith("«Anuel AA» queda excluido de la regla automática",
+                          GeneroPorReglasViewModel.TextoReglaArtista(1, "Anuel AA", "", GeneroPorReglasViewModel.AccionArtista.Excluir));
+        Assert.StartsWith("2 artistas quedan excluidos de la regla automática",
+                          GeneroPorReglasViewModel.TextoReglaArtista(2, "Anuel AA", "", GeneroPorReglasViewModel.AccionArtista.Excluir));
+        Assert.Equal("Esos artistas ya estaban excluidos.",
+                     GeneroPorReglasViewModel.TextoSinCambios(new[] { anuel, bunny }, GeneroPorReglasViewModel.AccionArtista.Excluir));
+
+        var quitados = GeneroPorReglasViewModel.Aplicar(mapa, new[] { anuel }, GeneroPorReglasViewModel.AccionArtista.Quitar, _ => "");
+        Assert.Single(quitados);
+        Assert.Equal("Sin asignar", anuel.Regla);
+        Assert.Equal("Regla quitada de «Anuel AA»: vuelve a valer la regla automática.",
+                     GeneroPorReglasViewModel.TextoReglaArtista(1, "Anuel AA", "", GeneroPorReglasViewModel.AccionArtista.Quitar));
+        Assert.Equal("Ese artista no tenía regla.",
+                     GeneroPorReglasViewModel.TextoSinCambios(new[] { anuel }, GeneroPorReglasViewModel.AccionArtista.Quitar));
+        Assert.Equal("3 artistas → Reggaeton.",
+                     GeneroPorReglasViewModel.TextoReglaArtista(3, "Anuel AA", "Reggaeton", GeneroPorReglasViewModel.AccionArtista.Poner));
+    }
+
+    [Fact]
+    public void Al_volver_a_proponer_se_conserva_lo_marcado_y_lo_corregido_y_salen_primero_las_marcadas()
+    {
+        var a = T("Feid", "A", "Latin");
+        var b = T("Feid", "B", "Trap");
+        var propuestas = new[]
+        {
+            new PropuestaGeneroRegla(b.FilePath, "Reggaeton", ReglaGenero.Artista, "x", false, "Trap", CambioGenero.Revisar),
+            new PropuestaGeneroRegla(a.FilePath, "Reggaeton", ReglaGenero.Artista, "x", true, "Latin", CambioGenero.SustituirGenerico),
+        };
+        var porRuta = new Dictionary<string, Track> { [a.FilePath] = a, [b.FilePath] = b };
+        var primera = GeneroPorReglasViewModel.Filas(propuestas, porRuta, Array.Empty<GeneroReglaFila>());
+        Assert.Equal(new[] { a.FilePath, b.FilePath }, primera.Select(f => f.Ruta));   // la marcada, arriba
+        primera[0].Aplicar = false;
+        primera[1].Aplicar = true;
+        primera[1].Genero = "Trap Latino";
+
+        var segunda = GeneroPorReglasViewModel.Filas(propuestas, porRuta, primera);
+
+        Assert.False(segunda[0].Aplicar);
+        Assert.True(segunda[1].Aplicar);
+        Assert.Equal("Trap Latino", segunda[1].Genero);
+        Assert.Equal(("Latin", "Sustituir genérico", "Artista"), (segunda[0].Ahora, segunda[0].Cambio, segunda[0].Regla));
+    }
+
     private sealed class Historial : IHistorialDeshacer
     {
         private readonly List<UndoRecord> _lista;

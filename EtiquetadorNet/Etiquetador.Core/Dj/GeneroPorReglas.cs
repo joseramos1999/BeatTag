@@ -646,7 +646,7 @@ public static class GeneroPorReglas
                     : $"Versión «{v.Texto}» → {estilo}";
                 if (v.Ambiguo) porQue += $" · «{v.Estilo}» puede nombrar varios estilos: revísalo";
                 res.Add(new PropuestaGeneroRegla(t.FilePath, estilo, ReglaGenero.Version, porQue + Sufijo(cambio, actual, marcada, false),
-                                                 marcada, actual, cambio));
+                                                 marcada, t.Genre ?? "", cambio));
                 continue;
             }
 
@@ -708,7 +708,7 @@ public static class GeneroPorReglas
                     break;
             }
             res.Add(new PropuestaGeneroRegla(t.FilePath, genero, regla, porQueRegla + Sufijo(cambio, actual, marcar, protegida && !marcar),
-                                             marcar, actual, cambio));
+                                             marcar, t.Genre ?? "", cambio));
         }
         return new CalculoGeneroReglas(res, protegidas, listas);
     }
