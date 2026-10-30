@@ -192,11 +192,18 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
     [ObservableProperty] private string _generoElegido = "";
 
     /// <summary>A qué canciones se proponen géneros. No se guarda: cada sesión empieza con «Todas».</summary>
-    public IReadOnlyList<string> Alcances { get; } = new[]
+    public IReadOnlyList<string> Alcances => TextosAlcance;
+
+    /// <summary>
+    /// Las opciones de «Proponer para», en el orden de <see cref="AlcanceGenero"/>. Con «Todas», qué
+    /// sale marcado lo explica el tooltip: las de otro estilo salen para revisar, salvo cuando la propia
+    /// versión indica su estilo.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> TextosAlcance = new[]
     {
         "Solo canciones sin género",
         "Sin género o con un género genérico",
-        "Todas (las de otro estilo, para revisar)",
+        "Todas (también las que ya tienen otro estilo)",
     };
 
     [ObservableProperty] private int _alcanceIndice = (int)AlcanceGenero.Todas;

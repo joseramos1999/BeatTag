@@ -55,7 +55,7 @@ public sealed record OpcionesGeneroReglas(IReadOnlyDictionary<string, string> Ca
                                           AlcanceGenero Alcance = AlcanceGenero.Todas);
 
 /// <summary>Lo que sale de proponer.</summary>
-/// <param name="Protegidas">Mashups y remixes firmados con otro estilo, que conservan su género.</param>
+/// <param name="Protegidas">Mashups y remixes firmados con otro estilo, que conservan su género frente a las reglas de carpeta y de artista.</param>
 /// <param name="Listas">Canciones con varios géneros («Rap; Hip Hop; Latino»), que no se tocan: son cosa de «Unificar géneros».</param>
 public sealed record CalculoGeneroReglas(List<PropuestaGeneroRegla> Propuestas, int Protegidas, int Listas);
 

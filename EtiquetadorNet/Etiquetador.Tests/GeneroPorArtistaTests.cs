@@ -490,7 +490,19 @@ public class GeneroPorArtistaTests : IDisposable
             Assert.True(texto.Contains("salvo cuando la propia versión indica su estilo", StringComparison.Ordinal),
                         $"{donde}: no dice que la propuesta de la versión sale marcada sobre otro estilo");
             Assert.DoesNotContain("y si es de la misma familia (Trap y Hip Hop, Tech House y EDM) no se propone nada", texto);
+            // Revisión (ronda 2): «Los mashups y los remixes firmados conservan su género» contradecía
+            // lo anterior: la versión que indica su estilo («(Sandunga Moombahton Remix)») lo cambia, y
+            // marcado. Solo lo conservan frente a las reglas de carpeta y de artista.
+            Assert.DoesNotContain("Los mashups y los remixes firmados conservan su género.", texto);
+            foreach (var frase in Regex.Split(texto, @"(?<=\.)\s+").Where(f => f.Contains("remixes firmados", StringComparison.Ordinal)))
+                Assert.True(frase.Contains("reglas de carpeta y de artista", StringComparison.OrdinalIgnoreCase),
+                            $"{donde}: «{frase}» no dice que los remixes firmados solo conservan su género frente a las reglas de carpeta y de artista");
         }
+        // Revisión (ronda 2): la opción inicial de «Proponer para» decía «(las de otro estilo, para
+        // revisar)», y la de la versión que indica su estilo sale marcada.
+        var todas = GeneroPorReglasViewModel.TextosAlcance[(int)AlcanceGenero.Todas];
+        Assert.DoesNotContain("para revisar", todas, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith("Todas", todas, StringComparison.Ordinal);
         // La regla automática del artista solo marca las canciones sin género cuando es fuerte.
         Assert.Contains("solo cuando es fuerte", textos["descripción de la pestaña"]);
         Assert.Contains("la versión propone el suyo desmarcado", textos["Ayuda"]);
