@@ -154,8 +154,8 @@ public partial class EditorViewModel : ViewModelBase, IEstadoPagina
             var sello = SelloArchivo.De(origPath);   // para que las cachés de audio sigan al archivo
             var res = await Task.Run(() => EdicionManual.Guardar(t.FilePath, cargado, form, anio, bpm, manifiesto));
 
-            // Refleja los cambios en la biblioteca en memoria (para las demás pestañas).
-            t.Title = form.Title; t.Artist = form.Artist; t.Album = form.Album; t.Genre = form.Genre; t.Year = anio; t.Bpm = bpm;
+            // Refleja los cambios en la biblioteca en memoria (para las demás pestañas): solo lo tocado.
+            EdicionManual.Reflejar(t, cargado, form, res, anio, bpm);
             if (res.Renombrado) t.FilePath = res.RutaFinal;   // FileName se deriva de la ruta
             if (ReferenceEquals(SelectedTrack, t)) LoadFrom(t);   // el formulario enseña lo que quedó escrito
             _engine.SeguirArchivo(origPath, t.FilePath, sello);
@@ -466,6 +466,31 @@ public static class EdicionManual
         var hubo = cambios.Count > 0 || renombrado;
         var error = hubo ? Anotar(manifiesto, ruta, rutaFinal, renombrado, cambios) : "";
         return new GuardadoEditor(cambios, renombrado, rutaFinal, mensaje, hubo && error.Length == 0, error);
+    }
+
+    /// <summary>
+    /// Pone en la canción de la biblioteca (en memoria, para las demás pestañas) los campos que has
+    /// tocado, tal como los leería el escaneo: un campo vacío es null, y los artistas y los géneros van
+    /// unidos por «; », como los une TagLib (los escritos, releídos del archivo). Lo que no has tocado se
+    /// queda como estaba.
+    ///
+    /// POR QUÉ (revisión 3). Antes se ponían todos los campos del formulario, también los no tocados, y
+    /// el formulario enseña "" donde el escaneo deja null: una canción sin género pasaba de null a "" con
+    /// solo corregirle el título, y Organizar por género daba la vista previa por desfasada («alguna
+    /// canción ha cambiado de género») sin que nada hubiera cambiado.
+    /// </summary>
+    public static void Reflejar(Track t, TagValues cargado, FormularioEditor form, GuardadoEditor res, uint anio, uint bpm)
+    {
+        static string? Nada(string s) => s.Length == 0 ? null : s;
+        string? Lista(string campo, IEnumerable<string> delFormulario)
+            => Nada(string.Join("; ", res.Cambios.TryGetValue(campo, out var c) && c.NewArr != null ? c.NewArr : delFormulario));
+
+        if (form.Title != cargado.Title) t.Title = Nada(form.Title);
+        if (form.Album != cargado.Album) t.Album = Nada(form.Album);
+        if (form.Artist != cargado.Artist) t.Artist = Lista("Artist", SepararArtistas(form.Artist, Array.Empty<string>()));
+        if (form.Genre != cargado.Genre) t.Genre = Lista("Genre", SepararGeneros(form.Genre));
+        if (anio != cargado.Year) t.Year = anio;
+        if (bpm != cargado.Bpm) t.Bpm = bpm;
     }
 
     /// <summary>

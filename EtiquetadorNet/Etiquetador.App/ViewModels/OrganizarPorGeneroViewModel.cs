@@ -513,17 +513,21 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
     /// planeó, que son lo único que el plan lee de cada una. Pasa cuando otra página la cambia en
     /// memoria sin avisar: REPRODUCIDO en la revisión 2, una canción corregida de Pop a Rock en el Editor
     /// acababa en «Por género/Pop». Comparar así cubre cualquier página que lo haga, no solo el Editor.
-    /// Solo mira la memoria: con 20.000 canciones es inmediato.
+    /// Solo mira la memoria: con 20.000 canciones es inmediato. Dos géneros vacíos (null, "" o en blanco)
+    /// son el mismo, como para el plan: los dos son «sin género» (revisión 3).
     /// </summary>
     private bool CancionesCambiadas()
     {
         if (_leidas is not { } leidas || _canciones is not { } copias || leidas.Count != copias.Count) return false;
         for (var i = 0; i < leidas.Count; i++)
             if (!string.Equals(leidas[i].FilePath, copias[i].FilePath, StringComparison.Ordinal)
-                || !string.Equals(leidas[i].Genre, copias[i].Genre, StringComparison.Ordinal))
+                || !MismoGenero(leidas[i].Genre, copias[i].Genre))
                 return true;
         return false;
     }
+
+    private static bool MismoGenero(string? a, string? b)
+        => (string.IsNullOrWhiteSpace(a) && string.IsNullOrWhiteSpace(b)) || string.Equals(a, b, StringComparison.Ordinal);
 
     private static bool MismasCarpetas(IEnumerable<string> a, IEnumerable<string> b)
         => new HashSet<string>(a.Select(c => c.TrimEnd('\\', '/')), ComparadorRutas.Instancia)

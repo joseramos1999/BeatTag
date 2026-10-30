@@ -337,6 +337,49 @@ public class OrganizarPorGeneroTextosTests : IDisposable
         Assert.Equal(OrganizarPorGeneroViewModel.AvisoCancionesCambiadas, vm.Aviso);
     }
 
+    // Revisión 3: el Editor ponía en la biblioteca todos los campos del formulario al guardar, aunque no
+    // se hubieran tocado, y una canción sin género (null al escanear) pasaba a "". REPRODUCIDO: tras
+    // cambiar solo el título de una canción sin género, la vista previa decía que «alguna canción ha
+    // cambiado de género» y obligaba a volver a calcularla.
+    [Fact]
+    public async Task Cambiar_solo_el_titulo_de_una_cancion_sin_genero_no_desfasa_la_vista_previa()
+    {
+        var (motor, biblioteca, musica) = Motor();
+        var a = Cancion(Path.Combine(musica, "Descargas"), "a.mp3", null);
+        Cancion(Path.Combine(musica, "Descargas"), "b.mp3", "Pop");
+        var vm = new OrganizarPorGeneroViewModel(motor);
+        await vm.CalcularCommand.ExecuteAsync(null);
+        Assert.True(vm.PuedeOrganizar);
+        var sinGenero = biblioteca.Tracks.Single(t => t.FilePath == a);
+        Assert.Null(sinGenero.Genre);
+        var artista = sinGenero.Artist;
+
+        var editor = new EditorViewModel(motor);
+        editor.SelectedTrack = sinGenero;
+        editor.Title = "Título nuevo";
+        await editor.SaveCommand.ExecuteAsync(null);
+
+        Assert.StartsWith("Guardado", editor.Status);
+        Assert.Equal("Título nuevo", sinGenero.Title);
+        Assert.Null(sinGenero.Genre);              // lo que no se ha tocado se queda como lo leyó el escaneo
+        Assert.Equal(artista, sinGenero.Artist);
+        Assert.True(vm.ComprobarVistaPrevia());
+        Assert.False(vm.Desfasado);
+
+        // Vaciar el título deja en la biblioteca lo mismo que leería el escaneo: nada.
+        editor.Title = "";
+        await editor.SaveCommand.ExecuteAsync(null);
+        Assert.Null(sinGenero.Title);
+        Assert.Equal(LibraryScanner.ReadTrack(a).Title, sinGenero.Title);
+
+        // Poner el género sí la desfasa, y queda como lo leería el escaneo.
+        editor.Genre = "Reggaeton; Latin";
+        await editor.SaveCommand.ExecuteAsync(null);
+        Assert.Equal(LibraryScanner.ReadTrack(a).Genre, sinGenero.Genre);
+        Assert.False(vm.ComprobarVistaPrevia());
+        Assert.Equal(OrganizarPorGeneroViewModel.AvisoCancionesCambiadas, vm.Aviso);
+    }
+
     [Fact]
     public async Task Una_carpeta_con_ajustes_nueva_o_una_carpeta_desmarcada_tras_calcular_desfasan_la_vista_previa()
     {
