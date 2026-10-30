@@ -971,15 +971,17 @@ public class AsistenteReglasTests : IDisposable
     {
         Assert.Equal("1 carpeta con canciones sin género · 0 con regla", GeneroPorReglasViewModel.TextoCarpetas(1, 0, 0));
         Assert.Equal("3 carpetas con canciones sin género · 2 con regla · 1 excluida", GeneroPorReglasViewModel.TextoCarpetas(3, 2, 1));
-        Assert.Equal("1 canción sin género · 1 por su carpeta · 0 por su artista (0 marcadas)", GeneroPorReglasViewModel.TextoResumen(1, 1, 0, 0));
-        Assert.EndsWith("(1 marcada)", GeneroPorReglasViewModel.TextoResumen(4, 1, 3, 1));
+        Assert.Equal("1 canción sin género · 1 propuesta marcada · 0 para revisar", GeneroPorReglasViewModel.TextoResumen(1, 1, 0, 0));
+        Assert.Equal("4 canciones sin género · 3 propuestas marcadas · 1 para revisar · 1 protegida (mashup o remix firmado)",
+                     GeneroPorReglasViewModel.TextoResumen(4, 3, 1, 1));
+        Assert.EndsWith(" · 2 protegidas (mashups y remixes firmados)", GeneroPorReglasViewModel.TextoResumen(4, 3, 1, 2));
         Assert.StartsWith("«WarmUp» queda excluida", GeneroPorReglasViewModel.TextoReglaCambiada(1, "WarmUp", "", excluir: true));
         Assert.StartsWith("2 carpetas quedan excluidas", GeneroPorReglasViewModel.TextoReglaCambiada(2, "WarmUp", "", excluir: true));
         Assert.Equal("Regla quitada de «Salsa».", GeneroPorReglasViewModel.TextoReglaCambiada(1, "Salsa", "", excluir: false));
 
         var t = T(Rutas.De("A", "a.mp3"), "Feid", "Tema");
         var una = new[] { new GeneroReglaFila(new PropuestaGeneroRegla(t.FilePath, "Reggaeton", ReglaGenero.Carpeta, "Carpeta", true), t) };
-        Assert.Equal("Se pondrá género a 1 canción que no tiene: 1 por su carpeta y 0 por su artista.", GeneroPorReglasViewModel.Confirmacion(una).Cuerpo);
+        Assert.Equal("Se cambiará el género de 1 canción: 1 sin género.", GeneroPorReglasViewModel.Confirmacion(una).Cuerpo);
     }
 
     // Revisión de la tanda 3: el género corregido a mano en la tabla se escribía tal cual y creaba
@@ -1082,7 +1084,7 @@ public class AsistenteReglasTests : IDisposable
     }
 
     [Fact]
-    public void P9_la_confirmacion_cuenta_por_regla_y_avisa_de_las_que_no_salian_marcadas()
+    public void P9_la_confirmacion_cuenta_por_tipo_de_cambio_y_avisa_de_las_que_no_salian_marcadas()
     {
         var t = T(Rutas.De("A", "a.mp3"), "Feid", "Tema");
         var filas = new[]
@@ -1091,7 +1093,7 @@ public class AsistenteReglasTests : IDisposable
             new GeneroReglaFila(new PropuestaGeneroRegla(t.FilePath, "Rumba", ReglaGenero.Carpeta, "Carpeta", true), t),
         };
         var (cuerpo, nota) = GeneroPorReglasViewModel.Confirmacion(filas);
-        Assert.Contains("2 canciones que no tienen: 1 por su carpeta y 1 por su artista", cuerpo);
+        Assert.Equal("Se cambiará el género de 2 canciones: 2 sin género.", cuerpo);
         Assert.Contains("⚠ 1 no salía marcada", nota);
         Assert.Contains("«Recargar etiqueta»", nota);
 

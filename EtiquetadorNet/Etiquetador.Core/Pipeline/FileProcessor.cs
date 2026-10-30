@@ -439,9 +439,13 @@ public sealed class FileProcessor
         // el disco que devolvía fuera de otro artista. Visto en una biblioteca real, con la canción
         // bien identificada por Deezer (confianza 15-20): «Arcangel - Bali» → Gamelan, «Mad Mind -
         // Bien Duro» → Medieval, «COQE, JC Reyes - Multiplicando $$$» → Educational.
+        //
+        // Spotify ya no se consulta para el género. MEDIDO (octubre de 2026, credenciales de
+        // aplicación): el token y las 152 peticiones respondieron HTTP 200 y 75 de 77 artistas se
+        // encontraron, pero ninguno traía «genres»; el objeto artista ya no trae genres, popularity
+        // ni followers. Cada artista nuevo gastaba una petición para nada.
         string genre = "";
-        if (sp != null && sp.ArtistId.Length > 0) { var g = await _sp.ArtistGenreAsync(sp.ArtistId, o.SpotifyId, o.SpotifySecret, ct).ConfigureAwait(false); if (g.Length > 0) genre = g; }
-        if (genre.Length == 0 && dz != null && dz.AlbumId.Length > 0) { var g = await _dz.AlbumGenreAsync(dz.AlbumId, ct).ConfigureAwait(false); if (g.Length > 0) genre = g; }
+        if (dz != null && dz.AlbumId.Length > 0) { var g = await _dz.AlbumGenreAsync(dz.AlbumId, ct).ConfigureAwait(false); if (g.Length > 0) genre = g; }
         if (genre.Length == 0 && it != null && it.Genre.Length > 0) genre = it.Genre;
         if (genre.Length == 0 && sec != null && sec.Genre.Length > 0) genre = sec.Genre;
         if (genre.Length == 0 && sec != null && sec.AlbumId.Length > 0) { var g = await _dz.AlbumGenreAsync(sec.AlbumId, ct).ConfigureAwait(false); if (g.Length > 0) genre = g; }

@@ -326,6 +326,45 @@ public partial class AsistenteView : UserControl
         if (ok) await vm.GeneroReglas.AplicarAsync();
     }
 
+    // --- Género por artista: el mapa artista → género, con los mismos patrones que el de carpetas.
+
+    private IReadOnlyList<ArtistaGeneroFila> ArtistasSeleccionados()
+        => TablaArtistasGenero.SelectedItems.OfType<ArtistaGeneroFila>().ToList();
+
+    private void PonerReglaArtista_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not AsistenteViewModel vm) return;
+        // Lo que se ve escrito en el desplegable, aunque aún no haya pasado al modelo.
+        var genero = GeneroArtista.Text;
+        if (string.IsNullOrWhiteSpace(genero)) genero = GeneroArtista.SelectedItem as string ?? vm.GeneroReglas.GeneroElegido;
+        vm.GeneroReglas.PonerReglaArtista(ArtistasSeleccionados(), genero);
+    }
+
+    private void UsarSugerenciaArtista_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is AsistenteViewModel vm) vm.GeneroReglas.UsarSugerencia(ArtistasSeleccionados());
+    }
+
+    private void QuitarReglaArtista_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is AsistenteViewModel vm) vm.GeneroReglas.QuitarReglaArtista(ArtistasSeleccionados());
+    }
+
+    private void ExcluirArtista_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is AsistenteViewModel vm) vm.GeneroReglas.ExcluirArtista(ArtistasSeleccionados());
+    }
+
+    /// <summary>Al seleccionar un solo artista, el desplegable enseña su regla o, si no tiene, su sugerencia.</summary>
+    private void ArtistasGenero_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (DataContext is not AsistenteViewModel vm) return;
+        var sel = ArtistasSeleccionados();
+        if (sel.Count != 1) return;
+        var genero = sel[0].Genero.Length > 0 ? sel[0].Genero : sel[0].Datos.Sugerencia;
+        if (genero.Length > 0) vm.GeneroReglas.GeneroElegido = genero;
+    }
+
     private IReadOnlyList<CarpetaGeneroFila> CarpetasSeleccionadas()
         => TablaCarpetasGenero.SelectedItems.OfType<CarpetaGeneroFila>().ToList();
 

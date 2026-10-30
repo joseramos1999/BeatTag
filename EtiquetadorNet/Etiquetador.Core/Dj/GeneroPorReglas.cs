@@ -2,18 +2,74 @@ using Etiquetador.Core.Ai;
 
 namespace Etiquetador.Core.Dj;
 
-/// <summary>Qué regla propone el género.</summary>
+/// <summary>Qué regla propone el género. Las nuevas van al final.</summary>
 public enum ReglaGenero
 {
     /// <summary>El mapa carpeta → género que rellena el usuario. Es una decisión suya: manda.</summary>
     Carpeta,
     /// <summary>El género dominante del artista entre sus canciones que ya tienen género.</summary>
     Artista,
+    /// <summary>El estilo que nombra la propia versión: «(Bachata Version)», «(Moombahton Remix)».</summary>
+    Version,
+    /// <summary>El género que el usuario ha asignado al artista (generos-por-artista.json).</summary>
+    MapaArtista,
+    /// <summary>Un subgénero concreto del álbum en Deezer, para lo que las reglas no cubren (ver <see cref="GeneroDeezer"/>).</summary>
+    Deezer,
 }
 
-/// <summary>Un género propuesto para una canción que no tiene, con la regla y los datos que lo justifican.</summary>
-/// <param name="Marcada">Sale marcada solo si la regla es fuerte.</param>
-public sealed record PropuestaGeneroRegla(string Ruta, string Genero, ReglaGenero Regla, string PorQue, bool Marcada);
+/// <summary>A qué canciones se proponen géneros.</summary>
+public enum AlcanceGenero
+{
+    /// <summary>Solo a las que no tienen género (lo de antes).</summary>
+    SinGenero,
+    /// <summary>También a las que tienen un género genérico («Latin», «Dance», «Mashup»…).</summary>
+    SinGeneroYGenericos,
+    /// <summary>
+    /// También a las que tienen otro estilo concreto: esas salen desmarcadas, para revisarlas, salvo
+    /// cuando la propia versión indica su estilo (ver <see cref="GeneroPorReglas.Calcular"/>).
+    /// </summary>
+    Todas,
+}
+
+/// <summary>Qué hace la propuesta con el género que tiene la canción.</summary>
+public enum CambioGenero
+{
+    /// <summary>La canción no tiene género.</summary>
+    Rellenar,
+    /// <summary>Tiene un género genérico, o algo que no es un género.</summary>
+    SustituirGenerico,
+    /// <summary>Tiene otro estilo concreto.</summary>
+    Revisar,
+}
+
+/// <summary>Un género propuesto para una canción, con la regla y los datos que lo justifican.</summary>
+/// <param name="Marcada">Sale marcada solo si la regla es fiable para ese caso (ver <see cref="GeneroPorReglas.Calcular"/>).</param>
+/// <param name="GeneroActual">El género que tiene la canción al proponer, tal como está escrito ("" si ninguno).</param>
+public sealed record PropuestaGeneroRegla(string Ruta, string Genero, ReglaGenero Regla, string PorQue, bool Marcada,
+                                          string GeneroActual = "", CambioGenero Cambio = CambioGenero.Rellenar);
+
+/// <summary>Las reglas con las que se propone y a qué canciones.</summary>
+/// <param name="Carpetas">Carpeta → género ("" = carpeta excluida de la regla de su madre).</param>
+/// <param name="Artistas">Clave del artista principal → género ("" = artista excluido de la regla automática).</param>
+public sealed record OpcionesGeneroReglas(IReadOnlyDictionary<string, string> Carpetas, IReadOnlyDictionary<string, string> Artistas,
+                                          AlcanceGenero Alcance = AlcanceGenero.Todas);
+
+/// <summary>Lo que sale de proponer.</summary>
+/// <param name="Protegidas">Mashups y remixes firmados con otro estilo, que conservan su género frente a las reglas de carpeta y de artista.</param>
+/// <param name="Listas">Canciones con varios géneros («Rap; Hip Hop; Latino»), que no se tocan: son cosa de «Unificar géneros».</param>
+public sealed record CalculoGeneroReglas(List<PropuestaGeneroRegla> Propuestas, int Protegidas, int Listas);
+
+/// <summary>Un género del reparto de un artista y en cuántas de sus canciones va.</summary>
+/// <param name="Generico">Es un género genérico, que no cuenta para su sugerencia.</param>
+public readonly record struct RepartoGenero(string Genero, int Canciones, bool Generico);
+
+/// <summary>Lo que se sabe del género de un artista, para el mapa artista → género.</summary>
+/// <param name="Nombre">Cómo lo escribe la biblioteca (la grafía más repetida).</param>
+/// <param name="Canciones">Canciones en las que es el artista principal.</param>
+/// <param name="Reparto">Sus géneros, de más a menos canciones, con los genéricos marcados.</param>
+/// <param name="Sugerencia">El género dominante sin contar los genéricos, si la regla automática lo propone; "" si no.</param>
+public sealed record ResumenArtista(string Clave, string Nombre, int Canciones, int SinGenero, IReadOnlyList<RepartoGenero> Reparto,
+                                    string Sugerencia, int Con, int Total, bool Fuerte);
 
 /// <summary>
 /// Una carpeta con canciones sin género, para que el usuario decida qué género le corresponde. Las
@@ -29,28 +85,42 @@ public sealed record CarpetaSinGenero(string Ruta, int SinGenero, int Total, str
                                       bool Subcarpetas = false);
 
 /// <summary>
-/// Poner género a las canciones que no tienen, sin IA (idea P9).
+/// Poner o corregir el género de las canciones con reglas, sin IA (idea P9, ampliada con el género
+/// por artista).
 ///
 /// MEDIDO en una biblioteca real: 2.566 de 13.550 archivos no tienen género (19 %), y ni las Colecciones
-/// por género ni el filtro de género de rekordbox los ven. Dos reglas, en este orden:
+/// por género ni el filtro de género de rekordbox los ven. Manda, por este orden, la primera regla que
+/// tenga género para la canción:
 ///
-///   1. Carpeta: un mapa carpeta → género que rellena el usuario («Flamenco Rumbas» → Rumba). Vale para
+///   1. Versión: el estilo que nombra la propia versión («(Bachata Version)», «(Moombahton Remix)»;
+///      ver <see cref="EstiloDeVersion"/>). Si la versión dice su estilo, ninguna otra regla la mira.
+///   2. Carpeta: un mapa carpeta → género que rellena el usuario («Flamenco Rumbas» → Rumba). Vale para
 ///      la carpeta y sus subcarpetas, y si hay reglas para varias, manda la más específica (la más
 ///      profunda). El mapa es explícito a propósito: hay carpetas que mezclan estilos («WarmUp»,
 ///      «Erasmus») y deducirlo del nombre o de su contenido las estropearía.
-///   2. Artista: el género dominante del artista principal entre sus canciones que ya tienen género,
-///      después de normalizarlas con las mismas reglas que «Unificar géneros». Solo con un mínimo de
-///      canciones y un dominio claro (ver <see cref="MinimoCanciones"/> y <see cref="DominioMinimo"/>).
+///   3. El mapa artista → género que rellena el usuario («Anuel AA» → Reggaeton), por el artista
+///      principal. Hace falta porque la regla automática no cubre a los artistas que mezclan estilos:
+///      medido, de 729 artistas con 3 o más canciones con género solo 222 llegan al 70 % con uno.
+///   4. Artista: el género dominante del artista principal entre sus canciones que ya tienen género,
+///      después de normalizarlas con las mismas reglas que «Unificar géneros» y sin contar los
+///      genéricos. Solo con un mínimo de canciones y un dominio claro (ver <see cref="MinimoCanciones"/>
+///      y <see cref="DominioMinimo"/>).
 ///
-/// Nunca pisa un género existente, y no usa la IA: está medido que en lote acierta 1 de cada 20 y que
-/// el modelo de 8B confunde estilos («Urban House» → Hip Hop).
+/// Qué sale marcado depende del género que ya tiene la canción (ver <see cref="Calcular"/>): si no
+/// tiene o tiene uno genérico, se rellena o se sustituye; si tiene otro estilo, la propuesta sale
+/// desmarcada para revisarla, salvo la de la versión, que manda; frente a las reglas de carpeta y de
+/// artista, los mashups y los remixes firmados conservan su estilo. No usa la IA:
+/// está medido que en lote acierta 1 de cada 20 y que el modelo de 8B confunde estilos («Urban House»
+/// → Hip Hop). Tampoco el BPM: medido, por sí solo acierta el estilo un 30,6 %, lo mismo que decir
+/// siempre el género más frecuente, porque a 90-100 BPM conviven reggaeton, hip hop, pop y flamenco.
 /// </summary>
 public static class GeneroPorReglas
 {
     /// <summary>
     /// Canciones con género que necesita el artista para que su género cuente. Con dos, que coincidan
     /// puede ser casualidad (un remix, una colaboración con otro estilo); con tres ya es una tendencia.
-    /// No depende del tamaño de la biblioteca: es lo que se sabe de UN artista.
+    /// No depende del tamaño de la biblioteca: es lo que se sabe de UN artista. Los géneros genéricos
+    /// no cuentan (ver <see cref="GenerosPorArtista"/>).
     /// </summary>
     public const int MinimoCanciones = 3;
 
@@ -69,8 +139,16 @@ public static class GeneroPorReglas
     /// tiene y proponiéndolo con las demás de su artista: con 3 o más y un 70 % salen 2.185 propuestas
     /// y el 74 % coincide exactamente con el género oculto (casi todos los fallos son géneros vecinos,
     /// «Latin» por «Reggaeton»); las fuertes coinciden en el 86 %; por debajo del 70 %, solo entre el
-    /// 33 % y el 50 %. En las 2.597 canciones sin género, el artista propone 280 (7 fuertes): la
-    /// regla de carpeta es la que más cubre, y por eso va primero.
+    /// 33 % y el 50 %.
+    ///
+    /// Sin contar los géneros genéricos («Latin», «Dance», «Electro»…), que no dicen qué estilo es, la
+    /// regla cubre un 42 % más (2.830 canciones frente a 1.988) con el mismo acierto (78,1 % frente a
+    /// 77,8 %; las fuertes, 87,2 % frente a 87,9 %), y coincide más con las carpetas en las que el
+    /// usuario ordena sus estilos (83,0 % frente a 78,3 %; las fuertes, 74,6 % frente a 56,2 %). Los
+    /// umbrales no se tocan: por debajo del 70 % entran artistas que de verdad mezclan estilos.
+    ///
+    /// Que las fuertes coincidan con las carpetas solo un 75 % es lo que impide marcar con ellas una
+    /// SUSTITUCIÓN: «fuerte» solo marca el relleno de canciones sin género.
     /// </remarks>
     public const int MinimoFuerte = 5;
 
@@ -110,7 +188,11 @@ public static class GeneroPorReglas
         };
     }
 
-    /// <summary>La canción no tiene género (vacío o en blanco). Lo que no es un género tampoco se pisa: eso lo arregla «Unificar géneros».</summary>
+    /// <summary>
+    /// La canción no tiene género (vacío o en blanco). Lo que no es un género («@usuario») no cuenta
+    /// aquí: para <see cref="Calcular"/> es un género genérico, que solo se sustituye si el alcance lo
+    /// incluye.
+    /// </summary>
     public static bool SinGenero(Track t) => string.IsNullOrWhiteSpace(t.Genre);
 
     /// <summary>Clave para agrupar géneros: «reggaeton» y «Reggaetón» son el mismo.</summary>
@@ -341,22 +423,111 @@ public static class GeneroPorReglas
     }
 
     /// <summary>
-    /// El género de cada artista principal entre sus canciones con género: el dominante, cuántas lo
-    /// llevan y cuántas tienen alguno.
+    /// <see cref="FamiliasGenero.EsGenerico"/> con memoria, como <see cref="Normalizador"/>: cada
+    /// consulta normaliza el nombre con varias expresiones regulares.
     /// </summary>
-    public static Dictionary<string, (string Genero, int Con, int Total)> GenerosPorArtista(IEnumerable<Track> canciones)
+    private static Func<string, bool> DetectorGenerico()
     {
-        var porArtista = new Dictionary<string, List<string?>>(StringComparer.Ordinal);
+        var vistos = new Dictionary<string, bool>(StringComparer.Ordinal);
+        return g =>
+        {
+            if (!vistos.TryGetValue(g, out var si)) vistos[g] = si = FamiliasGenero.EsGenerico(g);
+            return si;
+        };
+    }
+
+    /// <summary>
+    /// El género de cada artista principal entre sus canciones con género: el dominante, cuántas lo
+    /// llevan, cuántas tienen alguno y cuántas se han dejado fuera por tener un género genérico.
+    ///
+    /// Las canciones con un género genérico («Latin», «Dance», «Electro», «Mashup»…) no cuentan, ni
+    /// para el dominante ni para el total: no dicen qué estilo pincha el artista, y contarlas hundía
+    /// el dominio de artistas muy claros (Daddy Yankee pasa del 67 % al 77 % sin ellas, Ozuna del 68 %
+    /// al 77 %). Así, además, un género genérico no puede salir como dominante.
+    /// </summary>
+    public static Dictionary<string, (string Genero, int Con, int Total, int Genericos)> GenerosPorArtista(IEnumerable<Track> canciones)
+    {
+        var porArtista = new Dictionary<string, (List<string?> Generos, int Genericos)>(StringComparer.Ordinal);
         var normalizado = Normalizador();
+        var generico = DetectorGenerico();
         foreach (var t in canciones)
         {
             if (normalizado(t.Genre) is not { } g) continue;
             var a = ClaveArtista(t.Artist);
             if (a.Length == 0) continue;
-            if (!porArtista.TryGetValue(a, out var l)) porArtista[a] = l = new List<string?>();
-            l.Add(g);
+            if (!porArtista.TryGetValue(a, out var l)) l = (new List<string?>(), 0);
+            if (generico(g)) l.Genericos++;
+            else l.Generos.Add(g);
+            porArtista[a] = l;
         }
-        return porArtista.ToDictionary(kv => kv.Key, kv => Dominante(kv.Value), StringComparer.Ordinal);
+        return porArtista.ToDictionary(kv => kv.Key, kv =>
+        {
+            var (genero, con, total) = Dominante(kv.Value.Generos);
+            return (genero, con, total, kv.Value.Genericos);
+        }, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// El resumen de cada artista principal, de más a menos canciones: cómo lo escribe la biblioteca,
+    /// cuántas canciones tiene y cuántas sin género, su reparto de géneros (genéricos incluidos y
+    /// señalados) y lo que propone la regla automática. Es lo que enseña el mapa artista → género para
+    /// que el usuario decida. Lineal: va fuera del hilo de la interfaz.
+    /// </summary>
+    public static List<ResumenArtista> ResumenArtistas(IEnumerable<Track> canciones, CancellationToken ct = default)
+    {
+        var datos = new Dictionary<string, Acumulado>(StringComparer.Ordinal);
+        var normalizado = Normalizador();
+        var generico = DetectorGenerico();
+        foreach (var t in canciones)
+        {
+            ct.ThrowIfCancellationRequested();
+            var clave = ClaveArtista(t.Artist);
+            if (clave.Length == 0) continue;
+            if (!datos.TryGetValue(clave, out var a)) datos[clave] = a = new Acumulado();
+            a.Canciones++;
+            var nombre = IndiceArtistas.Partir(t.Artist).First();
+            a.Grafias[nombre] = a.Grafias.GetValueOrDefault(nombre) + 1;
+            if (SinGenero(t)) { a.SinGenero++; continue; }
+            if (normalizado(t.Genre) is not { } g) continue;
+            var k = ClaveGenero(g);
+            if (k.Length == 0) continue;
+            a.Generos[k] = a.Generos.TryGetValue(k, out var v) ? (v.Nombre, v.N + 1) : (g, 1);
+        }
+
+        var res = new List<ResumenArtista>(datos.Count);
+        foreach (var (clave, a) in datos)
+        {
+            var reparto = a.Generos.Values
+                .Select(v => new RepartoGenero(v.Nombre, v.N, generico(v.Nombre)))
+                .OrderByDescending(r => r.Canciones).ThenBy(r => r.Genero, StringComparer.Ordinal)
+                .ToList();
+            // El mismo dominante que GenerosPorArtista: el de más canciones sin contar los genéricos.
+            var (dominante, con, total) = Dominante(reparto.Where(r => !r.Generico).SelectMany(r => Enumerable.Repeat<string?>(r.Genero, r.Canciones)));
+            var (propone, fuerte) = Fuerza(con, total);
+            var nombre = a.Grafias.OrderByDescending(f => f.Value)
+                                  .ThenBy(f => f.Key.Any(char.IsLetter) && !f.Key.Any(char.IsLower))
+                                  .ThenBy(f => f.Key, StringComparer.Ordinal)
+                                  .First().Key;
+            res.Add(new ResumenArtista(clave, nombre, a.Canciones, a.SinGenero, reparto, propone ? dominante : "", con, total, fuerte));
+        }
+        return res.OrderByDescending(r => r.Canciones).ThenBy(r => r.Nombre, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    /// <summary>Lo que se va sumando de un artista para su resumen.</summary>
+    private sealed class Acumulado
+    {
+        public int Canciones, SinGenero;
+        public readonly Dictionary<string, int> Grafias = new(StringComparer.Ordinal);
+        /// <summary>Clave del género → cómo se escribe (el primero que se vio) y en cuántas va.</summary>
+        public readonly Dictionary<string, (string Nombre, int N)> Generos = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>El reparto como se enseña: «Reggaeton 71 · Trap 32 · Latin 10».</summary>
+    public static string TextoReparto(IEnumerable<RepartoGenero> reparto, int maximo = 6)
+    {
+        var lista = reparto.ToList();
+        var texto = string.Join(" · ", lista.Take(maximo).Select(r => $"{r.Genero} {r.Canciones:N0}"));
+        return lista.Count > maximo ? texto + " · …" : texto;
     }
 
     /// <summary>¿Basta lo que se sabe del artista para proponer? Y si es así, ¿es lo bastante fuerte para marcarlo?</summary>
@@ -368,41 +539,214 @@ public static class GeneroPorReglas
         return (true, total >= MinimoFuerte && dominio >= DominioFuerte);
     }
 
-    /// <summary>
-    /// Los géneros propuestos para las canciones sin género. La regla de carpeta va primero (es una
-    /// decisión del usuario) y sale marcada; la del artista solo se mira si ninguna carpeta cubre la
-    /// canción, y sale marcada solo si es fuerte. El recorrido es lineal: va fuera del hilo de la
-    /// interfaz, pero con veinte mil canciones dura poco.
-    /// </summary>
+    /// <summary>Los géneros propuestos para las canciones sin género, con el mapa de carpetas y la regla del artista (lo de antes).</summary>
     public static List<PropuestaGeneroRegla> Proponer(IReadOnlyList<Track> canciones, IReadOnlyDictionary<string, string> mapa,
                                                       CancellationToken ct = default)
+        => Proponer(canciones, new OpcionesGeneroReglas(mapa, new Dictionary<string, string>(), AlcanceGenero.SinGenero), ct);
+
+    /// <summary>Los géneros propuestos con estas reglas y este alcance (ver <see cref="Calcular"/>).</summary>
+    public static List<PropuestaGeneroRegla> Proponer(IReadOnlyList<Track> canciones, OpcionesGeneroReglas op, CancellationToken ct = default)
+        => Calcular(canciones, op, ct).Propuestas;
+
+    /// <summary>Tipos de versión que, firmados por alguien, son otra canción con su propio estilo.</summary>
+    private static readonly HashSet<string> VersionesFirmadas = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Remix", "Bootleg", "Rework", "Refix", "Flip", "VIP", "Dub",
+    };
+
+    /// <summary>
+    /// Un remix firmado: «Bonita (ADRUKID Remix)». Se lee del título y, si no lo hay, del nombre del
+    /// archivo. Un «(Remix)» sin autor no lo es, ni las versiones de utilidad de los pools (Extended,
+    /// Intro, Edit, Acapella), que siguen siendo el tema tal cual.
+    /// </summary>
+    public static bool RemixFirmado(Track t)
+    {
+        var texto = string.IsNullOrWhiteSpace(t.Title) ? Path.GetFileNameWithoutExtension(t.FilePath) : t.Title;
+        var r = RemixParser.Parse(texto);
+        return r.IsVersion && VersionesFirmadas.Contains(r.Kind) && RemixParser.Autor(r.Remixer).Length > 0;
+    }
+
+    // Un tipo de versión escrito como género: dice que la canción es un mashup o una transición.
+    private static readonly HashSet<string> GenerosDeMezcla = new(StringComparer.Ordinal) { "mashup", "mash up", "transition", "transicion" };
+
+    /// <summary>
+    /// Un mashup, una transición o un blend: por el nombre del archivo o del título, por estar en una
+    /// carpeta de mashups (<see cref="IndiceVersiones.Clasificar"/>) o porque su género lo dice.
+    /// </summary>
+    public static bool EsMezcla(Track t)
+        => IndiceVersiones.Clasificar(t.FilePath) == TipoPieza.Mezcla || Matching.IsMezclaDeVariosTemas(t.Title)
+           || GenerosDeMezcla.Contains(FamiliasGenero.Clave(t.Genre));
+
+    /// <summary>
+    /// Mashups y remixes firmados: conservan su estilo. MEDIDO en una biblioteca real: sustituir su
+    /// género concreto por el del artista estropeó 23 de 28 revisados a mano, porque el estilo es el
+    /// de quien lo rehízo o el del otro tema. En un remix firmado el artista principal solo acierta el
+    /// estilo de la carpeta del usuario en el 42 % de los casos, frente al 75 % del tema original y el
+    /// 81 % de Extended, Intro y Acapella, que por eso no protegen. El remixer tampoco sirve para
+    /// deducir: acierta un 53 %.
+    /// </summary>
+    public static bool Protegida(Track t) => EsMezcla(t) || RemixFirmado(t);
+
+    /// <summary>
+    /// Los géneros propuestos, recorriendo la biblioteca una vez (fuera del hilo de la interfaz; con
+    /// veinte mil canciones dura poco).
+    ///
+    /// Para cada canción que entra en el alcance: si su género es una lista, no se toca (es cosa de
+    /// «Unificar géneros»). Si la versión dice su estilo, se propone ese y ninguna otra regla la mira.
+    /// Si no, la primera regla con género: la carpeta, el mapa del usuario por artista o el dominante
+    /// automático del artista. Lo que sale marcado depende del género que ya tiene:
+    ///   · Ninguno: marcada si la regla es de carpeta (como siempre, aunque sea un mashup) o del mapa
+    ///     del usuario y la canción no está protegida; con el dominante automático, solo si es fuerte y
+    ///     no está protegida.
+    ///   · Uno genérico: se propone sustituirlo, marcada salvo que esté protegida. MEDIDO: 0
+    ///     estropicios en 15 revisadas a mano y en 178 comparadas con las carpetas del usuario.
+    ///   · El mismo: nada.
+    ///   · Otro estilo concreto: nada si está protegida o es de la misma familia (se perdería detalle:
+    ///     Trap bajo Hip Hop); si no, desmarcada para revisar. MEDIDO: un 82 % eran arreglos, pero no
+    ///     todos, y el dominante fuerte solo coincide con las carpetas del usuario un 56 %.
+    /// La versión sale marcada, también sobre otro estilo concreto (es lo que pide un DJ: si el remix
+    /// o la versión dice su estilo, ese manda), salvo que su estilo sea ambiguo, que solo lo diga el
+    /// álbum o que la canción tenga otro estilo de la misma familia: entonces se propone desmarcada.
+    /// </summary>
+    public static CalculoGeneroReglas Calcular(IReadOnlyList<Track> canciones, OpcionesGeneroReglas op, CancellationToken ct = default)
     {
         var artistas = GenerosPorArtista(canciones);
+        var normalizado = Normalizador();
+        var generico = DetectorGenerico();
+        var biblioteca = GenerosDeLaBiblioteca(canciones).Select(g => g.Genero).ToList();
+        var comoEnLaBiblioteca = new Dictionary<string, string>(StringComparer.Ordinal);
+        string Escrito(string estilo)
+        {
+            if (!comoEnLaBiblioteca.TryGetValue(estilo, out var e)) comoEnLaBiblioteca[estilo] = e = ComoEnLaBiblioteca(estilo, biblioteca);
+            return e;
+        }
+
         var res = new List<PropuestaGeneroRegla>();
+        int protegidas = 0, listas = 0;
         foreach (var t in canciones)
         {
             ct.ThrowIfCancellationRequested();
-            if (!SinGenero(t)) continue;
 
-            if (ReglaDeCarpeta(mapa, t.FilePath) is { } regla)
+            // La clase del género que ya tiene: vacío, genérico (o algo que no es un género) o concreto.
+            var actual = (t.Genre ?? "").Trim();
+            var vacio = actual.Length == 0;
+            if (!vacio && GenerosIa.EsLista(actual))
             {
-                var propia = Rutas.MismaCarpeta(Path.GetDirectoryName(t.FilePath) ?? "", regla.Carpeta);
-                var porQue = propia
-                    ? $"Carpeta «{NombreCarpeta(regla.Carpeta)}» → {regla.Genero}"
-                    : $"Carpeta «{NombreCarpeta(regla.Carpeta)}» (y sus subcarpetas) → {regla.Genero}";
-                res.Add(new PropuestaGeneroRegla(t.FilePath, regla.Genero, ReglaGenero.Carpeta, porQue, true));
+                if (op.Alcance != AlcanceGenero.SinGenero) listas++;
+                continue;
+            }
+            var actualNorm = vacio ? null : normalizado(actual);
+            var esGenerico = !vacio && (actualNorm == null || generico(actualNorm));
+            var cambio = vacio ? CambioGenero.Rellenar : esGenerico ? CambioGenero.SustituirGenerico : CambioGenero.Revisar;
+            if (!Admite(op.Alcance, cambio)) continue;
+            var claveActual = actualNorm == null ? "" : Compacta(actualNorm);
+
+            // 1. El estilo que dice la propia versión. Si confirma el que tiene, no hay nada que hacer.
+            if (EstiloDeVersion.De(t.Title, Path.GetFileNameWithoutExtension(t.FilePath), t.Artist, t.Album) is { } v)
+            {
+                var estilo = Escrito(v.Estilo);
+                if (claveActual.Length > 0 && Compacta(estilo) == claveActual) continue;
+                var mismaFamilia = cambio == CambioGenero.Revisar && FamiliasGenero.MismaFamilia(actualNorm, estilo);
+                var marcada = !v.Ambiguo && v.Fuente != FuenteEstilo.Album && !mismaFamilia;
+                var porQue = v.Fuente == FuenteEstilo.Album
+                    ? $"Álbum «{t.Album?.Trim()}» → {estilo}: puede describir el pack, revísalo"
+                    : $"Versión «{v.Texto}» → {estilo}";
+                if (v.Ambiguo) porQue += $" · «{v.Estilo}» puede nombrar varios estilos: revísalo";
+                res.Add(new PropuestaGeneroRegla(t.FilePath, estilo, ReglaGenero.Version, porQue + Sufijo(cambio, actual, marcada, false),
+                                                 marcada, t.Genre ?? "", cambio));
                 continue;
             }
 
-            var clave = ClaveArtista(t.Artist);
-            if (clave.Length == 0 || !artistas.TryGetValue(clave, out var d)) continue;
-            var (propone, fuerte) = Fuerza(d.Con, d.Total);
-            if (!propone) continue;
-            var artista = IndiceArtistas.Partir(t.Artist).First();
-            res.Add(new PropuestaGeneroRegla(t.FilePath, d.Genero, ReglaGenero.Artista,
-                $"Artista «{artista}»: {d.Con} de {d.Total} canciones con {d.Genero}", fuerte));
+            // 2. La primera regla con género: carpeta, mapa del usuario o dominante automático.
+            string genero, porQueRegla;
+            ReglaGenero regla;
+            var fuerte = false;
+            if (ReglaDeCarpeta(op.Carpetas, t.FilePath) is { } rc)
+            {
+                var propia = Rutas.MismaCarpeta(Path.GetDirectoryName(t.FilePath) ?? "", rc.Carpeta);
+                (genero, regla) = (rc.Genero, ReglaGenero.Carpeta);
+                porQueRegla = propia
+                    ? $"Carpeta «{NombreCarpeta(rc.Carpeta)}» → {rc.Genero}"
+                    : $"Carpeta «{NombreCarpeta(rc.Carpeta)}» (y sus subcarpetas) → {rc.Genero}";
+            }
+            else
+            {
+                var clave = ClaveArtista(t.Artist);
+                if (clave.Length == 0) continue;
+                var artista = IndiceArtistas.Partir(t.Artist).First();
+                if (op.Artistas.TryGetValue(clave, out var suyo))
+                {
+                    // "" es un artista excluido: tampoco le vale la regla automática.
+                    if ((suyo ?? "").Trim().Length == 0) continue;
+                    (genero, regla) = (suyo!.Trim(), ReglaGenero.MapaArtista);
+                    porQueRegla = $"Tu regla: «{artista}» → {genero}";
+                }
+                else if (artistas.TryGetValue(clave, out var d) && Fuerza(d.Con, d.Total) is { Propone: true } f)
+                {
+                    (genero, regla, fuerte) = (d.Genero, ReglaGenero.Artista, f.Fuerte);
+                    porQueRegla = $"Artista «{artista}»: {d.Con} de {d.Total} canciones con {d.Genero}"
+                                  + (d.Genericos > 0 ? " (sin contar géneros genéricos)" : "");
+                }
+                else continue;
+            }
+
+            // 3. La decisión, según el género que ya tiene.
+            if (claveActual.Length > 0 && Compacta(genero) == claveActual) continue;
+            // Una canción sin género con regla de carpeta sale marcada aunque sea un mashup: no hace falta mirarlo.
+            var protegida = (regla != ReglaGenero.Carpeta || cambio != CambioGenero.Rellenar) && Protegida(t);
+            bool marcar;
+            switch (cambio)
+            {
+                case CambioGenero.Rellenar:
+                    marcar = regla switch
+                    {
+                        ReglaGenero.Carpeta => true,
+                        ReglaGenero.MapaArtista => !protegida,
+                        _ => fuerte && !protegida,
+                    };
+                    break;
+                case CambioGenero.SustituirGenerico:
+                    marcar = !protegida;
+                    break;
+                default:
+                    if (protegida) { protegidas++; continue; }
+                    if (FamiliasGenero.MismaFamilia(actualNorm, genero)) continue;
+                    marcar = false;
+                    break;
+            }
+            res.Add(new PropuestaGeneroRegla(t.FilePath, genero, regla, porQueRegla + Sufijo(cambio, actual, marcar, protegida && !marcar),
+                                             marcar, t.Genre ?? "", cambio));
         }
-        return res;
+        return new CalculoGeneroReglas(res, protegidas, listas);
+    }
+
+    /// <summary>
+    /// La clave del género sin espacios, para saber si una propuesta deja el mismo género: «Afrohouse»
+    /// y «Afro House», o «HipHop» y «Hip Hop», son el mismo. Visto al validar en una biblioteca real:
+    /// «(Afro House)» proponía cambiar «Afrohouse» por «Afro House».
+    /// </summary>
+    private static string Compacta(string genero) => ClaveGenero(genero).Replace(" ", "", StringComparison.Ordinal);
+
+    /// <summary>El alcance elegido incluye canciones con ese género (ninguno, genérico u otro estilo).</summary>
+    private static bool Admite(AlcanceGenero alcance, CambioGenero cambio) => alcance switch
+    {
+        AlcanceGenero.SinGenero => cambio == CambioGenero.Rellenar,
+        AlcanceGenero.SinGeneroYGenericos => cambio != CambioGenero.Revisar,
+        _ => true,
+    };
+
+    /// <summary>Lo que se añade al «Por qué» según lo que hace la propuesta con el género que ya tiene.</summary>
+    private static string Sufijo(CambioGenero cambio, string actual, bool marcada, bool protegida)
+    {
+        var texto = cambio switch
+        {
+            CambioGenero.SustituirGenerico => GenerosIa.NoEsGenero(actual)
+                ? $" · sustituye «{actual}», que no es un género"
+                : $" · sustituye «{actual}», un género genérico",
+            CambioGenero.Revisar => marcada ? $" · sustituye «{actual}»" : $" · para revisar: la canción tiene {actual}",
+            _ => "",
+        };
+        return protegida ? texto + " · mashup o remix firmado: comprueba a qué tema corresponde" : texto;
     }
 
     /// <summary>

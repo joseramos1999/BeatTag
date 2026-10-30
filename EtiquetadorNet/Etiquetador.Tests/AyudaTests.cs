@@ -90,6 +90,8 @@ public class AyudaTests
             AlmacenPendientes.NombreArchivo,
             AlmacenListasSeguidas.NombreArchivo,
             MapaGenerosCarpeta.NombreArchivo,
+            // Género por artista: el mapa artista → género, hecho a mano como el de carpetas.
+            MapaGenerosArtista.NombreArchivo,
             Path.GetFileName(SustitucionBandeja.CarpetaDiario("datos")),
             // Pulido de la tanda 3: guarda la ficha y lo decidido sobre la copia antigua mientras
             // está en la papelera. Perderlo deja sin ficha la canción al deshacer la sustitución.
@@ -307,6 +309,14 @@ public class AyudaTests
     [InlineData("Analizar audio", "Views/DuplicatesView.axaml")]
     [InlineData("Marcar sobrantes", "Views/DuplicatesView.axaml")]
     [InlineData("Única de su edición", "ViewModels/DuplicatesViewModel.cs")]
+    // Género por artista: el mapa por artista, el alcance y el filtro de las propuestas.
+    [InlineData("Poner a los seleccionados", "Views/AsistenteView.axaml")]
+    [InlineData("Usar la sugerencia", "Views/AsistenteView.axaml")]
+    [InlineData("Excluir de la regla automática", "Views/AsistenteView.axaml")]
+    [InlineData("Proponer para", "Views/AsistenteView.axaml")]
+    [InlineData("Para revisar", "Views/AsistenteView.axaml")]
+    [InlineData("Para revisar", "ViewModels/GeneroPorReglasViewModel.cs")]
+    [InlineData("Buscar en Deezer las canciones sin género que siguen sin propuesta", "Views/AsistenteView.axaml")]
     public void Lo_que_cita_la_Ayuda_existe_en_la_pantalla(string rotulo, string archivo)
     {
         var fuente = Fuente(new[] { "Etiquetador.App" }.Concat(archivo.Split('/')).ToArray());
@@ -443,6 +453,9 @@ public class AyudaTests
     [InlineData("corrige las grabaciones que se desvían", "«Ajustar volumen» solo corrige las marcadas en la columna «Ajustar» y nunca las excluidas")]
     [InlineData("detecta la tonalidad", "la detección de la tonalidad por el audio no se ofrece en la interfaz")]
     [InlineData("deduce la tonalidad", "la detección de la tonalidad por el audio no se ofrece en la interfaz")]
+    // Género por artista: «Género por carpeta y artista» sustituye géneros genéricos y propone revisar otros estilos.
+    [InlineData("sin cambiar nunca un género existente", "«Género por carpeta y artista» sustituye los géneros genéricos y propone revisar los demás")]
+    [InlineData("nunca cambia un género existente", "«Género por carpeta y artista» sustituye los géneros genéricos y propone revisar los demás")]
     public void La_Ayuda_y_el_README_no_dicen_lo_que_el_codigo_ya_no_hace(string expresion, string motivo)
     {
         Assert.False(TodaLaAyuda().Contains(expresion, StringComparison.OrdinalIgnoreCase), $"la Ayuda dice «{expresion}», y {motivo}");
