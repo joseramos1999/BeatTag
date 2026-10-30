@@ -187,19 +187,24 @@ public static class EstiloDeVersion
 
     // Un artículo o una preposición delante dice que la palabra es parte del nombre de la canción, no
     // su estilo: «Llegamos A La Disco Remix», «El Mambo Remix». Visto al validar en una biblioteca real.
-    // «DJ» y «MC» delante dicen que es el nombre artístico de quien hizo la versión: «(DJ Mambo Remix)».
     private static readonly HashSet<string> Articulos = new(StringComparer.OrdinalIgnoreCase)
     {
         "la", "el", "los", "las", "lo", "un", "una", "de", "del", "al", "a", "en", "the", "mi", "tu", "su", "my",
-        "dj", "mc",
     };
+
+    // «DJ» y «MC» abriendo el fragmento dicen que lo que sigue es el nombre artístico de quien hizo la
+    // versión: «(DJ Mambo Remix)». Detrás de otro nombre suelen cerrarlo, y entonces el estilo sí lo
+    // es: «(Alex Gramage DJ Mambo Remix)», visto al validar en una biblioteca real.
+    private static readonly HashSet<string> Prefijos = new(StringComparer.OrdinalIgnoreCase) { "dj", "mc" };
 
     private static bool TrasArticulo(string texto, int posicion)
     {
         var antes = texto[..posicion].TrimEnd();
         var i = antes.Length;
         while (i > 0 && char.IsLetter(antes[i - 1])) i--;
-        return i < antes.Length && Articulos.Contains(antes[i..]);
+        if (i == antes.Length) return false;
+        var palabra = antes[i..];
+        return Articulos.Contains(palabra) || (Prefijos.Contains(palabra) && antes[..i].Trim().Length == 0);
     }
 
     /// <summary>Dentro de un paréntesis o un corchete valen los tres contextos.</summary>

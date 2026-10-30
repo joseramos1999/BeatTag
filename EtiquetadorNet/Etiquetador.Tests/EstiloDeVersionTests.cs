@@ -74,12 +74,16 @@ public class EstiloDeVersionTests
     public void Un_estilo_fuera_del_contexto_de_version_no_cuenta(string titulo, string? artista)
         => Assert.Null(EstiloDeVersion.De(titulo, titulo, artista, null));
 
-    // El estilo disco sí cuenta cuando el paréntesis no dice otra cosa, o como Nu Disco.
+    // El estilo disco sí cuenta cuando el paréntesis no dice otra cosa, o como Nu Disco; y el estilo que
+    // va detrás del nombre de quien hizo la versión, también.
     [Theory]
     [InlineData("Got To Be Real (Disco)", "Disco")]
     [InlineData("Midnight City (Nu Disco Remix)", "Nu Disco")]
     [InlineData("Tema (DJ Pepe Techno Remix)", "Techno")]
-    public void Disco_suelto_y_Nu_Disco_si_son_estilos(string titulo, string estilo)
+    // Visto al validar en una biblioteca real: detrás de otro nombre, «DJ» lo cierra («Alex Gramage DJ»).
+    [InlineData("Bad Boy (Alex Gramage DJ Mambo Remix)", "Mambo")]
+    [InlineData("Bad Boy - Alex Gramage DJ Mambo Remix", "Mambo")]
+    public void Disco_suelto_Nu_Disco_y_el_estilo_detras_del_remixer_si_cuentan(string titulo, string estilo)
         => Assert.Equal(estilo, EstiloDeVersion.De(titulo, null, null, null)?.Estilo);
 
     [Fact]
