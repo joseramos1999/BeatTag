@@ -732,6 +732,12 @@ public class OrganizarPorGeneroPlanTests
             Assert.True(disco.ExisteArchivo(Path.Combine(genero, "TITÍ.mp3".Normalize(NormalizationForm.FormD))));
             Assert.False(disco.ExisteArchivo(Path.Combine(genero, "Otro.mp3")));
             Assert.False(disco.ExisteArchivo(Path.Combine(dir, "No existe", "x.mp3")));
+
+            // Los asociados, con el nombre que tienen en el disco (también en macOS, que lista distinguiendo mayúsculas).
+            File.WriteAllText(Path.Combine(genero, "Tití.mp3.ASD"), "x");
+            Assert.Equal(Path.Combine(genero, "Tití.mp3.ASD"), disco.ArchivoReal(Path.Combine(genero, "TITÍ.mp3.asd".Normalize(NormalizationForm.FormD))));
+            Assert.Null(disco.ArchivoReal(Path.Combine(genero, "Tití.lrc")));
+            Assert.Null(disco.ArchivoReal(Path.Combine(dir, "Reggaetón")));   // una carpeta no es un archivo
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }

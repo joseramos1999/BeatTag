@@ -107,13 +107,20 @@ public sealed class DiscoReal : IAccesoDisco
     {
         var dir = Path.GetDirectoryName(ruta);
         if (string.IsNullOrEmpty(dir)) return null;
-        var archivos = Listar(_archivos, dir, Directory.EnumerateFiles);
+        // Solo los de su extensión: se pregunta por los asociados (.asd, .cue, .lrc) de miles de
+        // canciones, y listar cada carpeta entera para eso costaba más que el resto del plan.
+        var ext = Path.GetExtension(ruta);
+        var archivos = Listar(_archivos, dir, d => ext.Length == 0 ? Directory.EnumerateFiles(d) : Directory.EnumerateFiles(d, "*" + ext, PorExtension),
+                              clave: dir + "\0" + ext);
         if (archivos != null)
             return archivos.TryGetValue(ComparadorRutas.Clave(Path.GetFileName(ruta)), out var real) ? Path.Combine(dir, real) : null;
         return File.Exists(ruta) ? ruta : null;
     }
 
     private readonly Dictionary<string, Dictionary<string, string>?> _archivos = new(ComparadorRutas.Instancia);
+
+    // Sin distinguir mayúsculas también en macOS («Tema.mp3.ASD»), y sin saltarse los ocultos, como al listar la carpeta entera.
+    private static readonly EnumerationOptions PorExtension = new() { MatchCasing = MatchCasing.CaseInsensitive, AttributesToSkip = 0 };
 
     /// <summary>
     /// El disco donde está de verdad la ruta, aunque una carpeta del camino sea una unión, un enlace o
@@ -136,9 +143,10 @@ public sealed class DiscoReal : IAccesoDisco
     }
 
     private static Dictionary<string, string>? Listar(Dictionary<string, Dictionary<string, string>?> cache, string dir,
-                                                      Func<string, IEnumerable<string>> enumerar)
+                                                      Func<string, IEnumerable<string>> enumerar, string? clave = null)
     {
-        if (cache.TryGetValue(dir, out var ya)) return ya;
+        clave ??= dir;
+        if (cache.TryGetValue(clave, out var ya)) return ya;
         Dictionary<string, string>? res;
         try
         {
@@ -151,7 +159,7 @@ public sealed class DiscoReal : IAccesoDisco
                 }
         }
         catch { res = null; }
-        cache[dir] = res;
+        cache[clave] = res;
         return res;
     }
 }
