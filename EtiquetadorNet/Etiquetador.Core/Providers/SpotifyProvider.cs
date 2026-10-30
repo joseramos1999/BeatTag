@@ -6,8 +6,11 @@ using System.Text.RegularExpressions;
 namespace Etiquetador.Core.Providers;
 
 /// <summary>
-/// Spotify (client-credentials, gratis). Port de Get-SpotifyToken/_SpItems/Get-Spotify/Get-SpArtistGenre.
+/// Spotify (client-credentials, gratis). Port de Get-SpotifyToken/_SpItems/Get-Spotify.
 /// Mantiene el token cacheado y un cortacircuitos: si 429ea repetido, se desactiva un rato (SpBlocked).
+///
+/// Ya no se piden los géneros del artista (lo que hacía Get-SpArtistGenre): MEDIDO en octubre de 2026,
+/// /v1/artists/{id} responde 200 pero sin «genres», popularity ni followers en ninguno de 75 artistas.
 /// </summary>
 public sealed class SpotifyProvider
 {
@@ -29,7 +32,6 @@ public sealed class SpotifyProvider
     // De qué credenciales es el token guardado (su huella, no las credenciales).
     private string _tokenDe = "";
     private DateTime _bloqueadoHasta = DateTime.MinValue;
-    private readonly Dictionary<string, string> _genreCache = new();
 
     public int Sp429 { get; private set; }
     public bool SpBlocked => DateTime.Now < _bloqueadoHasta;
@@ -181,25 +183,6 @@ public sealed class SpotifyProvider
             Score = bestSc < -900 ? 0 : Math.Round(bestSc, 1),
             Dur = durMs > 0 ? durMs / 1000 : 0,
         };
-    }
-
-    public async Task<string> ArtistGenreAsync(string aid, string id, string secret, CancellationToken ct = default)
-    {
-        if (string.IsNullOrEmpty(aid)) return "";
-        if (_genreCache.TryGetValue(aid, out var cached)) return cached;
-        var tok = await GetTokenAsync(id, secret, ct).ConfigureAwait(false);
-        if (tok == null) return "";
-        var r = await _api.GetAsync($"https://api.spotify.com/v1/artists/{aid}", Auth(tok), ct: ct).ConfigureAwait(false);
-        var genres = J.A(J.P(r, "genres"));
-        var g = "";
-        if (genres is { Count: > 0 })
-        {
-            g = J.S(genres[0]);
-            foreach (var x in genres) { var s = J.S(x); if (Regex.IsMatch(s, "(?i)reggaeton|dembow|trap|latin|urban|salsa|bachata|merengue|cumbia|afro")) { g = s; break; } }
-            g = TextUtils.TitleCase(g);
-        }
-        _genreCache[aid] = g;
-        return g;
     }
 
     private static string JoinArtists(JsonNode? track)
