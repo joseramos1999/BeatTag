@@ -71,8 +71,51 @@ public class EstiloDeVersionTests
     // Un remixer que se llama como un estilo: lo que va detrás de «DJ» o de «MC» es un nombre.
     [InlineData("Gasolina (DJ Mambo Remix)", "Daddy Yankee")]
     [InlineData("Tema (MC Trap Edit)", null)]
+    // Revisión: delante de «DJ» solo va lo que acompaña a la versión (Extended, Clean, el BPM, Intro…),
+    // o está escrito «D.J.» o «DJ-»: «DJ» sigue abriendo el nombre de quien hizo la versión.
+    [InlineData("Gasolina (Extended DJ Mambo Remix)", "Daddy Yankee")]
+    [InlineData("Gasolina (Clean DJ Mambo Remix)", "Daddy Yankee")]
+    [InlineData("Gasolina (Dirty DJ Mambo Remix)", "Daddy Yankee")]
+    [InlineData("Gasolina (95 BPM DJ Mambo Remix)", "Daddy Yankee")]
+    [InlineData("Gasolina (Intro DJ Mambo Remix)", "Daddy Yankee")]
+    [InlineData("Gasolina (Extended Intro DJ Mambo Remix 8A)", "Daddy Yankee")]
+    [InlineData("Gasolina (D.J. Mambo Remix)", "Daddy Yankee")]
+    [InlineData("Gasolina (DJ-Mambo Remix)", "Daddy Yankee")]
+    [InlineData("Gasolina (Dj. Mambo Remix)", "Daddy Yankee")]
+    // Detrás de un separador de créditos, «DJ» abre el nombre del segundo autor.
+    [InlineData("Tema (DJ Mambo & DJ Trap Remix)", null)]
+    [InlineData("Tema (DJ Pepe x DJ Salsa Remix)", null)]
+    [InlineData("Tema (DJ Pepe, DJ Salsa Remix)", null)]
+    [InlineData("Tema (DJ Pepe feat. MC Trap Remix)", null)]
+    [InlineData("Tema (Prod. DJ Salsa Remix)", null)]
+    [InlineData("Tema (DJ Pepe vs DJ Trap Remix)", null)]
+    // Sin paréntesis y antes del primer guion, lo de delante de «DJ» es el nombre del tema.
+    [InlineData("Gasolina DJ Mambo Remix", "Daddy Yankee")]
+    [InlineData("Tema MC Trap Edit", null)]
     public void Un_estilo_fuera_del_contexto_de_version_no_cuenta(string titulo, string? artista)
         => Assert.Null(EstiloDeVersion.De(titulo, titulo, artista, null));
+
+    // Revisión: en el nombre del archivo, lo de delante del segundo guion es «Artista - Título» (con
+    // un número de pista o la clave delante, si los lleva), así que «DJ» abre el nombre del remixer.
+    [Theory]
+    [InlineData("Daddy Yankee - Gasolina DJ Mambo Remix")]
+    [InlineData("01 - Daddy Yankee - Gasolina DJ Mambo Remix")]
+    [InlineData("8A - 95 - Daddy Yankee - Gasolina DJ Mambo Remix")]
+    [InlineData("Daddy Yankee - Gasolina - DJ Mambo Remix")]
+    public void En_el_nombre_del_archivo_un_remixer_que_se_llama_como_un_estilo_no_cuenta(string archivo)
+    {
+        Assert.Null(EstiloDeVersion.De("Gasolina (DJ Mambo Remix)", archivo, "Daddy Yankee", null));
+        Assert.Null(EstiloDeVersion.De("Gasolina", archivo, "Daddy Yankee", null));
+    }
+
+    // Y detrás del título, tras otro guion, el estilo que cierra el nombre del remixer sí cuenta.
+    [Fact]
+    public void En_el_nombre_del_archivo_el_estilo_detras_del_remixer_cuenta()
+    {
+        var v = EstiloDeVersion.De("Bad Boy", "Daddy Yankee - Bad Boy - Alex Gramage DJ Mambo Remix", "Daddy Yankee", null);
+        Assert.Equal(("Mambo", FuenteEstilo.Archivo), (v?.Estilo, v?.Fuente));
+        Assert.Equal("Mambo", EstiloDeVersion.De("Bad Boy", "Daddy Yankee - Bad Boy (Alex Gramage DJ Mambo Remix)", null, null)?.Estilo);
+    }
 
     // El estilo disco sí cuenta cuando el paréntesis no dice otra cosa, o como Nu Disco; y el estilo que
     // va detrás del nombre de quien hizo la versión, también.
@@ -83,6 +126,8 @@ public class EstiloDeVersionTests
     // Visto al validar en una biblioteca real: detrás de otro nombre, «DJ» lo cierra («Alex Gramage DJ»).
     [InlineData("Bad Boy (Alex Gramage DJ Mambo Remix)", "Mambo")]
     [InlineData("Bad Boy - Alex Gramage DJ Mambo Remix", "Mambo")]
+    [InlineData("Bad Boy (DJ Pepe & Alex Gramage DJ Mambo Remix)", "Mambo")]
+    [InlineData("Bad Boy (Extended Alex Gramage DJ Mambo Remix)", "Mambo")]
     public void Disco_suelto_Nu_Disco_y_el_estilo_detras_del_remixer_si_cuentan(string titulo, string estilo)
         => Assert.Equal(estilo, EstiloDeVersion.De(titulo, null, null, null)?.Estilo);
 

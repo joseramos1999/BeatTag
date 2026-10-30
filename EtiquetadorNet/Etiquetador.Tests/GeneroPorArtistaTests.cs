@@ -431,6 +431,30 @@ public class GeneroPorArtistaTests : IDisposable
         Assert.Empty(Proponer(new List<Track> { disco, version, mambo, vacia }));
     }
 
+    // Revisión (ronda 2): con el título «Gasolina (DJ Mambo Remix)» no se proponía nada, pero entonces
+    // se miraba el nombre del archivo, «Daddy Yankee - Gasolina DJ Mambo Remix», sin paréntesis, y salía
+    // Mambo MARCADO sobre Reggaeton. Igual con «(Extended DJ Mambo Remix)» o «(DJ Mambo & DJ Trap Remix)».
+    [Fact]
+    public void Un_remixer_que_se_llama_como_un_estilo_no_pisa_el_genero_tampoco_desde_el_nombre_del_archivo()
+    {
+        static Track Con(string titulo, string archivo)
+            => new() { FilePath = Rutas.De("M", "Musica", archivo + ".mp3"), Artist = "Daddy Yankee", Title = titulo, Genre = "Reggaeton" };
+        var canciones = new List<Track>
+        {
+            Con("Gasolina (DJ Mambo Remix)", "Daddy Yankee - Gasolina DJ Mambo Remix"),
+            Con("Gasolina", "Daddy Yankee - Gasolina DJ Mambo Remix"),
+            Con("Gasolina", "01 - Daddy Yankee - Gasolina (Extended DJ Mambo Remix)"),
+            Con("Gasolina (Intro DJ Mambo Remix)", "Daddy Yankee - Gasolina (Intro DJ Mambo Remix)"),
+            Con("Gasolina (DJ Mambo & DJ Trap Remix)", "Daddy Yankee - Gasolina (DJ Mambo & DJ Trap Remix)"),
+        };
+        Assert.Empty(Proponer(canciones));
+
+        // El estilo que cierra el nombre del remixer, detrás del título, sí manda.
+        var gramage = Con("Bad Boy", "Daddy Yankee - Bad Boy - Alex Gramage DJ Mambo Remix");
+        var p = De(Proponer(new List<Track> { gramage }), gramage);
+        Assert.Equal(("Mambo", ReglaGenero.Version, true), (p?.Genero, p?.Regla, p?.Marcada));
+    }
+
     // Revisión: la Ayuda, la descripción de la pestaña, el desplegable «Proponer para», el consejo del
     // estado y el README decían que con otro estilo la propuesta sale SIEMPRE desmarcada. La que
     // indica la propia versión sale marcada (es lo que pide un DJ: el estilo de la versión manda), y
