@@ -470,6 +470,10 @@ public sealed class UndoEngine
         {
             try
             {
+                // La carpeta en que lo dejó la ejecución pudo quitarse al deshacer, si se quedó vacía
+                // (ver QuitarCarpetasCreadas): se vuelve a crear para devolverlo ahí.
+                var carpeta = Path.GetDirectoryName(v.Desde);
+                if (!string.IsNullOrEmpty(carpeta)) Directory.CreateDirectory(carpeta);
                 Mover(v.Hasta, v.Desde);
                 devueltas.Add(v.Desde);
                 resultado[v.Linea] = Outcome.Error;
@@ -1056,6 +1060,9 @@ public sealed class UndoEngine
         ef.Sellar(path);
         var renamedBack = RenameBack(r.Renamed, ref path, r.FinalPath, r.OrigPath);
         if (renamedBack) { ef.Movido = true; ef.Hasta = path; }
+        // Con el archivo ya en su sitio (devuelto ahora, o porque el traslado no llegó a hacerse), las
+        // carpetas que se crearon para él sobran si se han quedado vacías.
+        if (string.Equals(path, r.OrigPath, StringComparison.Ordinal)) QuitarCarpetasCreadas(r);
 
         bool restoredAny = false, skippedAny = false, volumenFallido = false, volumenDevuelto = false;
 
@@ -1173,9 +1180,40 @@ public sealed class UndoEngine
             File.Move(finalPath, tmp);
             File.Move(tmp, origPath);
         }
-        else File.Move(finalPath, origPath);
+        else
+        {
+            // La carpeta de origen puede no existir ya: Organizar por género la deja vacía y el usuario
+            // la borra. MEDIDO: con las carpetas de origen borradas, deshacer devolvía 0 de 2.000
+            // archivos (File.Move no crea la carpeta) y todo quedaba como error. Se vuelve a crear.
+            var carpetaOrigen = Path.GetDirectoryName(origPath);
+            if (!string.IsNullOrEmpty(carpetaOrigen)) Directory.CreateDirectory(carpetaOrigen);
+            File.Move(finalPath, origPath);
+        }
         path = origPath;
         return true;
+    }
+
+    /// <summary>
+    /// Quita las carpetas que la ejecución creó para el archivo de este registro
+    /// (<see cref="UndoRecord.CarpetasCreadas"/>), de la más profunda a la más alta, SOLO si están
+    /// vacías del todo. Nunca se borra nada recursivamente: si dentro hay algo (un desktop.ini, un
+    /// .DS_Store, un archivo que el usuario dejó ahí después), la carpeta se queda con ello.
+    /// </summary>
+    private void QuitarCarpetasCreadas(UndoRecord r)
+    {
+        if (r.CarpetasCreadas is not { Count: > 0 } carpetas) return;
+        for (var i = carpetas.Count - 1; i >= 0; i--)
+        {
+            var dir = carpetas[i];
+            if (string.IsNullOrWhiteSpace(dir)) continue;
+            try
+            {
+                if (!Directory.Exists(dir) || Directory.EnumerateFileSystemEntries(dir).Any()) continue;
+                Directory.Delete(dir, recursive: false);
+                _log?.Log($"  deshacer: se quita la carpeta vacía que había creado la ejecución [{dir}]", LogKind.No);
+            }
+            catch (Exception e) { _log?.Log($"  deshacer: no se pudo quitar la carpeta vacía «{dir}»: {e.Message}", LogKind.Err); }
+        }
     }
 
     // Restaura un campo solo si el valor actual coincide con el que escribió la app. (restaurado, omitido).
