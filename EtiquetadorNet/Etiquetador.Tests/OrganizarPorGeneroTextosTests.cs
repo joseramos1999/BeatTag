@@ -283,6 +283,60 @@ public class OrganizarPorGeneroTextosTests : IDisposable
         Assert.Equal("Rock", Assert.Single(vm.Plan!.Movimientos).Genero);
     }
 
+    // Revisión 2, bloqueante: el Editor guarda el género (y el nombre) en el mismo objeto de la
+    // biblioteca, sin avisar con Library.Changed. REPRODUCIDO: tras pasar a.mp3 de Pop a Rock en el
+    // Editor, la vista previa seguía al día y «Organizar» la llevaba a «Por género/Pop».
+    [Fact]
+    public async Task Cambiar_el_genero_o_el_nombre_en_el_Editor_desfasa_la_vista_previa()
+    {
+        var (motor, biblioteca, musica) = Motor();
+        var a = Cancion(Path.Combine(musica, "Descargas"), "a.mp3", "Pop");
+        var vm = new OrganizarPorGeneroViewModel(motor);
+        await vm.CalcularCommand.ExecuteAsync(null);
+        Assert.True(vm.PuedeOrganizar);
+        vm.Visible = true;
+
+        // Se va al Editor, se corrige el género y se guarda.
+        vm.Visible = false;
+        var editor = new EditorViewModel(motor);
+        editor.SelectedTrack = biblioteca.Tracks.Single();
+        editor.Genre = "Rock";
+        await editor.SaveCommand.ExecuteAsync(null);
+        Assert.StartsWith("Guardado", editor.Status);
+        Assert.Equal("Rock", biblioteca.Tracks.Single().Genre);
+
+        // Al volver a la página ya se ve desfasada, y «Organizar» no mueve nada.
+        vm.Visible = true;
+        Assert.True(vm.Desfasado);
+        Assert.False(vm.PuedeOrganizar);
+        Assert.Equal(OrganizarPorGeneroViewModel.AvisoCancionesCambiadas, vm.Aviso);
+        Assert.False(vm.ComprobarVistaPrevia());
+        await vm.OrganizarAsync();
+        Assert.True(File.Exists(a));
+        Assert.False(Directory.Exists(Path.Combine(musica, OrganizarPorGenero.CarpetaPorGenero)));
+        Assert.Equal(OrganizarPorGeneroViewModel.AvisoCancionesCambiadas, vm.Status);
+
+        // Cambiar una opción vuelve a planear con la lectura de la vista previa: sigue desfasada.
+        vm.ConservarEstructura = true;
+        await Esperar(() => !vm.Calculando);
+        Assert.True(vm.Desfasado);
+        Assert.False(vm.PuedeOrganizar);
+        Assert.Equal("Pop", Assert.Single(vm.Plan!.Movimientos).Genero);
+
+        // Solo «Calcular la vista previa» la pone al día, ya con «Rock».
+        await vm.CalcularCommand.ExecuteAsync(null);
+        Assert.False(vm.Desfasado);
+        Assert.Equal("Rock", Assert.Single(vm.Plan!.Movimientos).Genero);
+
+        // Renombrar el archivo en el Editor también la desfasa: el plan movería una ruta que ya no existe.
+        editor.SelectedTrack = biblioteca.Tracks.Single();
+        editor.FileName = "b.mp3";
+        await editor.SaveCommand.ExecuteAsync(null);
+        Assert.True(File.Exists(Path.Combine(musica, "Descargas", "b.mp3")));
+        Assert.False(vm.ComprobarVistaPrevia());
+        Assert.Equal(OrganizarPorGeneroViewModel.AvisoCancionesCambiadas, vm.Aviso);
+    }
+
     [Fact]
     public async Task Una_carpeta_con_ajustes_nueva_o_una_carpeta_desmarcada_tras_calcular_desfasan_la_vista_previa()
     {

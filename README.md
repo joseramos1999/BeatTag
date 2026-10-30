@@ -123,7 +123,8 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
   unión), rutas demasiado largas o un archivo con el mismo nombre en el destino, porque nunca se
   sobrescribe ni se renombra nada. Los archivos asociados por el nombre (`.asd` de Ableton Live, `.cue`
   y `.lrc`) van con su canción. La vista previa queda desfasada si la biblioteca cambia después de
-  calcularla, y hay que volver a calcularla para organizar; calcularla se puede cancelar, y mover se
+  calcularla (también si se corrige el género o el nombre de una canción en el Editor), y hay que
+  volver a calcularla para organizar; calcularla se puede cancelar, y mover se
   cancela entre un archivo y el siguiente. La ficha de DJ, lo decidido en Enriquecer y la caché de la
   biblioteca siguen a cada archivo, y se deshace desde el historial, también por partes: recrea las
   carpetas de origen y quita las que creó si se han quedado vacías. Después, la página rekordbox repara

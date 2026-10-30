@@ -93,8 +93,14 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
     private CancellationTokenSource? _cts;
 
     // La biblioteca con que se calculó la vista previa, leída en el hilo de la interfaz al calcularla:
-    // desmarcar una carpeta o cambiar una opción vuelve a planear sobre ella, sin escanear otra vez.
+    // desmarcar una carpeta o cambiar una opción vuelve a planear sobre ella, sin escanear otra vez. Es
+    // una COPIA de cada canción: el plan se hace siempre con lo que se leyó.
     private IReadOnlyList<Track>? _canciones;
+    // Las canciones de la biblioteca de las que salió cada copia, en el mismo orden. Otra página puede
+    // cambiar una en memoria sin avisar con Library.Changed: el Editor pone el género y la ruta nuevos en
+    // el mismo objeto (revisión 2). Si su ruta o su género ya no son los de la copia, la vista previa
+    // está desfasada (ver CancionesCambiadas).
+    private IReadOnlyList<Track>? _leidas;
     private IReadOnlyList<string> _raices = Array.Empty<string>();
     private int _variantes, _sinGenero;
     // Los puntos de montaje, una vez por vista previa: con una unidad de red caída, preguntar por ellos
@@ -351,12 +357,14 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
             // Primero cuántos cambios lleva y después la lectura: un aviso que llegara entre las dos
             // desfasaría la vista previa sin motivo, nunca al revés.
             _cambiosAlLeer = Volatile.Read(ref _cambiosBiblioteca);
-            var canciones = _engine.Library.Tracks.ToList();
+            var leidas = _engine.Library.Tracks.ToList();
+            var canciones = leidas.Select(t => t.Copia()).ToList();
             _raices = _engine.Library.EnabledPaths();
             Status = "Calculando la vista previa…";
             (_variantes, _sinGenero, _puntos) = await Task.Run(() => (GeneroPorReglas.VariantesSinUnificar(canciones), canciones.Count(GeneroPorReglas.SinGenero),
                                                                       Rutas.PuntosDeMontaje()), ct);
             _canciones = canciones;
+            _leidas = leidas;
             if (!await PlanearAsync(ct)) return;
             Status = Resumen;
         }
@@ -486,16 +494,35 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
 
     /// <summary>
     /// Por qué la vista previa que se ve ya no corresponde a lo que hay ahora, o "" si sigue al día:
-    /// la biblioteca ha cambiado desde que se leyó, se han marcado o desmarcado carpetas de la
-    /// biblioteca, o han cambiado las carpetas con ajustes propios de Duplicados o de Volumen (eso no
-    /// avisa a nadie: se compara con las que usó el plan).
+    /// la biblioteca ha cambiado desde que se leyó, alguna canción tiene otro género u otra ruta (cambiados
+    /// en memoria, sin aviso), se han marcado o desmarcado carpetas de la biblioteca, o han cambiado las
+    /// carpetas con ajustes propios de Duplicados o de Volumen (eso tampoco avisa a nadie: se compara con
+    /// las que usó el plan).
     /// </summary>
     private string MotivoDesfase()
     {
         if (Volatile.Read(ref _cambiosBiblioteca) != _cambiosAlLeer) return AvisoBibliotecaCambiada;
+        if (CancionesCambiadas()) return AvisoCancionesCambiadas;
         if (!MismasCarpetas(_raices, _engine.Library.EnabledPaths())) return AvisoCarpetasCambiadas;
         if (_opcionesDelPlan != null && !MismasCarpetas(_opcionesDelPlan.CarpetasConAjustes, CarpetasConAjustes())) return AvisoAjustesCambiados;
         return "";
+    }
+
+    /// <summary>
+    /// Alguna canción de la biblioteca tiene ahora otra ruta u otro género que la copia con que se
+    /// planeó, que son lo único que el plan lee de cada una. Pasa cuando otra página la cambia en
+    /// memoria sin avisar: REPRODUCIDO en la revisión 2, una canción corregida de Pop a Rock en el Editor
+    /// acababa en «Por género/Pop». Comparar así cubre cualquier página que lo haga, no solo el Editor.
+    /// Solo mira la memoria: con 20.000 canciones es inmediato.
+    /// </summary>
+    private bool CancionesCambiadas()
+    {
+        if (_leidas is not { } leidas || _canciones is not { } copias || leidas.Count != copias.Count) return false;
+        for (var i = 0; i < leidas.Count; i++)
+            if (!string.Equals(leidas[i].FilePath, copias[i].FilePath, StringComparison.Ordinal)
+                || !string.Equals(leidas[i].Genre, copias[i].Genre, StringComparison.Ordinal))
+                return true;
+        return false;
     }
 
     private static bool MismasCarpetas(IEnumerable<string> a, IEnumerable<string> b)
@@ -545,6 +572,7 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         _plan = null;
         _opcionesDelPlan = null;
         _canciones = null;
+        _leidas = null;
         HayPlan = false;
         Desfasado = false;
         Aviso = "";
@@ -636,6 +664,9 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
     private static string N(int n) => n.ToString("N0", Es);
 
     public const string AvisoBibliotecaCambiada = "La biblioteca ha cambiado desde la vista previa: vuelve a calcularla antes de organizar.";
+
+    public const string AvisoCancionesCambiadas =
+        "Alguna canción ha cambiado de género o de nombre de archivo desde la vista previa (por ejemplo, en el Editor): vuelve a calcularla antes de organizar.";
 
     public const string AvisoCarpetasCambiadas =
         "Las carpetas marcadas de la biblioteca han cambiado desde la vista previa: vuelve a calcularla antes de organizar.";
