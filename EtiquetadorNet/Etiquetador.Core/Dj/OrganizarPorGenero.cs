@@ -27,7 +27,10 @@ public interface IAccesoDisco
     /// </summary>
     bool ExisteCarpeta(string carpeta);
 
-    /// <summary>La unidad (el punto de montaje) de la ruta: ver <see cref="Rutas.UnidadDe"/>.</summary>
+    /// <summary>
+    /// El disco donde está de verdad la ruta: entre dos rutas con la misma unidad, mover es renombrar (ver
+    /// <see cref="DiscoReal.UnidadDe"/>, que sigue uniones, enlaces y carpetas donde está montado otro disco).
+    /// </summary>
     string UnidadDe(string ruta);
 }
 
@@ -39,14 +42,29 @@ public interface IAccesoDisco
 public sealed class DiscoReal : IAccesoDisco
 {
     private readonly IReadOnlyList<string> _puntos;
+    private readonly Func<string, string?> _destinoDeEnlace;
+    private readonly Func<string, string?> _volumen;
     // Por carpeta: sus entradas (archivos y carpetas) por clave, con el nombre real. Vacío si la
     // carpeta no existe; null si no se ha podido listar (entonces se pregunta archivo a archivo).
     private readonly Dictionary<string, Dictionary<string, string>?> _entradas = new(ComparadorRutas.Instancia);
     private readonly Dictionary<string, Dictionary<string, string>?> _subcarpetas = new(ComparadorRutas.Instancia);
+    private readonly Dictionary<string, string> _unidades = new(ComparadorRutas.Instancia);
 
     public DiscoReal() : this(Rutas.PuntosDeMontaje()) { }
 
-    public DiscoReal(IReadOnlyList<string> puntosDeMontaje) => _puntos = puntosDeMontaje;
+    /// <param name="puntosDeMontaje">
+    /// Los de <see cref="Rutas.PuntosDeMontaje"/>, que se pueden calcular una vez por vista previa y
+    /// reutilizar: con una unidad de red caída, preguntar por ellos puede tardar segundos.
+    /// </param>
+    public DiscoReal(IReadOnlyList<string> puntosDeMontaje) : this(puntosDeMontaje, null, null) { }
+
+    /// <summary>Para las pruebas: cómo se resuelve un enlace y cuál es el volumen de una carpeta.</summary>
+    internal DiscoReal(IReadOnlyList<string> puntosDeMontaje, Func<string, string?>? destinoDeEnlace, Func<string, string?>? volumen)
+    {
+        _puntos = puntosDeMontaje;
+        _destinoDeEnlace = destinoDeEnlace ?? Rutas.DestinoDeEnlace;
+        _volumen = volumen ?? Rutas.VolumenDe;
+    }
 
     public bool ExisteArchivo(string ruta)
     {
@@ -79,7 +97,25 @@ public sealed class DiscoReal : IAccesoDisco
 
     private readonly Dictionary<string, bool> _existe = new(ComparadorRutas.Instancia);
 
-    public string UnidadDe(string ruta) => Rutas.UnidadDe(ruta, _puntos);
+    /// <summary>
+    /// El disco donde está de verdad la ruta, aunque una carpeta del camino sea una unión, un enlace o
+    /// el punto de montaje de otro disco: en Windows, el número de serie del volumen de la carpeta
+    /// existente más cercana («volumen:…»); si no se tiene, el punto de montaje de la ruta con los
+    /// enlaces resueltos. Ver el comentario de unidades en <see cref="Rutas"/>.
+    /// </summary>
+    public string UnidadDe(string ruta)
+    {
+        if (_unidades.TryGetValue(ruta, out var ya)) return ya;
+        string unidad;
+        var existente = ruta;
+        while (!string.IsNullOrEmpty(existente) && !ExisteCarpeta(existente)) existente = Path.GetDirectoryName(existente);
+        if (!string.IsNullOrEmpty(existente) && _volumen(existente) is { Length: > 0 } volumen)
+            unidad = "volumen:" + volumen;
+        else
+            unidad = Rutas.UnidadDe(Rutas.RutaReal(ruta, _destinoDeEnlace), _puntos);
+        _unidades[ruta] = unidad;
+        return unidad;
+    }
 
     private static Dictionary<string, string>? Listar(Dictionary<string, Dictionary<string, string>?> cache, string dir,
                                                       Func<string, IEnumerable<string>> enumerar)

@@ -97,6 +97,9 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
     private IReadOnlyList<Track>? _canciones;
     private IReadOnlyList<string> _raices = Array.Empty<string>();
     private int _variantes, _sinGenero;
+    // Los puntos de montaje, una vez por vista previa: con una unidad de red caída, preguntar por ellos
+    // puede tardar segundos, y replanificar tras cambiar una opción tiene que ser inmediato.
+    private IReadOnlyList<string>? _puntos;
     private readonly HashSet<string> _excluidos = new(ComparadorRutas.Instancia);
     private PlanOrganizar? _plan;
     private OpcionesOrganizar? _opcionesDelPlan;
@@ -351,7 +354,8 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
             var canciones = _engine.Library.Tracks.ToList();
             _raices = _engine.Library.EnabledPaths();
             Status = "Calculando la vista previa…";
-            (_variantes, _sinGenero) = await Task.Run(() => (GeneroPorReglas.VariantesSinUnificar(canciones), canciones.Count(GeneroPorReglas.SinGenero)), ct);
+            (_variantes, _sinGenero, _puntos) = await Task.Run(() => (GeneroPorReglas.VariantesSinUnificar(canciones), canciones.Count(GeneroPorReglas.SinGenero),
+                                                                      Rutas.PuntosDeMontaje()), ct);
             _canciones = canciones;
             if (!await PlanearAsync(ct)) return;
             Status = Resumen;
@@ -406,7 +410,8 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         Calculando = true;
         try
         {
-            var plan = await Task.Run(() => OrganizarPorGenero.Planear(canciones, raices, op, new DiscoReal(), ct), ct);
+            var puntos = _puntos ?? Array.Empty<string>();
+            var plan = await Task.Run(() => OrganizarPorGenero.Planear(canciones, raices, op, new DiscoReal(puntos), ct), ct);
             if (version != _version) return false;
             Mostrar(plan, op);
             return true;

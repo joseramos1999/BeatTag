@@ -580,6 +580,88 @@ public class OrganizarPorGeneroPlanTests
         Assert.True(Etiquetador.Core.Rutas.MismaUnidad(ruta, Path.Combine(Path.GetTempPath(), "b", "c.mp3"), Array.Empty<string>()));
     }
 
+    // Revisión 1: DriveInfo solo ve letras de unidad en Windows, y ningún sistema ve así las uniones ni
+    // los enlaces simbólicos. Una subcarpeta de la biblioteca que es un enlace a otro disco contaba como
+    // la misma unidad, y File.Move copiaba y borraba sin atomicidad.
+    [Fact]
+    public void La_ruta_real_sigue_los_enlaces_de_cada_tramo()
+    {
+        var raiz = Path.Combine(Path.GetTempPath(), "beattag-enlaces");
+        var enlace = Path.Combine(raiz, "Musica", "Externa");
+        var usb = Path.Combine(raiz, "Volumes", "USB");
+        string? Destino(string carpeta) => Etiquetador.Core.Rutas.MismaCarpeta(carpeta, enlace) ? Path.Combine(usb, "Musica") : null;
+
+        Assert.Equal(Path.Combine(usb, "Musica", "Pack", "a.mp3"),
+                     Etiquetador.Core.Rutas.RutaReal(Path.Combine(enlace, "Pack", "a.mp3"), Destino));
+        Assert.Equal(Path.Combine(raiz, "Musica", "Otra"), Etiquetador.Core.Rutas.RutaReal(Path.Combine(raiz, "Musica", "Otra"), Destino));
+    }
+
+    [Fact]
+    public void Una_carpeta_de_la_biblioteca_que_enlaza_con_otro_disco_es_otra_unidad()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var musica = Directory.CreateDirectory(Path.Combine(dir, "Musica")).FullName;
+            var enlace = Directory.CreateDirectory(Path.Combine(musica, "Externa")).FullName;
+            var usb = Path.Combine(dir, "Volumes", "USB");
+            File.WriteAllText(Path.Combine(musica, "dentro.mp3"), "x");
+            File.WriteAllText(Path.Combine(enlace, "fuera.mp3"), "x");
+            // «Externa» hace de enlace a «USB/Musica», un disco montado aparte; sin número de volumen,
+            // como en macOS, para que cuente lo que se resuelve de la ruta.
+            var disco = new DiscoReal(new[] { dir, usb },
+                                      c => Etiquetador.Core.Rutas.MismaCarpeta(c, enlace) ? Path.Combine(usb, "Musica") : null,
+                                      _ => null);
+            var canciones = new[]
+            {
+                new Track { FilePath = Path.Combine(musica, "dentro.mp3"), Folder = musica, Genre = "Pop" },
+                new Track { FilePath = Path.Combine(enlace, "fuera.mp3"), Folder = musica, Genre = "Pop" },
+            };
+
+            var plan = OrganizarPorGenero.Planear(canciones, new[] { musica }, new OpcionesOrganizar(), disco);
+
+            Assert.Equal("dentro.mp3", Path.GetFileName(Unico(plan).Origen));
+            Assert.Equal(MotivoOmision.OtraUnidad, Assert.Single(plan.Omitidas).Motivo);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void Un_enlace_simbolico_de_verdad_se_resuelve_si_el_sistema_deja_crearlo()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var destino = Directory.CreateDirectory(Path.Combine(dir, "Destino")).FullName;
+            var enlace = Path.Combine(dir, "Enlace");
+            try { Directory.CreateSymbolicLink(enlace, destino); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return; }   // Windows sin permiso para enlaces
+
+            // Las dos resueltas: en macOS la carpeta temporal ya pasa por un enlace (/var lleva a /private/var).
+            Assert.True(Etiquetador.Core.Rutas.MismaCarpeta(Etiquetador.Core.Rutas.RutaReal(Path.Combine(destino, "Pack")),
+                                                             Etiquetador.Core.Rutas.RutaReal(Path.Combine(enlace, "Pack"))));
+            Assert.False(Etiquetador.Core.Rutas.MismaCarpeta(Path.Combine(enlace, "Pack"), Etiquetador.Core.Rutas.RutaReal(Path.Combine(enlace, "Pack"))));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [WindowsFact]
+    public void En_Windows_la_unidad_es_el_volumen_de_la_carpeta_existente_mas_cercana()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var a = Directory.CreateDirectory(Path.Combine(dir, "A")).FullName;
+            var disco = new DiscoReal(Array.Empty<string>());
+
+            var unidad = disco.UnidadDe(a);
+            Assert.StartsWith("volumen:", unidad);
+            Assert.Equal(unidad, disco.UnidadDe(Path.Combine(dir, "Por género", "Pop")));   // aún no existe
+            Assert.NotNull(Etiquetador.Core.Rutas.VolumenDe(a));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
     [Fact]
     public void El_disco_real_lee_la_carpeta_sin_distinguir_mayusculas_ni_NFC()
     {
