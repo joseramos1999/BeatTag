@@ -33,9 +33,14 @@ public sealed class DeezerProvider
     /// <see cref="ExplicitDetector.DelNombre"/>). Sirve para elegir entre las dos versiones que
     /// publican los catálogos (ver <see cref="CoherenciaDeLetra"/>).
     /// </param>
+    /// <param name="conFicha">
+    /// Pide además la ficha de la pista (track/{id}) para el BPM, el año y los contribuidores. Quien
+    /// solo necesita el álbum («Género por carpeta y artista») se ahorra esa petición: sin ella, el
+    /// resultado no trae BPM ni año, y el ISRC y la letra salen de la búsqueda.
+    /// </param>
     public async Task<ProviderResult?> SearchAsync(string artist, string title, bool wantRemix, bool wantLive,
         int localDur = 0, bool isEdit = false, CancellationToken ct = default, string expectedRemixer = "", bool verbatim = false,
-        bool wantTool = false, Explicitness letra = Explicitness.Unknown)
+        bool wantTool = false, Explicitness letra = Explicitness.Unknown, bool conFicha = true)
     {
         var kw = verbatim ? Descriptors.BuildKwVerbatim(artist, title) : Descriptors.BuildKw(artist, title);
         if (kw.Length == 0) kw = Descriptors.CleanKeywords(title);
@@ -54,7 +59,7 @@ public sealed class DeezerProvider
         // Enriquecido: BPM, año y contribuidores completos vía track/{id}
         string bpm = "", year = "";
         string artistFull = J.S(J.P(pick, "artist", "name"));
-        var tk = await _api.GetAsync("https://api.deezer.com/track/" + J.S(J.P(pick, "id")), ct: ct).ConfigureAwait(false);
+        var tk = conFicha ? await _api.GetAsync("https://api.deezer.com/track/" + J.S(J.P(pick, "id")), ct: ct).ConfigureAwait(false) : null;
         if (tk != null)
         {
             var b = J.D(J.P(tk, "bpm"));

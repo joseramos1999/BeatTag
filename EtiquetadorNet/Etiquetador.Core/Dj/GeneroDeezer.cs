@@ -72,40 +72,61 @@ public static class GeneroDeezer
     /// <summary>
     /// Busca en Deezer cada candidata y propone el subgénero concreto de su álbum, siempre desmarcado.
     /// Cada álbum se pide una sola vez. El ritmo lo pone el limitador de ApiClient (unas 9 peticiones
-    /// por segundo como mucho, con caché de 30 días), y se puede cancelar entre una canción y la
-    /// siguiente. Unas 3 peticiones por canción: la búsqueda, la ficha de la pista y, si es nuevo, el
-    /// álbum.
+    /// por segundo como mucho, con caché de 30 días). Unas 2 peticiones por canción: la búsqueda y, si
+    /// es nuevo, el álbum; la ficha de la pista (BPM, ISRC, contribuidores) no hace falta y no se pide.
+    ///
+    /// Se puede cancelar entre una canción y la siguiente, o a mitad de una petición: entonces se
+    /// devuelve lo calculado hasta ahí, con <see cref="BusquedaGeneroDeezer.Cancelada"/>. Cancelar al
+    /// 90 % no tira lo encontrado.
     /// </summary>
-    public static async Task<List<PropuestaGeneroRegla>> BuscarAsync(IReadOnlyList<Track> candidatas, DeezerProvider deezer,
+    public static async Task<BusquedaGeneroDeezer> BuscarAsync(IReadOnlyList<Track> candidatas, DeezerProvider deezer,
         IProgress<(int Hechas, int Total)>? progreso, CancellationToken ct)
     {
         var res = new List<PropuestaGeneroRegla>();
         var albumes = new Dictionary<string, (string? Estilo, string Nombres)>(StringComparer.Ordinal);
+        int buscadas = 0, encontradas = 0;
         for (var i = 0; i < candidatas.Count; i++)
         {
-            ct.ThrowIfCancellationRequested();
+            if (ct.IsCancellationRequested) return new BusquedaGeneroDeezer(res, buscadas, encontradas, true);
             var t = candidatas[i];
             // Por si llega alguna sin pasar por Candidatas: un mashup no se encuentra y gastaría peticiones.
             if (!GeneroPorReglas.SinGenero(t) || GeneroPorReglas.EsMezcla(t)) { progreso?.Report((i + 1, candidatas.Count)); continue; }
 
             var titulo = string.IsNullOrWhiteSpace(t.Title) ? Path.GetFileNameWithoutExtension(t.FilePath) : t.Title!;
             var version = RemixParser.Parse(titulo);
-            var r = await deezer.SearchAsync(t.Artist ?? "", titulo, wantRemix: GeneroPorReglas.RemixFirmado(t), wantLive: false,
-                                             localDur: t.DurationSeconds, isEdit: version.IsVersion, ct: ct).ConfigureAwait(false);
-            if (r is { AlbumId.Length: > 0 })
+            try
             {
-                if (!albumes.TryGetValue(r.AlbumId, out var album))
+                var r = await deezer.SearchAsync(t.Artist ?? "", titulo, wantRemix: GeneroPorReglas.RemixFirmado(t), wantLive: false,
+                                                 localDur: t.DurationSeconds, isEdit: version.IsVersion, ct: ct, conFicha: false).ConfigureAwait(false);
+                if (r is { AlbumId.Length: > 0 })
                 {
-                    var generos = await deezer.AlbumGenresAsync(r.AlbumId, ct).ConfigureAwait(false);
-                    albumes[r.AlbumId] = album = (Traducir(generos), string.Join(", ", generos.Select(g => g.Nombre).Where(n => n.Length > 0)));
+                    encontradas++;
+                    if (!albumes.TryGetValue(r.AlbumId, out var album))
+                    {
+                        var generos = await deezer.AlbumGenresAsync(r.AlbumId, ct).ConfigureAwait(false);
+                        albumes[r.AlbumId] = album = (Traducir(generos), string.Join(", ", generos.Select(g => g.Nombre).Where(n => n.Length > 0)));
+                    }
+                    if (album.Estilo is { } estilo)
+                        res.Add(new PropuestaGeneroRegla(t.FilePath, estilo, ReglaGenero.Deezer,
+                            $"Deezer: álbum «{r.Album}» ({album.Nombres}) → {estilo} · el género de Deezer es del álbum entero: revísalo",
+                            false, t.Genre ?? "", CambioGenero.Rellenar));
                 }
-                if (album.Estilo is { } estilo)
-                    res.Add(new PropuestaGeneroRegla(t.FilePath, estilo, ReglaGenero.Deezer,
-                        $"Deezer: álbum «{r.Album}» ({album.Nombres}) → {estilo} · el género de Deezer es del álbum entero: revísalo",
-                        false, t.Genre ?? "", CambioGenero.Rellenar));
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Cancelada a mitad de esta canción: no cuenta como buscada.
+                return new BusquedaGeneroDeezer(res, buscadas, encontradas, true);
+            }
+            buscadas++;
             progreso?.Report((i + 1, candidatas.Count));
         }
-        return res;
+        return new BusquedaGeneroDeezer(res, buscadas, encontradas, false);
     }
 }
+
+/// <summary>Lo que ha dado buscar en Deezer las canciones sin propuesta.</summary>
+/// <param name="Propuestas">Las canciones con un subgénero concreto en su álbum, desmarcadas.</param>
+/// <param name="Buscadas">Canciones que se han llegado a buscar.</param>
+/// <param name="Encontradas">De ellas, cuántas ha encontrado Deezer (con su álbum).</param>
+/// <param name="Cancelada">Se canceló antes de acabar: las propuestas son las de las canciones buscadas hasta ese momento.</param>
+public sealed record BusquedaGeneroDeezer(List<PropuestaGeneroRegla> Propuestas, int Buscadas, int Encontradas, bool Cancelada);

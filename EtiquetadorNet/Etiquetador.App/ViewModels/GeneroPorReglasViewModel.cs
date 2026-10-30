@@ -418,24 +418,46 @@ public sealed partial class GeneroPorReglasViewModel : ObservableObject
             _p.Progress = x.Total > 0 ? 100.0 * x.Hechas / x.Total : 0;
             _p.Status = $"Buscando en Deezer: {x.Hechas:N0} de {x.Total:N0}…";
         });
-        var nuevas = await Task.Run(() => GeneroDeezer.BuscarAsync(candidatas, _p.Engine.Deezer, progreso, ct), ct);
+        // Sin el token en Task.Run: si se cancela, la búsqueda devuelve lo calculado hasta ese momento
+        // y se añade a la tabla igualmente.
+        var busqueda = await Task.Run(() => GeneroDeezer.BuscarAsync(candidatas, _p.Engine.Deezer, progreso, ct));
+        var nuevas = busqueda.Propuestas;
 
         foreach (var n in nuevas) _deezer[n.Ruta] = n;
-        var porRuta = new Dictionary<string, Track>(StringComparer.Ordinal);
-        foreach (var t in canciones) porRuta.TryAdd(t.FilePath, t);
-        var nuevasRutas = new HashSet<string>(nuevas.Select(n => n.Ruta), StringComparer.Ordinal);
-        var quedan = Propuestas.Where(f => !nuevasRutas.Contains(f.Ruta)).Select(f => f.Propuesta);
-        Propuestas = new ObservableCollection<GeneroReglaFila>(Filas(quedan.Concat(nuevas), porRuta, Propuestas));
-        _p.Status = TextoDeezer(candidatas.Count, nuevas.Count);
+        if (nuevas.Count > 0)
+        {
+            var porRuta = new Dictionary<string, Track>(StringComparer.Ordinal);
+            foreach (var t in canciones) porRuta.TryAdd(t.FilePath, t);
+            var nuevasRutas = new HashSet<string>(nuevas.Select(n => n.Ruta), StringComparer.Ordinal);
+            var quedan = Propuestas.Where(f => !nuevasRutas.Contains(f.Ruta)).Select(f => f.Propuesta);
+            Propuestas = new ObservableCollection<GeneroReglaFila>(Filas(quedan.Concat(nuevas), porRuta, Propuestas));
+        }
+        _p.Status = TextoDeezer(busqueda, candidatas.Count);
     });
 
-    internal static string TextoDeezer(int buscadas, int propuestas)
-        => $"Buscadas en Deezer {EscrituraPorReglas.Cuenta(buscadas, "canción", "canciones")}: "
-           + (propuestas == 0
-               ? "ninguna propuesta, porque sus álbumes solo traen géneros que no distinguen estilos."
-               : propuestas == 1
-                   ? "1 propuesta con un subgénero concreto del álbum, desmarcada para que la revises."
-                   : $"{propuestas:N0} propuestas con un subgénero concreto del álbum, desmarcadas para que las revises.");
+    /// <summary>
+    /// Lo que ha dado la búsqueda en Deezer: cuántas se buscaron (y, si se canceló, de cuántas), y
+    /// por qué no hay propuestas cuando no las hay: que Deezer no las encontró o que sus álbumes solo
+    /// traen géneros amplios.
+    /// </summary>
+    internal static string TextoDeezer(BusquedaGeneroDeezer b, int candidatas)
+    {
+        var propuestas = b.Propuestas.Count;
+        var inicio = b.Cancelada
+            ? $"Búsqueda en Deezer cancelada a medias, tras {b.Buscadas:N0} de {EscrituraPorReglas.Cuenta(candidatas, "canción", "canciones")}"
+            : b.Buscadas == 1 ? "Buscada en Deezer 1 canción" : $"Buscadas en Deezer {b.Buscadas:N0} canciones";
+        var resto = propuestas switch
+        {
+            0 when b.Buscadas == 0 => "ninguna propuesta.",
+            0 when b.Encontradas == 0 => b.Buscadas == 1 ? "Deezer no la ha encontrado." : "Deezer no ha encontrado ninguna.",
+            0 => b.Encontradas == 1
+                ? "ninguna propuesta: Deezer ha encontrado 1, pero su álbum solo trae géneros amplios, que no distinguen estilos."
+                : $"ninguna propuesta: Deezer ha encontrado {b.Encontradas:N0}, pero sus álbumes solo traen géneros amplios, que no distinguen estilos.",
+            1 => "1 propuesta con un subgénero concreto del álbum, desmarcada para que la revises.",
+            _ => $"{propuestas:N0} propuestas con un subgénero concreto del álbum, desmarcadas para que las revises.",
+        };
+        return inicio + ": " + resto;
+    }
 
     /// <summary>
     /// Las filas de las propuestas: primero las marcadas, luego por regla y por ruta. Lo que ya habías

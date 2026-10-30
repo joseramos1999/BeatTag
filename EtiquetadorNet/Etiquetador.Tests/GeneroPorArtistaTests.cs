@@ -725,19 +725,38 @@ public class GeneroPorArtistaTests : IDisposable
 
     private const string AlbumDeezer = """{"genres":{"data":[{"id":122,"name":"Reggaeton"},{"id":197,"name":"Latino"}]}}""";
 
+    // Revisión: cada canción pedía también la ficha de la pista (track/{id}), que aquí no se usa: unas
+    // 565 peticiones de más con 565 candidatas. Ahora son la búsqueda y, si es nuevo, el álbum.
     [Fact]
-    public async Task Deezer_pide_cada_album_una_vez_y_propone_desmarcado()
+    public async Task Deezer_pide_cada_album_una_vez_no_pide_la_ficha_de_la_pista_y_propone_desmarcado()
     {
         using var m = new MontajeApi();
         m.Red.Responde("api.deezer.com/search", BusquedaDeezer).Responde("api.deezer.com/album/77", AlbumDeezer);
         var canciones = new List<Track> { T("KAROL G", "Bichota", null), T("KAROL G", "Tusa", null) };
 
-        var p = await GeneroDeezer.BuscarAsync(canciones, new Etiquetador.Core.Providers.DeezerProvider(m.Api), null, CancellationToken.None);
+        var r = await GeneroDeezer.BuscarAsync(canciones, new Etiquetador.Core.Providers.DeezerProvider(m.Api), null, CancellationToken.None);
 
+        var p = r.Propuestas;
         Assert.Equal(2, p.Count);
         Assert.All(p, x => Assert.Equal(("Reggaeton", ReglaGenero.Deezer, false), (x.Genero, x.Regla, x.Marcada)));
         Assert.StartsWith("Deezer: álbum «KG0516» (Reggaeton, Latino) → Reggaeton", p[0].PorQue);
+        Assert.Equal((2, 2, false), (r.Buscadas, r.Encontradas, r.Cancelada));
+        Assert.Equal(2, m.Red.Cuantas("api.deezer.com/search"));
         Assert.Equal(1, m.Red.Cuantas("api.deezer.com/album/"));
+        Assert.Equal(0, m.Red.Cuantas("api.deezer.com/track/"));
+    }
+
+    [Fact]
+    public async Task Deezer_distingue_lo_que_no_encuentra_de_lo_que_solo_trae_generos_amplios()
+    {
+        using var m = new MontajeApi();
+        m.Red.Responde("api.deezer.com/search", """{"data":[]}""");
+        var canciones = new List<Track> { T("KAROL G", "Bichota", null), T("KAROL G", "Tusa", null) };
+
+        var r = await GeneroDeezer.BuscarAsync(canciones, new Etiquetador.Core.Providers.DeezerProvider(m.Api), null, CancellationToken.None);
+
+        Assert.Equal((0, 2, 0, false), (r.Propuestas.Count, r.Buscadas, r.Encontradas, r.Cancelada));
+        Assert.Equal("Buscadas en Deezer 2 canciones: Deezer no ha encontrado ninguna.", GeneroPorReglasViewModel.TextoDeezer(r, 2));
     }
 
     [Fact]
@@ -748,8 +767,9 @@ public class GeneroPorArtistaTests : IDisposable
         var mashup = T("KAROL G", "Bichota x Tusa (Gery Mashup)", null);
 
         Assert.Empty(GeneroDeezer.Candidatas(new[] { mashup }, Array.Empty<string>()));
-        var p = await GeneroDeezer.BuscarAsync(new[] { mashup }, new Etiquetador.Core.Providers.DeezerProvider(m.Api), null, CancellationToken.None);
-        Assert.Empty(p);
+        var r = await GeneroDeezer.BuscarAsync(new[] { mashup }, new Etiquetador.Core.Providers.DeezerProvider(m.Api), null, CancellationToken.None);
+        Assert.Empty(r.Propuestas);
+        Assert.Equal(0, r.Buscadas);
         Assert.Equal(0, m.Red.Cuantas("api.deezer.com"));
     }
 
@@ -762,27 +782,67 @@ public class GeneroPorArtistaTests : IDisposable
         Assert.Equal(new[] { sin }, GeneroDeezer.Candidatas(new[] { sin, conPropuesta, conGenero }, new[] { conPropuesta.FilePath }));
     }
 
+    // Revisión: cancelar lanzaba la excepción y se perdía todo lo calculado (cancelar al 90 % no dejaba
+    // ninguna propuesta). Ahora se para entre una canción y la siguiente y devuelve lo que lleva.
     [Fact]
-    public async Task Deezer_se_puede_cancelar_entre_una_cancion_y_la_siguiente()
+    public async Task Deezer_cancelado_entre_una_cancion_y_la_siguiente_conserva_lo_encontrado()
     {
         using var m = new MontajeApi();
         m.Red.Responde("api.deezer.com/search", BusquedaDeezer).Responde("api.deezer.com/album/77", AlbumDeezer);
         using var cts = new CancellationTokenSource();
         var canciones = new List<Track> { T("KAROL G", "Bichota", null), T("KAROL G", "Tusa", null) };
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => GeneroDeezer.BuscarAsync(
-            canciones, new Etiquetador.Core.Providers.DeezerProvider(m.Api), new EnLinea(_ => cts.Cancel()), cts.Token));
+        var r = await GeneroDeezer.BuscarAsync(canciones, new Etiquetador.Core.Providers.DeezerProvider(m.Api), new EnLinea(_ => cts.Cancel()), cts.Token);
 
         Assert.Equal(1, m.Red.Cuantas("api.deezer.com/search"));
+        Assert.Equal(canciones[0].FilePath, Assert.Single(r.Propuestas).Ruta);
+        Assert.Equal((1, 1, true), (r.Buscadas, r.Encontradas, r.Cancelada));
+        Assert.Equal("Búsqueda en Deezer cancelada a medias, tras 1 de 2 canciones: 1 propuesta con un subgénero concreto del álbum, desmarcada para que la revises.",
+                     GeneroPorReglasViewModel.TextoDeezer(r, 2));
     }
 
+    // Y también si se cancela mientras espera la respuesta de Deezer.
+    [Fact]
+    public async Task Deezer_cancelado_a_mitad_de_una_peticion_conserva_lo_encontrado()
+    {
+        using var m = new MontajeApi();
+        using var cts = new CancellationTokenSource();
+        m.Red.Cuando("api.deezer.com/search", async (n, req, ct) =>
+        {
+            if (n == 1) return RedFalsa.Respuesta(req, BusquedaDeezer);
+            cts.Cancel();   // la segunda no contesta: se cancela mientras espera
+            await Task.Delay(Timeout.Infinite, ct);
+            throw new InvalidOperationException("inalcanzable");
+        }).Responde("api.deezer.com/album/77", AlbumDeezer);
+        var canciones = new List<Track> { T("KAROL G", "Bichota", null), T("KAROL G", "Tusa", null), T("KAROL G", "Provenza", null) };
+
+        var r = await GeneroDeezer.BuscarAsync(canciones, new Etiquetador.Core.Providers.DeezerProvider(m.Api), null, cts.Token);
+
+        Assert.Equal(canciones[0].FilePath, Assert.Single(r.Propuestas).Ruta);
+        Assert.Equal((1, 1, true), (r.Buscadas, r.Encontradas, r.Cancelada));
+        Assert.Equal(2, m.Red.Cuantas("api.deezer.com/search"));
+    }
+
+    // Revisión: con 1 canción decía «Buscadas en Deezer 1 canción», y sin propuestas siempre culpaba a
+    // los géneros de los álbumes, aunque Deezer no hubiera encontrado las canciones.
     [Fact]
     public void Los_textos_de_Deezer_distinguen_singular_y_plural()
     {
-        Assert.Equal("Buscadas en Deezer 1 canción: 1 propuesta con un subgénero concreto del álbum, desmarcada para que la revises.",
-                     GeneroPorReglasViewModel.TextoDeezer(1, 1));
-        Assert.StartsWith("Buscadas en Deezer 3 canciones: ninguna propuesta", GeneroPorReglasViewModel.TextoDeezer(3, 0));
-        Assert.EndsWith("2 propuestas con un subgénero concreto del álbum, desmarcadas para que las revises.", GeneroPorReglasViewModel.TextoDeezer(3, 2));
+        static BusquedaGeneroDeezer B(int propuestas, int buscadas, int encontradas, bool cancelada = false)
+            => new(Enumerable.Range(0, propuestas)
+                       .Select(i => new PropuestaGeneroRegla($"r{i}", "Reggaeton", ReglaGenero.Deezer, "x", false)).ToList(),
+                   buscadas, encontradas, cancelada);
+
+        Assert.Equal("Buscada en Deezer 1 canción: 1 propuesta con un subgénero concreto del álbum, desmarcada para que la revises.",
+                     GeneroPorReglasViewModel.TextoDeezer(B(1, 1, 1), 1));
+        Assert.Equal("Buscada en Deezer 1 canción: Deezer no la ha encontrado.", GeneroPorReglasViewModel.TextoDeezer(B(0, 1, 0), 1));
+        Assert.Equal("Buscada en Deezer 1 canción: ninguna propuesta: Deezer ha encontrado 1, pero su álbum solo trae géneros amplios, que no distinguen estilos.",
+                     GeneroPorReglasViewModel.TextoDeezer(B(0, 1, 1), 1));
+        Assert.Equal("Buscadas en Deezer 3 canciones: ninguna propuesta: Deezer ha encontrado 2, pero sus álbumes solo traen géneros amplios, que no distinguen estilos.",
+                     GeneroPorReglasViewModel.TextoDeezer(B(0, 3, 2), 3));
+        Assert.Equal("Buscadas en Deezer 3 canciones: Deezer no ha encontrado ninguna.", GeneroPorReglasViewModel.TextoDeezer(B(0, 3, 0), 3));
+        Assert.EndsWith("2 propuestas con un subgénero concreto del álbum, desmarcadas para que las revises.", GeneroPorReglasViewModel.TextoDeezer(B(2, 3, 3), 3));
+        Assert.Equal("Búsqueda en Deezer cancelada a medias, tras 0 de 1 canción: ninguna propuesta.", GeneroPorReglasViewModel.TextoDeezer(B(0, 0, 0, true), 1));
         Assert.Equal("Deezer", GeneroReglaFila.TextoRegla(ReglaGenero.Deezer));
     }
 
