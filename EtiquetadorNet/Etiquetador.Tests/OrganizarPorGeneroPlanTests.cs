@@ -691,6 +691,76 @@ public class OrganizarPorGeneroPlanTests
         Assert.Equal(Path.Combine(raiz, "Musica", "Otra"), Etiquetador.Core.Rutas.RutaReal(Path.Combine(raiz, "Musica", "Otra"), Destino));
     }
 
+    // Revisión 2: el destino de un enlace no se volvía a resolver. En macOS ResolveLinkTarget solo sigue
+    // el último tramo, así que un enlace a «/var/…/Destino» se quedaba ahí, y «/var» es a su vez un
+    // enlace a «/private/var»: la misma carpeta daba dos rutas reales distintas. Se simula con un
+    // resolvedor que encadena los dos enlaces, para comprobarlo en cualquier sistema.
+    [Fact]
+    public void La_ruta_real_vuelve_a_resolver_el_destino_de_un_enlace()
+    {
+        var raiz = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "beattag-enlaces2");
+        var varCorta = Path.Combine(raiz, "var");
+        var privada = Path.Combine(raiz, "private", "var");
+        var enlace = Path.Combine(privada, "T", "Enlace");
+        string? Destino(string c)
+            => Etiquetador.Core.Rutas.MismaCarpeta(c, varCorta) ? privada
+             : Etiquetador.Core.Rutas.MismaCarpeta(c, enlace) ? Path.Combine(varCorta, "T", "Destino")
+             : null;
+
+        var porElDestino = Etiquetador.Core.Rutas.RutaReal(Path.Combine(varCorta, "T", "Destino", "Pack"), Destino);
+        var porElEnlace = Etiquetador.Core.Rutas.RutaReal(Path.Combine(varCorta, "T", "Enlace", "Pack"), Destino);
+
+        Assert.Equal(Path.Combine(privada, "T", "Destino", "Pack"), porElDestino);
+        Assert.Equal(porElDestino, porElEnlace);
+    }
+
+    [Fact]
+    public void La_ruta_real_no_da_vueltas_con_dos_enlaces_que_se_apuntan()
+    {
+        var raiz = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "beattag-ciclo");
+        var a = Path.Combine(raiz, "A");
+        var b = Path.Combine(raiz, "B");
+        string? Destino(string c) => Etiquetador.Core.Rutas.MismaCarpeta(c, a) ? b : Etiquetador.Core.Rutas.MismaCarpeta(c, b) ? a : null;
+
+        var real = Etiquetador.Core.Rutas.RutaReal(Path.Combine(a, "Pack"), Destino);
+
+        Assert.EndsWith("Pack", real);
+    }
+
+    // Lo mismo en el plan: una carpeta de la biblioteca que enlaza con un atajo que, a su vez, lleva a
+    // otro disco. Sin volver a resolver el destino, se daba por la misma unidad y File.Move copiaba y borraba.
+    [Fact]
+    public void Un_enlace_a_otro_enlace_que_lleva_a_otro_disco_es_otra_unidad()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var musica = Directory.CreateDirectory(Path.Combine(dir, "Musica")).FullName;
+            var externa = Directory.CreateDirectory(Path.Combine(musica, "Externa")).FullName;
+            var atajo = Path.Combine(dir, "Atajo");
+            var usb = Path.Combine(dir, "Volumes", "USB");
+            File.WriteAllText(Path.Combine(musica, "dentro.mp3"), "x");
+            File.WriteAllText(Path.Combine(externa, "fuera.mp3"), "x");
+            // «Externa» lleva a «Atajo/Musica», y «Atajo» lleva a «USB», un disco montado aparte.
+            var disco = new DiscoReal(new[] { dir, usb },
+                                      c => Etiquetador.Core.Rutas.MismaCarpeta(c, externa) ? Path.Combine(atajo, "Musica")
+                                         : Etiquetador.Core.Rutas.MismaCarpeta(c, atajo) ? usb
+                                         : null,
+                                      _ => null);
+            var canciones = new[]
+            {
+                new Track { FilePath = Path.Combine(musica, "dentro.mp3"), Folder = musica, Genre = "Pop" },
+                new Track { FilePath = Path.Combine(externa, "fuera.mp3"), Folder = musica, Genre = "Pop" },
+            };
+
+            var plan = OrganizarPorGenero.Planear(canciones, new[] { musica }, new OpcionesOrganizar(), disco);
+
+            Assert.Equal("dentro.mp3", Path.GetFileName(Unico(plan).Origen));
+            Assert.Equal(MotivoOmision.OtraUnidad, Assert.Single(plan.Omitidas).Motivo);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
     [Fact]
     public void Una_carpeta_de_la_biblioteca_que_enlaza_con_otro_disco_es_otra_unidad()
     {

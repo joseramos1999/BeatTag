@@ -86,8 +86,9 @@ public static class Rutas
 
     /// <summary>
     /// La ruta con los enlaces de cada tramo resueltos: si una carpeta del camino es un enlace
-    /// simbólico o una unión que lleva a otro sitio, la ruta sigue desde allí. Los tramos que no
-    /// existen (una carpeta que aún no se ha creado) se quedan como están. Sin enlaces, la misma ruta.
+    /// simbólico o una unión que lleva a otro sitio, la ruta sigue desde allí, y ese destino se vuelve a
+    /// resolver entero, porque también puede pasar por otros enlaces. Los tramos que no existen (una
+    /// carpeta que aún no se ha creado) se quedan como están. Sin enlaces, la misma ruta.
     /// </summary>
     /// <param name="destinoDeEnlace">
     /// Adónde lleva una carpeta si es un enlace, o null si no lo es. Por defecto,
@@ -95,22 +96,30 @@ public static class Rutas
     /// </param>
     public static string RutaReal(string ruta, Func<string, string?>? destinoDeEnlace = null)
     {
-        destinoDeEnlace ??= DestinoDeEnlace;
+        var saltos = 0;
+        return RutaReal(ruta, destinoDeEnlace ?? DestinoDeEnlace, ref saltos);
+    }
+
+    /// <summary>Cuántos enlaces se siguen como mucho para una ruta: evita dar vueltas si dos enlaces se apuntan.</summary>
+    private const int SaltosMaximos = 40;
+
+    private static string RutaReal(string ruta, Func<string, string?> destinoDeEnlace, ref int saltos)
+    {
         var raiz = Path.GetPathRoot(ruta);
         if (string.IsNullOrEmpty(raiz)) return ruta;
         var actual = raiz;
         var tramos = ruta[raiz.Length..].Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
-        var saltos = 0;
         foreach (var tramo in tramos)
         {
             actual = Path.Combine(actual, tramo);
-            // Un enlace que lleva a otro enlace ya lo resuelve DestinoDeEnlace hasta el final; el límite
-            // solo evita dar vueltas si un resolvedor devolviera algo que vuelve a pasar por aquí.
-            if (saltos < 40 && destinoDeEnlace(actual) is { Length: > 0 } destino)
-            {
-                actual = Path.IsPathRooted(destino) ? destino : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(actual) ?? "", destino));
-                saltos++;
-            }
+            if (saltos >= SaltosMaximos || destinoDeEnlace(actual) is not { Length: > 0 } destino) continue;
+            saltos++;
+            var absoluto = Path.IsPathRooted(destino) ? destino : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(actual) ?? "", destino));
+            // El destino puede pasar a su vez por otro enlace (revisión 2). En macOS, ResolveLinkTarget solo
+            // sigue el último tramo: un enlace a «/var/…/Destino» se queda ahí, y «/var» es a su vez un
+            // enlace a «/private/var». Sin volver a resolverlo, la misma carpeta daba dos rutas reales, y un
+            // enlace cuyo destino pasa por otro enlace a otro disco se daba por la misma unidad.
+            actual = RutaReal(absoluto, destinoDeEnlace, ref saltos);
         }
         return actual;
     }
