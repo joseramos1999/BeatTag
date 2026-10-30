@@ -32,6 +32,8 @@ internal sealed class DiscoEnMemoria : IAccesoDisco
 
     public bool ExisteArchivo(string ruta) => _archivos.Contains(ruta) || _carpetas.Contains(ruta, ComparadorRutas.Instancia);
 
+    public bool ExisteCarpeta(string carpeta) => _carpetas.Any(c => Etiquetador.Core.Rutas.MismaCarpeta(c, carpeta));
+
     public string? NombreRealDeCarpeta(string padre, string nombre)
         => _carpetas.Where(c => ComparadorRutas.Instancia.Equals(Path.GetDirectoryName(c) ?? "", padre.TrimEnd('\\', '/'))
                                 && ComparadorRutas.Instancia.Equals(Path.GetFileName(c), nombre))
@@ -435,6 +437,50 @@ public class OrganizarPorGeneroPlanTests
         var latino = plan.PorOrigen.Single(o => o.Carpeta == Path.Combine(Raiz, "Latino"));
         Assert.Equal("2 a Reggaeton · 1 a Latin", latino.Reparto);
         Assert.Equal(2, plan.MediaGenerosPorOrigen);
+    }
+
+    // Revisión 1: las canciones de una carpeta de la biblioteca que no está disponible (un disco externo
+    // desconectado: la biblioteca las conserva) entraban como traslados. COMPROBADO con una raíz en Q:\
+    // inexistente: «Se moverán 2 canciones a 2 carpetas», que después fallaban una a una.
+    [Fact]
+    public void Las_canciones_de_una_carpeta_que_no_esta_disponible_se_quedan_con_su_motivo()
+    {
+        var externo = Path.Combine(Path.GetPathRoot(Raiz)!, "Disco externo");
+        var dentro = T("A", "uno.mp3", "Pop");
+        var fuera = new[] { T("B", "dos.mp3", "Pop", raiz: externo), T("C", "tres.mp3", "Rock", raiz: externo) };
+        var disco = Disco(new[] { dentro });   // el disco externo no está
+
+        var plan = Plan(fuera.Append(dentro).ToList(), disco: disco, raices: new[] { Raiz, externo });
+
+        Assert.Equal(dentro.FilePath, Unico(plan).Origen);
+        Assert.Equal(2, plan.CuantasOmitidas(MotivoOmision.NoDisponible));
+        Assert.All(plan.Omitidas, o => Assert.Equal("Su carpeta no está disponible", o.Texto));
+        Assert.Contains("2 se omiten porque su carpeta no está disponible", OrganizarPorGenero.Resumen(plan));
+    }
+
+    [Fact]
+    public void El_disco_real_dice_que_una_carpeta_que_no_existe_no_esta_disponible()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var musica = Directory.CreateDirectory(Path.Combine(dir, "Musica")).FullName;
+            var a = Path.Combine(musica, "A", "uno.mp3");
+            Directory.CreateDirectory(Path.GetDirectoryName(a)!);
+            File.WriteAllText(a, "x");
+            var desconectada = Path.Combine(dir, "Desconectada");
+            var canciones = new[]
+            {
+                new Track { FilePath = a, Folder = musica, Genre = "Pop" },
+                new Track { FilePath = Path.Combine(desconectada, "B", "dos.mp3"), Folder = desconectada, Genre = "Pop" },
+            };
+
+            var plan = OrganizarPorGenero.Planear(canciones, new[] { musica, desconectada }, new OpcionesOrganizar(), new DiscoReal(Array.Empty<string>()));
+
+            Assert.Equal(a, Unico(plan).Origen);
+            Assert.Equal(MotivoOmision.NoDisponible, Assert.Single(plan.Omitidas).Motivo);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
     [Fact]

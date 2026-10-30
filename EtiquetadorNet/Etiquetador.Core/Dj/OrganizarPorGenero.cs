@@ -21,6 +21,12 @@ public interface IAccesoDisco
     /// </summary>
     string? NombreRealDeCarpeta(string padre, string nombre);
 
+    /// <summary>
+    /// La carpeta existe y se puede ver ahora. Una carpeta de la biblioteca en un disco externo
+    /// desconectado no existe, aunque la biblioteca conserve sus canciones (ver LibraryStore).
+    /// </summary>
+    bool ExisteCarpeta(string carpeta);
+
     /// <summary>La unidad (el punto de montaje) de la ruta: ver <see cref="Rutas.UnidadDe"/>.</summary>
     string UnidadDe(string ruta);
 }
@@ -59,6 +65,19 @@ public sealed class DiscoReal : IAccesoDisco
             return subcarpetas.TryGetValue(ComparadorRutas.Clave(nombre), out var real) ? real : null;
         return Directory.Exists(Path.Combine(padre, nombre)) ? nombre : null;
     }
+
+    public bool ExisteCarpeta(string carpeta)
+    {
+        if (!_existe.TryGetValue(carpeta, out var si))
+        {
+            try { si = Directory.Exists(carpeta); }
+            catch { si = false; }
+            _existe[carpeta] = si;
+        }
+        return si;
+    }
+
+    private readonly Dictionary<string, bool> _existe = new(ComparadorRutas.Instancia);
 
     public string UnidadDe(string ruta) => Rutas.UnidadDe(ruta, _puntos);
 
@@ -143,6 +162,8 @@ public enum MotivoOmision
     DestinoConAjustes,
     /// <summary>Su carpeta de origen está desmarcada en la vista previa.</summary>
     OrigenDesmarcado,
+    /// <summary>Su carpeta no existe ahora (un disco externo desconectado, una unidad de red caída).</summary>
+    NoDisponible,
     OtraUnidad,
     /// <summary>La ruta de destino tendría <see cref="OrganizarPorGenero.LargoMaximoRuta"/> caracteres o más.</summary>
     RutaLarga,
@@ -461,6 +482,9 @@ public static class OrganizarPorGenero
 
             void Omitir(MotivoOmision m, string texto) => omitidas.Add(new OmisionOrganizar(t.FilePath, m, texto));
 
+            // Un disco desconectado no ha borrado su música: la biblioteca conserva sus canciones, pero
+            // no se pueden mover, y contarlas en la vista previa solo daría fallos al organizar.
+            if (!disco.ExisteCarpeta(dir)) { Omitir(MotivoOmision.NoDisponible, TextoMotivo(MotivoOmision.NoDisponible)); continue; }
             if (ConAjustes(dir)) { Omitir(MotivoOmision.CarpetaConAjustes, TextoMotivo(MotivoOmision.CarpetaConAjustes)); continue; }
             if (excluidos.Contains(dir.TrimEnd('\\', '/'))) { Omitir(MotivoOmision.OrigenDesmarcado, TextoMotivo(MotivoOmision.OrigenDesmarcado)); continue; }
 
@@ -612,6 +636,7 @@ public static class OrganizarPorGenero
         MotivoOmision.CarpetaConAjustes => "Su carpeta tiene ajustes propios en Duplicados o en Volumen",
         MotivoOmision.DestinoConAjustes => "Su carpeta de destino tiene ajustes propios en Duplicados o en Volumen",
         MotivoOmision.OrigenDesmarcado => "Su carpeta de origen está desmarcada",
+        MotivoOmision.NoDisponible => "Su carpeta no está disponible",
         MotivoOmision.OtraUnidad => "Está en otra unidad",
         MotivoOmision.RutaLarga => $"La ruta de destino tendría {LargoMaximoRuta} caracteres o más",
         MotivoOmision.TramoLargo => $"Un tramo de la ruta de destino pasaría de {BytesMaximoTramo} bytes",
@@ -653,6 +678,7 @@ public static class OrganizarPorGenero
                 ? "1 se queda porque su carpeta de destino tiene ajustes propios en Duplicados o en Volumen"
                 : $"{cuantas} se quedan porque su carpeta de destino tiene ajustes propios en Duplicados o en Volumen",
             MotivoOmision.OrigenDesmarcado => uno ? "1 se queda porque su carpeta está desmarcada" : $"{cuantas} se quedan porque su carpeta está desmarcada",
+            MotivoOmision.NoDisponible => uno ? "1 se omite porque su carpeta no está disponible" : $"{cuantas} se omiten porque su carpeta no está disponible",
             MotivoOmision.OtraUnidad => uno ? "1 se omite porque está en otra unidad" : $"{cuantas} se omiten porque están en otra unidad",
             MotivoOmision.RutaLarga => uno
                 ? $"1 se omite porque su ruta de destino tendría {LargoMaximoRuta} caracteres o más"
@@ -668,7 +694,7 @@ public static class OrganizarPorGenero
     private static readonly MotivoOmision[] OrdenResumen =
     {
         MotivoOmision.SinGenero, MotivoOmision.HerramientaDj, MotivoOmision.CarpetaConAjustes, MotivoOmision.DestinoConAjustes, MotivoOmision.OrigenDesmarcado,
-        MotivoOmision.YaEnSuSitio, MotivoOmision.Colision, MotivoOmision.OtraUnidad, MotivoOmision.RutaLarga, MotivoOmision.TramoLargo,
+        MotivoOmision.YaEnSuSitio, MotivoOmision.Colision, MotivoOmision.NoDisponible, MotivoOmision.OtraUnidad, MotivoOmision.RutaLarga, MotivoOmision.TramoLargo,
     };
 
     /// <summary>
