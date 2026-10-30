@@ -28,6 +28,12 @@ public interface IAccesoDisco
     bool ExisteCarpeta(string carpeta);
 
     /// <summary>
+    /// Si hay un ARCHIVO con ese nombre (sin distinguir mayúsculas ni la forma Unicode), su ruta con el
+    /// nombre que tiene en el disco; si no, null.
+    /// </summary>
+    string? ArchivoReal(string ruta);
+
+    /// <summary>
     /// El disco donde está de verdad la ruta: entre dos rutas con la misma unidad, mover es renombrar (ver
     /// <see cref="DiscoReal.UnidadDe"/>, que sigue uniones, enlaces y carpetas donde está montado otro disco).
     /// </summary>
@@ -96,6 +102,18 @@ public sealed class DiscoReal : IAccesoDisco
     }
 
     private readonly Dictionary<string, bool> _existe = new(ComparadorRutas.Instancia);
+
+    public string? ArchivoReal(string ruta)
+    {
+        var dir = Path.GetDirectoryName(ruta);
+        if (string.IsNullOrEmpty(dir)) return null;
+        var archivos = Listar(_archivos, dir, Directory.EnumerateFiles);
+        if (archivos != null)
+            return archivos.TryGetValue(ComparadorRutas.Clave(Path.GetFileName(ruta)), out var real) ? Path.Combine(dir, real) : null;
+        return File.Exists(ruta) ? ruta : null;
+    }
+
+    private readonly Dictionary<string, Dictionary<string, string>?> _archivos = new(ComparadorRutas.Instancia);
 
     /// <summary>
     /// El disco donde está de verdad la ruta, aunque una carpeta del camino sea una unión, un enlace o
@@ -214,7 +232,18 @@ public enum MotivoOmision
 /// <summary>Una canción que se mueve.</summary>
 /// <param name="Genero">El género con que se ha decidido, escrito como en la biblioteca («» si va a «Sin género»).</param>
 /// <param name="CarpetaGenero">La carpeta del género tal como queda en el disco («Reggaeton», «Otros géneros»…).</param>
-public sealed record MovimientoOrganizar(string Origen, string Destino, string Genero, string CarpetaGenero);
+public sealed record MovimientoOrganizar(string Origen, string Destino, string Genero, string CarpetaGenero)
+{
+    /// <summary>
+    /// Los archivos que acompañan a la canción por su nombre y van con ella a la misma carpeta, con el
+    /// nombre que tienen en el disco: «Tema.mp3.asd» (Ableton Live), «Tema.cue» y «Tema.lrc». Ver
+    /// <see cref="OrganizarPorGenero.ExtensionesAsociadas"/>.
+    /// </summary>
+    public IReadOnlyList<string> Asociados { get; init; } = Array.Empty<string>();
+
+    /// <summary>Adónde va cada asociado: a la carpeta de la canción, con su mismo nombre.</summary>
+    public string DestinoDe(string asociado) => Path.Combine(Path.GetDirectoryName(Destino) ?? "", Path.GetFileName(asociado));
+}
 
 /// <summary>Una canción que no se mueve, con el motivo.</summary>
 public sealed record OmisionOrganizar(string Ruta, MotivoOmision Motivo, string Texto)
@@ -259,6 +288,9 @@ public sealed class PlanOrganizar
 
     public int Carpetas => PorDestino.Count;
     public int CarpetasNuevas => PorDestino.Count(d => d.Nueva);
+
+    /// <summary>Cuántos archivos asociados (.asd, .cue, .lrc) se mueven con sus canciones.</summary>
+    public int Asociados => Movimientos.Sum(m => m.Asociados.Count);
 
     /// <summary>Cuántas se omiten por ese motivo.</summary>
     public int CuantasOmitidas(MotivoOmision motivo) => Omitidas.Count(o => o.Motivo == motivo);
@@ -316,6 +348,17 @@ public static class OrganizarPorGenero
 
     /// <summary>Cada tramo de la ruta, como mucho estos bytes en UTF-8: el límite de APFS y de ext4 (NTFS admite 255 caracteres, que es más).</summary>
     public const int BytesMaximoTramo = 255;
+
+    /// <summary>
+    /// Los archivos que acompañan a una canción por su nombre y se mueven con ella (revisión 1: antes se
+    /// quedaban en la carpeta de origen, separados de su canción):
+    ///   · «Tema.mp3.asd»: el análisis de Ableton Live, con los marcadores de warp hechos a mano; lleva
+    ///     el nombre ENTERO del audio, así que es siempre de esa canción.
+    ///   · «Tema.cue» y «Tema.lrc»: una hoja de pistas y una letra sincronizada; llevan el nombre sin la
+    ///     extensión, así que solo se mueven si ninguna otra canción de la carpeta se llama igual («Tema.mp3»
+    ///     y «Tema.flac»): si no, no se sabe de cuál son y se quedan.
+    /// </summary>
+    public static readonly IReadOnlyList<string> ExtensionesAsociadas = new[] { ".asd", ".cue", ".lrc" };
 
     /// <summary>Con «Agrupar en Otros géneros» recién marcado, los géneros de menos de estas canciones (una tendencia, como en GeneroPorReglas).</summary>
     public const int AgruparPorDefecto = 3;
@@ -526,6 +569,26 @@ public static class OrganizarPorGenero
         var candidatas = new List<(Track T, string Dir, string Raiz, (string Genero, int Canciones)? Genero)>();
         var porGenero = new Dictionary<string, int>(StringComparer.Ordinal);
         var ordenadas = canciones.OrderBy(t => t.FilePath, StringComparer.Ordinal).ToList();
+
+        // Los archivos asociados (ver ExtensionesAsociadas): «Tema.cue» y «Tema.lrc» solo son de
+        // «Tema.mp3» si ninguna otra canción de su carpeta se llama «Tema».
+        var mismoNombre = new Dictionary<string, int>(StringComparer.Ordinal);
+        string ClaveNombre(string dir, string ruta) => ComparadorRutas.Clave(dir) + "\0" + ComparadorRutas.Clave(Path.GetFileNameWithoutExtension(ruta));
+        foreach (var t in ordenadas)
+        {
+            var k = ClaveNombre(Path.GetDirectoryName(t.FilePath) ?? "", t.FilePath);
+            mismoNombre[k] = mismoNombre.GetValueOrDefault(k) + 1;
+        }
+        List<string> Asociados(string ruta, string dir)
+        {
+            var res = new List<string>();
+            if (disco.ArchivoReal(ruta + ".asd") is { } asd) res.Add(asd);
+            if (mismoNombre.GetValueOrDefault(ClaveNombre(dir, ruta)) > 1) return res;
+            var sinExtension = Path.Combine(dir, Path.GetFileNameWithoutExtension(ruta));
+            foreach (var ext in new[] { ".cue", ".lrc" })
+                if (disco.ArchivoReal(sinExtension + ext) is { } a) res.Add(a);
+            return res;
+        }
         for (var i = 0; i < ordenadas.Count; i++)
         {
             if (i % 256 == 0) ct.ThrowIfCancellationRequested();
@@ -586,8 +649,17 @@ public static class OrganizarPorGenero
             if (!ComparadorRutas.Instancia.Equals(Unidad(dir), Unidad(baseDir))) { Omitir(MotivoOmision.OtraUnidad, TextoMotivo(MotivoOmision.OtraUnidad)); continue; }
             if (ConAjustes(destinoDir)) { Omitir(MotivoOmision.DestinoConAjustes, TextoDestinoConAjustes(nombreDestino)); continue; }
             if (CambioPorCarpeta(t.FilePath, destino, nombreDestino) is { } cambio) { Omitir(MotivoOmision.TipoPorCarpeta, cambio); continue; }
-            if (destino.Length >= LargoMaximoRuta) { Omitir(MotivoOmision.RutaLarga, TextoMotivo(MotivoOmision.RutaLarga)); continue; }
-            if (Tramos(destino).Any(s => Encoding.UTF8.GetByteCount(s) > BytesMaximoTramo))
+            // Los archivos que la acompañan por su nombre van con ella: valen para ellos los mismos límites
+            // y tampoco pueden pisar nada.
+            var asociados = Asociados(t.FilePath, dir);
+            var destinosAsociados = asociados.Select(a => Path.Combine(destinoDir, Path.GetFileName(a))).ToList();
+            if (destino.Length >= LargoMaximoRuta || destinosAsociados.Any(a => a.Length >= LargoMaximoRuta))
+            {
+                Omitir(MotivoOmision.RutaLarga, TextoMotivo(MotivoOmision.RutaLarga));
+                continue;
+            }
+            if (Tramos(destino).Any(s => Encoding.UTF8.GetByteCount(s) > BytesMaximoTramo)
+                || destinosAsociados.Any(a => Encoding.UTF8.GetByteCount(Path.GetFileName(a)) > BytesMaximoTramo))
             {
                 Omitir(MotivoOmision.TramoLargo, TextoMotivo(MotivoOmision.TramoLargo));
                 continue;
@@ -597,9 +669,15 @@ public static class OrganizarPorGenero
                 Omitir(MotivoOmision.Colision, TextoColision(nombreDestino));
                 continue;
             }
+            if (destinosAsociados.FirstOrDefault(a => ocupados.Contains(a) || disco.ExisteArchivo(a)) is { } ocupado)
+            {
+                Omitir(MotivoOmision.Colision, TextoColisionAsociado(Path.GetFileName(ocupado), nombreDestino));
+                continue;
+            }
 
             ocupados.Add(destino);
-            movimientos.Add(new MovimientoOrganizar(t.FilePath, destino, genero?.Genero ?? "", carpetaGenero));
+            ocupados.UnionWith(destinosAsociados);
+            movimientos.Add(new MovimientoOrganizar(t.FilePath, destino, genero?.Genero ?? "", carpetaGenero) { Asociados = asociados });
             destinos[destinoDir] = destinos.TryGetValue(destinoDir, out var d) ? (d.Nombre, d.Canciones + 1) : (nombreDestino, 1);
             origen.Reparto[carpetaGenero] = origen.Reparto.GetValueOrDefault(carpetaGenero) + 1;
         }
@@ -762,6 +840,9 @@ public static class OrganizarPorGenero
 
     /// <summary>«Ya hay un archivo con ese nombre en «Latin»».</summary>
     public static string TextoColision(string carpeta) => $"Ya hay un archivo con ese nombre en «{carpeta}»";
+
+    /// <summary>«Su archivo asociado «Tema.mp3.asd» ya existe en «Pop»».</summary>
+    public static string TextoColisionAsociado(string archivo, string carpeta) => $"Su archivo asociado «{archivo}» ya existe en «{carpeta}»";
 
     /// <summary>«Su carpeta de destino, «House», tiene ajustes propios en Duplicados o en Volumen».</summary>
     public static string TextoDestinoConAjustes(string carpeta)

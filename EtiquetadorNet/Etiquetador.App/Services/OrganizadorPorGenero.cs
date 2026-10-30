@@ -19,6 +19,9 @@ public sealed record ResultadoOrganizar(IReadOnlyList<(string Origen, string Des
                                         bool Cancelado, string Detenido, string UndoErr)
 {
     public int Movidas => Hechos.Count;
+
+    /// <summary>Archivos asociados (.asd, .cue, .lrc) movidos con sus canciones; no cuentan en <see cref="Movidas"/>.</summary>
+    public int Asociados { get; init; }
 }
 
 /// <summary>
@@ -64,23 +67,33 @@ internal static class OrganizadorPorGenero
         var total = plan.Movimientos.Count;
         var cancelado = false;
         var detenido = "";
+        var asociadosMovidos = 0;
         for (var inicio = 0; inicio < total && !cancelado; inicio += TamanoLote)
         {
             if (ct.IsCancellationRequested) { cancelado = true; break; }
             var lote = plan.Movimientos.Skip(inicio).Take(TamanoLote).ToList();
 
-            // 1. Las carpetas que faltan, cada una para el primer registro que la necesita.
+            // 1. Las carpetas que faltan, cada una para el primer registro que la necesita. Cada canción
+            //    lleva detrás un registro por cada archivo asociado que va con ella (ver ExtensionesAsociadas).
             var registros = new List<UndoRecord>(lote.Count);
+            var deCadaUno = new List<(UndoRecord Cancion, List<UndoRecord> Asociados)>(lote.Count);
             var creadasDelLote = new List<string>();
             foreach (var m in lote)
             {
                 var suyas = CarpetasQueFaltan(Path.GetDirectoryName(m.Destino) ?? "").Where(reclamadas.Add).ToList();
                 creadasDelLote.AddRange(suyas);
-                registros.Add(new UndoRecord
+                var cancion = new UndoRecord
                 {
                     OrigPath = m.Origen, FinalPath = m.Destino, Renamed = true, Origen = nameof(TipoEjecucion.OrganizarPorGenero),
                     CarpetasCreadas = suyas.Count > 0 ? suyas : null,
-                });
+                };
+                var asociados = m.Asociados.Select(a => new UndoRecord
+                {
+                    OrigPath = a, FinalPath = m.DestinoDe(a), Renamed = true, Origen = nameof(TipoEjecucion.OrganizarPorGenero),
+                }).ToList();
+                registros.Add(cancion);
+                registros.AddRange(asociados);
+                deCadaUno.Add((cancion, asociados));
             }
 
             // 2. Todo el lote anotado antes de mover nada.
@@ -92,8 +105,8 @@ internal static class OrganizadorPorGenero
                 break;
             }
 
-            // 3. Archivo a archivo.
-            var hechosLote = new List<UndoRecord>(lote.Count);
+            // 3. Canción a canción, cada una con sus asociados detrás.
+            var hechosLote = new List<UndoRecord>(registros.Count);
             for (var i = 0; i < lote.Count; i++)
             {
                 if (ct.IsCancellationRequested) { cancelado = true; break; }
@@ -101,8 +114,22 @@ internal static class OrganizadorPorGenero
                 var error = MoverUno(m, mover, seguir, log);
                 if (error.Length == 0)
                 {
-                    hechosLote.Add(registros[i]);
+                    hechosLote.Add(deCadaUno[i].Cancion);
                     hechos.Add((m.Origen, m.Destino));
+                    foreach (var r in deCadaUno[i].Asociados)
+                    {
+                        var motivo = MoverAsociado(r.OrigPath, r.FinalPath, m.CarpetaGenero, mover);
+                        if (motivo == null) continue;   // ya no está: no hay nada que llevar ni que anotar
+                        if (motivo.Length == 0)
+                        {
+                            hechosLote.Add(r);
+                            asociadosMovidos++;
+                            continue;
+                        }
+                        // La canción ya se movió y se queda movida: su asociado se queda donde estaba y se dice.
+                        fallos.Add($"{Path.GetFileName(r.OrigPath)}: {motivo}");
+                        log?.Log($"Organizar por género: no se movió «{Path.GetFileName(r.OrigPath)}», que va con «{Path.GetFileName(m.Origen)}»: {motivo}", LogKind.Err);
+                    }
                 }
                 else
                 {
@@ -128,9 +155,27 @@ internal static class OrganizadorPorGenero
             }
         }
 
-        log?.Detail($"Organizar por género: {hechos.Count} movida(s) · {fallos.Count} sin mover"
+        log?.Detail($"Organizar por género: {hechos.Count} movida(s) · {asociadosMovidos} asociado(s) · {fallos.Count} sin mover"
                     + (cancelado ? " · cancelado" : "") + (detenido.Length > 0 ? " · detenido" : "") + ".");
-        return new ResultadoOrganizar(hechos, fallos, cancelado || detenido.Length > 0, detenido, "");
+        return new ResultadoOrganizar(hechos, fallos, cancelado || detenido.Length > 0, detenido, "") { Asociados = asociadosMovidos };
+    }
+
+    /// <summary>
+    /// Lleva un archivo asociado a la carpeta a la que acaba de ir su canción. "" si fue bien, null si ya
+    /// no está (no hay nada que llevar), o el motivo. Nunca sobrescribe. No hay nada que lo siga: las
+    /// cachés y lo decidido en Enriquecer son de la canción.
+    /// </summary>
+    private static string? MoverAsociado(string origen, string destino, string carpeta, Action<string, string> mover)
+    {
+        try
+        {
+            if (!File.Exists(origen)) return null;
+            if (File.Exists(destino) || Directory.Exists(destino)) return $"Ya hay un archivo con ese nombre en «{carpeta}»; no se sobrescribe";
+            mover(origen, destino);
+            return "";
+        }
+        catch (IOException e) when (EsArchivoAbierto(e)) { return Abierto; }
+        catch (Exception e) { return e.Message; }
     }
 
     /// <summary>Mueve un archivo del plan. "" si fue bien, o el motivo.</summary>

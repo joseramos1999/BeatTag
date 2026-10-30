@@ -227,6 +227,61 @@ public class OrganizarPorGeneroDeshacerTests : IDisposable
         Assert.True(File.Exists(archivos[1]));
     }
 
+    // Revisión 1: los archivos asociados (.asd de Ableton Live, .cue, .lrc) se quedaban en la carpeta de
+    // origen, separados de su canción.
+    [Fact]
+    public void Los_archivos_asociados_se_mueven_con_su_cancion_y_se_deshacen_con_ella()
+    {
+        var archivos = Archivos(2);
+        var asd = archivos[0] + ".asd";
+        var lrc = Path.ChangeExtension(archivos[0], ".lrc");
+        File.WriteAllText(asd, "warp");
+        File.WriteAllText(lrc, "letra");
+        var plan = PlanA(archivos);
+        plan = new PlanOrganizar { Movimientos = new[] { plan.Movimientos[0] with { Asociados = new[] { asd, lrc } }, plan.Movimientos[1] } };
+
+        var res = Organizar(plan);
+
+        Assert.Equal(2, res.Movidas);
+        Assert.Equal(2, res.Asociados);
+        Assert.Empty(res.Fallos);
+        var pop = Path.Combine(PorGenero, "Pop");
+        Assert.Equal("warp", File.ReadAllText(Path.Combine(pop, Path.GetFileName(asd))));
+        Assert.Equal("letra", File.ReadAllText(Path.Combine(pop, Path.GetFileName(lrc))));
+        Assert.False(File.Exists(asd));
+        Assert.Equal(4, LineasDelManifiesto().Length);
+        Assert.StartsWith("Se han movido 2 canciones a 1 carpeta. También se han movido 2 archivos asociados",
+                          OrganizarPorGeneroViewModel.TextoResultado(res, 1));
+
+        var deshecho = new UndoEngine(_paths).UndoLastRun();
+
+        Assert.Equal(4, deshecho.Reverted);
+        Assert.All(archivos.Append(asd).Append(lrc), a => Assert.True(File.Exists(a)));
+        Assert.False(Directory.Exists(PorGenero));
+    }
+
+    [Fact]
+    public void Un_asociado_que_ya_no_se_puede_mover_se_queda_y_se_dice_sin_deshacer_la_cancion()
+    {
+        var archivo = Archivos(1)[0];
+        var asd = archivo + ".asd";
+        var cue = Path.ChangeExtension(archivo, ".cue");
+        File.WriteAllText(asd, "warp");
+        var plan = new PlanOrganizar { Movimientos = new[] { PlanA(new[] { archivo }).Movimientos[0] with { Asociados = new[] { asd, cue } } } };
+        var ocupado = Path.Combine(PorGenero, "Pop", Path.GetFileName(asd));
+        Directory.CreateDirectory(Path.GetDirectoryName(ocupado)!);
+        File.WriteAllText(ocupado, "otro");   // entre la vista previa y el clic; y el .cue ya no está
+
+        var res = Organizar(plan);
+
+        Assert.Equal(1, res.Movidas);
+        Assert.Equal(0, res.Asociados);
+        Assert.Contains("no se sobrescribe", Assert.Single(res.Fallos));
+        Assert.Equal("otro", File.ReadAllText(ocupado));
+        Assert.True(File.Exists(asd));
+        Assert.Single(LineasDelManifiesto());
+    }
+
     [Fact]
     public void Prueba_de_humo_dos_mil_traslados()
     {

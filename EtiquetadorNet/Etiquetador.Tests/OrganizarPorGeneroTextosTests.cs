@@ -99,6 +99,17 @@ public class OrganizarPorGeneroTextosTests : IDisposable
         Assert.Contains(OrganizarPorGeneroViewModel.AvisoEjecucionesAnteriores, nota);
         Assert.Contains("Las ejecuciones anteriores que sigan pendientes", OrganizarPorGeneroViewModel.AvisoEjecucionesAnteriores);
         Assert.Contains(OrganizarPorGeneroViewModel.AvisoEjecucionesAnteriores, SeccionDeLaAyuda());
+        Assert.DoesNotContain("asociado", cuerpo);
+
+        // Con archivos asociados, la confirmación dice cuántos van con sus canciones.
+        var conAsociados = new PlanOrganizar
+        {
+            Movimientos = new[] { new MovimientoOrganizar("a.mp3", "b.mp3", "Pop", "Pop") { Asociados = new[] { "a.mp3.asd" } } },
+            PorDestino = new[] { new CarpetaDestinoPlan("Pop", "Pop", 1, true) },
+        };
+        Assert.Equal("Se moverá 1 canción a 1 carpeta. Con ella va 1 archivo asociado por el nombre (.asd de Ableton Live, .cue o .lrc). "
+                     + "Ningún archivo se sobrescribe ni se renombra, y las etiquetas no se tocan.",
+                     OrganizarPorGeneroViewModel.TextosConfirmacion(conAsociados).Cuerpo);
 
         var uno = OrganizarPorGeneroViewModel.TextoResultado(new ResultadoOrganizar(new[] { ("a", "b") }, Array.Empty<string>(), false, "", ""), 1);
         Assert.StartsWith("Se ha movido 1 canción a 1 carpeta.", uno);
@@ -304,6 +315,30 @@ public class OrganizarPorGeneroTextosTests : IDisposable
         Assert.False(vm.PuedeOrganizar);
     }
 
+    [Fact]
+    public async Task La_pagina_mueve_los_archivos_asociados_con_su_cancion_y_los_devuelve_al_deshacer()
+    {
+        var (motor, _, musica) = Motor();
+        var a = Cancion(Path.Combine(musica, "Descargas"), "a.mp3", "Pop");
+        File.WriteAllText(a + ".asd", "warp");
+        File.WriteAllText(Path.ChangeExtension(a, ".lrc"), "letra");
+        var vm = new OrganizarPorGeneroViewModel(motor);
+
+        await vm.CalcularCommand.ExecuteAsync(null);
+        Assert.Equal(2, vm.Plan!.Asociados);
+        await vm.OrganizarAsync();
+
+        var pop = Path.Combine(musica, OrganizarPorGenero.CarpetaPorGenero, "Pop");
+        Assert.True(File.Exists(Path.Combine(pop, "a.mp3.asd")));
+        Assert.True(File.Exists(Path.Combine(pop, "a.lrc")));
+        Assert.Contains("También se han movido 2 archivos asociados", vm.Resultado);
+
+        new UndoEngine(motor.Paths).UndoLastRun();
+        Assert.True(File.Exists(a + ".asd"));
+        Assert.True(File.Exists(Path.ChangeExtension(a, ".lrc")));
+        Assert.False(Directory.Exists(pop));
+    }
+
     // Revisión 1: «Calcular la vista previa» no se podía cancelar y mantenía el bloqueo global mientras
     // escaneaba (un primer escaneo real tardó 340 s).
     [Fact]
@@ -424,6 +459,8 @@ public class OrganizarPorGeneroTextosTests : IDisposable
         foreach (var programa in new[] { "Serato", "Traktor", "Engine DJ", "VirtualDJ", "M3U8 y XML" })
             Assert.Contains(programa, seccion);
         Assert.Contains("Nunca se sobrescribe ni se renombra", seccion);
+        foreach (var ext in OrganizarPorGenero.ExtensionesAsociadas)
+            Assert.Contains("Tema" + (ext == ".asd" ? ".mp3" : "") + ext, seccion);   // «Tema.mp3.asd», «Tema.cue», «Tema.lrc»
         // Y el tipo, también en la lista de ejemplos del historial.
         Assert.Contains("u «Organización por género»", Fuente("Etiquetador.App", "Views", "HelpView.axaml"));
     }

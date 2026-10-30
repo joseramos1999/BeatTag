@@ -34,6 +34,8 @@ internal sealed class DiscoEnMemoria : IAccesoDisco
 
     public bool ExisteCarpeta(string carpeta) => _carpetas.Any(c => Etiquetador.Core.Rutas.MismaCarpeta(c, carpeta));
 
+    public string? ArchivoReal(string ruta) => _archivos.TryGetValue(ruta, out var real) ? real : null;
+
     public string? NombreRealDeCarpeta(string padre, string nombre)
         => _carpetas.Where(c => ComparadorRutas.Instancia.Equals(Path.GetDirectoryName(c) ?? "", padre.TrimEnd('\\', '/'))
                                 && ComparadorRutas.Instancia.Equals(Path.GetFileName(c), nombre))
@@ -227,6 +229,58 @@ public class OrganizarPorGeneroPlanTests
         var recortado = OrganizarPorGenero.NombreCarpetaGenero(largo);
         Assert.True(Encoding.UTF8.GetByteCount(recortado) <= OrganizarPorGenero.BytesMaximoTramo);
         Assert.Equal(new string('á', 127), recortado);   // se corta entre caracteres, nunca a mitad de uno
+    }
+
+    // Revisión 1: solo se movía el audio. «Tema.mp3.asd» de Ableton Live (marcadores de warp hechos a
+    // mano), «Tema.cue» o «Tema.lrc» se quedaban en la carpeta de origen, separados de su canción.
+    [Fact]
+    public void Los_archivos_asociados_por_nombre_van_con_su_cancion()
+    {
+        var t = T("Descargas", "Tema.mp3", "Pop");
+        var descargas = Path.Combine(Raiz, "Descargas");
+        var disco = Disco(new[] { t })
+            .Archivo(Path.Combine(descargas, "Tema.mp3.asd"))
+            .Archivo(Path.Combine(descargas, "tema.LRC"))   // con el nombre que tenga en el disco
+            .Archivo(Path.Combine(descargas, "Tema.cue"))
+            .Archivo(Path.Combine(descargas, "Tema.txt"));   // no es de los que acompañan a una canción
+
+        var m = Unico(Plan(new[] { t }, disco: disco));
+
+        Assert.Equal(new[] { Path.Combine(descargas, "Tema.mp3.asd"), Path.Combine(descargas, "Tema.cue"), Path.Combine(descargas, "tema.LRC") },
+                     m.Asociados);
+        Assert.Equal(3, Plan(new[] { t }, disco: disco).Asociados);
+    }
+
+    [Fact]
+    public void Un_cue_o_un_lrc_que_podria_ser_de_dos_canciones_no_se_mueve_con_ninguna()
+    {
+        // «Otro.mp3» y «Otro.flac» se llaman igual: «Otro.lrc» puede ser de cualquiera de las dos. El
+        // .asd lleva el nombre entero del audio y no tiene duda.
+        var mp3 = T("Descargas", "Otro.mp3", "Pop");
+        var flac = T("Descargas", "Otro.flac", "Rock");
+        var descargas = Path.Combine(Raiz, "Descargas");
+        var disco = Disco(new[] { mp3, flac }).Archivo(Path.Combine(descargas, "Otro.lrc")).Archivo(Path.Combine(descargas, "Otro.flac.asd"));
+
+        var plan = Plan(new[] { mp3, flac }, disco: disco);
+
+        Assert.Empty(plan.Movimientos.Single(x => x.Origen == mp3.FilePath).Asociados);
+        Assert.Equal(new[] { Path.Combine(descargas, "Otro.flac.asd") }, plan.Movimientos.Single(x => x.Origen == flac.FilePath).Asociados);
+    }
+
+    [Fact]
+    public void Si_el_nombre_de_un_asociado_ya_esta_en_el_destino_la_cancion_se_queda()
+    {
+        var t = T("Descargas", "Tema.mp3", "Pop");
+        var disco = Disco(new[] { t })
+            .Archivo(Path.Combine(Raiz, "Descargas", "Tema.mp3.asd"))
+            .Archivo(Path.Combine(PorGenero, "Pop", "Tema.mp3.asd"));   // de otra canción que ya se llamó así
+
+        var plan = Plan(new[] { t }, disco: disco);
+
+        Assert.Empty(plan.Movimientos);
+        var o = Assert.Single(plan.Omitidas);
+        Assert.Equal(MotivoOmision.Colision, o.Motivo);
+        Assert.Equal("Su archivo asociado «Tema.mp3.asd» ya existe en «Pop»", o.Texto);
     }
 
     [Fact]

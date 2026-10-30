@@ -671,9 +671,13 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
     public static (string Titulo, string Cuerpo, string Nota) TextosConfirmacion(PlanOrganizar plan)
     {
         var nuevas = plan.CarpetasNuevas;
+        var conEllas = plan.Movimientos.Count == 1 ? "Con ella" : "Con ellas";
         var cuerpo = OrganizarPorGenero.TextoMovimientos(plan.Movimientos.Count, plan.Carpetas)
                    + (nuevas == 0 ? "" : nuevas == 1 ? " (1 se crea)" : $" ({N(nuevas)} se crean)")
-                   + ". " + (plan.Omitidas.Count == 0 ? "" : "Las demás canciones se quedan donde están. ")
+                   + ". " + (plan.Asociados == 0 ? ""
+                             : plan.Asociados == 1 ? $"{conEllas} va 1 archivo asociado por el nombre (.asd de Ableton Live, .cue o .lrc). "
+                             : $"{conEllas} van {N(plan.Asociados)} archivos asociados por el nombre (.asd de Ableton Live, .cue o .lrc). ")
+                   + (plan.Omitidas.Count == 0 ? "" : "Las demás canciones se quedan donde están. ")
                    + "Ningún archivo se sobrescribe ni se renombra, y las etiquetas no se tocan.";
         var nota = string.Join(" ", AvisoRekordbox, AvisoOtrosProgramas, AvisoListas, AvisoEnriquecer, AvisoDeshacer, AvisoEjecucionesAnteriores);
         return ("Organizar por género", cuerpo, nota);
@@ -691,6 +695,10 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         };
         if (res.Cancelado && res.Detenido.Length == 0) texto = "Cancelado. " + texto + "; el resto se queda donde estaba";
         texto += ".";
+        if (res.Asociados > 0)
+            texto += res.Asociados == 1
+                ? " También se ha movido 1 archivo asociado (.asd, .cue o .lrc) con su canción."
+                : $" También se han movido {N(res.Asociados)} archivos asociados (.asd, .cue o .lrc) con sus canciones.";
         if (res.Fallos.Count > 0)
             texto += res.Fallos.Count == 1
                 ? $" 1 no se ha podido mover ({res.Fallos[0]})."
