@@ -18,6 +18,7 @@ on:
 permissions:
   contents: read
   statuses: write   # solo para el latido
+  checks: write     # y para dejar lo que vio cuando murió el runner
 
 jobs:
   pruebas:
@@ -48,17 +49,39 @@ jobs:
         run: |
           cat > "$RUNNER_TEMP/latido.sh" <<'EOF'
           #!/bin/bash
-          trap '' HUP PIPE TERM
+          trap '' HUP PIPE TERM INT
           inicio=$(date +%s)
-          for i in $(seq 1 400); do
+          api() { curl -s -o /dev/null -m 20 -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$GITHUB_REPOSITORY/$1" -d @-; }
+          # Al empezar, con todo vivo: el árbol de procesos con sus grupos, y dónde está el runner.
+          arbol=$(ps -axo pid,ppid,pgid,sess,stat,command | grep -E "PID|Runner|bash|dotnet|latido|testhost|runsvc" | grep -v grep | cut -c1-250)
+          listener=$(pgrep -f Runner.Listener | head -1)
+          raiz=$(dirname "$(dirname "$(ps -o command= -p "$listener" | awk '{print $1}')")")
+          forense=""
+          for i in $(seq 1 300); do
             w=$(pgrep -f Runner.Worker > /dev/null && echo vivo || echo MUERTO)
             l=$(pgrep -f Runner.Listener > /dev/null && echo vivo || echo MUERTO)
             h=$(grep -cE '^  (Passed|Failed|Skipped) ' "$DIR/test.log" 2>/dev/null); h=${h:-0}
             t=$(pgrep -f testhost > /dev/null && echo testhost || echo sin-testhost)
             desc="$(( $(date +%s) - inicio )) s · worker $w · listener $l · $t · $h hechas"
-            curl -s -o /dev/null -m 5 -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-              -d "{\"state\":\"pending\",\"context\":\"latido/$NOMBRE\",\"description\":\"$desc\"}"
+            printf '{"state":"pending","context":"latido/%s","description":"%s"}' "$NOMBRE" "$desc" | api "statuses/$GITHUB_SHA"
+            if [ "$w" = MUERTO ] && [ -z "$forense" ]; then
+              forense=1
+              sleep 3   # que acaben de escribir los registros
+              texto=$( {
+                echo "## Árbol de procesos al empezar (raíz del runner: $raiz)"; echo "$arbol"
+                echo; echo "## Procesos de usuario que quedan"; ps -axo pid,ppid,pgid,stat,lstart,command | grep -vE "/System/|/usr/libexec/|/usr/sbin/|/Library/Apple/" | cut -c1-220 | tail -50
+                echo; echo "## Runner_*.log"; tail -45 "$(ls -t "$raiz"/_diag/Runner_*.log 2>/dev/null | head -1)"
+                echo; echo "## Worker_*.log"; tail -70 "$(ls -t "$raiz"/_diag/Worker_*.log 2>/dev/null | head -1)"
+                echo; echo "## vstest (proceso de pruebas)"; tail -40 "$(ls -t "$DIR"/diag/*host*.txt 2>/dev/null | head -1)"
+                echo; echo "## vstest (consola)"; tail -25 "$DIR/diag/vstest.txt"
+                echo; echo "## test.log"; tail -25 "$DIR/test.log"
+                echo; echo "## Registro de macOS"; sudo log show --last 2m --style compact \
+                  --predicate 'process == "launchd" OR eventMessage CONTAINS[c] "Runner" OR eventMessage CONTAINS[c] "testhost" OR eventMessage CONTAINS[c] "dotnet"' | tail -160
+              } 2>&1 | cut -c1-400 | tail -c 60000)
+              jq -n --arg sha "$GITHUB_SHA" --arg n "forense $NOMBRE" --arg t "$texto" \
+                '{name: $n, head_sha: $sha, status: "completed", conclusion: "neutral",
+                  output: {title: $n, summary: "Lo que había en el equipo cuando murió el runner", text: $t}}' | api check-runs
+            fi
             sleep 2
           done
           EOF
