@@ -200,6 +200,19 @@ public class GeneroBreaksYDiscogsTests
         Assert.Equal(Path.Combine(Raiz, genero, carpeta, "Pack", "a.mp3"), Assert.Single(plan.Movimientos).Destino);
     }
 
+    // Revisión 5: una lista escrita con separadores de ancho completo o con la coma ideográfica también es
+    // una carpeta tuya, aunque la biblioteca tenga el género que forman juntos.
+    [Theory]
+    [InlineData("Latin，Pop")]
+    [InlineData("Latin、Pop")]
+    [InlineData("Latin／Pop")]
+    [InlineData("Latin；Pop")]
+    public void Una_lista_con_separadores_de_ancho_completo_tambien_se_conserva(string carpeta)
+    {
+        var plan = EnLaRaiz(EnCarpeta(Path.Combine(carpeta, "Pack"), "a.mp3", "Pop"), EnCarpeta("Nuevas", "b.mp3", "Latin Pop"));
+        Assert.Contains(plan.Movimientos, m => m.Destino == Path.Combine(Raiz, "Pop", carpeta, "Pack", "a.mp3"));
+    }
+
     // Los signos de puntuación de otros alfabetos sí: «Electro–Latino», con raya, es Electro Latino.
     [Fact]
     public void Una_raya_o_un_apostrofo_tipografico_siguen_siendo_otra_forma_del_genero()

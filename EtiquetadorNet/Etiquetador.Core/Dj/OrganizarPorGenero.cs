@@ -524,9 +524,12 @@ public static class OrganizarPorGenero
         // («Electro–Latino»). Ni una carpeta que por su nombre marca el tipo de pieza («Mash Up» con el
         // género «Mash-Up»): quitarla de la ruta cambiaría lo que es la canción, que se quedaría en su sitio
         // en vez de moverse con su carpeta.
+        // Los separadores de ancho completo y la coma ideográfica también hacen una lista: «Latin，Pop».
+        static string ConSeparadoresAscii(string s)
+            => s.Replace('，', ',').Replace('、', ',').Replace('；', ';').Replace('／', '/').Replace('｜', '|');
         var neutra = LoQueDiceLaRuta.De("x");
         bool OtraFormaDeUnGenero(string nombre)
-            => !GenerosIa.EsLista(nombre)
+            => !GenerosIa.EsLista(ConSeparadoresAscii(nombre))
                && TextUtils.RemoveDiacritics(nombre).All(c => char.IsAscii(c) || EsEspacioOPuntuacion(c))
                && LoQueDiceLaRuta.De(Path.Combine(nombre, "x")) == neutra
                && GeneroPorReglas.Normalizado(nombre) is { } n && forma.ContainsKey(GeneroPorReglas.ClaveGenero(n));
