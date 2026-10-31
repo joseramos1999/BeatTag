@@ -33,7 +33,36 @@ public sealed class ScanCache
         /// </summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
         public bool La { get; set; }
+
+        /// <summary>
+        /// Un BPM de más de <see cref="BpmAltoDudoso"/> leído ya con <see cref="BpmEtiqueta"/>, sin la
+        /// configuración regional: un tempo alto de verdad (speedcore, por ejemplo). En las entradas
+        /// guardadas antes de ese lector, un BPM así puede ser una etiqueta con un decimal mal leída
+        /// («95.5» quedaba como 955) que no llega a <see cref="BpmEtiqueta.Maximo"/>: esas no la llevan
+        /// y se releen, una vez. Sin la marca, un tempo alto de verdad se releería en cada escaneo.
+        /// Solo se escribe en las de BPM alto, para no engordar el archivo.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool Bi { get; set; }
     }
+
+    /// <summary>
+    /// Un BPM guardado por encima de esto y sin <see cref="Entry.Bi"/> no se da por bueno sin releerlo.
+    ///
+    /// POR QUÉ. Cuando TagLib leía el BPM con la configuración regional (ver <see cref="BpmEtiqueta"/>),
+    /// si el decimal de la etiqueta era el separador de miles del sistema (el punto en es-ES, de-DE,
+    /// it-IT o pt-BR; la coma, con «95,5», en en-US), el decimal multiplicaba el tempo por 10: «95.5»
+    /// quedaba como 955, «90.0» como 900 y «85.5» como 855, tempos habituales en reggaeton y dembow.
+    /// Con dos o más decimales ya pasaba de 999 y se releía, pero con uno, un tempo de más de 25 y
+    /// menos de 100 BPM daba entre 251 y 999, y la caché lo seguía sirviendo mientras no cambiaran la
+    /// fecha ni el tamaño del archivo. Un tempo real casi nunca pasa de 250, y el que sí (speedcore)
+    /// se relee una sola vez y queda marcado. MEDIDO en una biblioteca real (14.477 entradas): ninguna
+    /// entre 251 y 999 y 3 por encima de 999, así que allí no se relee nada de más.
+    /// </summary>
+    private const uint BpmAltoDudoso = 250;
+
+    // Un BPM alto que no pasó por el lector invariable: puede ser un texto mal leído (ver BpmAltoDudoso).
+    private static bool BpmDudoso(Entry e) => e.Bp > BpmAltoDudoso && !e.Bi;
 
     private readonly string _file;
     private Dictionary<string, Entry> _map = new(StringComparer.OrdinalIgnoreCase);
@@ -58,12 +87,13 @@ public sealed class ScanCache
         // Un AIFF guardado sin frecuencia y sin la marca del lector de cabecera es uno que TagLib no pudo
         // abrir (un AIFF-C de macOS) antes de que el escáner supiera leer su cabecera: se vuelve a leer
         // en lugar de seguir vacío. Con la marca ya se intentó, y releerlo no daría otra cosa.
-        // Un BPM imposible es de cuando el BPM se leía con la configuración regional («102.000000»
-        // quedaba como 102.000.000; ver BpmEtiqueta): se relee una vez y la entrada se corrige.
+        // Un BPM alto sin la marca del lector invariable puede ser de cuando el BPM se leía con la
+        // configuración regional («102.000000» quedaba como 102.000.000 y «95.5» como 955; ver
+        // BpmAltoDudoso): se relee una vez y la entrada se corrige, o se marca si el tempo es de verdad.
         Entry? e;
         lock (_cerrojo) _map.TryGetValue(path, out e);
         if (e != null && e.M == m && e.S == s && !(e.Sr == 0 && !e.La && LectorAiff.EsAiff(path))
-            && e.Bp <= BpmEtiqueta.Maximo)
+            && !BpmDudoso(e))
             return new Track
             {
                 FilePath = path,
@@ -79,6 +109,7 @@ public sealed class ScanCache
             M = m, S = s, Ti = t.Title, Ar = t.Artist, Al = t.Album, Ge = t.Genre,
             Yr = t.Year, Bp = t.Bpm, Ke = t.Key, Du = t.DurationSeconds, Br = t.Bitrate, Sr = t.SampleRate, Ch = t.Channels,
             La = LectorAiff.EsAiff(path),   // ReadTrack ya prueba el lector de cabecera con los AIFF
+            Bi = t.Bpm > BpmAltoDudoso,     // y lee el BPM con BpmEtiqueta: un BPM alto es de verdad
         };
         lock (_cerrojo)
         {
@@ -128,12 +159,13 @@ public sealed class ScanCache
             {
                 var raiz = raizDe(path);
                 if (raiz == null) continue;
-                // Un BPM imposible no se enseña mientras llega la comprobación, que lo relee (ver Read).
+                // Un BPM que puede estar mal leído (955 por «95.5») no se enseña mientras llega la
+                // comprobación, que lo relee (ver Read y BpmAltoDudoso).
                 lista.Add(new Track
                 {
                     FilePath = path, Folder = raiz,
                     Title = e.Ti, Artist = e.Ar, Album = e.Al, Genre = e.Ge,
-                    Year = e.Yr, Bpm = e.Bp <= BpmEtiqueta.Maximo ? e.Bp : 0, Key = e.Ke, DurationSeconds = e.Du,
+                    Year = e.Yr, Bpm = BpmDudoso(e) ? 0 : e.Bp, Key = e.Ke, DurationSeconds = e.Du,
                     Bitrate = e.Br, SampleRate = e.Sr, Channels = e.Ch,
                 });
             }

@@ -6,17 +6,20 @@ namespace Etiquetador.Tests;
 
 /// <summary>
 /// El BPM de las etiquetas se lee igual con cualquier configuración regional. Con la española, TagLib
-/// leía el TBPM «102.000000» como 102.000.000 BPM (visto en 2 archivos de una biblioteca real). Todas
-/// las pruebas corren con es-ES, que es donde fallaba.
+/// leía el TBPM «102.000000» como 102.000.000 BPM (visto en 2 archivos de una biblioteca real). Las
+/// pruebas corren con es-ES, que es donde fallaba, y la de la caché también con otras culturas que
+/// tenían el mismo problema.
 /// </summary>
 public class BpmEtiquetaTests
 {
-    private static T EnEspanol<T>(Func<T> f)
+    private static T EnEspanol<T>(Func<T> f) => EnCultura("es-ES", f);
+
+    private static T EnCultura<T>(string cultura, Func<T> f)
     {
         var antes = CultureInfo.CurrentCulture;
         try
         {
-            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("es-ES");
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultura);
             return f();
         }
         finally { CultureInfo.CurrentCulture = antes; }
@@ -118,6 +121,77 @@ public class BpmEtiquetaTests
 
             Assert.Equal(0u, alArrancar);
             Assert.Equal(102u, alComprobar);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Con un solo decimal, la 1.10.0 guardaba el tempo multiplicado por 10 sin pasar de 999 («95.5»
+    // quedaba como 955): la comprobación de los BPM imposibles no lo veía y la caché lo servía mientras
+    // el archivo no cambiara. Pasaba con cualquier cultura cuyo separador de miles fuera el decimal de
+    // la etiqueta, también en inglés con la coma.
+    [Theory]
+    [InlineData("es-ES", "95.5", 955u, 96u)]
+    [InlineData("de-DE", "90.0", 900u, 90u)]
+    [InlineData("it-IT", "85.5", 855u, 86u)]
+    [InlineData("pt-BR", "92.5", 925u, 93u)]
+    [InlineData("en-US", "95,5", 955u, 96u)]
+    public void Una_entrada_de_cache_con_un_decimal_mal_leido_se_relee(string cultura, string tbpm, uint guardado, uint esperado)
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var mp3 = Path.Combine(dir, "a.mp3");
+            EscribirMp3ConTbpm(mp3, tbpm);
+            var cacheFile = Path.Combine(dir, "cache.json");
+
+            // Lo que leía TagLib por sí solo con esa cultura, y por tanto lo que quedó en la caché.
+            Assert.Equal(guardado, EnCultura(cultura, () => { using var f = TagLib.File.Create(mp3); return f.Tag.BeatsPerMinute; }));
+            var fi = new FileInfo(mp3);
+            var vieja = new Dictionary<string, ScanCache.Entry>(StringComparer.OrdinalIgnoreCase)
+            {
+                [mp3] = new() { M = fi.LastWriteTimeUtc.Ticks, S = fi.Length, Ti = "Tema", Bp = guardado, Sr = 44100 },
+            };
+            Assert.Equal("", ArchivoDatos.EscribirJson(cacheFile, vieja));
+
+            var (alArrancar, alComprobar, guardar) = EnCultura(cultura, () =>
+            {
+                var c = new ScanCache(cacheFile);
+                var publicada = c.Guardadas(_ => dir).Single().Bpm;   // lo que se enseña antes de ir al disco
+                return (publicada, c.Read(mp3).Bpm, c.Save());
+            });
+
+            Assert.Equal((0u, esperado, ""), (alArrancar, alComprobar, guardar));
+            var json = File.ReadAllText(cacheFile);
+            Assert.Contains($"\"Bp\":{esperado},", json);   // la entrada queda corregida
+            Assert.DoesNotContain("\"Bi\"", json);           // y un tempo normal no lleva la marca
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // Un tempo de verdad por encima de 250 (speedcore) queda marcado al leerlo: ni se relee en cada
+    // escaneo ni se esconde al arrancar.
+    [Fact]
+    public void Un_bpm_alto_de_verdad_no_se_relee_en_cada_escaneo()
+    {
+        var dir = Mp3Fixture.NewTempDir();
+        try
+        {
+            var mp3 = Path.Combine(dir, "a.mp3");
+            EscribirMp3ConTbpm(mp3, "300");
+            var cacheFile = Path.Combine(dir, "cache.json");
+
+            var primera = EnEspanol(() => { var c = new ScanCache(cacheFile); return (c.Read(mp3).Bpm, c.Save()); });
+            Assert.Equal((300u, ""), primera);
+            Assert.Contains("\"Bi\":true", File.ReadAllText(cacheFile));
+
+            var segunda = EnEspanol(() =>
+            {
+                var c = new ScanCache(cacheFile);
+                File.Delete(cacheFile);
+                return (c.Guardadas(_ => dir).Single().Bpm, c.Read(mp3).Bpm, c.Save());
+            });
+            Assert.Equal((300u, 300u, ""), segunda);
+            Assert.False(File.Exists(cacheFile));   // sin cambios no se reescribe la caché: no se ha releído
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
