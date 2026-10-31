@@ -57,7 +57,7 @@ public class ArtistaTagYGeneroTests
             var r = await cat.Procesador(dir).ProcessAsync(p, false,
                 new ProcessOptions { Deezer = true, Discogs = true, DiscogsToken = "prueba" });
 
-            Assert.Equal("Latino", r.Genre);
+            Assert.Equal("Latin", r.Genre);   // en inglés, como el resto de géneros de Deezer
             Assert.Equal("2019", r.Year);
             // Con género, álbum y año ya resueltos, Discogs ni se consulta.
             Assert.DoesNotContain(cat.Pedidas, u => u.Contains("discogs", StringComparison.Ordinal));

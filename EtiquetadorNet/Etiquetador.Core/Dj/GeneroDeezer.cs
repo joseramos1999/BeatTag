@@ -16,6 +16,9 @@ namespace Etiquetador.Core.Dj;
 ///
 /// Se traduce por el IDENTIFICADOR de Deezer y no por el nombre, porque el nombre llega en el idioma de
 /// la IP («Latino» o «Latin Music»). Los identificadores se comprobaron en las respuestas de la medición.
+///
+/// Enriquecer usa también estas tablas, a través de <see cref="EnIngles"/> y <see cref="EsGrueso"/>, para
+/// escribir el género del álbum en inglés (ver <see cref="DeezerProvider.GeneroDelAlbum"/>).
 /// </summary>
 public static class GeneroDeezer
 {
@@ -33,6 +36,55 @@ public static class GeneroDeezer
     /// (152), Techno/House (111).
     /// </summary>
     private static readonly HashSet<int> Gruesos = new() { 116, 197, 138, 132, 113, 106, 85, 152, 111 };
+
+    /// <summary>
+    /// El nombre en inglés de cada género de Deezer, por su identificador. Comprobados en
+    /// api.deezer.com/genre pidiéndolos en inglés y en español (octubre de 2026): los 24 géneros
+    /// principales y los tres subgéneros de la medición que no lo son (Pop latino 138, Techno/House 111,
+    /// Flamenco 36). Dos no se escriben como los nombra Deezer: «Latin Music» queda en «Latin», que es
+    /// como se etiqueta, y «Films/Games» en «Soundtrack», que no se parte por la barra al normalizarlo.
+    /// </summary>
+    private static readonly Dictionary<int, string> EnInglesPorId = new()
+    {
+        [132] = "Pop", [116] = "Rap/Hip Hop", [122] = "Reggaeton", [152] = "Rock", [113] = "Dance", [165] = "R&B",
+        [85] = "Alternative", [106] = "Electro", [466] = "Folk", [144] = "Reggae", [129] = "Jazz", [67] = "Salsa",
+        [98] = "Classical", [464] = "Metal", [173] = "Soundtrack", [169] = "Soul & Funk", [153] = "Blues", [71] = "Cumbia",
+        [197] = "Latin", [75] = "Brazilian Music", [2] = "African Music", [16] = "Asian Music", [81] = "Indian Music",
+        [95] = "Kids", [138] = "Latin Pop", [111] = "Techno/House", [36] = "Flamenco",
+    };
+
+    /// <summary>
+    /// Los nombres que Deezer da en español distintos del inglés, para un identificador que no está en
+    /// la tabla. La clave no distingue mayúsculas ni acentos («Música Latina», «musica latina»).
+    /// </summary>
+    private static readonly Dictionary<string, string> EnInglesPorNombre = new (string Es, string En)[]
+    {
+        ("Latino", "Latin"), ("Música Latina", "Latin"), ("Latin Music", "Latin"), ("Pop latino", "Latin Pop"),
+        ("Alternativo", "Alternative"), ("Clásica", "Classical"), ("Películas/Juegos", "Soundtrack"), ("Films/Games", "Soundtrack"),
+        ("Música Brasileña", "Brazilian Music"), ("Música africana", "African Music"), ("Música asiática", "Asian Music"),
+        ("Música india", "Indian Music"), ("Niños", "Kids"),
+    }.ToDictionary(p => VocabularioBiblioteca.Clave(p.Es), p => p.En, StringComparer.Ordinal);
+
+    /// <summary>Los gruesos con el nombre que les da <see cref="EnIngles"/>.</summary>
+    private static readonly HashSet<string> GruesosEnIngles =
+        Gruesos.Select(id => EnInglesPorId[id]).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// El nombre en inglés de un género de Deezer: por su identificador si está comprobado y, si no, por
+    /// su nombre en español («Latino» → «Latin»). Lo que no se reconoce se deja como llega.
+    /// </summary>
+    public static string EnIngles(int id, string nombre)
+    {
+        if (EnInglesPorId.TryGetValue(id, out var ingles)) return ingles;
+        var limpio = (nombre ?? "").Trim();
+        return EnInglesPorNombre.TryGetValue(VocabularioBiblioteca.Clave(limpio), out ingles) ? ingles : limpio;
+    }
+
+    /// <summary>
+    /// Es uno de los géneros gruesos de Deezer (Rap/Hip Hop, Latin, Pop, Dance, Electro…), con el nombre
+    /// en inglés que da <see cref="EnIngles"/>: dicen el mercado o el espectro del álbum, no su estilo.
+    /// </summary>
+    public static bool EsGrueso(string nombreEnIngles) => GruesosEnIngles.Contains(nombreEnIngles);
 
     /// <summary>
     /// Subgéneros concretos por su nombre, para los que no tienen un identificador comprobado. Se
