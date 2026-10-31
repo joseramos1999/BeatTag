@@ -215,7 +215,16 @@ public class RevisionUnionTests : IDisposable
         await UnSoloHilo.Ejecutar(async () =>
         {
             var vm = Duplicados(store, config, comparacion: comparacion);
-            vm.SelectedMode = vm.ModeOptions.Single(m => m.Value == DuplicateMode.Fingerprint);   // ya compara
+
+            // Elegir el criterio por audio ya compara, sin pulsar «Analizar»: también ocupa la página.
+            comparacion.Retener();
+            try
+            {
+                vm.SelectedMode = vm.ModeOptions.Single(m => m.Value == DuplicateMode.Fingerprint);
+                await comparacion.EsperarDentroAsync();
+                Assert.True(vm.IsBusy);
+            }
+            finally { comparacion.Soltar(); }
             await UnSoloHilo.HastaQue(() => !vm.IsBusy, "la primera comparación termina");
 
             comparacion.Retener();

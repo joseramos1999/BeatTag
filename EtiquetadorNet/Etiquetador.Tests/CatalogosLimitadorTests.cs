@@ -106,10 +106,12 @@ public class CatalogosLimitadorTests
         // con una tarea apartada justo tras su turno (su marca quedaba pegada a la siguiente aunque el
         // limitador las hubiera separado bien). Lo que no puede pasar es que una marca llegue ANTES de
         // su turno, y los turnos van a 0, 100, 200… ms: la k-ésima marca, por orden, no puede ser
-        // anterior a k × 100 ms. Sin el limitador saldrían todas hacia 0 ms. Se dejan 15 ms por si
-        // Task.Delay vuelve un poco antes de tiempo.
+        // anterior a k × 100 ms. Sin el limitador saldrían todas hacia 0 ms. Se dejan 25 ms porque
+        // Task.Delay puede volver antes de tiempo: en Windows, con el reloj del sistema a su resolución
+        // por defecto (15,6 ms, la de la CI), hasta un tic más los milisegundos que trunca, unos 17,5 ms.
+        // No se acumula: el limitador cuenta cada turno desde el anterior previsto, no desde el real.
         for (var k = 0; k < orden.Count; k++)
-            Assert.True(orden[k] >= k * 100 - 15, $"la petición {k + 1} empezó a los {orden[k]} ms: {string.Join(", ", orden)}");
+            Assert.True(orden[k] >= k * 100 - 25, $"la petición {k + 1} empezó a los {orden[k]} ms: {string.Join(", ", orden)}");
     }
 
     [Fact]
