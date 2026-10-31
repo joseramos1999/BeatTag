@@ -24,11 +24,12 @@ public sealed record EstiloVersion(string Estilo, string Texto, FuenteEstilo Fue
 /// 26 %, porque guarda el género del tema original. Lo que lo hace fiable es exigir el CONTEXTO de
 /// versión: buscar el estilo en cualquier parte del título daba 353 falsos positivos («La Disco
 /// Resplandece», «Mambo Kingz», «Trap Queen»), y por eso cuenta solo:
-///   (a) justo delante de una palabra de versión («Moombahton Remix», «Techno VIP»), dentro de un
-///       paréntesis o un corchete, tras un guion o detrás del nombre del tema («COCHINAE GUARACHA
-///       REMIX DJ PROF EDIT»); al principio del título solo si es todo lo que dice;
+///   (a) justo delante de una palabra de versión («Moombahton Remix», «Techno VIP», también con «Old
+///       School» en medio), dentro de un paréntesis o un corchete, tras un guion o detrás del nombre del
+///       tema («COCHINAE GUARACHA REMIX DJ PROF EDIT»); al principio del título solo si es todo lo que dice;
 ///   (b) detrás de una palabra de versión y al final del fragmento, dentro de un paréntesis o tras un
-///       guion («Versión Rumba», «Mashup Techno»);
+///       guion («Versión Rumba», «Mashup Techno»), también en su forma adjetiva en español («Versión
+///       Flamenca», «Versión Rumbera», «Mix Salsero»), que solo cuenta aquí;
 ///   (c) un paréntesis que, quitando el BPM, la clave Camelot, Extended, Clean y Dirty, es solo el
 ///       estilo («(Dembow)», «(Sevillanas)»).
 /// Nunca cuentan «Latin», «Latino» ni «Latina» sueltos («Extended Latino» es el nombre de un pool:
@@ -101,6 +102,7 @@ public static class EstiloDeVersion
         (@"techno", "Techno"),
         (@"trance", "Trance"),
         (@"dubstep", "Dubstep"),
+        (@"trap[\s-]*latino", "Trap"),   // como «Latin Trap Remix», que también es Trap
         (@"trap", "Trap"),
         (@"drill", "Drill"),
         (@"phonk", "Phonk"),
@@ -134,18 +136,42 @@ public static class EstiloDeVersion
     // El estilo como palabra completa: «Mambo» no está en «Mambos», ni «Trap» en «Trapero».
     private static readonly string Estilo = @"\b(?:" + string.Join("|", Vocabulario.Select(v => v.Patron)) + @")\b";
 
+    /// <summary>
+    /// La forma adjetiva en español de algunos estilos, con su nombre: «Versión Flamenca», «Versión
+    /// Rumbera», «Mix Salsero» (revisión 3). Solo cuenta en el contexto (b), detrás de una palabra de
+    /// versión: delante («La Flamenca Remix») suele ser parte del nombre de la canción.
+    /// </summary>
+    private static readonly (string Patron, string Estilo)[] Adjetivos =
+    {
+        (@"flamenc[oa]s?", "Flamenco"),
+        (@"rumber[oa]s?", "Rumba"),
+        (@"salser[oa]s?", "Salsa"),
+        (@"bachater[oa]s?", "Bachata"),
+        (@"cumbier[oa]s?", "Cumbia"),
+        (@"merenguer[oa]s?", "Merengue"),
+    };
+
+    private static readonly string Adjetivo = @"\b(?:" + string.Join("|", Adjetivos.Select(a => a.Patron)) + @")\b";
+
+    private static readonly (Regex Patron, string Estilo)[] NombresAdjetivos =
+        Adjetivos.Select(a => (new Regex($@"^(?:{a.Patron})$", IC | RegexOptions.Compiled), a.Estilo)).ToArray();
+
     // Lo que dice que el fragmento es una versión de la canción.
     private const string Version =
         @"\b(?:club[\s-]*edit|re[\s-]*edit|remix|rmx|edit|mix|versi[oó]n|bootleg|flip|rework|refix|vip|mash[\s-]*up|blend|cover|intro|extended|remake|tribute)\b";
 
     /// <summary>Filtro rápido: casi ningún título nombra un estilo, y esos no pasan de aquí.</summary>
-    private static readonly Regex AlgunEstilo = new(Estilo, IC | RegexOptions.Compiled);
+    private static readonly Regex AlgunEstilo = new($"{Estilo}|{Adjetivo}", IC | RegexOptions.Compiled);
 
-    // (a) El estilo delante de la palabra de versión.
-    private static readonly Regex EstiloYVersion = new($@"(?<estilo>{Estilo})\s+{Version}", IC | RegexOptions.Compiled);
+    // (a) El estilo delante de la palabra de versión; entre los dos puede ir «Old School» («(Reggaeton Old
+    // School Remix)», revisión 3).
+    private static readonly Regex EstiloYVersion = new($@"(?<estilo>{Estilo})(?:\s+old[\s-]*school)?\s+{Version}", IC | RegexOptions.Compiled);
 
     // (b) La palabra de versión delante del estilo, al final del fragmento.
     private static readonly Regex VersionYEstilo = new($@"{Version}\s+(?<estilo>{Estilo})\s*$", IC | RegexOptions.Compiled);
+
+    // (b) con la forma adjetiva: «Versión Flamenca».
+    private static readonly Regex VersionYAdjetivo = new($@"{Version}\s+(?<adjetivo>{Adjetivo})\s*$", IC | RegexOptions.Compiled);
 
     // (c) El fragmento entero es el estilo.
     private static readonly Regex SoloEstilo = new($@"^\s*(?<estilo>{Estilo})\s*$", IC | RegexOptions.Compiled);
@@ -287,7 +313,18 @@ public static class EstiloDeVersion
         var limpio = Limpio(fragmento);
         if (VersionYEstilo.Match(limpio) is { Success: true } b && ValeJuntoAVersion(b.Groups["estilo"].Value))
             return (b.Groups["estilo"].Value, b.Value.Trim());
+        if (ConAdjetivo(limpio) is { } adjetivo) return adjetivo;
         if (SoloEstilo.Match(limpio) is { Success: true } c) return (c.Groups["estilo"].Value, "(" + fragmento.Trim() + ")");
+        return null;
+    }
+
+    /// <summary>El contexto (b) con la forma adjetiva («Versión Flamenca» → Flamenco), en un fragmento ya limpio.</summary>
+    private static (string Estilo, string Texto)? ConAdjetivo(string limpio)
+    {
+        if (VersionYAdjetivo.Match(limpio) is not { Success: true } m) return null;
+        var escrito = m.Groups["adjetivo"].Value;
+        foreach (var (patron, estilo) in NombresAdjetivos)
+            if (patron.IsMatch(escrito)) return (estilo, m.Value.Trim());
         return null;
     }
 
@@ -306,9 +343,11 @@ public static class EstiloDeVersion
             var alFinal = Limpio(trozo[(a.Index + a.Length)..]).Length == 0;
             if (trasGuion || delante || alFinal) return (a.Groups["estilo"].Value, a.Value.Trim());
         }
-        if (trasGuion && VersionYEstilo.Match(Limpio(trozo)) is { Success: true } b && ValeJuntoAVersion(b.Groups["estilo"].Value))
+        if (!trasGuion) return null;
+        var limpio = Limpio(trozo);
+        if (VersionYEstilo.Match(limpio) is { Success: true } b && ValeJuntoAVersion(b.Groups["estilo"].Value))
             return (b.Groups["estilo"].Value, b.Value.Trim());
-        return null;
+        return ConAdjetivo(limpio);
     }
 
     private static string Limpio(string s) => Regex.Replace(Morralla.Replace(s, " ").Replace(',', ' '), @"\s+", " ").Trim();

@@ -35,6 +35,16 @@ public class EstiloDeVersionTests
     [InlineData("Gasolina (8A Reggaeton Remix)", "Reggaeton")]
     [InlineData("Gasolina (12A Moombahton Edit)", "Moombahton")]
     [InlineData("Gasolina 8A Moombahton Edit", "Moombahton")]
+    // Revisión 3: las formas adjetivas en español detrás de una palabra de versión, el trap latino y el
+    // reggaeton «old school».
+    [InlineData("Despacito (Versión Flamenca)", "Flamenco")]
+    [InlineData("Despacito - Versión Rumbera", "Rumba")]
+    [InlineData("Despacito (Version Salsera)", "Salsa")]
+    [InlineData("Despacito (Versión Bachatera)", "Bachata")]
+    [InlineData("Despacito (Mix Cumbiero)", "Cumbia")]
+    [InlineData("Despacito (Versión Merenguera)", "Merengue")]
+    [InlineData("Tema (Trap Latino Remix)", "Trap")]
+    [InlineData("Tema (Reggaeton Old School Remix)", "Reggaeton")]
     public void El_estilo_de_la_version_se_lee_del_titulo(string titulo, string estilo)
     {
         var v = EstiloDeVersion.De(titulo, null, null, null);
@@ -102,6 +112,10 @@ public class EstiloDeVersionTests
     // Sin paréntesis y antes del primer guion, lo de delante de «DJ» es el nombre del tema.
     [InlineData("Gasolina DJ Mambo Remix", "Daddy Yankee")]
     [InlineData("Tema MC Trap Edit", null)]
+    // Revisión 3: la forma adjetiva solo cuenta detrás de una palabra de versión.
+    [InlineData("La Flamenca Remix", null)]
+    [InlineData("Tema (Flamenca Remix)", null)]
+    [InlineData("Rumbera (Extended Mix)", null)]
     public void Un_estilo_fuera_del_contexto_de_version_no_cuenta(string titulo, string? artista)
         => Assert.Null(EstiloDeVersion.De(titulo, titulo, artista, null));
 
