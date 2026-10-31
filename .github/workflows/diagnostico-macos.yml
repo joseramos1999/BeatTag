@@ -2,15 +2,16 @@ name: Diagnóstico macOS (temporal)
 
 # TEMPORAL: se quita antes de unir la rama.
 #
-# Uno de cada ocho equipos macOS recién arrancados deja de responder a los pocos segundos de empezar
-# las pruebas, sin quedarse sin memoria ni disco, también sin la prueba que parecía sospechosa.
-# Desde fuera es igual que el equipo se pare entero o que algo mate el proceso del runner de GitHub
-# (el propio aviso lo dice: «anything that terminates the runner process»).
+# El latido demostró que el equipo no se para: mueren a la vez Runner.Listener, Runner.Worker y el
+# proceso de las pruebas, todos del MISMO grupo de procesos (el de /opt/hca/start_hca.sh), y solo
+# sobrevive el latido, que ignora SIGHUP y SIGTERM.
 #
-# Para distinguirlo, un LATIDO independiente del runner: un proceso suelto que cada 2 s publica un
-# estado en el commit por la API de GitHub, con curl, diciendo si Runner.Worker y Runner.Listener
-# siguen vivos y cuántas pruebas van. Si el equipo se para, los latidos se cortan a la vez que el
-# registro; si lo que muere es el runner, siguen llegando y dicen cuándo murió.
+# Sospecha: Process.Kill(entireProcessTree: true) de .NET para primero el proceso con SIGSTOP. Si
+# el grupo queda huérfano mientras hay un proceso parado, el núcleo manda SIGHUP + SIGCONT a todo el
+# grupo (regla POSIX de los grupos huérfanos), y eso se lleva el runner.
+#
+# Reproducción sin nada de la aplicación: un «sleep» PARADO y huérfano en el grupo del runner, y
+# luego procesos cortos que acaban como hijos de launchd. Control: lo mismo sin pararlo.
 on:
   push:
     branches: [ claude/ci-macos-cuelgue ]
@@ -18,77 +19,60 @@ on:
 permissions:
   contents: read
   statuses: write   # solo para el latido
-  checks: write     # y para dejar lo que vio cuando murió el runner
 
 jobs:
-  pruebas:
-    name: latido ${{ matrix.intento }}
+  repro:
+    name: ${{ matrix.modo }} ${{ matrix.intento }}
     runs-on: macos-latest
-    timeout-minutes: 10
+    timeout-minutes: 6
     strategy:
       fail-fast: false
       matrix:
-        intento: [ 1, 2, 3, 4, 5, 6, 7 ]
-    defaults:
-      run:
-        working-directory: EtiquetadorNet
+        include:
+          - { modo: parado, intento: 1 }
+          - { modo: parado, intento: 2 }
+          - { modo: control, intento: 1 }
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
-        with:
-          dotnet-version: '9.0.x'
-      - run: dotnet restore
-      - run: dotnet build -c Release --no-restore
       - name: Latido independiente
         shell: bash
         env:
           TOKEN: ${{ github.token }}
-          NOMBRE: ${{ github.run_attempt }}-${{ matrix.intento }}
+          NOMBRE: ${{ github.run_attempt }}-${{ matrix.modo }}-${{ matrix.intento }}
         run: |
           cat > "$RUNNER_TEMP/latido.sh" <<'EOF'
           #!/bin/bash
           trap '' HUP PIPE TERM INT
           inicio=$(date +%s)
-          api() { curl -s -o /dev/null -m 20 -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$GITHUB_REPOSITORY/$1" -d @-; }
-          # Al empezar, con todo vivo: el árbol de procesos con sus grupos, y dónde está el runner.
-          arbol=$(ps -axo pid,ppid,pgid,sess,stat,command | grep -E "PID|Runner|bash|dotnet|latido|testhost|runsvc" | grep -v grep | cut -c1-250)
-          listener=$(pgrep -f Runner.Listener | head -1)
-          raiz=$(dirname "$(dirname "$(ps -o command= -p "$listener" | awk '{print $1}')")")
-          forense=""
-          for i in $(seq 1 300); do
+          for i in $(seq 1 150); do
             w=$(pgrep -f Runner.Worker > /dev/null && echo vivo || echo MUERTO)
             l=$(pgrep -f Runner.Listener > /dev/null && echo vivo || echo MUERTO)
-            h=$(grep -cE '^  (Passed|Failed|Skipped) ' "$DIR/test.log" 2>/dev/null); h=${h:-0}
-            t=$(pgrep -f testhost > /dev/null && echo testhost || echo sin-testhost)
-            desc="$(( $(date +%s) - inicio )) s · worker $w · listener $l · $t · $h hechas"
-            printf '{"state":"pending","context":"latido/%s","description":"%s"}' "$NOMBRE" "$desc" | api "statuses/$GITHUB_SHA"
-            if [ "$w" = MUERTO ] && [ -z "$forense" ]; then
-              forense=1
-              sleep 3   # que acaben de escribir los registros
-              texto=$( {
-                echo "## Árbol de procesos al empezar (raíz del runner: $raiz)"; echo "$arbol"
-                echo; echo "## Procesos de usuario que quedan"; ps -axo pid,ppid,pgid,stat,lstart,command | grep -vE "/System/|/usr/libexec/|/usr/sbin/|/Library/Apple/" | cut -c1-220 | tail -50
-                echo; echo "## Runner_*.log"; tail -45 "$(ls -t "$raiz"/_diag/Runner_*.log 2>/dev/null | head -1)"
-                echo; echo "## Worker_*.log"; tail -70 "$(ls -t "$raiz"/_diag/Worker_*.log 2>/dev/null | head -1)"
-                echo; echo "## vstest (proceso de pruebas)"; tail -40 "$(ls -t "$DIR"/diag/*host*.txt 2>/dev/null | head -1)"
-                echo; echo "## vstest (consola)"; tail -25 "$DIR/diag/vstest.txt"
-                echo; echo "## test.log"; tail -25 "$DIR/test.log"
-                echo; echo "## Registro de macOS"; sudo log show --last 2m --style compact \
-                  --predicate 'process == "launchd" OR eventMessage CONTAINS[c] "Runner" OR eventMessage CONTAINS[c] "testhost" OR eventMessage CONTAINS[c] "dotnet"' | tail -160
-              } 2>&1 | cut -c1-400 | tail -c 60000)
-              jq -n --arg sha "$GITHUB_SHA" --arg n "forense $NOMBRE" --arg t "$texto" \
-                '{name: $n, head_sha: $sha, status: "completed", conclusion: "neutral",
-                  output: {title: $n, summary: "Lo que había en el equipo cuando murió el runner", text: $t}}' | api check-runs
-            fi
+            desc="$(( $(date +%s) - inicio )) s · worker $w · listener $l"
+            printf '{"state":"pending","context":"latido/%s","description":"%s"}' "$NOMBRE" "$desc" \
+              | curl -s -o /dev/null -m 10 -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d @-
             sleep 2
           done
           EOF
           chmod +x "$RUNNER_TEMP/latido.sh"
-          DIR="$PWD" nohup "$RUNNER_TEMP/latido.sh" > /dev/null 2>&1 &
+          nohup "$RUNNER_TEMP/latido.sh" > /dev/null 2>&1 &
           disown
-      - name: Test
+          sleep 3
+      - name: Reproducir
         shell: bash
-        timeout-minutes: 8
-        run: ../scripts/pruebas-vigiladas.sh
+        run: |
+          set +e
+          ps -o pid,ppid,pgid,stat,command -p $$
+          if [ "${{ matrix.modo }}" = parado ]; then
+            ( sleep 120 & kill -STOP $! ; exit 0 )   # parado, y su padre termina: queda huérfano en el grupo
+          else
+            ( sleep 120 & exit 0 )                     # control: huérfano igual, pero sin parar
+          fi
+          sleep 1
+          ps -axo pid,ppid,pgid,stat,command | grep "sleep 120" | grep -v grep
+          # Procesos cortos que acaban como hijos de launchd: al terminar, el núcleo vuelve a mirar si
+          # el grupo ha quedado huérfano.
+          for i in $(seq 1 40); do ( sleep 0.1 & ); sleep 0.05; done
+          sleep 3
+          echo "El runner sigue vivo"
+          pkill -CONT -f "sleep 120"; pkill -f "sleep 120"
+          exit 0
