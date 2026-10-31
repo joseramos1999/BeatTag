@@ -221,19 +221,26 @@ public static class EstiloDeVersion
     /// </summary>
     private static bool SoloAcompana(string s) => !AcompanaVersion.Replace(Limpio(s), " ").Any(char.IsLetter);
 
-    /// <summary>Termina en un separador de créditos: «DJ Pepe x», «DJ Mambo &amp;», «DJ Pepe feat.».</summary>
+    /// <summary>
+    /// Termina en un separador de créditos: «DJ Pepe x», «DJ Mambo &amp;», «DJ Pepe feat.», «DJ Pepe b2b».
+    /// Se comparan letras y dígitos (revisión 3: solo con las letras, «b2b» quedaba en «bb» y no coincidía).
+    /// </summary>
     private static bool TrasSeparador(string s)
     {
         s = s.TrimEnd();
         if (s.Length == 0) return false;
         if (SignosSeparadores.Contains(s[^1])) return true;
-        return Separadores.Contains(Letras(UltimaPalabra(s)));
+        return Separadores.Contains(new string(UltimaPalabra(s).Where(char.IsLetterOrDigit).ToArray()));
     }
 
+    /// <summary>
+    /// La última palabra, cortando por los espacios y por los signos que separan créditos (revisión 3):
+    /// en «DJ Pepe&amp;DJ», «DJ Pepe,DJ» o «DJ Pepe/DJ» es «DJ», y lo de delante acaba en un separador.
+    /// </summary>
     private static string UltimaPalabra(string s)
     {
         var j = s.Length;
-        while (j > 0 && !char.IsWhiteSpace(s[j - 1])) j--;
+        while (j > 0 && !char.IsWhiteSpace(s[j - 1]) && !SignosSeparadores.Contains(s[j - 1])) j--;
         return s[j..];
     }
 

@@ -93,6 +93,12 @@ public class EstiloDeVersionTests
     [InlineData("Tema (DJ Pepe feat. MC Trap Remix)", null)]
     [InlineData("Tema (Prod. DJ Salsa Remix)", null)]
     [InlineData("Tema (DJ Pepe vs DJ Trap Remix)", null)]
+    // Revisión 3: «b2b» no se reconocía (se comparaban solo las letras, «bb»), ni un separador sin espacio.
+    [InlineData("Tema (DJ Pepe b2b DJ Trap Remix)", null)]
+    [InlineData("Tema (DJ Pepe B2B MC Salsa Edit)", null)]
+    [InlineData("Tema (DJ Pepe&DJ Mambo Remix)", null)]
+    [InlineData("Tema (DJ Pepe,DJ Mambo Remix)", null)]
+    [InlineData("Tema (DJ Pepe/DJ Mambo Remix)", null)]
     // Sin paréntesis y antes del primer guion, lo de delante de «DJ» es el nombre del tema.
     [InlineData("Gasolina DJ Mambo Remix", "Daddy Yankee")]
     [InlineData("Tema MC Trap Edit", null)]

@@ -446,6 +446,10 @@ public class GeneroPorArtistaTests : IDisposable
             Con("Gasolina", "01 - Daddy Yankee - Gasolina (Extended DJ Mambo Remix)"),
             Con("Gasolina (Intro DJ Mambo Remix)", "Daddy Yankee - Gasolina (Intro DJ Mambo Remix)"),
             Con("Gasolina (DJ Mambo & DJ Trap Remix)", "Daddy Yankee - Gasolina (DJ Mambo & DJ Trap Remix)"),
+            // Revisión 3: «b2b» y los separadores sin espacio.
+            Con("Tema (DJ Pepe b2b DJ Trap Remix)", "Daddy Yankee - Tema (DJ Pepe b2b DJ Trap Remix)"),
+            Con("Tema (DJ Pepe B2B MC Salsa Edit)", "Daddy Yankee - Tema (DJ Pepe B2B MC Salsa Edit)"),
+            Con("Tema (DJ Pepe&DJ Mambo Remix)", "Daddy Yankee - Tema (DJ Pepe&DJ Mambo Remix)"),
         };
         Assert.Empty(Proponer(canciones));
 
