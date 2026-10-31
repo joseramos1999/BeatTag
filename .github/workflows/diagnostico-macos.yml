@@ -2,13 +2,12 @@ name: Diagnóstico macOS (temporal)
 
 # TEMPORAL: se quita antes de unir la rama.
 #
-# Con las pruebas, uno de cada cinco o seis equipos macOS se paraba entero a los pocos segundos, sin
-# quedarse sin memoria ni disco. La sospecha: el vaciado a disco de .NET (Flush(true)), que en macOS
-# es fcntl(F_FULLFSYNC) y obliga al disco del equipo virtual a vaciarse de verdad; el historial de
-# deshacer lo hace en cada anotación y llegó el 19 de octubre, justo antes del primer cuelgue.
-#
-# Esto lo comprueba sin nada de la aplicación: varios hilos que escriben y vacían a disco sin parar,
-# con F_FULLFSYNC y, de control, con fsync normal. Si es eso, se cuelgan los primeros.
+# Con las pruebas, uno de cada cinco o seis equipos macOS 26 se para entero a los pocos segundos,
+# sin quedarse sin memoria ni disco (descartado también el vaciado a disco: dos minutos de
+# F_FULLFSYNC sin parar no colgaron ninguno). Esta vuelta mira dos cosas:
+#   - macOS 26 con un límite de 8 minutos para el TRABAJO: si GitHub lo corta aunque el equipo no
+#     responda, un cuelgue cuesta 8 minutos y no 46;
+#   - las mismas pruebas en macOS 15, por si el cuelgue es cosa del sistema.
 on:
   push:
     branches: [ claude/ci-macos-cuelgue ]
@@ -17,41 +16,34 @@ permissions:
   contents: read
 
 jobs:
-  vaciado:
-    name: ${{ matrix.modo }} ${{ matrix.intento }}
-    runs-on: macos-latest
+  pruebas:
+    name: ${{ matrix.so }} ${{ matrix.intento }}
+    runs-on: ${{ matrix.so }}
+    timeout-minutes: 8
     strategy:
       fail-fast: false
       matrix:
-        modo: [ full ]
-        intento: [ 1, 2, 3, 4 ]
         include:
-          - { modo: normal, intento: 1 }
-          - { modo: normal, intento: 2 }
+          - { so: macos-latest, intento: 1 }
+          - { so: macos-latest, intento: 2 }
+          - { so: macos-latest, intento: 3 }
+          - { so: macos-latest, intento: 4 }
+          - { so: macos-latest, intento: 5 }
+          - { so: macos-15, intento: 1 }
+          - { so: macos-15, intento: 2 }
+    defaults:
+      run:
+        working-directory: EtiquetadorNet
     steps:
-      - name: Pruebas de vaciado a disco
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: '9.0.x'
+      - run: dotnet restore
+      - run: dotnet build -c Release --no-restore
+      - name: Test
         shell: bash
-        timeout-minutes: 10
-        run: |
-          cat > "$RUNNER_TEMP/vaciado.py" <<'EOF'
-          import fcntl, os, sys, threading, time
-          modo, hilos, segundos = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
-          cuenta, peor = [0] * hilos, [0.0] * hilos
-          def trabajo(i):
-              ruta = os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), f"vaciado_{i}.bin")
-              fin = time.time() + segundos
-              with open(ruta, "wb") as f:
-                  while time.time() < fin:
-                      f.seek(0); f.write(os.urandom(4096)); f.flush()
-                      t = time.time()
-                      if modo == "full": fcntl.fcntl(f.fileno(), fcntl.F_FULLFSYNC)
-                      else: os.fsync(f.fileno())
-                      peor[i] = max(peor[i], time.time() - t); cuenta[i] += 1
-          hs = [threading.Thread(target=trabajo, args=(i,)) for i in range(hilos)]
-          for h in hs: h.start()
-          inicio = time.time()
-          while any(h.is_alive() for h in hs):
-              time.sleep(1)
-              print(f"{time.time() - inicio:.0f} s · {sum(cuenta)} vaciados · el más lento {max(peor) * 1000:.0f} ms", flush=True)
-          EOF
-          python3 "$RUNNER_TEMP/vaciado.py" "${{ matrix.modo }}" 6 120
+        timeout-minutes: 6
+        run: ../scripts/pruebas-vigiladas.sh
