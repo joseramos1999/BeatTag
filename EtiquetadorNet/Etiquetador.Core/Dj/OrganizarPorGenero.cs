@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Etiquetador.Core.Ai;
 
 namespace Etiquetador.Core.Dj;
 
@@ -503,10 +504,35 @@ public static class OrganizarPorGenero
             return k.Length > 0 && forma.TryGetValue(k, out var f) ? f : null;
         }
 
-        // Los nombres de carpeta que son de un género: una canción que ya está en una de ellas, dentro
-        // del destino, cuenta desde ahí (volver a organizar no anida «Pop/Pop»).
-        var carpetasDeGenero = new HashSet<string>(ComparadorRutas.Instancia) { CarpetaOtros, CarpetaSinGenero };
-        foreach (var g in generos) carpetasDeGenero.Add(NombreCarpetaGenero(g.Genero));
+        // Las carpetas que son de un género: una canción que ya está en una de ellas, dentro del destino,
+        // cuenta desde ahí (volver a organizar no anida «Pop/Pop»). Son «Otros géneros», «Sin género», las
+        // que se llaman como un género de la biblioteca y las que lo escriben de otra forma, contada igual
+        // que al agrupar los géneros: una carpeta «Breaks», «Rap» o «Electro-Latino» es la de Breakbeat,
+        // Hip Hop o Electro Latino, y no tiene que acabar dentro de la nueva («Breakbeat/Breaks»).
+        var nombresDeGenero = new HashSet<string>(ComparadorRutas.Instancia) { CarpetaOtros, CarpetaSinGenero };
+        foreach (var g in generos) nombresDeGenero.Add(NombreCarpetaGenero(g.Genero));
+        var esCarpetaDeGenero = new Dictionary<string, bool>(ComparadorRutas.Instancia);
+        bool EsCarpetaDeGenero(string nombre)
+        {
+            if (!esCarpetaDeGenero.TryGetValue(nombre, out var es))
+                esCarpetaDeGenero[nombre] = es = nombresDeGenero.Contains(nombre) || OtraFormaDeUnGenero(nombre);
+            return es;
+        }
+        // Una lista no es otra forma de escribir su primer género: «Salsa, Vol. 1» o «Reggaeton, Dembow» son
+        // carpetas tuyas. Tampoco un nombre con letras o símbolos que la clave no conserva («邦楽 Pop», «Pop
+        // 🇯🇵», «🔥 Reggaeton»): fuera de lo ASCII solo se admiten espacios y signos de puntuación
+        // («Electro–Latino»). Ni una carpeta que por su nombre marca el tipo de pieza («Mash Up» con el
+        // género «Mash-Up»): quitarla de la ruta cambiaría lo que es la canción, que se quedaría en su sitio
+        // en vez de moverse con su carpeta.
+        // Los separadores de ancho completo y la coma ideográfica también hacen una lista: «Latin，Pop».
+        static string ConSeparadoresAscii(string s)
+            => s.Replace('，', ',').Replace('、', ',').Replace('；', ';').Replace('／', '/').Replace('｜', '|');
+        var neutra = LoQueDiceLaRuta.De("x");
+        bool OtraFormaDeUnGenero(string nombre)
+            => !GenerosIa.EsLista(ConSeparadoresAscii(nombre))
+               && TextUtils.RemoveDiacritics(nombre).All(c => char.IsAscii(c) || EsEspacioOPuntuacion(c))
+               && LoQueDiceLaRuta.De(Path.Combine(nombre, "x")) == neutra
+               && GeneroPorReglas.Normalizado(nombre) is { } n && forma.ContainsKey(GeneroPorReglas.ClaveGenero(n));
 
         var raices = raicesHabilitadas.Where(r => !string.IsNullOrWhiteSpace(r)).OrderByDescending(r => r.Length).ToList();
         var raizDe = new Dictionary<string, string?>(ComparadorRutas.Instancia);
@@ -663,7 +689,7 @@ public static class OrganizarPorGenero
                 var baseDir = Base(raiz);
                 var carpetaGenero = Real(baseDir, nombreGenero);
                 var relativa = op.ConservarEstructura
-                    ? Relativa(dir, raiz, baseDir, op.Destino == DestinoOrganizar.PorGeneroEnCadaRaiz ? null : carpetasDeGenero)
+                    ? Relativa(dir, raiz, baseDir, op.Destino == DestinoOrganizar.PorGeneroEnCadaRaiz ? null : EsCarpetaDeGenero)
                     : "";
                 var destinoDir = Path.Combine(baseDir, carpetaGenero);
                 foreach (var tramo in Tramos(relativa)) destinoDir = Path.Combine(destinoDir, Real(destinoDir, tramo));
@@ -778,21 +804,28 @@ public static class OrganizarPorGenero
         public Dictionary<string, int> Organizadas { get; } = new(StringComparer.Ordinal);
     }
 
+    /// <summary>Un espacio o un signo de puntuación de cualquier alfabeto («–», «’», «¡»), no un símbolo ni un emoji.</summary>
+    private static bool EsEspacioOPuntuacion(char c) => CharUnicodeInfo.GetUnicodeCategory(c)
+        is UnicodeCategory.SpaceSeparator or UnicodeCategory.DashPunctuation or UnicodeCategory.ConnectorPunctuation
+        or UnicodeCategory.OpenPunctuation or UnicodeCategory.ClosePunctuation or UnicodeCategory.InitialQuotePunctuation
+        or UnicodeCategory.FinalQuotePunctuation or UnicodeCategory.OtherPunctuation;
+
     /// <summary>
     /// Las subcarpetas de origen que se conservan dentro del género. Si la canción ya está dentro del
     /// destino, se cuenta desde la carpeta de su género: al volver a organizar, una canción de «Por
     /// género/Latin/Pack» que pasa a Reggaeton va a «Por género/Reggaeton/Pack», no a «Por
     /// género/Reggaeton/Latin/Pack». En «Por género» todo lo que cuelga directamente es la carpeta de un
-    /// género (<paramref name="carpetasDeGenero"/> null), aunque ese género ya no esté en la biblioteca;
-    /// en otro destino, que puede tener carpetas del usuario, solo las que se llaman como un género.
+    /// género (<paramref name="esCarpetaDeGenero"/> null), aunque ese género ya no esté en la biblioteca;
+    /// en otro destino, que puede tener carpetas del usuario, solo las que lo son para
+    /// <paramref name="esCarpetaDeGenero"/>.
     /// </summary>
-    private static string Relativa(string dir, string raiz, string baseDir, HashSet<string>? carpetasDeGenero)
+    private static string Relativa(string dir, string raiz, string baseDir, Func<string, bool>? esCarpetaDeGenero)
     {
         if (Rutas.MismaCarpeta(dir, baseDir)) return "";
         if (Rutas.EstaDentroDe(dir, baseDir))
         {
             var tramos = Tramos(Debajo(dir, baseDir)).ToList();
-            if (tramos.Count > 0 && (carpetasDeGenero == null || carpetasDeGenero.Contains(tramos[0]))) tramos.RemoveAt(0);
+            if (tramos.Count > 0 && (esCarpetaDeGenero == null || esCarpetaDeGenero(tramos[0]))) tramos.RemoveAt(0);
             return tramos.Count == 0 ? "" : Path.Combine(tramos.ToArray());
         }
         if (Rutas.MismaCarpeta(dir, raiz)) return "";

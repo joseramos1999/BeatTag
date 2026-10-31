@@ -48,11 +48,19 @@ public sealed class VocabularioBiblioteca
     public VocabularioBiblioteca(IEnumerable<Track> canciones, int minimoPorGenero = 3)
     {
         var cuenta = new Dictionary<string, (string Nombre, int N)>(StringComparer.Ordinal);
+        // Cómo lo escribe la biblioteca, si no es como el nombre unificado: «breaks» en la frase tiene que
+        // encontrar el Breakbeat de una biblioteca etiquetada «Breaks».
+        var comoSeEscribe = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var t in canciones)
         {
             var g = GenreNormalizer.Canonical(t.Genre);
             var k = Clave(g);
-            if (k.Length > 0) cuenta[k] = cuenta.TryGetValue(k, out var v) ? (v.Nombre, v.N + 1) : (g, 1);
+            if (k.Length > 0)
+            {
+                cuenta[k] = cuenta.TryGetValue(k, out var v) ? (v.Nombre, v.N + 1) : (g, 1);
+                var escrito = Clave(SeparadorGeneros.Split(t.Genre!).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)));
+                if (escrito.Length > 0 && escrito != k) comoSeEscribe.TryAdd(escrito, k);
+            }
 
             foreach (var a in PartirArtistas(t.Artist))
             {
@@ -63,7 +71,12 @@ public sealed class VocabularioBiblioteca
         }
         foreach (var (k, v) in cuenta)
             if (v.N >= minimoPorGenero) _generos[k] = v.Nombre;
+        foreach (var (escrito, k) in comoSeEscribe)
+            if (_generos.TryGetValue(k, out var nombre)) _generos.TryAdd(escrito, nombre);
     }
+
+    /// <summary>Los mismos separadores con los que <see cref="GenreNormalizer.Canonical"/> parte una lista de géneros.</summary>
+    private static readonly Regex SeparadorGeneros = new(@"\s*[/;,|]\s*");
 
     private static IEnumerable<string> PartirArtistas(string? s)
         => string.IsNullOrWhiteSpace(s)
@@ -92,7 +105,7 @@ public sealed class VocabularioBiblioteca
         foreach (var (k, nombre) in _generos.OrderByDescending(g => g.Key.Length))
         {
             if (!ContienePalabras(usado, k)) continue;
-            hallados.Add(nombre);
+            if (!hallados.Contains(nombre)) hallados.Add(nombre);   // «breaks breakbeat» es un solo género
             usado = (" " + usado + " ").Replace(" " + k + " ", " | ").Trim();   // «afro house» no cuenta además como «house»
         }
         return hallados;

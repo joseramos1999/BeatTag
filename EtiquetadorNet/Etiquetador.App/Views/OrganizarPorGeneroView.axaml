@@ -23,7 +23,7 @@
                                  ToolTip.Tip="Las carpetas de los géneros no se mezclan con las que ya tienes." />
                     <RadioButton GroupName="DestinoOrganizar" IsChecked="{Binding DestinoRaiz}" IsEnabled="{Binding Libre}"
                                  Content="Directamente en cada carpeta de la biblioteca"
-                                 ToolTip.Tip="Junto a las carpetas que ya hay: una carpeta que ya se llama como un género recibe las canciones de ese género." />
+                                 ToolTip.Tip="Junto a las carpetas que ya hay: una carpeta que ya se llama como un género recibe las canciones de ese género. Con otra forma de escribirlo no: las de «Breaks» pasan a «Breakbeat»." />
                     <WrapPanel ItemSpacing="8" LineSpacing="4">
                         <RadioButton GroupName="DestinoOrganizar" IsChecked="{Binding DestinoCarpeta}" IsEnabled="{Binding Libre}"
                                      Content="En otra carpeta de la biblioteca…" VerticalAlignment="Center" />

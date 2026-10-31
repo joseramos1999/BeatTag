@@ -16,8 +16,26 @@ public static class GenrePicker
     /// <summary>Lo que se escribe cuando un álbum de Deezer es a la vez latino y de rap.</summary>
     public const string LatinUrban = "Latin Urban";
 
+    /// <summary>
+    /// El género de un disco de Discogs: el primero de sus estilos y después de sus géneros que está en
+    /// la lista de preferencias, salvo que entre los ESTILOS haya uno concreto de esa misma lista: ese
+    /// manda sobre uno genérico (<see cref="FamiliasGenero.EsGenerico"/>, como «Latin» o «Electro») que
+    /// vaya antes. Discogs también tiene «Latin» como estilo, y en una biblioteca real «Feid - Vente
+    /// Conmigo», con los estilos [Latin, Reggaeton], y «Toman - Verano En NY», con [Latin, Tech House],
+    /// se etiquetaban Latin (unos 4 de 78 discos). Un estilo que no está en la lista («Breaks», «Drum n
+    /// Bass», «Trance») no gana a uno que sí está, genérico o no: cambiar eso afectaría a muchos estilos
+    /// más y no está medido.
+    ///
+    /// Solo entre los estilos. Los géneros de Discogs son amplios: en un disco sin estilos,
+    /// [Latin, Hip Hop] sigue dando Latin, que «Género por carpeta y artista» puede afinar sin
+    /// preguntar, y no un «Hip Hop» que puede ser reggaeton (ver <see cref="PickDeezer"/>). Por lo
+    /// mismo, <see cref="PickDeezer"/>, que llama a este método sin estilos, elige como antes.
+    /// </summary>
     public static string Pick(IReadOnlyList<string>? style, IReadOnlyList<string>? genre)
     {
+        if (style != null)
+            foreach (var x in style)
+                if (EsPreferido(x) && !FamiliasGenero.EsGenerico(x)) return x;
         var c = new List<string>();
         if (style != null) c.AddRange(style);
         if (genre != null) c.AddRange(genre);
