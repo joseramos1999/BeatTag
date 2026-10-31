@@ -425,6 +425,28 @@ public class GeneroPorArtistaTests : IDisposable
         }
     }
 
+    // Revisión 3: el estilo que solo dice el campo Artista salía MARCADO y con un «Por qué» de versión
+    // («Versión «Bachata Mix» → Bachata»), aunque en el título no hubiera ninguna versión. El artista de
+    // una recopilación describe la colección, no la versión: sale desmarcado, como el del álbum.
+    [Fact]
+    public void El_estilo_que_solo_dice_el_artista_sale_desmarcado_y_lo_dice()
+    {
+        var t = new Track { FilePath = Rutas.De("M", "Musica", "Tema.mp3"), Artist = "Bachata Mix 2023", Title = "Tema", Genre = "Reggaeton" };
+        var conNombre = new Track
+        {
+            FilePath = Rutas.De("M", "Musica", "Bachata Mix 2023 - Tema 2.mp3"), Artist = "Bachata Mix 2023", Title = "Tema 2", Genre = "Reggaeton",
+        };
+
+        var p = Proponer(new List<Track> { t, conNombre });
+
+        foreach (var x in new[] { De(p, t)!, De(p, conNombre)! })
+        {
+            Assert.Equal(("Bachata", ReglaGenero.Version, false), (x.Genero, x.Regla, x.Marcada));
+            Assert.StartsWith("Artista «Bachata Mix 2023» → Bachata: puede describir la recopilación, revísalo", x.PorQue);
+            Assert.DoesNotContain("Versión", x.PorQue);
+        }
+    }
+
     // Visto al validar en una biblioteca real: «(Afro House)» proponía cambiar «Afrohouse» por «Afro House».
     [Fact]
     public void El_mismo_genero_escrito_junto_o_separado_no_se_propone()

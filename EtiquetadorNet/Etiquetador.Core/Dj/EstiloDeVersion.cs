@@ -194,8 +194,10 @@ public static class EstiloDeVersion
 
     /// <summary>
     /// El estilo que indica la versión, buscado por este orden: el título, el nombre del archivo (sin
-    /// la extensión), el artista y el álbum. Gana el primero que lo diga. Lo que solo dice el álbum
-    /// sale con <see cref="FuenteEstilo.Album"/>: suele describir el pack entero, no la canción.
+    /// la extensión), el artista y el álbum. Gana el primero que lo diga. Lo que solo dice el artista o
+    /// el álbum sale con <see cref="FuenteEstilo.Artista"/> o <see cref="FuenteEstilo.Album"/>: suelen
+    /// describir la recopilación o el pack entero, no la canción. En el título y en el nombre del
+    /// archivo no se mira la parte que es el artista («Bachata Mix 2023 - Tema»): es el mismo dato.
     /// </summary>
     public static EstiloVersion? De(string? titulo, string? nombreArchivoSinExtension, string? artista, string? album)
     {
@@ -271,8 +273,13 @@ public static class EstiloDeVersion
         var partes = Guion.Split(Parentesis.Replace(texto, " | "));
         var nombre = PartesDelNombre(partes, fuente, b);
         for (var i = 0; i < partes.Length; i++)
+        {
+            // La parte que es el artista («Bachata Mix 2023 - Tema») dice lo mismo que el campo Artista, y
+            // eso se busca después, con su fuente (revisión 3).
+            if ((fuente is FuenteEstilo.Titulo or FuenteEstilo.Archivo) && b.EsElArtista(partes[i])) continue;
             foreach (var trozo in partes[i].Split('|'))
                 if (FueraDeParentesis(trozo, trasGuion: i > 0, enNombreDelTema: i < nombre, b) is { } r) return Resultado(r, fuente);
+        }
         return null;
     }
 

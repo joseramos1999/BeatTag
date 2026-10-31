@@ -606,7 +606,8 @@ public static class GeneroPorReglas
     ///     todos, y el dominante fuerte solo coincide con las carpetas del usuario un 56 %.
     /// La versión sale marcada, también sobre otro estilo concreto (es lo que pide un DJ: si el remix
     /// o la versión dice su estilo, ese manda), salvo que su estilo sea ambiguo, que solo lo diga el
-    /// álbum o que la canción tenga otro estilo de la misma familia: entonces se propone desmarcada.
+    /// artista o el álbum o que la canción tenga otro estilo de la misma familia: entonces se propone
+    /// desmarcada.
     /// </summary>
     public static CalculoGeneroReglas Calcular(IReadOnlyList<Track> canciones, OpcionesGeneroReglas op, CancellationToken ct = default)
     {
@@ -647,10 +648,15 @@ public static class GeneroPorReglas
                 var estilo = Escrito(v.Estilo);
                 if (claveActual.Length > 0 && Compacta(estilo) == claveActual) continue;
                 var mismaFamilia = cambio == CambioGenero.Revisar && FamiliasGenero.MismaFamilia(actualNorm, estilo);
-                var marcada = !v.Ambiguo && v.Fuente != FuenteEstilo.Album && !mismaFamilia;
-                var porQue = v.Fuente == FuenteEstilo.Album
-                    ? $"Álbum «{t.Album?.Trim()}» → {estilo}: puede describir el pack, revísalo"
-                    : $"Versión «{v.Texto}» → {estilo}";
+                // Lo que solo dice el artista o el álbum describe la recopilación o el pack, no la versión
+                // (revisión 3: el del artista salía marcado y con un «Por qué» de versión).
+                var marcada = !v.Ambiguo && v.Fuente is not (FuenteEstilo.Album or FuenteEstilo.Artista) && !mismaFamilia;
+                var porQue = v.Fuente switch
+                {
+                    FuenteEstilo.Album => $"Álbum «{t.Album?.Trim()}» → {estilo}: puede describir el pack, revísalo",
+                    FuenteEstilo.Artista => $"Artista «{t.Artist?.Trim()}» → {estilo}: puede describir la recopilación, revísalo",
+                    _ => $"Versión «{v.Texto}» → {estilo}",
+                };
                 if (v.Ambiguo) porQue += $" · «{v.Estilo}» puede nombrar varios estilos: revísalo";
                 res.Add(new PropuestaGeneroRegla(t.FilePath, estilo, ReglaGenero.Version, porQue + Sufijo(cambio, actual, marcada, false),
                                                  marcada, t.Genre ?? "", cambio));

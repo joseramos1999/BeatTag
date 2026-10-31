@@ -273,8 +273,9 @@ el resto, el género dominante del artista sin contar los genéricos como Latin 
 sustituye géneros genéricos con la propuesta marcada (con el dominante automático del artista, las
 canciones sin género solo cuando es fuerte); si la canción ya tiene otro estilo, la propuesta sale
 desmarcada para revisarla, salvo cuando la propia versión indica su estilo («(Bachata Version)» en una
-canción con Reggaeton), que sale marcada; y los mashups y los remixes firmados conservan el suyo
-frente a las reglas de carpeta y de artista. Solo escribe en las canciones que siguen como estaban al proponer. El BPM no se usa, porque no
+canción con Reggaeton) en el título o en el nombre del archivo, que sale marcada (si solo lo indican
+el artista o el álbum, o si puede nombrar varios estilos, como «Tribal», sale desmarcada); y los
+mashups y los remixes firmados conservan el suyo frente a las reglas de carpeta y de artista. Solo escribe en las canciones que siguen como estaban al proponer. El BPM no se usa, porque no
 distingue estilos, y Spotify ya no publica los géneros de los artistas. Para las canciones sin
 género que ninguna regla cubre (y que no son mashups), se puede consultar Deezer: solo propone el
 subgénero del álbum cuando es concreto (Reggaeton, Cumbia, Flamenco…), y siempre desmarcado.

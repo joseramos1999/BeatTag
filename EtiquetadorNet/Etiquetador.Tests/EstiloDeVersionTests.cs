@@ -217,6 +217,12 @@ public class EstiloDeVersionTests
         var archivo = EstiloDeVersion.De("Dividimos", "Romeo Santos - Dividimos (Bachata Version)", null, null);
         Assert.Equal(FuenteEstilo.Archivo, archivo!.Fuente);
 
+        // Revisión 3: lo que solo dice el artista (también la parte del nombre del archivo que es el
+        // artista) sale con su fuente, el artista, y no como si fuera del título o del archivo.
+        var artista = EstiloDeVersion.De("Tema", "Bachata Mix 2023 - Tema", "Bachata Mix 2023", null);
+        Assert.Equal(("Bachata", FuenteEstilo.Artista), (artista?.Estilo, artista?.Fuente));
+        Assert.Equal(FuenteEstilo.Artista, EstiloDeVersion.De("Bachata Mix 2023 - Tema", null, "Bachata Mix 2023", null)?.Fuente);
+
         // Si el título ya lo dice, manda el título.
         var titulo = EstiloDeVersion.De("Dividimos (Salsa Version)", "Dividimos (Bachata Version)", null, "Pack (Merengue)");
         Assert.Equal(("Salsa", FuenteEstilo.Titulo), (titulo!.Estilo, titulo.Fuente));
