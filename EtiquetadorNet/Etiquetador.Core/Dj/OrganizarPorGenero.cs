@@ -477,8 +477,8 @@ public static class OrganizarPorGenero
     /// interfaz, y se puede cancelar.
     ///
     /// El género de cada canción es el de <see cref="GeneroPorReglas.Normalizado"/> (con una lista, el
-    /// primero), con el nombre de <see cref="GeneroPorReglas.GenerosDeLaBiblioteca"/>: «Reggaeton»,
-    /// «Reggaetón» y «Reguetón» acaban en una sola carpeta, «Reggaeton». Las canciones se recorren ordenadas por ruta para que el
+    /// primero), escrito como lo escribe la mayoría de la biblioteca: «Reggaeton», «Reggaetón» y
+    /// «Reguetón» acaban en una sola carpeta. Las canciones se recorren ordenadas por ruta para que el
     /// plan sea siempre el mismo: si dos van al mismo destino, se mueve la primera y la otra se lista.
     /// </summary>
     /// <param name="canciones">La biblioteca (las canciones de las carpetas marcadas).</param>
@@ -503,15 +503,19 @@ public static class OrganizarPorGenero
             return k.Length > 0 && forma.TryGetValue(k, out var f) ? f : null;
         }
 
-        // Los nombres de carpeta que son de un género: una canción que ya está en una de ellas, dentro
-        // del destino, cuenta desde ahí (volver a organizar no anida «Pop/Pop»).
-        var carpetasDeGenero = new HashSet<string>(ComparadorRutas.Instancia) { CarpetaOtros, CarpetaSinGenero };
-        // También las otras formas conocidas de su nombre: una carpeta «Breaks» o «Rap» es la de Breakbeat
-        // o Hip Hop, y conservando las subcarpetas no tiene que acabar dentro de la nueva («Breakbeat/Breaks»).
-        foreach (var g in generos)
+        // Las carpetas que son de un género: una canción que ya está en una de ellas, dentro del destino,
+        // cuenta desde ahí (volver a organizar no anida «Pop/Pop»). Son «Otros géneros», «Sin género» y
+        // las que se llaman como un género de la biblioteca o como otra forma de escribirlo, contada igual
+        // que al agrupar los géneros: una carpeta «Breaks», «Rap» o «Electro-Latino» es la de Breakbeat,
+        // Hip Hop o Electro Latino, y no tiene que acabar dentro de la nueva («Breakbeat/Breaks»).
+        var esCarpetaDeGenero = new Dictionary<string, bool>(ComparadorRutas.Instancia);
+        bool EsCarpetaDeGenero(string nombre)
         {
-            carpetasDeGenero.Add(NombreCarpetaGenero(g.Genero));
-            foreach (var a in GenreNormalizer.Alias(g.Genero)) carpetasDeGenero.Add(NombreCarpetaGenero(a));
+            if (!esCarpetaDeGenero.TryGetValue(nombre, out var es))
+                esCarpetaDeGenero[nombre] = es =
+                    ComparadorRutas.Instancia.Equals(nombre, CarpetaOtros) || ComparadorRutas.Instancia.Equals(nombre, CarpetaSinGenero)
+                    || (GeneroPorReglas.Normalizado(nombre) is { } n && forma.ContainsKey(GeneroPorReglas.ClaveGenero(n)));
+            return es;
         }
 
         var raices = raicesHabilitadas.Where(r => !string.IsNullOrWhiteSpace(r)).OrderByDescending(r => r.Length).ToList();
@@ -669,7 +673,7 @@ public static class OrganizarPorGenero
                 var baseDir = Base(raiz);
                 var carpetaGenero = Real(baseDir, nombreGenero);
                 var relativa = op.ConservarEstructura
-                    ? Relativa(dir, raiz, baseDir, op.Destino == DestinoOrganizar.PorGeneroEnCadaRaiz ? null : carpetasDeGenero)
+                    ? Relativa(dir, raiz, baseDir, op.Destino == DestinoOrganizar.PorGeneroEnCadaRaiz ? null : EsCarpetaDeGenero)
                     : "";
                 var destinoDir = Path.Combine(baseDir, carpetaGenero);
                 foreach (var tramo in Tramos(relativa)) destinoDir = Path.Combine(destinoDir, Real(destinoDir, tramo));
@@ -789,17 +793,17 @@ public static class OrganizarPorGenero
     /// destino, se cuenta desde la carpeta de su género: al volver a organizar, una canción de «Por
     /// género/Latin/Pack» que pasa a Reggaeton va a «Por género/Reggaeton/Pack», no a «Por
     /// género/Reggaeton/Latin/Pack». En «Por género» todo lo que cuelga directamente es la carpeta de un
-    /// género (<paramref name="carpetasDeGenero"/> null), aunque ese género ya no esté en la biblioteca;
-    /// en otro destino, que puede tener carpetas del usuario, solo las que se llaman como un género de la
-    /// biblioteca o como otra forma conocida de él («Breaks» para Breakbeat).
+    /// género (<paramref name="esCarpetaDeGenero"/> null), aunque ese género ya no esté en la biblioteca;
+    /// en otro destino, que puede tener carpetas del usuario, solo las que lo son para
+    /// <paramref name="esCarpetaDeGenero"/>.
     /// </summary>
-    private static string Relativa(string dir, string raiz, string baseDir, HashSet<string>? carpetasDeGenero)
+    private static string Relativa(string dir, string raiz, string baseDir, Func<string, bool>? esCarpetaDeGenero)
     {
         if (Rutas.MismaCarpeta(dir, baseDir)) return "";
         if (Rutas.EstaDentroDe(dir, baseDir))
         {
             var tramos = Tramos(Debajo(dir, baseDir)).ToList();
-            if (tramos.Count > 0 && (carpetasDeGenero == null || carpetasDeGenero.Contains(tramos[0]))) tramos.RemoveAt(0);
+            if (tramos.Count > 0 && (esCarpetaDeGenero == null || esCarpetaDeGenero(tramos[0]))) tramos.RemoveAt(0);
             return tramos.Count == 0 ? "" : Path.Combine(tramos.ToArray());
         }
         if (Rutas.MismaCarpeta(dir, raiz)) return "";

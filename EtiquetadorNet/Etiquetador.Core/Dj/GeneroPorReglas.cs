@@ -223,10 +223,6 @@ public static class GeneroPorReglas
     /// Los géneros de la biblioteca ya normalizados, de más a menos canciones, escritos como los lleva
     /// la mayoría. Es lo que ofrece el desplegable del mapa de carpetas: elegir un género que ya usas
     /// evita crear otra variante («Reggaeton» y «Reguetón»).
-    ///
-    /// Si una de las formas es un nombre que GenreNormalizer conoce, se escribe ese aunque sea la
-    /// minoría: «Drum&amp;Bass» no es una grafía conocida (el «&amp;» va sin espacios) pero se agrupa con
-    /// «Drum &amp; Bass», y con la mayoría ganaba la variante también para las que ya estaban unificadas.
     /// </summary>
     public static IReadOnlyList<(string Genero, int Canciones)> GenerosDeLaBiblioteca(IEnumerable<Track> canciones)
     {
@@ -241,9 +237,7 @@ public static class GeneroPorReglas
             formas[g] = formas.GetValueOrDefault(g) + 1;
         }
         return grupos.Values
-            .Select(f => (Genero: f.OrderByDescending(x => GenreNormalizer.Conocidos.Contains(x.Key, StringComparer.Ordinal))
-                                   .ThenByDescending(x => x.Value).ThenBy(x => x.Key, StringComparer.Ordinal).First().Key,
-                          Canciones: f.Values.Sum()))
+            .Select(f => (Genero: f.OrderByDescending(x => x.Value).ThenBy(x => x.Key, StringComparer.Ordinal).First().Key, Canciones: f.Values.Sum()))
             .OrderByDescending(x => x.Canciones).ThenBy(x => x.Genero, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
     }

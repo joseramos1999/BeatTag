@@ -102,19 +102,6 @@ public class GeneroBreaksYDiscogsTests
         Assert.True(FiltroColeccion.Cumple(alReves, T("dos", "Breakbeat"), null));
     }
 
-    // Revisión: una forma conocida que es minoría daba nombre a la carpeta de todas. «Drum&Bass» no es
-    // una grafía conocida (el «&» sin espacios), pero se agrupa con «Drum & Bass», que sí lo es.
-    [Fact]
-    public void La_forma_conocida_nombra_el_genero_aunque_sea_minoria()
-    {
-        var generos = GeneroPorReglas.GenerosDeLaBiblioteca(new[]
-        {
-            T("uno", "Drum&Bass"), T("dos", "Drum&Bass"), T("tres", "Drum&Bass"), T("cuatro", "Drum & Bass"),
-        });
-
-        Assert.Equal(("Drum & Bass", 4), Assert.Single(generos));
-    }
-
     // Revisión: la búsqueda con una frase guarda cada género por su nombre unificado, y «breaks» dejó de
     // encontrar el de una biblioteca etiquetada «Breaks». Cuenta también como lo escribe la biblioteca.
     [Fact]
@@ -181,13 +168,32 @@ public class GeneroBreaksYDiscogsTests
         Assert.Equal(Path.Combine(Raiz, "Breakbeat", "Packs", "Enero", "a.mp3"), Assert.Single(plan.Movimientos).Destino);
     }
 
+    // Revisión 2: lo mismo con las formas que la tabla no conoce pero que se agrupan con un género de la
+    // biblioteca. La carpeta se llama como la mayoría; la de la forma minoritaria es la misma carpeta de
+    // género y no se anida.
     [Fact]
-    public void Alias_da_las_otras_formas_de_un_nombre_canonico()
+    public void Una_carpeta_con_la_forma_minoritaria_no_se_anida()
     {
-        Assert.Contains("breaks", GenreNormalizer.Alias("Breakbeat"));
-        Assert.Contains("rap", GenreNormalizer.Alias("hip hop"));
-        Assert.Empty(GenreNormalizer.Alias("Electro Latino"));
-        Assert.Empty(GenreNormalizer.Alias(null));
+        var plan = EnLaRaiz(
+            EnCarpeta(Path.Combine("Electro-Latino", "Pack"), "a.mp3", "Electro-Latino"),
+            EnCarpeta("Nuevas", "b.mp3", "Electro Latino"), EnCarpeta("Nuevas", "c.mp3", "Electro Latino"));
+
+        Assert.Contains(plan.Movimientos, m => m.Destino == Path.Combine(Raiz, "Electro Latino", "Pack", "a.mp3"));
+    }
+
+    // Revisión 2: si una forma conocida minoritaria daba nombre al género, la carpeta de la mayoría
+    // («Drum&Bass», que la tabla no conoce: el «&» va sin espacios) quedaba dentro de la nueva. La
+    // carpeta se llama como la mayoría, así que lo que ya está en ella se queda.
+    [Fact]
+    public void La_carpeta_de_la_mayoria_se_queda_aunque_haya_una_forma_conocida()
+    {
+        var pack = Path.Combine("Drum&Bass", "Pack");
+        var plan = EnLaRaiz(EnCarpeta(pack, "a.mp3", "Drum&Bass"), EnCarpeta(pack, "b.mp3", "Drum&Bass"),
+                            EnCarpeta(pack, "c.mp3", "Drum&Bass"), EnCarpeta("Nuevas", "d.mp3", "Drum & Bass"));
+
+        var m = Assert.Single(plan.Movimientos);
+        Assert.Equal(Path.Combine(Raiz, "Drum&Bass", "Nuevas", "d.mp3"), m.Destino);
+        Assert.Equal(3, plan.CuantasOmitidas(MotivoOmision.YaEnSuSitio));
     }
 
     // =================================================================================================
