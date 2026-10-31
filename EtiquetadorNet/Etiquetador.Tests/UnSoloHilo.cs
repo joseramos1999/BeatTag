@@ -10,7 +10,16 @@ internal sealed class UnSoloHilo : SynchronizationContext
 {
     private readonly System.Collections.Concurrent.BlockingCollection<(SendOrPostCallback, object?)> _cola = new();
 
-    public override void Post(SendOrPostCallback d, object? state) => _cola.Add((d, state));
+    /// <summary>
+    /// Lo que llega cuando la prueba ya ha terminado se descarta. Si una prueba falla con algo todavía
+    /// en marcha (una comparación, un envío), su continuación llegaba tarde, Add lanzaba en un hilo del
+    /// grupo y tumbaba el proceso de pruebas entero en vez de dar un fallo limpio.
+    /// </summary>
+    public override void Post(SendOrPostCallback d, object? state)
+    {
+        try { _cola.Add((d, state)); }
+        catch (InvalidOperationException) when (_cola.IsAddingCompleted) { }
+    }
 
     public static Task Ejecutar(Func<Task> trabajo)
     {

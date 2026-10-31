@@ -100,12 +100,41 @@ public class RevisionUnionTests : IDisposable
         return (store, config);
     }
 
-    private DuplicatesViewModel Duplicados(LibraryStore store, AppConfig config, Func<string, (bool, string)>? enviar = null)
+    private DuplicatesViewModel Duplicados(LibraryStore store, AppConfig config, Func<string, (bool, string)>? enviar = null,
+                                           ComparacionRetenida? comparacion = null)
     {
         var huellas = new FingerprintScanner(Path.Combine(_dir, "huellas.json"), Path.Combine(_dir, "no-hay-fpcalc.exe"));
-        return enviar == null
-            ? new DuplicatesViewModel(store, config, () => { }, huellas, new AudioPreview())
-            : new DuplicatesViewModel(store, config, () => { }, huellas, new AudioPreview()) { EnviarUno = enviar };
+        return new DuplicatesViewModel(store, config, () => { }, huellas, new AudioPreview())
+        {
+            EnviarUno = enviar ?? Papelera.Enviar,
+            AgruparPorAudio = comparacion == null ? null : comparacion.Agrupar,
+        };
+    }
+
+    /// <summary>
+    /// Una comparación por audio que, una vez retenida, se queda parada hasta que la prueba la suelta.
+    /// Agrupa de verdad, sin huellas (estas canciones no las tienen).
+    /// </summary>
+    private sealed class ComparacionRetenida
+    {
+        private readonly ManualResetEventSlim _soltar = new(true);   // abierta: lo de antes de retenerla pasa
+        private readonly SemaphoreSlim _dentro = new(0);
+
+        public void Retener() => _soltar.Reset();
+        public void Soltar() => _soltar.Set();
+
+        public ResultadoPorAudio Agrupar(List<Track> lista, IProgress<(int Hechas, int Total)> avance, CancellationToken ct)
+        {
+            if (!_soltar.IsSet)
+            {
+                _dentro.Release();
+                Assert.True(_soltar.Wait(TimeSpan.FromSeconds(20)), "la prueba no soltó la comparación");
+            }
+            return FingerprintDuplicates.Agrupar(lista, _ => null, incluirEdiciones: true, progreso: avance, ct: ct);
+        }
+
+        public async Task EsperarDentroAsync()
+            => Assert.True(await _dentro.WaitAsync(TimeSpan.FromSeconds(20)), "la comparación no llegó a empezar");
     }
 
     // La página está OCUPADA mientras envía (PaginaNav de Duplicados solo mira IsBusy: sin esto, las
@@ -173,21 +202,31 @@ public class RevisionUnionTests : IDisposable
 
     // «Analizar» en el modo por audio vuelve enseguida y la comparación de huellas sigue aparte. La
     // base soltaba IsBusy al volver y desbloqueaba las demás pestañas con la comparación en marcha.
+    //
+    // La comparación se retiene hasta haber mirado la página. Con tres canciones sin huella, la de
+    // verdad termina en el acto, y en la CI llegó a terminar antes de la comprobación: la página
+    // quedaba libre, lo correcto, y la prueba fallaba.
     [Fact]
     public async Task Analizar_por_audio_no_suelta_la_pagina_con_la_comparacion_en_marcha()
     {
         var (store, config) = await TresCopiasAsync();
+        var comparacion = new ComparacionRetenida();
 
         await UnSoloHilo.Ejecutar(async () =>
         {
-            var vm = Duplicados(store, config);
+            var vm = Duplicados(store, config, comparacion: comparacion);
             vm.SelectedMode = vm.ModeOptions.Single(m => m.Value == DuplicateMode.Fingerprint);   // ya compara
             await UnSoloHilo.HastaQue(() => !vm.IsBusy, "la primera comparación termina");
 
-            var analizar = vm.AnalyzeCommand.ExecuteAsync(null);
-            Assert.True(analizar.IsCompleted);    // «Analizar» ya ha vuelto…
-            Assert.True(vm.IsBusy);               // …y la página sigue ocupada mientras compara
-
+            comparacion.Retener();
+            try
+            {
+                var analizar = vm.AnalyzeCommand.ExecuteAsync(null);
+                Assert.True(analizar.IsCompleted);    // «Analizar» ya ha vuelto…
+                await comparacion.EsperarDentroAsync();
+                Assert.True(vm.IsBusy);               // …y la página sigue ocupada mientras compara
+            }
+            finally { comparacion.Soltar(); }   // también si falla: que no quede un hilo parado 20 s
             await UnSoloHilo.HastaQue(() => !vm.IsBusy, "la comparación termina y suelta la página");
         });
     }

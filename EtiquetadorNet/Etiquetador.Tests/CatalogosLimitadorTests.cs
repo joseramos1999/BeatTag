@@ -101,10 +101,15 @@ public class CatalogosLimitadorTests
             inicios.Add(sw.ElapsedMilliseconds);
         })));
         var orden = inicios.OrderBy(x => x).ToList();
-        // 6 peticiones separadas 100 ms: la última no puede empezar antes de ~500 ms.
-        Assert.True(orden[^1] >= 450, $"la última empezó a los {orden[^1]} ms");
-        for (var i = 1; i < orden.Count; i++)
-            Assert.True(orden[i] - orden[i - 1] >= 80, $"dos peticiones a {orden[i] - orden[i - 1]} ms");
+        // Cada tarea apunta su hora DESPUÉS de recibir el turno, cuando el sistema le vuelve a dar la
+        // CPU, y eso puede tardar: antes se exigían 80 ms entre dos marcas seguidas, y en la CI falló
+        // con una tarea apartada justo tras su turno (su marca quedaba pegada a la siguiente aunque el
+        // limitador las hubiera separado bien). Lo que no puede pasar es que una marca llegue ANTES de
+        // su turno, y los turnos van a 0, 100, 200… ms: la k-ésima marca, por orden, no puede ser
+        // anterior a k × 100 ms. Sin el limitador saldrían todas hacia 0 ms. Se dejan 15 ms por si
+        // Task.Delay vuelve un poco antes de tiempo.
+        for (var k = 0; k < orden.Count; k++)
+            Assert.True(orden[k] >= k * 100 - 15, $"la petición {k + 1} empezó a los {orden[k]} ms: {string.Join(", ", orden)}");
     }
 
     [Fact]

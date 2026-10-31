@@ -847,8 +847,9 @@ public partial class DuplicatesViewModel : ScanViewModelBase
             // conserva su copia, así que no estorban a la limpieza. Las ediciones de DJ que el
             // usuario excluye ya no están en la lista, así que tampoco aparecen como ediciones.
             var res = await Task.Run(
-                () => FingerprintDuplicates.Agrupar(lista, t => _huellas.Get(t.FilePath), incluirEdiciones: true,
-                                                    AudioFingerprint.UmbralIgual, avance, ct), ct);
+                () => AgruparPorAudio?.Invoke(lista, avance, ct)
+                      ?? FingerprintDuplicates.Agrupar(lista, t => _huellas.Get(t.FilePath), incluirEdiciones: true,
+                                                       AudioFingerprint.UmbralIgual, avance, ct), ct);
 
             // El usuario puede haber cambiado de criterio mientras esto corría: no pisar la tabla.
             if (SelectedMode.Value != DuplicateMode.Fingerprint) return;
@@ -861,6 +862,14 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         catch (Exception e) { Status = "No se pudo comparar el audio: " + e.Message; }
         finally { _agrupando = false; SoltarOcupada(); }
     }
+
+    /// <summary>
+    /// Cómo se agrupa por audio; sin nada, <see cref="FingerprintDuplicates.Agrupar"/> con las huellas
+    /// guardadas. Las pruebas ponen uno que se queda parado hasta que lo sueltan, para mirar la página
+    /// con la comparación en marcha: con tres canciones la de verdad termina en el acto, y la prueba
+    /// fallaba a ratos en la CI cuando acababa antes de poder mirarla.
+    /// </summary>
+    internal Func<List<Track>, IProgress<(int Hechas, int Total)>, CancellationToken, ResultadoPorAudio>? AgruparPorAudio { get; init; }
 
     private void RecontarMarcadas() => Marcadas = Rows.Count(r => r.Marcada);
 
