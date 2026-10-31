@@ -11,7 +11,7 @@ public enum FuenteEstilo { Titulo, Archivo, Artista, Album }
 /// </summary>
 /// <param name="Estilo">El nombre del estilo, ya unificado («Drum &amp; Bass» para «Dnb»).</param>
 /// <param name="Texto">Lo que lo dice, tal como está escrito («Dnb Bootleg»).</param>
-/// <param name="Ambiguo">«Afro» y «Electro» pueden nombrar varios estilos: hay que revisarlo.</param>
+/// <param name="Ambiguo">«Afro», «Electro» y «Tribal» pueden nombrar varios estilos: hay que revisarlo.</param>
 public sealed record EstiloVersion(string Estilo, string Texto, FuenteEstilo Fuente, bool Ambiguo);
 
 /// <summary>
@@ -113,8 +113,12 @@ public static class EstiloDeVersion
         (@"hardcore", "Hardcore"),
     };
 
-    /// <summary>Pueden nombrar varios estilos: «Afro» (Afro House, Afrobeats…) y «Electro» (Electro House, electro latino…).</summary>
-    private static readonly HashSet<string> Ambiguos = new(StringComparer.Ordinal) { "Afro", "Electro" };
+    /// <summary>
+    /// Pueden nombrar varios estilos: «Afro» (Afro House, Afrobeats…), «Electro» (Electro House, electro
+    /// latino…) y «Tribal» (revisión 3: «Tribal Mix» es el nombre clásico de una mezcla de tribal house, y
+    /// también está el tribal guarachero mexicano; sin familia, pisaba marcado un Tech House).
+    /// </summary>
+    private static readonly HashSet<string> Ambiguos = new(StringComparer.Ordinal) { "Afro", "Electro", "Tribal" };
 
     /// <summary>
     /// Junto a una palabra de versión nombran un tipo de versión, no el estilo: «(Disco Mix)» y

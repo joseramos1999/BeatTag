@@ -151,14 +151,19 @@ public class EstiloDeVersionTests
         => Assert.Equal(estilo, EstiloDeVersion.De(titulo, null, null, null)?.Estilo);
 
     [Fact]
-    public void Afro_y_Electro_son_ambiguos()
+    public void Afro_Electro_y_Tribal_son_ambiguos()
     {
         var afro = EstiloDeVersion.De("Afro Edit", null, null, null);
         Assert.Equal("Afro", afro?.Estilo);
         Assert.True(afro!.Ambiguo);
         Assert.True(EstiloDeVersion.De("Tema (Electro Mix)", null, null, null)!.Ambiguo);
+        // Revisión 3: «Tribal Mix» es el nombre clásico de una mezcla de tribal house, y «tribal» es también
+        // el tribal guarachero mexicano.
+        var tribal = EstiloDeVersion.De("Saturday Night (Tribal Mix)", null, null, null);
+        Assert.Equal(("Tribal", true), (tribal?.Estilo, tribal?.Ambiguo));
         // Con su segunda palabra ya no lo son.
         Assert.False(EstiloDeVersion.De("Tema (Electro House Remix)", null, null, null)!.Ambiguo);
+        Assert.False(EstiloDeVersion.De("Tema (Tribal House Mix)", null, null, null)!.Ambiguo);
     }
 
     [Fact]

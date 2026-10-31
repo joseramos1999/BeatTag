@@ -407,6 +407,24 @@ public class GeneroPorArtistaTests : IDisposable
         Assert.False(De(p, familia)!.Marcada);   // Afro House sobre Tech House: la misma familia
     }
 
+    // Revisión 3: «(Tribal Mix)» pisaba marcado un Tech House o un House: «tribal» nombra varios estilos
+    // (el tribal house, el tribal guarachero), como «Afro» y «Electro».
+    [Fact]
+    public void Tribal_suelto_sale_desmarcado_para_revisarlo()
+    {
+        var techHouse = T("Pepe", "Saturday Night (Tribal Mix)", "Tech House");
+        var house = T("Pepe", "Sunday Morning (Tribal Mix)", "House");
+
+        var p = Proponer(new List<Track> { techHouse, house });
+
+        foreach (var t in new[] { techHouse, house })
+        {
+            var x = De(p, t)!;
+            Assert.Equal(("Tribal", false), (x.Genero, x.Marcada));
+            Assert.Contains("«Tribal» puede nombrar varios estilos: revísalo", x.PorQue);
+        }
+    }
+
     // Visto al validar en una biblioteca real: «(Afro House)» proponía cambiar «Afrohouse» por «Afro House».
     [Fact]
     public void El_mismo_genero_escrito_junto_o_separado_no_se_propone()
