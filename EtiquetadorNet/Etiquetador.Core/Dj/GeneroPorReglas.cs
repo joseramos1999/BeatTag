@@ -113,13 +113,15 @@ public sealed record CarpetaSinGenero(string Ruta, int SinGenero, int Total, str
 /// está medido que en lote acierta 1 de cada 20 y que el modelo de 8B confunde estilos («Urban House»
 /// → Hip Hop). Tampoco el BPM: medido, por sí solo acierta el estilo un 30,6 %, lo mismo que decir
 /// siempre el género más frecuente, porque a 90-100 BPM conviven reggaeton, hip hop, pop y flamenco.
-/// Ni el género del artista de fuentes externas (lo que hace Chosic), medido frente a las carpetas
-/// de una biblioteca real: el primer género de Wikidata acierta el 41,5 % de las canciones, frente al
-/// 85,5 % de la regla del artista donde propone; eligiendo siempre el mejor de sus géneros solo
-/// coincide con el dominante en el 62,8 % de los artistas; en los de menos de 3 canciones acierta el
-/// 24,6 %, y confunde homónimos en el 6-11 % (los nombres cortos: «Plan B» sale como un grupo de
-/// rock alemán). MusicBrainz por grabación acierta el 38-41 %, sin datos para mashups ni ediciones
-/// de pool. Spotify ya no da los géneros de los artistas.
+/// Ni fuentes externas, medidas frente a las carpetas de una biblioteca real:
+/// - El género del artista de Wikidata (lo que hace Chosic): su primer género acierta el 41,5 % de las
+///   canciones, frente al 85,5 % de la regla del artista en esas mismas canciones, donde propone;
+///   eligiendo siempre el mejor de sus géneros solo coincide con el dominante en el 62,8 % de los
+///   artistas; en los de menos de 3 canciones acierta el 24,6 %, y confunde homónimos en el 6-11 %
+///   (los nombres cortos: «Plan B» sale como un grupo de rock alemán).
+/// - El género de la grabación de MusicBrainz: acierta el 38-41 %, sin datos para mashups ni
+///   ediciones de pool.
+/// - Spotify ya no da los géneros de los artistas.
 /// </summary>
 public static class GeneroPorReglas
 {
@@ -221,6 +223,10 @@ public static class GeneroPorReglas
     /// Los géneros de la biblioteca ya normalizados, de más a menos canciones, escritos como los lleva
     /// la mayoría. Es lo que ofrece el desplegable del mapa de carpetas: elegir un género que ya usas
     /// evita crear otra variante («Reggaeton» y «Reguetón»).
+    ///
+    /// Si una de las formas es un nombre que GenreNormalizer conoce, se escribe ese aunque sea la
+    /// minoría: «Drum&amp;Bass» no es una grafía conocida (el «&amp;» va sin espacios) pero se agrupa con
+    /// «Drum &amp; Bass», y con la mayoría ganaba la variante también para las que ya estaban unificadas.
     /// </summary>
     public static IReadOnlyList<(string Genero, int Canciones)> GenerosDeLaBiblioteca(IEnumerable<Track> canciones)
     {
@@ -235,7 +241,9 @@ public static class GeneroPorReglas
             formas[g] = formas.GetValueOrDefault(g) + 1;
         }
         return grupos.Values
-            .Select(f => (Genero: f.OrderByDescending(x => x.Value).ThenBy(x => x.Key, StringComparer.Ordinal).First().Key, Canciones: f.Values.Sum()))
+            .Select(f => (Genero: f.OrderByDescending(x => GenreNormalizer.Conocidos.Contains(x.Key, StringComparer.Ordinal))
+                                   .ThenByDescending(x => x.Value).ThenBy(x => x.Key, StringComparer.Ordinal).First().Key,
+                          Canciones: f.Values.Sum()))
             .OrderByDescending(x => x.Canciones).ThenBy(x => x.Genero, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
     }

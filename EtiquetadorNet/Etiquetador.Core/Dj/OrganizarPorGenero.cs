@@ -477,8 +477,8 @@ public static class OrganizarPorGenero
     /// interfaz, y se puede cancelar.
     ///
     /// El género de cada canción es el de <see cref="GeneroPorReglas.Normalizado"/> (con una lista, el
-    /// primero), escrito como lo escribe la mayoría de la biblioteca: «Reggaeton», «Reggaetón» y
-    /// «Reguetón» acaban en una sola carpeta. Las canciones se recorren ordenadas por ruta para que el
+    /// primero), con el nombre de <see cref="GeneroPorReglas.GenerosDeLaBiblioteca"/>: «Reggaeton»,
+    /// «Reggaetón» y «Reguetón» acaban en una sola carpeta, «Reggaeton». Las canciones se recorren ordenadas por ruta para que el
     /// plan sea siempre el mismo: si dos van al mismo destino, se mueve la primera y la otra se lista.
     /// </summary>
     /// <param name="canciones">La biblioteca (las canciones de las carpetas marcadas).</param>
@@ -506,7 +506,13 @@ public static class OrganizarPorGenero
         // Los nombres de carpeta que son de un género: una canción que ya está en una de ellas, dentro
         // del destino, cuenta desde ahí (volver a organizar no anida «Pop/Pop»).
         var carpetasDeGenero = new HashSet<string>(ComparadorRutas.Instancia) { CarpetaOtros, CarpetaSinGenero };
-        foreach (var g in generos) carpetasDeGenero.Add(NombreCarpetaGenero(g.Genero));
+        // También las otras formas conocidas de su nombre: una carpeta «Breaks» o «Rap» es la de Breakbeat
+        // o Hip Hop, y conservando las subcarpetas no tiene que acabar dentro de la nueva («Breakbeat/Breaks»).
+        foreach (var g in generos)
+        {
+            carpetasDeGenero.Add(NombreCarpetaGenero(g.Genero));
+            foreach (var a in GenreNormalizer.Alias(g.Genero)) carpetasDeGenero.Add(NombreCarpetaGenero(a));
+        }
 
         var raices = raicesHabilitadas.Where(r => !string.IsNullOrWhiteSpace(r)).OrderByDescending(r => r.Length).ToList();
         var raizDe = new Dictionary<string, string?>(ComparadorRutas.Instancia);
@@ -784,7 +790,8 @@ public static class OrganizarPorGenero
     /// género/Latin/Pack» que pasa a Reggaeton va a «Por género/Reggaeton/Pack», no a «Por
     /// género/Reggaeton/Latin/Pack». En «Por género» todo lo que cuelga directamente es la carpeta de un
     /// género (<paramref name="carpetasDeGenero"/> null), aunque ese género ya no esté en la biblioteca;
-    /// en otro destino, que puede tener carpetas del usuario, solo las que se llaman como un género.
+    /// en otro destino, que puede tener carpetas del usuario, solo las que se llaman como un género de la
+    /// biblioteca o como otra forma conocida de él («Breaks» para Breakbeat).
     /// </summary>
     private static string Relativa(string dir, string raiz, string baseDir, HashSet<string>? carpetasDeGenero)
     {

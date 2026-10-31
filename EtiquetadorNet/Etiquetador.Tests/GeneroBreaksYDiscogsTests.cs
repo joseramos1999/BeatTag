@@ -102,6 +102,94 @@ public class GeneroBreaksYDiscogsTests
         Assert.True(FiltroColeccion.Cumple(alReves, T("dos", "Breakbeat"), null));
     }
 
+    // Revisión: una forma conocida que es minoría daba nombre a la carpeta de todas. «Drum&Bass» no es
+    // una grafía conocida (el «&» sin espacios), pero se agrupa con «Drum & Bass», que sí lo es.
+    [Fact]
+    public void La_forma_conocida_nombra_el_genero_aunque_sea_minoria()
+    {
+        var generos = GeneroPorReglas.GenerosDeLaBiblioteca(new[]
+        {
+            T("uno", "Drum&Bass"), T("dos", "Drum&Bass"), T("tres", "Drum&Bass"), T("cuatro", "Drum & Bass"),
+        });
+
+        Assert.Equal(("Drum & Bass", 4), Assert.Single(generos));
+    }
+
+    // Revisión: la búsqueda con una frase guarda cada género por su nombre unificado, y «breaks» dejó de
+    // encontrar el de una biblioteca etiquetada «Breaks». Cuenta también como lo escribe la biblioteca.
+    [Fact]
+    public void La_busqueda_con_una_frase_encuentra_el_genero_como_lo_escribe_la_biblioteca()
+    {
+        var breaks = new VocabularioBiblioteca(Enumerable.Range(0, 5).Select(i => T($"b{i}", "Breaks")));
+        Assert.Equal(new[] { "Breakbeat" }, breaks.GenerosEn("breaks para el pico"));
+        Assert.Equal(new[] { "Breakbeat" }, breaks.GenerosEn("breakbeat y breaks"));
+
+        var rap = new VocabularioBiblioteca(Enumerable.Range(0, 5).Select(i => T($"r{i}", "Rap; Latino")));
+        Assert.Equal(new[] { "Hip Hop" }, rap.GenerosEn("rap de los 90"));
+        Assert.Empty(rap.GenerosEn("trap de los 90"));   // por palabras: «rap» no está en «trap»
+
+        // Lo que la biblioteca no escribe así no se añade: ninguna canción dice «perreo».
+        var reggaeton = new VocabularioBiblioteca(Enumerable.Range(0, 5).Select(i => T($"g{i}", "Reggaeton")));
+        Assert.Empty(reggaeton.GenerosEn("perreo"));
+    }
+
+    // Revisión: organizando en cada carpeta de la biblioteca y conservando las subcarpetas, una carpeta
+    // «Breaks» dejó de contar como la de su género («Breaks» ya se unifica como Breakbeat) y sus canciones
+    // acababan en «Breakbeat/Breaks/Pack 2023». Pasaba igual con «Rap» o «Reguetón».
+    private static readonly string Raiz = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "Musica");
+
+    private static Track EnCarpeta(string carpeta, string archivo, string genero) => new()
+    {
+        FilePath = Path.Combine(Raiz, carpeta, archivo), Folder = Raiz, Genre = genero,
+        Title = Path.GetFileNameWithoutExtension(archivo),
+    };
+
+    private static PlanOrganizar EnLaRaiz(params Track[] canciones)
+    {
+        var disco = new DiscoEnMemoria();
+        foreach (var t in canciones) disco.Archivo(t.FilePath);
+        return OrganizarPorGenero.Planear(canciones, new[] { Raiz },
+            new OpcionesOrganizar { Destino = DestinoOrganizar.EnLaRaiz, ConservarEstructura = true }, disco);
+    }
+
+    [Theory]
+    [InlineData("Breaks")]
+    [InlineData("Breakbeat")]
+    public void Una_carpeta_con_otra_forma_del_genero_no_se_anida_dentro_de_la_nueva(string genero)
+    {
+        var plan = EnLaRaiz(EnCarpeta(Path.Combine("Breaks", "Pack 2023"), "a.mp3", genero));
+        Assert.Equal(Path.Combine(Raiz, "Breakbeat", "Pack 2023", "a.mp3"), Assert.Single(plan.Movimientos).Destino);
+
+        var suelta = EnLaRaiz(EnCarpeta("Breaks", "b.mp3", genero));
+        Assert.Equal(Path.Combine(Raiz, "Breakbeat", "b.mp3"), Assert.Single(suelta.Movimientos).Destino);
+    }
+
+    [Theory]
+    [InlineData("Rap", "Hip Hop")]
+    [InlineData("Reguetón", "Reggaeton")]
+    public void Tampoco_con_los_alias_que_ya_existian(string carpeta, string genero)
+    {
+        var plan = EnLaRaiz(EnCarpeta(Path.Combine(carpeta, "Pack"), "a.mp3", genero));
+        Assert.Equal(Path.Combine(Raiz, genero, "Pack", "a.mp3"), Assert.Single(plan.Movimientos).Destino);
+    }
+
+    // Una carpeta que no es ninguna forma del género sigue conservándose entera.
+    [Fact]
+    public void Una_carpeta_que_no_es_un_genero_se_conserva()
+    {
+        var plan = EnLaRaiz(EnCarpeta(Path.Combine("Packs", "Enero"), "a.mp3", "Breaks"));
+        Assert.Equal(Path.Combine(Raiz, "Breakbeat", "Packs", "Enero", "a.mp3"), Assert.Single(plan.Movimientos).Destino);
+    }
+
+    [Fact]
+    public void Alias_da_las_otras_formas_de_un_nombre_canonico()
+    {
+        Assert.Contains("breaks", GenreNormalizer.Alias("Breakbeat"));
+        Assert.Contains("rap", GenreNormalizer.Alias("hip hop"));
+        Assert.Empty(GenreNormalizer.Alias("Electro Latino"));
+        Assert.Empty(GenreNormalizer.Alias(null));
+    }
+
     // =================================================================================================
     // El elector de Discogs: un estilo concreto manda sobre uno genérico
     // =================================================================================================
@@ -120,7 +208,9 @@ public class GeneroBreaksYDiscogsTests
     {
         Assert.Equal("Latin", GenrePicker.Pick(new[] { "Latin" }, new[] { "Latin" }));
         Assert.Equal("Electro", GenrePicker.Pick(new[] { "Electro" }, new[] { "Electronic" }));
-        // «Latin Pop» y «Breaks» no están en la lista de preferencias: gana el preferido.
+        // «Latin Pop» y «Breaks» no están en la lista de preferencias: gana el preferido, como antes. Que
+        // los estilos concretos que no están en la lista (Breaks, Drum n Bass, Trance…) ganen a Latin o a
+        // Electro cambiaría muchas más elecciones, y no está medido.
         Assert.Equal("Latin", GenrePicker.Pick(new[] { "Latin", "Latin Pop" }, null));
         Assert.Equal("Latin", GenrePicker.Pick(new[] { "Latin", "Breaks" }, null));
         // Sin nada preferido, el primer estilo; FileProcessor lo normaliza después («Breaks» → Breakbeat).

@@ -51,6 +51,14 @@ public static class GenreNormalizer
     public static IReadOnlyCollection<string> Conocidos { get; } =
         Map.Select(m => m.Canonical).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
+    /// <summary>
+    /// Las otras formas conocidas de escribir un nombre canónico («Breakbeat» → «breaks», «break
+    /// beat»…), en minúsculas y tal como están en la tabla. Vacío si no es un canónico de la tabla.
+    /// </summary>
+    public static IEnumerable<string> Alias(string? canonico)
+        => Map.Where(m => string.Equals(m.Canonical, canonico, StringComparison.OrdinalIgnoreCase))
+              .SelectMany(m => m.Aliases);
+
     public static string Canonical(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return "";

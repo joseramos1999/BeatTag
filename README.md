@@ -278,9 +278,9 @@ desmarcada para revisarla, salvo cuando la propia versión indica su estilo («(
 canción con Reggaeton) en el título o en el nombre del archivo, que sale marcada (si solo lo indican
 el artista o el álbum, o si puede nombrar varios estilos, como «Tribal», sale desmarcada); y los
 mashups y los remixes firmados conservan el suyo frente a las reglas de carpeta y de artista. Solo escribe en las canciones que siguen como estaban al proponer. El BPM no se usa, porque no
-distingue estilos, y Spotify ya no publica los géneros de los artistas. Tampoco el género del artista
-de Wikidata o MusicBrainz: medido, acierta el estilo de cada canción menos que las propias canciones
-del artista y confunde artistas que se llaman igual. Para las canciones sin
+distingue estilos, y Spotify ya no publica los géneros de los artistas. Tampoco Wikidata (el género
+del artista) ni MusicBrainz (el de la grabación): medido, aciertan el estilo de cada canción menos que
+las propias canciones del artista, y Wikidata confunde artistas que se llaman igual. Para las canciones sin
 género que ninguna regla cubre (y que no son mashups), se puede consultar Deezer: solo propone el
 subgénero del álbum cuando es concreto (Reggaeton, Cumbia, Flamenco…), y siempre desmarcado.
 
