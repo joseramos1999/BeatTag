@@ -16,10 +16,10 @@ name: Release
 #     trabajo al compilar: los binarios no están firmados y es la forma de verificar la descarga.
 #   - La etiqueta tiene que coincidir con AppInfo.Version: de ahí sacan la versión el .exe y el .app.
 #
-# Empuja la etiqueta SOLA, cuando la CI de main ya haya terminado. Visto con la 1.10.0 (octubre de
-# 2026): empujando main y la etiqueta a la vez, la CI y la Release arrancaban dos equipos macOS a
-# la vez y el de la Release, que empieza unos segundos después, se perdía a los 46 minutos en mitad
-# de las pruebas (cinco de cinco), mientras la CI pasaba en 2. Empujada sola, pasó a la primera.
+# Con la 1.10.0 (octubre de 2026), el equipo macOS de la Release se perdía a los 46 minutos en mitad
+# de las pruebas y parecía que era por empujar main y la etiqueta a la vez. No lo era: una prueba
+# que cancelaba un programa podía llevarse el runner (SIGHUP a todo su grupo de procesos), con o sin
+# otra ejecución a la vez. Corregido en Procesos.Matar; ver scripts/pruebas-vigiladas.sh.
 on:
   push:
     tags: [ 'v*' ]
@@ -56,6 +56,7 @@ jobs:
   windows:
     needs: version
     runs-on: windows-latest
+    timeout-minutes: 30   # un runner que no responde se cancela, no se espera 46 minutos (ver ci.yml)
     outputs:
       sha256: ${{ steps.suma.outputs.sha256 }}
     defaults:
@@ -108,6 +109,7 @@ jobs:
   macos:
     needs: version
     runs-on: macos-latest
+    timeout-minutes: 30   # un runner que no responde se cancela, no se espera 46 minutos (ver ci.yml)
     outputs:
       sha256: ${{ steps.suma.outputs.sha256 }}
     defaults:

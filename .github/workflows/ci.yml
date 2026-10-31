@@ -17,6 +17,10 @@ jobs:
   build-test:
     name: ${{ matrix.nombre }}
     runs-on: ${{ matrix.os }}
+    # Si el runner deja de responder, el límite de un PASO no llega a contar, pero el del trabajo sí:
+    # GitHub lo cancela a los pocos minutos de vencer en vez de darlo por perdido a los 46
+    # (comprobado en octubre de 2026). Un trabajo normal tarda menos de 5 minutos.
+    timeout-minutes: 20
     # Las dos plataformas son bloqueantes.
     #
     # macOS lo es desde que compila, pasa los 547 tests y produce el ejecutable para Apple Silicon.
@@ -57,9 +61,9 @@ jobs:
       # permisos de administrador para leerse, y las anotaciones no: asi el resultado de macOS se
       # puede consultar desde fuera sin tener que entrar a mirarlo a mano cada vez.
       #
-      # En macOS, con un vigilante: desde octubre de 2026 el equipo de GitHub se queda de vez en
-      # cuando sin responder en mitad de las pruebas y a los 46 minutos se da por perdido, sin
-      # ningún dato. El script dice por qué y qué hace (el mismo que usa la Release).
+      # En macOS, en una sesión propia y con un vigilante: de octubre de 2026 hasta la corrección,
+      # una prueba que cancelaba un programa podía llevarse el runner de GitHub por un SIGHUP a todo
+      # su grupo de procesos. El script dice por qué y qué hace (el mismo que usa la Release).
       - name: Test
         shell: bash
         timeout-minutes: 25

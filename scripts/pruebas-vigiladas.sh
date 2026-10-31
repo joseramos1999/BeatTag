@@ -7,19 +7,23 @@
 #   ../scripts/pruebas-vigiladas.sh          todas las pruebas
 #   ../scripts/pruebas-vigiladas.sh ABC      solo las de las clases que empiezan por A, B o C
 #
-# POR QUÉ EL VIGILANTE. Desde octubre de 2026, el equipo macOS de GitHub se queda de vez en cuando
-# sin responder en mitad de las pruebas -en main, en los PR y en la Release, casi la mitad de las
-# veces y sin relación con lo que cambiaba cada uno- y a los 46 minutos GitHub lo da por perdido sin
-# dejar ningún registro. Ni el límite de 25 minutos del paso ni el vigilante anterior llegaron a
-# actuar nunca: se para el equipo entero, no solo las pruebas. Aquel vigilante miraba cada 5 s la
-# memoria residente de las pruebas, y en macOS la memoria comprimida no cuenta como residente, así
-# que un desbordamiento podía no verse.
+# EN macOS, EN SU PROPIA SESIÓN. Desde el 20 de octubre de 2026, uno de cada ocho equipos macOS de
+# GitHub dejaba de responder a los pocos segundos de empezar las pruebas y a los 46 minutos se daba
+# por perdido, sin ningún registro. No era el equipo: un latido independiente del runner mostró que
+# morían a la vez Runner.Listener, Runner.Worker y las pruebas, que en GitHub comparten grupo de
+# procesos. Un proceso parado (SIGSTOP, lo hacía Process.Kill(entireProcessTree: true) de .NET al
+# cancelar un programa) en un grupo huérfano hace que el núcleo mande SIGHUP a todo el grupo. La
+# aplicación ya no para a nadie (Procesos.Matar), y además las pruebas corren aquí en una sesión
+# propia: si algo vuelve a hacerlo, el SIGHUP se lleva las pruebas, que fallan y lo dicen, y no el
+# runner. Ver los detalles en EtiquetadorNet/Etiquetador.Core/Procesos.cs.
 #
-# Este mira cada segundo lo que dice el propio macOS -la memoria libre, que sí cuenta la comprimida,
-# el swap y el disco- y el número de procesos, y deja las pruebas con menos prioridad que él para
-# que no lo ahoguen. Si algo se dispara, corta las pruebas ANTES de que el equipo caiga y publica qué
-# estaba en marcha. Además, .NET tiene un tope de memoria: una prueba que se desboque falla ella,
-# con su pila, en vez de llevarse el equipo por delante.
+# EL VIGILANTE, también solo en macOS, escribe cada segundo cuántas pruebas van, cuáles están en
+# marcha y cómo están la memoria (la que dice macOS, contando la comprimida), el swap, el disco y
+# los procesos. Mientras GitHub tiene un trabajo «en marcha», su página enseña esa salida aunque el
+# equipo ya no responda. Si algo se dispara, corta las pruebas antes de que el equipo caiga y
+# publica qué estaba en marcha. .NET tiene además un tope de memoria: una prueba que se desboque
+# falla ella, con su pila. Picos medidos en octubre de 2026: 400-600 MB de las pruebas y nunca menos
+# de un 79 % de memoria libre.
 
 set -u
 
@@ -43,6 +47,10 @@ if $es_mac; then
   # vigilante dice cuáles están en marcha en cada momento.
   rm -rf diag
   orden=(nice -n 10 "${orden[@]:0:2}" --diag diag/vstest.txt "${orden[@]:2}")
+  # Sesión y grupo de procesos propios (setsid; macOS no trae la orden, Python sí).
+  if command -v python3 > /dev/null; then
+    orden=(python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "${orden[@]}")
+  fi
 fi
 
 "${orden[@]}" > test.log 2>&1 &
@@ -142,6 +150,17 @@ if [ "$codigo" -eq 0 ]; then
   tail -3 test.log
   if $es_mac; then echo "$picos"; fi
   exit 0
+fi
+
+# 129 = 128 + SIGHUP: lo que antes se llevaba el runner (ver arriba), ahora solo a las pruebas.
+if [ "$codigo" -eq 129 ]; then
+  echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
+  cuerpo=$( { echo "Las pruebas murieron por SIGHUP: un proceso se quedó parado (SIGSTOP) en su grupo de procesos."
+              echo "¿Se ha vuelto a usar Process.Kill(entireProcessTree: true) en vez de Procesos.Matar?"
+              echo "-- En marcha:"; en_marcha_ahora | tr ',' '\n' | sed 's/^ *//'
+              echo "-- Últimas líneas:"; tail -10 test.log; } | anotacion) || true
+  echo "::error title=Pruebas cortadas por SIGHUP::$cuerpo"
+  exit 1
 fi
 
 echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
