@@ -16,10 +16,10 @@ name: Release
 #     trabajo al compilar: los binarios no están firmados y es la forma de verificar la descarga.
 #   - La etiqueta tiene que coincidir con AppInfo.Version: de ahí sacan la versión el .exe y el .app.
 #
-# Empuja la etiqueta SOLA, cuando la CI de main ya haya terminado. Visto con la 1.10.0 (octubre de
-# 2026): empujando main y la etiqueta a la vez, la CI y la Release arrancaban dos equipos macOS a
-# la vez y el de la Release, que empieza unos segundos después, se perdía a los 46 minutos en mitad
-# de las pruebas (cinco de cinco), mientras la CI pasaba en 2. Empujada sola, pasó a la primera.
+# Con la 1.10.0 (octubre de 2026), el equipo macOS de la Release se perdía a los 46 minutos en mitad
+# de las pruebas y parecía que era por empujar main y la etiqueta a la vez. No lo era: una prueba
+# que cancelaba un programa podía llevarse el runner (SIGHUP a todo su grupo de procesos), con o sin
+# otra ejecución a la vez. Corregido en Procesos.Matar; ver scripts/pruebas-vigiladas.sh.
 on:
   push:
     tags: [ 'v*' ]
@@ -56,6 +56,7 @@ jobs:
   windows:
     needs: version
     runs-on: windows-latest
+    timeout-minutes: 30   # un runner que no responde se cancela, no se espera 46 minutos (ver ci.yml)
     outputs:
       sha256: ${{ steps.suma.outputs.sha256 }}
     defaults:
@@ -81,57 +82,8 @@ jobs:
       - name: Test
         shell: bash
         timeout-minutes: 25
-        run: |
-          # Las pruebas van en segundo plano para poder vigilarlas. En macOS, un vigilante mira cada
-          # 5 s la memoria y el número de procesos de las pruebas: visto en octubre de 2026, de vez
-          # en cuando algo dejaba el equipo de GitHub sin responder y a los 46 minutos se daba por
-          # perdido, sin dejar ningún dato. Si se dispara, se cortan las pruebas ANTES de que el
-          # equipo caiga y se publica qué estaba en marcha (xUnit avisa de las que pasan de 20 s).
-          dotnet test -c Release --no-build --verbosity normal --blame-hang-timeout 10m --blame-hang-dump-type none \
-            -- xUnit.LongRunningTestSeconds=20 xUnit.DiagnosticMessages=true > test.log 2>&1 &
-          pid=$!
-          motivo=""
-          inicio=$(date +%s)
-          while kill -0 "$pid" 2>/dev/null; do
-            sleep 5
-            if [ "$RUNNER_OS" = "macOS" ]; then
-              rss=$(ps -axo rss=,command= | awk '/testhost|dotnet test|vstest/ && !/awk/ {s+=$1} END {print int(s/1024)}')
-              procs=$(ps -axo ppid=,command= | grep -vc "^ *1 " || true)
-              echo "$(( $(date +%s) - inicio )) s · ${rss} MB · ${procs} procesos" >> vigilancia.log
-              if [ "${rss:-0}" -gt 3500 ]; then motivo="las pruebas usan ${rss} MB de memoria"; fi
-              if [ "${procs:-0}" -gt 400 ]; then motivo="hay ${procs} procesos en marcha"; fi
-              if [ -n "$motivo" ]; then
-                {
-                  echo "== ps (más memoria)"; ps -axo pid,ppid,rss,%cpu,etime,command | sort -k3 -nr | head -15
-                  echo "== ps (procesos más repetidos)"; ps -axo comm= | sort | uniq -c | sort -nr | head -10
-                } > instantanea.log 2>&1
-                pkill -f testhost || true; pkill -f "dotnet test" || true
-                break
-              fi
-            fi
-          done
-          codigo=0; wait "$pid" || codigo=$?
-          if [ -n "$motivo" ]; then
-            echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
-            cuerpo=$( { echo "Cortado por el vigilante: $motivo"; echo "-- Pruebas largas (xUnit):"; { grep -i "long running" test.log || true; } | tail -25; echo "-- Últimas líneas:"; tail -15 test.log; echo "-- Vigilancia:"; tail -8 vigilancia.log; cat instantanea.log; } | head -90 | awk '{printf "%s%%0A", $0}') || true
-            echo "::error title=Pruebas cortadas por el vigilante::$cuerpo"
-            exit 1
-          fi
-          if [ "$codigo" -eq 0 ]; then
-            tail -3 test.log
-          else
-            echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
-
-            # UNA sola anotacion con todo dentro: GitHub solo conserva unas diez por trabajo y
-            # ademas deduplica, asi que emitir una por fallo perdia justo lo que hace falta ver.
-            # %0A es el salto de linea dentro de un mensaje de anotacion. Incluye las pruebas que
-            # estaban en marcha cuando --blame-hang-timeout cortó la ejecución.
-            fallos=$( { grep -E "^[[:space:]]*(Failed|Con error) [A-Za-z]" test.log; grep -iE -A6 "hang|were running|se estaban ejecutando|aborted|anul|long running" test.log || true; } | sed 's/^[[:space:]]*//' | sort -u) || true
-            total=$(printf '%s\n' "$fallos" | grep -c . || true)
-            cuerpo=$(printf '%s\n' "$fallos" | head -60 | awk '{printf "%s%%0A", $0}') || true
-            echo "::error title=Tests que fallan ($total)::$cuerpo"
-            exit 1
-          fi
+        # Las mismas pruebas vigiladas que la CI: el script dice por qué y qué hace.
+        run: ../scripts/pruebas-vigiladas.sh
 
       - name: Publish single-file exe
         run: >
@@ -157,6 +109,7 @@ jobs:
   macos:
     needs: version
     runs-on: macos-latest
+    timeout-minutes: 30   # un runner que no responde se cancela, no se espera 46 minutos (ver ci.yml)
     outputs:
       sha256: ${{ steps.suma.outputs.sha256 }}
     defaults:
@@ -182,57 +135,8 @@ jobs:
       - name: Test
         shell: bash
         timeout-minutes: 25
-        run: |
-          # Las pruebas van en segundo plano para poder vigilarlas. En macOS, un vigilante mira cada
-          # 5 s la memoria y el número de procesos de las pruebas: visto en octubre de 2026, de vez
-          # en cuando algo dejaba el equipo de GitHub sin responder y a los 46 minutos se daba por
-          # perdido, sin dejar ningún dato. Si se dispara, se cortan las pruebas ANTES de que el
-          # equipo caiga y se publica qué estaba en marcha (xUnit avisa de las que pasan de 20 s).
-          dotnet test -c Release --no-build --verbosity normal --blame-hang-timeout 10m --blame-hang-dump-type none \
-            -- xUnit.LongRunningTestSeconds=20 xUnit.DiagnosticMessages=true > test.log 2>&1 &
-          pid=$!
-          motivo=""
-          inicio=$(date +%s)
-          while kill -0 "$pid" 2>/dev/null; do
-            sleep 5
-            if [ "$RUNNER_OS" = "macOS" ]; then
-              rss=$(ps -axo rss=,command= | awk '/testhost|dotnet test|vstest/ && !/awk/ {s+=$1} END {print int(s/1024)}')
-              procs=$(ps -axo ppid=,command= | grep -vc "^ *1 " || true)
-              echo "$(( $(date +%s) - inicio )) s · ${rss} MB · ${procs} procesos" >> vigilancia.log
-              if [ "${rss:-0}" -gt 3500 ]; then motivo="las pruebas usan ${rss} MB de memoria"; fi
-              if [ "${procs:-0}" -gt 400 ]; then motivo="hay ${procs} procesos en marcha"; fi
-              if [ -n "$motivo" ]; then
-                {
-                  echo "== ps (más memoria)"; ps -axo pid,ppid,rss,%cpu,etime,command | sort -k3 -nr | head -15
-                  echo "== ps (procesos más repetidos)"; ps -axo comm= | sort | uniq -c | sort -nr | head -10
-                } > instantanea.log 2>&1
-                pkill -f testhost || true; pkill -f "dotnet test" || true
-                break
-              fi
-            fi
-          done
-          codigo=0; wait "$pid" || codigo=$?
-          if [ -n "$motivo" ]; then
-            echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
-            cuerpo=$( { echo "Cortado por el vigilante: $motivo"; echo "-- Pruebas largas (xUnit):"; { grep -i "long running" test.log || true; } | tail -25; echo "-- Últimas líneas:"; tail -15 test.log; echo "-- Vigilancia:"; tail -8 vigilancia.log; cat instantanea.log; } | head -90 | awk '{printf "%s%%0A", $0}') || true
-            echo "::error title=Pruebas cortadas por el vigilante::$cuerpo"
-            exit 1
-          fi
-          if [ "$codigo" -eq 0 ]; then
-            tail -3 test.log
-          else
-            echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
-
-            # UNA sola anotacion con todo dentro: GitHub solo conserva unas diez por trabajo y
-            # ademas deduplica, asi que emitir una por fallo perdia justo lo que hace falta ver.
-            # %0A es el salto de linea dentro de un mensaje de anotacion. Incluye las pruebas que
-            # estaban en marcha cuando --blame-hang-timeout cortó la ejecución.
-            fallos=$( { grep -E "^[[:space:]]*(Failed|Con error) [A-Za-z]" test.log; grep -iE -A6 "hang|were running|se estaban ejecutando|aborted|anul|long running" test.log || true; } | sed 's/^[[:space:]]*//' | sort -u) || true
-            total=$(printf '%s\n' "$fallos" | grep -c . || true)
-            cuerpo=$(printf '%s\n' "$fallos" | head -60 | awk '{printf "%s%%0A", $0}') || true
-            echo "::error title=Tests que fallan ($total)::$cuerpo"
-            exit 1
-          fi
+        # Las mismas pruebas vigiladas que la CI: el script dice por qué y qué hace.
+        run: ../scripts/pruebas-vigiladas.sh
 
       # Mismo script que la CI: universal (arm64 + Intel), con icono y en .tar.gz para no perder
       # el permiso de ejecución por el camino.

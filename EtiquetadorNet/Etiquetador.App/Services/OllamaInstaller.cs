@@ -3,6 +3,7 @@ using System.IO;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using Etiquetador.Core;
 
 namespace Etiquetador.App.Services;
 
@@ -203,7 +204,7 @@ public static class OllamaInstaller
             // Cancelar solo dejaba de esperar: winget o brew seguían instalando en segundo plano.
             // (Lo que ya corra con permisos de administrador, tras la confirmación de Windows, no se
             // puede detener desde aquí; quien llama lo avisa.)
-            using var alCancelar = ct.Register(() => { try { p.Kill(entireProcessTree: true); } catch { } });
+            using var alCancelar = ct.Register(() => Procesos.Matar(p));
 
             var salida = Task.Run(async () =>
             {
