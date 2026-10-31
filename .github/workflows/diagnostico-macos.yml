@@ -1,0 +1,88 @@
+name: Diagnóstico macOS (temporal)
+
+# TEMPORAL: se quita antes de unir la rama. Corre las pruebas en varios equipos macOS a la vez para
+# reproducir el cuelgue intermitente, que pasa más o menos una vez de cada dos.
+#   - «Entera»: como la CI, todas de una vez con el vigilante de scripts/pruebas-vigiladas.sh.
+#   - «Por partes»: en seis pasos por la inicial de la clase. Si el equipo cae, la lista de pasos del
+#     trabajo sigue diciendo cuál estaba en marcha, aunque no quede ningún registro.
+on:
+  push:
+    branches: [ claude/ci-macos-cuelgue ]
+
+permissions:
+  contents: read
+
+jobs:
+  entera:
+    name: Entera ${{ matrix.intento }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        intento: [ 1, 2, 3, 4 ]
+    defaults:
+      run:
+        working-directory: EtiquetadorNet
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: '9.0.x'
+      - run: dotnet restore
+      - run: dotnet build -c Release --no-restore
+      - name: Test
+        shell: bash
+        timeout-minutes: 25
+        run: ../scripts/pruebas-vigiladas.sh
+
+  partes:
+    name: Por partes ${{ matrix.intento }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        intento: [ 1, 2, 3 ]
+    defaults:
+      run:
+        working-directory: EtiquetadorNet
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: '9.0.x'
+      - run: dotnet restore
+      - run: dotnet build -c Release --no-restore
+      - name: Pruebas A-B
+        if: success() || failure()
+        shell: bash
+        timeout-minutes: 10
+        run: ../scripts/pruebas-vigiladas.sh AB
+      - name: Pruebas C-D
+        if: success() || failure()
+        shell: bash
+        timeout-minutes: 10
+        run: ../scripts/pruebas-vigiladas.sh CD
+      - name: Pruebas E-L
+        if: success() || failure()
+        shell: bash
+        timeout-minutes: 10
+        run: ../scripts/pruebas-vigiladas.sh EFGHIJKL
+      - name: Pruebas M-O
+        if: success() || failure()
+        shell: bash
+        timeout-minutes: 10
+        run: ../scripts/pruebas-vigiladas.sh MNO
+      - name: Pruebas P-R
+        if: success() || failure()
+        shell: bash
+        timeout-minutes: 10
+        run: ../scripts/pruebas-vigiladas.sh PQR
+      - name: Pruebas S-Z
+        if: success() || failure()
+        shell: bash
+        timeout-minutes: 10
+        run: ../scripts/pruebas-vigiladas.sh STUVWXYZ
