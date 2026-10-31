@@ -57,63 +57,13 @@ jobs:
       # permisos de administrador para leerse, y las anotaciones no: asi el resultado de macOS se
       # puede consultar desde fuera sin tener que entrar a mirarlo a mano cada vez.
       #
-      # --blame-hang-timeout: una prueba que se queda colgada se corta a los 10 minutos y se dice
-      # cuál era. Visto en octubre de 2026: en macOS el paso se quedaba colgado de vez en cuando y a
-      # los 46 minutos GitHub daba el equipo por perdido, sin ningún dato de qué prueba lo causaba.
+      # En macOS, con un vigilante: desde octubre de 2026 el equipo de GitHub se queda de vez en
+      # cuando sin responder en mitad de las pruebas y a los 46 minutos se da por perdido, sin
+      # ningún dato. El script dice por qué y qué hace (el mismo que usa la Release).
       - name: Test
         shell: bash
         timeout-minutes: 25
-        run: |
-          # Las pruebas van en segundo plano para poder vigilarlas. En macOS, un vigilante mira cada
-          # 5 s la memoria y el número de procesos de las pruebas: visto en octubre de 2026, de vez
-          # en cuando algo dejaba el equipo de GitHub sin responder y a los 46 minutos se daba por
-          # perdido, sin dejar ningún dato. Si se dispara, se cortan las pruebas ANTES de que el
-          # equipo caiga y se publica qué estaba en marcha (xUnit avisa de las que pasan de 20 s).
-          dotnet test -c Release --no-build --verbosity normal --blame-hang-timeout 10m --blame-hang-dump-type none \
-            -- xUnit.LongRunningTestSeconds=20 xUnit.DiagnosticMessages=true > test.log 2>&1 &
-          pid=$!
-          motivo=""
-          inicio=$(date +%s)
-          while kill -0 "$pid" 2>/dev/null; do
-            sleep 5
-            if [ "$RUNNER_OS" = "macOS" ]; then
-              rss=$(ps -axo rss=,command= | awk '/testhost|dotnet test|vstest/ && !/awk/ {s+=$1} END {print int(s/1024)}')
-              procs=$(ps -axo ppid=,command= | grep -vc "^ *1 " || true)
-              echo "$(( $(date +%s) - inicio )) s · ${rss} MB · ${procs} procesos" >> vigilancia.log
-              if [ "${rss:-0}" -gt 3500 ]; then motivo="las pruebas usan ${rss} MB de memoria"; fi
-              if [ "${procs:-0}" -gt 400 ]; then motivo="hay ${procs} procesos en marcha"; fi
-              if [ -n "$motivo" ]; then
-                {
-                  echo "== ps (más memoria)"; ps -axo pid,ppid,rss,%cpu,etime,command | sort -k3 -nr | head -15
-                  echo "== ps (procesos más repetidos)"; ps -axo comm= | sort | uniq -c | sort -nr | head -10
-                } > instantanea.log 2>&1
-                pkill -f testhost || true; pkill -f "dotnet test" || true
-                break
-              fi
-            fi
-          done
-          codigo=0; wait "$pid" || codigo=$?
-          if [ -n "$motivo" ]; then
-            echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
-            cuerpo=$( { echo "Cortado por el vigilante: $motivo"; echo "-- Pruebas largas (xUnit):"; { grep -i "long running" test.log || true; } | tail -25; echo "-- Últimas líneas:"; tail -15 test.log; echo "-- Vigilancia:"; tail -8 vigilancia.log; cat instantanea.log; } | head -90 | awk '{printf "%s%%0A", $0}') || true
-            echo "::error title=Pruebas cortadas por el vigilante::$cuerpo"
-            exit 1
-          fi
-          if [ "$codigo" -eq 0 ]; then
-            tail -3 test.log
-          else
-            echo "::group::Salida completa"; cat test.log; echo "::endgroup::"
-
-            # UNA sola anotacion con todo dentro: GitHub solo conserva unas diez por trabajo y
-            # ademas deduplica, asi que emitir una por fallo perdia justo lo que hace falta ver.
-            # %0A es el salto de linea dentro de un mensaje de anotacion. Incluye las pruebas que
-            # estaban en marcha cuando --blame-hang-timeout cortó la ejecución.
-            fallos=$( { grep -E "^[[:space:]]*(Failed|Con error) [A-Za-z]" test.log; grep -iE -A6 "hang|were running|se estaban ejecutando|aborted|anul|long running" test.log || true; } | sed 's/^[[:space:]]*//' | sort -u) || true
-            total=$(printf '%s\n' "$fallos" | grep -c . || true)
-            cuerpo=$(printf '%s\n' "$fallos" | head -60 | awk '{printf "%s%%0A", $0}') || true
-            echo "::error title=Tests que fallan ($total)::$cuerpo"
-            exit 1
-          fi
+        run: ../scripts/pruebas-vigiladas.sh
 
       # Solo en macOS: comprobar que además se puede PUBLICAR para Apple Silicon. Compilar y pasar
       # las pruebas no garantiza que el empaquetado salga; es un paso aparte y conviene verlo fallar
