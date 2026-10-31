@@ -256,7 +256,9 @@ public static class EstiloDeVersion
         var antes = texto[..posicion].TrimEnd();
         var i = antes.Length;
         while (i > 0 && char.IsLetter(antes[i - 1])) i--;
-        if (i < antes.Length && Articulos.Contains(antes[i..])) return true;
+        // Solo una palabra entera (revisión 3): la «A» de una clave Camelot («8A Reggaeton Remix») no es
+        // la preposición.
+        if (i < antes.Length && (i == 0 || !char.IsLetterOrDigit(antes[i - 1])) && Articulos.Contains(antes[i..])) return true;
 
         var palabra = UltimaPalabra(antes);
         if (!Prefijos.Contains(Letras(palabra))) return false;

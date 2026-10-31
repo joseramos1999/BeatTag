@@ -31,6 +31,10 @@ public class EstiloDeVersionTests
     [InlineData("Gasolina (SAMI Dancehall Edit)", "Dancehall")]
     [InlineData("Lose Control (RUSHMORE & CIBUS Techno VIP)", "Techno")]
     [InlineData("Sopa de Caracol (Merengue)", "Merengue")]
+    // Revisión 3: una clave Camelot acabada en A delante del estilo se leía como la preposición «a».
+    [InlineData("Gasolina (8A Reggaeton Remix)", "Reggaeton")]
+    [InlineData("Gasolina (12A Moombahton Edit)", "Moombahton")]
+    [InlineData("Gasolina 8A Moombahton Edit", "Moombahton")]
     public void El_estilo_de_la_version_se_lee_del_titulo(string titulo, string estilo)
     {
         var v = EstiloDeVersion.De(titulo, null, null, null);
@@ -106,6 +110,15 @@ public class EstiloDeVersionTests
     {
         Assert.Null(EstiloDeVersion.De("Gasolina (DJ Mambo Remix)", archivo, "Daddy Yankee", null));
         Assert.Null(EstiloDeVersion.De("Gasolina", archivo, "Daddy Yankee", null));
+    }
+
+    // Si el título no dice el estilo, el nombre del archivo sí cuenta, también detrás del número de pista o
+    // de una clave Camelot acabada en A.
+    [Fact]
+    public void En_el_nombre_del_archivo_el_estilo_tras_la_pista_o_la_clave_cuenta()
+    {
+        var v = EstiloDeVersion.De("Gasolina", "Daddy Yankee - Gasolina - 8A Moombahton Edit", "Daddy Yankee", null);
+        Assert.Equal(("Moombahton", FuenteEstilo.Archivo), (v?.Estilo, v?.Fuente));
     }
 
     // Y detrás del título, tras otro guion, el estilo que cierra el nombre del remixer sí cuenta.
