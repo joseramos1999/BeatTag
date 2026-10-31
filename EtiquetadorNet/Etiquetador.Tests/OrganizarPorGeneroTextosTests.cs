@@ -111,14 +111,14 @@ public class OrganizarPorGeneroTextosTests : IDisposable
                      + "Ningún archivo se sobrescribe ni se renombra, y las etiquetas no se tocan.",
                      OrganizarPorGeneroViewModel.TextosConfirmacion(conAsociados).Cuerpo);
 
-        var uno = OrganizarPorGeneroViewModel.TextoResultado(new ResultadoOrganizar(new[] { ("a", "b") }, Array.Empty<string>(), false, "", ""), 1);
+        var uno = OrganizarPorGeneroViewModel.TextoResultado(new ResultadoTraslado(new[] { ("a", "b") }, Array.Empty<string>(), false, "", ""), 1);
         Assert.StartsWith("Se ha movido 1 canción a 1 carpeta.", uno);
         Assert.Contains("«Rutas rotas»", uno);
         var varios = OrganizarPorGeneroViewModel.TextoResultado(
-            new ResultadoOrganizar(new[] { ("a", "b"), ("c", "d") }, new[] { "e.mp3: " + OrganizadorPorGenero.Abierto, "f.mp3: x" }, true, "", ""), 2);
+            new ResultadoTraslado(new[] { ("a", "b"), ("c", "d") }, new[] { "e.mp3: " + TrasladoPorLotes.Abierto, "f.mp3: x" }, true, "", ""), 2);
         Assert.StartsWith("Cancelado. Se han movido 2 canciones a 2 carpetas; el resto se queda donde estaba.", varios);
         Assert.Contains("2 no se han podido mover (por ejemplo, e.mp3: Está abierto en otro programa)", varios);
-        var nada = OrganizarPorGeneroViewModel.TextoResultado(new ResultadoOrganizar(Array.Empty<(string, string)>(), Array.Empty<string>(), true, "No se ha tocado ningún archivo.", ""), 0);
+        var nada = OrganizarPorGeneroViewModel.TextoResultado(new ResultadoTraslado(Array.Empty<(string, string)>(), Array.Empty<string>(), true, "No se ha tocado ningún archivo.", ""), 0);
         Assert.Equal("No se ha movido ninguna canción. No se ha tocado ningún archivo.", nada);
     }
 

@@ -189,10 +189,11 @@ public partial class MainViewModel : ViewModelBase
                 {
                     // Cancelar: el envío a la papelera se detiene entre un archivo y el siguiente al
                     // cerrar, en lugar de esperar 15 s y cortarse a medias (hallazgo rendimiento-3).
+                    // En la Bandeja, también el paso a la biblioteca.
                     new() { Indice = 0,  Icono = "📚", Nombre = "Biblioteca", Vm = Library, Ocupada = () => Library.IsBusy,
                             Cancelar = Library.CancelarPapelera },
                     new() { Indice = 13, Icono = "📥", Nombre = "Bandeja de entrada", Vm = Bandeja, Ocupada = () => Bandeja.IsBusy,
-                            Cancelar = Bandeja.CancelarDescarte },
+                            Cancelar = Bandeja.Cancelar },
                     new() { Indice = 2,  Icono = "✏",  Nombre = "Editor",     Vm = Editor, Ocupada = () => Editor.IsBusy },
                     // Sin «Ocupada»: solo lee el XML exportado y escribe otros XML y listas, nunca la música,
                     // así que no bloquea el resto de la aplicación (equipo «rekordbox», tanda 4).

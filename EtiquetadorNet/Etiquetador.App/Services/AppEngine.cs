@@ -599,14 +599,65 @@ public sealed class AppEngine
     /// (<see cref="ReleaseAudio"/>); después, la biblioteca se vuelve a escanear (rápido: la caché ya
     /// siguió a cada archivo).
     /// </summary>
-    public ResultadoOrganizar OrganizarPorGenero(PlanOrganizar plan, IProgress<double>? progreso, CancellationToken ct)
+    public ResultadoTraslado OrganizarPorGenero(PlanOrganizar plan, IProgress<double>? progreso, CancellationToken ct)
     {
-        ResultadoOrganizar res;
+        ResultadoTraslado res;
         using (var manifiesto = ManifiestoDeshacer.Abrir(Paths.NuevoManifiesto(), out var error))
             res = OrganizadorPorGenero.Ejecutar(plan, manifiesto, error, SeguirTraslado, Logger, progreso, ct);
         if (res.Movidas > 0) GuardarLoQueSigueAlArchivo();
         GuardarCachesDeAudio();
         return res;
+    }
+
+    // --- Pasar la Bandeja a la biblioteca ---
+
+    /// <summary>
+    /// «Pasar a la biblioteca» (Bandeja de entrada): mueve las descargas a <paramref name="carpeta"/> con
+    /// su nombre, con el mismo motor que Organizar por género (<see cref="TrasladoPorLotes"/>), y deja
+    /// guardado todo lo que sigue a los archivos. Hay que llamarlo fuera del hilo de la interfaz y con
+    /// el reproductor parado (<see cref="ReleaseAudio"/>).
+    ///
+    /// POR QUÉ (medido al organizar por género). La Bandeja anotaba cada traslado con
+    /// File.AppendAllText DESPUÉS de moverlo, seguía moviendo aunque no se pudiera anotar y no se podía
+    /// cancelar: con el proceso cortado a mitad, 7 de 18 cortes dejaron archivos movidos sin anotar, que
+    /// ya no se podían devolver a la bandeja. Ahora cada lote se anota antes de moverlo, sin historial no
+    /// se mueve nada y se para entre un archivo y el siguiente. Además de la ficha, las cachés de audio
+    /// y la exclusión de Volumen, que ya lo seguían, sigue al archivo lo decidido en Enriquecer
+    /// (<see cref="SeguirTraslado"/>).
+    /// </summary>
+    public ResultadoTraslado PasarABiblioteca(IReadOnlyList<string> rutas, string carpeta, IProgress<double>? progreso, CancellationToken ct)
+    {
+        ResultadoTraslado res;
+        using (var manifiesto = ManifiestoDeshacer.Abrir(Paths.NuevoManifiesto(), out var error))
+            res = PasarABiblioteca(rutas, carpeta, manifiesto, error, SeguirTraslado, Logger, progreso, ct);
+        if (res.Movidas > 0) GuardarLoQueSigueAlArchivo();
+        GuardarCachesDeAudio();
+        return res;
+    }
+
+    /// <summary>Cuando la carpeta de destino ya no está (una unidad desconectada, una carpeta renombrada).</summary>
+    public const string SinCarpetaDeDestino = "La carpeta de destino ya no existe: no se ha movido nada. Elige otra.";
+
+    /// <summary>El traslado de <see cref="PasarABiblioteca(IReadOnlyList{string}, string, IProgress{double}?, CancellationToken)"/>, aparte para poder probar qué pasa si el historial falla o se corta.</summary>
+    /// <param name="mover">Cómo se mueve un archivo. Por defecto, File.Move sin sobrescribir; las pruebas simulan un corte.</param>
+    internal static ResultadoTraslado PasarABiblioteca(IReadOnlyList<string> rutas, string carpeta,
+                                                       IHistorialPorLotes? historial, string errorHistorial,
+                                                       Action<string, string, SelloArchivo>? seguir, Logger? log,
+                                                       IProgress<double>? progreso, CancellationToken ct,
+                                                       Action<string, string>? mover = null)
+    {
+        // La carpeta la eligió el DJ dentro de la biblioteca: si ya no está, no se crea otra con ese
+        // nombre en su lugar (como antes, cuando cada traslado fallaba por eso).
+        if (!Directory.Exists(carpeta))
+        {
+            log?.Err($"Bandeja → biblioteca: no existe la carpeta de destino «{carpeta}».");
+            return new ResultadoTraslado(Array.Empty<(string, string)>(), Array.Empty<string>(), true, SinCarpetaDeDestino, "");
+        }
+        var nombre = Path.GetFileName(carpeta.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (nombre.Length == 0) nombre = carpeta;   // la raíz de una unidad
+        var movimientos = rutas.Select(r => new MovimientoArchivo(r, Path.Combine(carpeta, Path.GetFileName(r)), nombre)).ToList();
+        return TrasladoPorLotes.Ejecutar(movimientos, TipoEjecucion.Traslado, "Bandeja → biblioteca",
+                                         historial, errorHistorial, seguir, log, progreso, ct, mover);
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using Etiquetador.App.Services;
 using Etiquetador.Core;
 using Etiquetador.Core.Dj;
 
@@ -193,6 +194,16 @@ public class BandejaTests : IDisposable
     }
 
     // --- Pasar a la biblioteca ---
+    //
+    // Por el mismo camino que la aplicación: el motor por lotes, con el historial para deshacer. Lo que
+    // se le exige además (anotar antes de mover, cancelar, no mover sin historial) está en BandejaPasarTests.
+
+    private ResultadoTraslado Pasar(string origen, string carpeta)
+    {
+        var paths = new AppPaths(Path.Combine(_dir, "datos"));
+        using var historial = ManifiestoDeshacer.Abrir(paths.NuevoManifiesto(), out var error);
+        return AppEngine.PasarABiblioteca(new[] { origen }, carpeta, historial, error, null, null, null, CancellationToken.None);
+    }
 
     [Fact]
     public void Pasar_a_la_biblioteca_mueve_el_archivo()
@@ -202,9 +213,10 @@ public class BandejaTests : IDisposable
         var origen = Path.Combine(bandeja, "tema.mp3");
         Mp3Fixture.WriteMinMp3(origen);
 
-        var t = TrasladoBandeja.Mover(origen, musica);
+        var t = Pasar(origen, musica);
 
-        Assert.True(t.Ok, t.Error);
+        Assert.Empty(t.Fallos);
+        Assert.Equal(1, t.Movidas);
         Assert.False(File.Exists(origen));
         Assert.True(File.Exists(Path.Combine(musica, "tema.mp3")));
     }
@@ -221,9 +233,10 @@ public class BandejaTests : IDisposable
         Mp3Fixture.WriteMinMp3(existente, frames: 40);
         var tamanoOriginal = new FileInfo(existente).Length;
 
-        var t = TrasladoBandeja.Mover(origen, musica);
+        var t = Pasar(origen, musica);
 
-        Assert.False(t.Ok);
+        Assert.Equal(0, t.Movidas);
+        Assert.Contains("no se sobrescribe", Assert.Single(t.Fallos));
         Assert.True(File.Exists(origen));                                  // sigue en la bandeja
         Assert.Equal(tamanoOriginal, new FileInfo(existente).Length);      // y la de la biblioteca, intacta
     }

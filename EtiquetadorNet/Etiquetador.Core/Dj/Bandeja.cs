@@ -389,33 +389,14 @@ public sealed class AlmacenBandeja
     public string Guardar() => SoloLectura ? ArchivoJson.AvisoSoloLectura(_archivo) : ArchivoJson.Escribir(_archivo, _entradas);
 }
 
-/// <summary>Resultado de pasar un archivo de la bandeja a la biblioteca.</summary>
+/// <summary>
+/// Resultado de mover o renombrar un archivo suelto (el renombrado con IA). «Pasar a la biblioteca» ya
+/// no mueve archivo a archivo: va por lotes, con cada lote anotado para deshacer antes de moverlo
+/// (AppEngine.PasarABiblioteca en la aplicación).
+/// </summary>
 public sealed record Traslado(string Origen, string Destino, string Error)
 {
     public bool Ok => Error.Length == 0;
-}
-
-public static class TrasladoBandeja
-{
-    /// <summary>
-    /// Mueve un archivo a una carpeta de la biblioteca conservando su nombre. NUNCA sobrescribe: si
-    /// en el destino ya hay un archivo con ese nombre, no se mueve y se dice por qué. Machacar una
-    /// canción de la biblioteca al ordenar la bandeja sería perder música.
-    /// </summary>
-    public static Traslado Mover(string archivo, string carpetaDestino)
-    {
-        var destino = Path.Combine(carpetaDestino, Path.GetFileName(archivo));
-        try
-        {
-            if (!File.Exists(archivo)) return new Traslado(archivo, destino, "El archivo ya no está en la bandeja.");
-            if (!Directory.Exists(carpetaDestino)) return new Traslado(archivo, destino, "La carpeta de destino no existe.");
-            if (File.Exists(destino)) return new Traslado(archivo, destino, "Ya hay un archivo con ese nombre en el destino; no se sobrescribe.");
-
-            File.Move(archivo, destino, overwrite: false);
-            return new Traslado(archivo, destino, "");
-        }
-        catch (Exception e) { return new Traslado(archivo, destino, e.Message); }
-    }
 }
 
 // ---------------------------------------------------------------------------------------------

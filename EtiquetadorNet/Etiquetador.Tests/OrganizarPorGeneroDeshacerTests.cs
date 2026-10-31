@@ -56,8 +56,8 @@ public class OrganizarPorGeneroDeshacerTests : IDisposable
             Movimientos = archivos.Select(a => new MovimientoOrganizar(a, Path.Combine(PorGenero, genero, Path.GetFileName(a)), genero, genero)).ToList(),
         };
 
-    private ResultadoOrganizar Organizar(PlanOrganizar plan, CancellationToken ct = default,
-                                         Action<string, string, SelloArchivo>? seguir = null, Action<string, string>? mover = null)
+    private ResultadoTraslado Organizar(PlanOrganizar plan, CancellationToken ct = default,
+                                        Action<string, string, SelloArchivo>? seguir = null, Action<string, string>? mover = null)
     {
         using var m = ManifiestoDeshacer.Abrir(_paths.NuevoManifiesto(), out var error);
         return OrganizadorPorGenero.Ejecutar(plan, m, error, seguir, null, null, ct, mover);
@@ -161,11 +161,11 @@ public class OrganizarPorGeneroDeshacerTests : IDisposable
 
         var res = OrganizadorPorGenero.Ejecutar(PlanA(archivos), historial, "", null, null, null, CancellationToken.None);
 
-        Assert.Equal(OrganizadorPorGenero.TamanoLote, res.Movidas);   // solo el primer lote
+        Assert.Equal(TrasladoPorLotes.TamanoLote, res.Movidas);   // solo el primer lote
         Assert.True(res.Cancelado);
         Assert.Contains("tema0101.mp3", res.Detenido);
-        Assert.Equal(OrganizadorPorGenero.TamanoLote, historial.Anotados.Count);
-        Assert.All(archivos.Skip(OrganizadorPorGenero.TamanoLote), a => Assert.True(File.Exists(a)));
+        Assert.Equal(TrasladoPorLotes.TamanoLote, historial.Anotados.Count);
+        Assert.All(archivos.Skip(TrasladoPorLotes.TamanoLote), a => Assert.True(File.Exists(a)));
     }
 
     [Fact]
@@ -182,7 +182,7 @@ public class OrganizarPorGeneroDeshacerTests : IDisposable
 
         Assert.Equal(9, res.Movidas);
         var fallo = Assert.Single(res.Fallos);
-        Assert.Equal("tema0005.mp3: " + OrganizadorPorGenero.Abierto, fallo);
+        Assert.Equal("tema0005.mp3: " + TrasladoPorLotes.Abierto, fallo);
         Assert.True(File.Exists(abierto));
         Assert.Equal(9, LineasDelManifiesto().Length);
         Assert.DoesNotContain(LineasDelManifiesto(), l => l.Contains("tema0005", StringComparison.Ordinal));
