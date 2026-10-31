@@ -22,10 +22,11 @@ public class VistaPreviaMacTests
             ? new ProcessStartInfo("cmd.exe") { Arguments = $"/c ping -n 3 127.0.0.1 >nul & echo listo> \"{marca}\"", UseShellExecute = false, CreateNoWindow = true }
             : new ProcessStartInfo("/bin/sh") { ArgumentList = { "-c", $"sleep 2; echo listo > '{marca}'" }, UseShellExecute = false };
 
-    private static Func<string, ProcessStartInfo> ReproductorInstantaneo()
+    /// <summary>Un «reproductor» que deja su marca y termina en el acto.</summary>
+    private static Func<string, ProcessStartInfo> ReproductorInstantaneo(string marca)
         => _ => OperatingSystem.IsWindows()
-            ? new ProcessStartInfo("cmd.exe") { Arguments = "/c exit 0", UseShellExecute = false, CreateNoWindow = true }
-            : new ProcessStartInfo("/bin/sh") { ArgumentList = { "-c", "exit 0" }, UseShellExecute = false };
+            ? new ProcessStartInfo("cmd.exe") { Arguments = $"/c echo listo> \"{marca}\"", UseShellExecute = false, CreateNoWindow = true }
+            : new ProcessStartInfo("/bin/sh") { ArgumentList = { "-c", $"echo listo > '{marca}'" }, UseShellExecute = false };
 
     // Solo se prepara lo que va a sonar: un minuto desde el 25 %, no el resto del tema.
     [Fact]
@@ -83,6 +84,14 @@ public class VistaPreviaMacTests
 
     // Cuando el reproductor termina solo, deja de contar como reproduciendo: el siguiente clic
     // vuelve a reproducir en vez de «parar» algo que ya no suena.
+    //
+    // Se espera al aviso con el que la vista previa refresca los botones, no a un plazo. El
+    // «reproductor» es un proceso de verdad (cmd.exe o /bin/sh) y tarda en arrancar y en salir lo
+    // que el equipo le deje. MEDIDO en octubre de 2026, de lanzar la vista previa a soltarla: unos
+    // 150 ms en reposo; 0,5-3,6 s con dos baterías y una compilación a la vez; 3,5-4,4 s en dos
+    // núcleos saturados, de los que unos 3 s eran la vida del propio proceso según el sistema (de
+    // StartTime a ExitTime). El plazo anterior de 10 s llegó a vencer con la batería completa en
+    // Windows. El minuto es solo el tope para que una regresión falle en vez de colgar la batería.
     [Fact]
     public async Task Al_terminar_de_sonar_deja_de_contar_como_reproduciendo()
     {
@@ -91,12 +100,19 @@ public class VistaPreviaMacTests
         {
             var mp3 = Path.Combine(dir, "Karol G - Provenza.mp3");
             Mp3Fixture.WriteMinMp3(mp3, frames: 100);
-            using var preview = new AudioPreview(caminoMac: true, reproductor: ReproductorInstantaneo());
+            var marca = Path.Combine(dir, "sono.txt");
+            using var preview = new AudioPreview(caminoMac: true, reproductor: ReproductorInstantaneo(marca));
 
             preview.Toggle(mp3);
-            var reloj = Stopwatch.StartNew();
-            while (preview.IsPlaying && reloj.Elapsed < TimeSpan.FromSeconds(10)) await Task.Delay(50);
 
+            // Suscrito y DESPUÉS comprobado, como hace la propia vista previa con el proceso: si ya
+            // ha terminado entre una cosa y otra, no se espera a un aviso que ya pasó.
+            var suelta = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            preview.StateChanged += () => { if (preview.CurrentPath == null) suelta.TrySetResult(); };
+            if (preview.CurrentPath == null) suelta.TrySetResult();
+            await suelta.Task.WaitAsync(TimeSpan.FromMinutes(1));
+
+            Assert.True(File.Exists(marca), "el reproductor no llegó a ejecutarse: se soltó por un error al prepararlo");
             Assert.False(preview.IsPlaying);
             Assert.Null(preview.CurrentPath);
         }
