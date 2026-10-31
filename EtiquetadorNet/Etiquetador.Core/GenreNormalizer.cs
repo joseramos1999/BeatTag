@@ -13,6 +13,9 @@ public static class GenreNormalizer
         (new[] { "hip hop", "hip-hop", "hiphop", "rap" }, "Hip Hop"),
         (new[] { "r&b", "rnb", "r and b", "rhythm and blues", "r&b/soul" }, "R&B"),
         (new[] { "drum and bass", "drum & bass", "drum n bass", "dnb", "d&b" }, "Drum & Bass"),
+        // Discogs y Beatport lo llaman «Breaks». Medido con Discogs en canciones archivadas como
+        // breakbeat: dio «Breaks» en 7 de 14 y «Breakbeat» en 3.
+        (new[] { "breakbeat", "breakbeats", "break beat", "breaks" }, "Breakbeat"),
         (new[] { "reggaeton", "reggaetón", "reguetón", "regueton", "perreo" }, "Reggaeton"),
         (new[] { "tech house", "tech-house", "techhouse" }, "Tech House"),
         (new[] { "deep house", "deep-house" }, "Deep House"),

@@ -113,6 +113,13 @@ public sealed record CarpetaSinGenero(string Ruta, int SinGenero, int Total, str
 /// está medido que en lote acierta 1 de cada 20 y que el modelo de 8B confunde estilos («Urban House»
 /// → Hip Hop). Tampoco el BPM: medido, por sí solo acierta el estilo un 30,6 %, lo mismo que decir
 /// siempre el género más frecuente, porque a 90-100 BPM conviven reggaeton, hip hop, pop y flamenco.
+/// Ni el género del artista de fuentes externas (lo que hace Chosic), medido frente a las carpetas
+/// de una biblioteca real: el primer género de Wikidata acierta el 41,5 % de las canciones, frente al
+/// 85,5 % de la regla del artista donde propone; eligiendo siempre el mejor de sus géneros solo
+/// coincide con el dominante en el 62,8 % de los artistas; en los de menos de 3 canciones acierta el
+/// 24,6 %, y confunde homónimos en el 6-11 % (los nombres cortos: «Plan B» sale como un grupo de
+/// rock alemán). MusicBrainz por grabación acierta el 38-41 %, sin datos para mashups ni ediciones
+/// de pool. Spotify ya no da los géneros de los artistas.
 /// </summary>
 public static class GeneroPorReglas
 {
