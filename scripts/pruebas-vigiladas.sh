@@ -55,6 +55,11 @@ disco_mb() { df -Pk "${TMPDIR:-/tmp}" 2>/dev/null | awk 'NR == 2 { print int($4 
 pruebas_mb() { ps -axo rss=,command= | awk '/testhost|dotnet test|vstest/ && !/awk/ { s += $1 } END { print int(s / 1024) }'; }
 procesos() { ps -axo ppid= | grep -vc '^ *1$' || true; }
 
+# Cuántas pruebas han terminado y cuál ha sido la última, en inglés (GitHub) o en español.
+resultado='^  (Passed|Failed|Skipped|Correctas|Con error|Omitida) '
+hechas() { local n; n=$(grep -cE "$resultado" test.log 2>/dev/null); echo "${n:-0}"; }
+ultima() { grep -E "$resultado" test.log 2>/dev/null | tail -1 | sed -E "s/$resultado//; s/ \[[^]]*\]\$//" | cut -c1-110; }
+
 motivo=""
 inicio=$(date +%s)
 swap0=""
@@ -73,7 +78,11 @@ while kill -0 "$pid" 2>/dev/null; do
   if [ "$extra" -gt "$pico_swap" ]; then pico_swap=$extra; fi
   if [ -z "$min_disco" ] || [ "$disco" -lt "$min_disco" ]; then min_disco=$disco; fi
   if [ "$procs" -gt "$pico_procs" ]; then pico_procs=$procs; fi
-  echo "$(( $(date +%s) - inicio )) s · pruebas ${mb} MB · libre ${libre} % · swap +${extra} MB · disco ${disco} MB · ${procs} procesos" >> vigilancia.log
+  linea="$(( $(date +%s) - inicio )) s · pruebas ${mb} MB · libre ${libre} % · swap +${extra} MB · disco ${disco} MB · ${procs} procesos"
+  echo "$linea" >> vigilancia.log
+  # También en la salida del paso, que GitHub enseña en directo: si el equipo cae, mientras el
+  # trabajo sigue «en marcha» su página aún enseña el último segundo antes de caer.
+  echo "$linea · $(hechas) hechas · última: $(ultima)"
 
   if   [ "$libre" -lt 10 ];   then motivo="macOS dice que solo queda un ${libre} % de memoria libre"
   elif [ "$extra" -gt 1024 ]; then motivo="el swap ha crecido ${extra} MB"
