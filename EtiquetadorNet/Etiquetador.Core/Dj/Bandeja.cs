@@ -616,7 +616,7 @@ public static class SustitucionBandeja
         try
         {
             using var f = TagLib.File.Create(ruta);
-            return new EtiquetasDj((f.Tag.Comment ?? "").Trim(), (f.Tag.InitialKey ?? "").Trim(), f.Tag.BeatsPerMinute);
+            return new EtiquetasDj((f.Tag.Comment ?? "").Trim(), (f.Tag.InitialKey ?? "").Trim(), BpmEtiqueta.Leer(f.Tag));
         }
         catch { return null; }
     }
@@ -677,9 +677,9 @@ public static class SustitucionBandeja
             }
             if (copiar.Bpm > 0)
             {
-                var antes = tag.BeatsPerMinute;
+                var antes = BpmEtiqueta.Leer(tag);
                 try { tag.BeatsPerMinute = copiar.Bpm; } catch { /* el formato no lo admite */ }
-                if (tag.BeatsPerMinute == copiar.Bpm) cambios["Bpm"] = FieldChange.Num(antes, copiar.Bpm);
+                if (BpmEtiqueta.Leer(tag) == copiar.Bpm) cambios["Bpm"] = FieldChange.Num(antes, copiar.Bpm);
             }
             if (cambios.Count == 0) return (0, "el formato de la descarga no admite esas etiquetas.");
 

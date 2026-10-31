@@ -91,7 +91,7 @@ public static class NombrePropuesto
 
         // BPM distinto del que declara el propio nombre del archivo.
         var declarado = FileProcessor.BpmDelNombre(Path.GetFileNameWithoutExtension(nombreOriginal ?? ""), out _);
-        if (declarado > 0 && int.TryParse(bpm, out var propuesto) && propuesto > 0 && propuesto != declarado)
+        if (declarado > 0 && int.TryParse(bpm, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var propuesto) && propuesto > 0 && propuesto != declarado)
             motivos.Add($"el BPM propuesto ({propuesto}) no cuadra con el que declara el nombre ({declarado})");
 
         return motivos;

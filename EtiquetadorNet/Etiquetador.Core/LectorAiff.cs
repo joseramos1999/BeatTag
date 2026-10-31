@@ -157,7 +157,7 @@ public static class LectorAiff
                 t.Album = Vacio(id3.Album);
                 t.Genre = Vacio(id3.JoinedGenres);
                 t.Year = id3.Year;
-                t.Bpm = id3.BeatsPerMinute;
+                t.Bpm = BpmEtiqueta.Leer(id3);
                 t.Key = Vacio(id3.InitialKey);
             }
             return t;

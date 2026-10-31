@@ -78,7 +78,5 @@ public static class RekordboxImporter
     }
 
     /// <summary>BPM redondeado (de "128.00" a 128). 0 si no es válido.</summary>
-    public static uint ParseBpm(string bpm)
-        => double.TryParse(bpm, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d) && d > 0
-            ? (uint)System.Math.Round(d) : 0u;
+    public static uint ParseBpm(string bpm) => BpmEtiqueta.DeTexto(bpm);
 }
