@@ -112,6 +112,13 @@ public class EstiloDeVersionTests
     // Sin paréntesis y antes del primer guion, lo de delante de «DJ» es el nombre del tema.
     [InlineData("Gasolina DJ Mambo Remix", "Daddy Yankee")]
     [InlineData("Tema MC Trap Edit", null)]
+    // Revisión 3: con «Artista - Título» en el título, como en muchos archivos descargados, lo de detrás
+    // del primer guion también es el nombre del tema.
+    [InlineData("Daddy Yankee - Gasolina DJ Mambo Remix", "Daddy Yankee")]
+    [InlineData("Daddy Yankee - Gasolina MC Trap Edit", "Daddy Yankee")]
+    [InlineData("Daddy Yankee - Gasolina Extended DJ Mambo Remix", "Daddy Yankee")]
+    [InlineData("Daddy Yankee - Gasolina D.J. Mambo Remix", "Daddy Yankee")]
+    [InlineData("Daddy Yankee - Gasolina 95 BPM DJ Mambo Remix", "Daddy Yankee x Don Omar")]
     // Revisión 3: la forma adjetiva solo cuenta detrás de una palabra de versión.
     [InlineData("La Flamenca Remix", null)]
     [InlineData("Tema (Flamenca Remix)", null)]
@@ -126,10 +133,26 @@ public class EstiloDeVersionTests
     [InlineData("01 - Daddy Yankee - Gasolina DJ Mambo Remix")]
     [InlineData("8A - 95 - Daddy Yankee - Gasolina DJ Mambo Remix")]
     [InlineData("Daddy Yankee - Gasolina - DJ Mambo Remix")]
+    // Revisión 3: con el número de pista o el álbum entre el artista y el título.
+    [InlineData("Daddy Yankee - 01 - Gasolina DJ Mambo Remix")]
+    [InlineData("Daddy Yankee - Barrio Fino - 01 - Gasolina DJ Mambo Remix")]
+    [InlineData("Daddy Yankee - Barrio Fino - Gasolina DJ Mambo Remix")]
     public void En_el_nombre_del_archivo_un_remixer_que_se_llama_como_un_estilo_no_cuenta(string archivo)
     {
         Assert.Null(EstiloDeVersion.De("Gasolina (DJ Mambo Remix)", archivo, "Daddy Yankee", null));
         Assert.Null(EstiloDeVersion.De("Gasolina", archivo, "Daddy Yankee", null));
+        Assert.Null(EstiloDeVersion.De("Daddy Yankee - Gasolina DJ Mambo Remix", archivo, "Daddy Yankee", null));
+    }
+
+    // Revisión 3: si el título ya ha dicho que el estilo es el nombre de quien hizo la versión (va tras
+    // «DJ» o «MC»), el nombre del archivo, el artista o el álbum no lo pueden volver a dar por estilo.
+    [Fact]
+    public void Lo_que_el_titulo_da_por_nombre_de_remixer_no_vuelve_como_estilo_desde_otro_campo()
+    {
+        Assert.Null(EstiloDeVersion.De("Gasolina (DJ Mambo Remix)", "Gasolina - Pack - Mambo Edit", null, null));
+        Assert.Null(EstiloDeVersion.De("Gasolina (DJ Mambo Remix)", "Gasolina", null, "Pack (Mambo Version)"));
+        // Otro estilo sí.
+        Assert.Equal("Dembow", EstiloDeVersion.De("Gasolina (DJ Mambo Remix)", "Gasolina - Dembow Edit", null, null)?.Estilo);
     }
 
     // Si el título no dice el estilo, el nombre del archivo sí cuenta, también detrás del número de pista o
@@ -139,6 +162,10 @@ public class EstiloDeVersionTests
     {
         var v = EstiloDeVersion.De("Gasolina", "Daddy Yankee - Gasolina - 8A Moombahton Edit", "Daddy Yankee", null);
         Assert.Equal(("Moombahton", FuenteEstilo.Archivo), (v?.Estilo, v?.Fuente));
+        Assert.Equal("Moombahton", EstiloDeVersion.De("Gasolina", "Daddy Yankee - Barrio Fino - 01 - Gasolina (Moombahton Edit)", "Daddy Yankee", null)?.Estilo);
+        // Las dos primeras partes del nombre del archivo se toman siempre por «Artista - Título»: un «DJ» en
+        // la segunda abre el nombre de quien hizo la versión, que es lo seguro.
+        Assert.Null(EstiloDeVersion.De("Gasolina", "Gasolina - Alex Gramage DJ Mambo Remix", null, null));
     }
 
     // Y detrás del título, tras otro guion, el estilo que cierra el nombre del remixer sí cuenta.

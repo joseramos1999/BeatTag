@@ -198,29 +198,138 @@ public static class EstiloDeVersion
     /// sale con <see cref="FuenteEstilo.Album"/>: suele describir el pack entero, no la canción.
     /// </summary>
     public static EstiloVersion? De(string? titulo, string? nombreArchivoSinExtension, string? artista, string? album)
-        => Buscar(titulo, FuenteEstilo.Titulo) ?? Buscar(nombreArchivoSinExtension, FuenteEstilo.Archivo)
-           ?? Buscar(artista, FuenteEstilo.Artista) ?? Buscar(album, FuenteEstilo.Album);
+    {
+        var b = new Busqueda(titulo, artista);
+        return Buscar(titulo, FuenteEstilo.Titulo, b) ?? Buscar(nombreArchivoSinExtension, FuenteEstilo.Archivo, b)
+               ?? Buscar(artista, FuenteEstilo.Artista, b) ?? Buscar(album, FuenteEstilo.Album, b);
+    }
 
-    private static EstiloVersion? Buscar(string? texto, FuenteEstilo fuente)
+    /// <summary>
+    /// Lo que se sabe de la canción mientras se buscan sus campos, por orden: los artistas del crédito,
+    /// cómo se llama el tema según el título y los estilos que un campo anterior ya ha dado por nombre de
+    /// quien hizo la versión. Lo que cuesta calcular se calcula solo si un campo nombra algún estilo.
+    /// </summary>
+    private sealed class Busqueda
+    {
+        private readonly string? _titulo, _artista;
+        private HashSet<string>? _artistas;
+        private string[]? _tema;
+        private bool _temaCalculado;
+
+        public Busqueda(string? titulo, string? artista) { _titulo = titulo; _artista = artista; }
+
+        /// <summary>
+        /// Los estilos (ya unificados) que un campo anterior ha apartado por ir tras «DJ» o «MC»: son el
+        /// nombre de quien hizo la versión, y otro campo no los puede volver a dar por estilo (revisión 3:
+        /// el título «Gasolina (DJ Mambo Remix)» no daba nada, y el archivo «Daddy Yankee - Barrio Fino - 01 -
+        /// Gasolina DJ Mambo Remix» daba Mambo).
+        /// </summary>
+        public HashSet<string> Remixers { get; } = new(StringComparer.Ordinal);
+
+        private HashSet<string> Artistas
+            => _artistas ??= new HashSet<string>(IndiceArtistas.Partir(_artista).Select(IndiceArtistas.Clave).Where(k => k.Length > 0),
+                                                 StringComparer.Ordinal);
+
+        /// <summary>La parte (de las separadas por guiones) es el artista: su primer nombre es uno de los del crédito.</summary>
+        public bool EsElArtista(string parte)
+        {
+            if (Artistas.Count == 0) return false;
+            var nombres = IndiceArtistas.Partir(parte.Split('|')[0]);
+            return nombres.Count > 0 && Artistas.Contains(IndiceArtistas.Clave(nombres[0]));
+        }
+
+        /// <summary>
+        /// Las palabras del nombre del tema según el título: su primera parte, o la segunda si la primera
+        /// es el artista, sin lo que va entre paréntesis. null si el título no lo dice.
+        /// </summary>
+        public string[]? Tema
+        {
+            get
+            {
+                if (_temaCalculado) return _tema;
+                _temaCalculado = true;
+                if (string.IsNullOrWhiteSpace(_titulo)) return null;
+                var reales = Guion.Split(Parentesis.Replace(_titulo, " | ")).Where(p => !SoloAcompana(p)).ToList();
+                if (reales.Count == 0) return null;
+                var nombre = reales.Count > 1 && EsElArtista(reales[0]) ? reales[1] : reales[0];
+                var palabras = Palabras(nombre.Split('|')[0]);
+                return _tema = palabras.Length == 0 ? null : palabras;
+            }
+        }
+    }
+
+    private static EstiloVersion? Buscar(string? texto, FuenteEstilo fuente, Busqueda b)
     {
         if (string.IsNullOrWhiteSpace(texto) || !AlgunEstilo.IsMatch(texto)) return null;
 
         // Primero lo que va entre paréntesis o corchetes, que es donde los pools escriben la versión.
         foreach (Match m in Parentesis.Matches(texto))
-            if (EnParentesis(m.Groups[1].Value) is { } r) return Resultado(r, fuente);
+            if (EnParentesis(m.Groups[1].Value, b) is { } r) return Resultado(r, fuente);
 
-        // Después el resto, partido por los guiones: lo de delante del primero es el nombre del tema.
-        // Los paréntesis se cambian por una barra para que no junten lo que tienen a cada lado.
+        // Después el resto, partido por los guiones. Los paréntesis se cambian por una barra para que no
+        // junten lo que tienen a cada lado.
         var partes = Guion.Split(Parentesis.Replace(texto, " | "));
-        // Las partes que forman el nombre del tema: la primera o, en el nombre del archivo, las dos
-        // primeras («Artista - Título»). Un número de pista, la clave o el BPM sueltos delante
-        // («01 - », «8A - 95 - ») no cuentan como parte.
-        var nombre = fuente == FuenteEstilo.Archivo ? 2 : 1;
-        for (var k = 0; k < partes.Length && SoloAcompana(partes[k]); k++) nombre++;
+        var nombre = PartesDelNombre(partes, fuente, b);
         for (var i = 0; i < partes.Length; i++)
             foreach (var trozo in partes[i].Split('|'))
-                if (FueraDeParentesis(trozo, trasGuion: i > 0, enNombreDelTema: i < nombre) is { } r) return Resultado(r, fuente);
+                if (FueraDeParentesis(trozo, trasGuion: i > 0, enNombreDelTema: i < nombre, b) is { } r) return Resultado(r, fuente);
         return null;
+    }
+
+    private static readonly Regex PalabraDeVersion = new(Version, IC | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Cuántas partes, desde el principio, forman el nombre del tema (con el artista o el álbum, si van
+    /// delante): en ellas, un «DJ» o un «MC» abre el nombre de quien hizo la versión (ver
+    /// <see cref="Apartar"/>). Un número de pista, la clave o el BPM sueltos («01», «8A», «95») no cuentan.
+    ///  · En el título, la primera parte; si es el artista, también la siguiente: «Daddy Yankee - Gasolina
+    ///    DJ Mambo Remix», como en muchos archivos descargados (revisión 3).
+    ///  · En el nombre del archivo, las dos primeras («Artista - Título») y, si el título dice cómo se
+    ///    llama el tema, hasta la última que empieza así: «Artista - Álbum - 01 - Título» (revisión 3). Si
+    ///    no lo dice, hasta la primera que lleva una palabra de versión: sin saber dónde está el título, es
+    ///    lo seguro (un «DJ» abre un nombre en vez de cerrarlo, y el estilo no cuenta).
+    ///  · En el artista y en el álbum, la primera.
+    /// </summary>
+    private static int PartesDelNombre(string[] partes, FuenteEstilo fuente, Busqueda b)
+    {
+        var reales = Enumerable.Range(0, partes.Length).Where(k => !SoloAcompana(partes[k])).ToList();
+        if (reales.Count == 0) return partes.Length;
+        int Hasta(int n) => reales[Math.Min(n, reales.Count) - 1] + 1;   // hasta la n-ésima parte que dice algo
+
+        switch (fuente)
+        {
+            case FuenteEstilo.Titulo:
+                return Hasta(EsElArtistaDelante(partes, reales, b) ? 2 : 1);
+            case FuenteEstilo.Archivo:
+                var nombre = Hasta(2);
+                if (b.Tema is { } tema)
+                {
+                    var ultima = reales.LastOrDefault(k => !b.EsElArtista(partes[k]) && MismoPrincipio(Palabras(partes[k].Split('|')[0]), tema), -1);
+                    if (ultima >= 0) return Math.Max(nombre, ultima + 1);
+                }
+                var conVersion = reales.FirstOrDefault(k => PalabraDeVersion.IsMatch(partes[k]), -1);
+                return Math.Max(nombre, conVersion + 1);
+            default:
+                return Hasta(1);
+        }
+    }
+
+    private static bool EsElArtistaDelante(string[] partes, List<int> reales, Busqueda b) => reales.Count > 1 && b.EsElArtista(partes[reales[0]]);
+
+    private static readonly Regex NoPalabra = new(@"[^\p{L}\p{Nd}]+", RegexOptions.Compiled);
+
+    /// <summary>Las palabras de un texto, en minúsculas y sin acentos.</summary>
+    private static string[] Palabras(string s)
+        => NoPalabra.Split(TextUtils.RemoveDiacritics(s).ToLowerInvariant()).Where(p => p.Length > 0).ToArray();
+
+    /// <summary>Una lista de palabras empieza como la otra (la más corta es el principio de la más larga).</summary>
+    private static bool MismoPrincipio(string[] a, string[] b)
+    {
+        var n = Math.Min(a.Length, b.Length);
+        if (n == 0) return false;
+        for (var i = 0; i < n; i++)
+            if (!string.Equals(a[i], b[i], StringComparison.Ordinal)) return false;
+        return true;
     }
 
     // Un artículo o una preposición delante dice que la palabra es parte del nombre de la canción, no
@@ -276,6 +385,9 @@ public static class EstiloDeVersion
 
     private static string Letras(string s) => new(s.Where(char.IsLetter).ToArray());
 
+    /// <summary>Por qué un estilo no es el de la versión, según lo que lleva delante (ver <see cref="Apartar"/>).</summary>
+    private enum Apartado { No, Articulo, Remixer }
+
     /// <summary>
     /// Lo que va justo delante dice que la palabra no es el estilo de la versión:
     ///  · un artículo o una preposición: es parte del nombre de la canción;
@@ -284,70 +396,90 @@ public static class EstiloDeVersion
     ///    «(Intro DJ Mambo Remix)», «(95 BPM DJ Mambo Remix)»), cuando hay un separador de créditos
     ///    («(DJ Mambo &amp; DJ Trap Remix)», «(DJ Pepe x DJ Salsa Remix)») o cuando, fuera de paréntesis,
     ///    lo de delante es el nombre del tema («Gasolina DJ Mambo Remix», «Artista - Gasolina DJ Mambo
-    ///    Remix» en el nombre del archivo). Detrás de otro nombre, en cambio, lo cierran, y el estilo sí
-    ///    lo es: «(Alex Gramage DJ Mambo Remix)», «- Alex Gramage DJ Mambo Remix», visto al validar en
-    ///    una biblioteca real.
+    ///    Remix»; ver <see cref="PartesDelNombre"/>). Detrás de otro nombre, en cambio, lo cierran, y el
+    ///    estilo sí lo es: «(Alex Gramage DJ Mambo Remix)», «- Alex Gramage DJ Mambo Remix», visto al
+    ///    validar en una biblioteca real.
     /// </summary>
-    private static bool NoEsElEstilo(string texto, int posicion, bool enNombreDelTema)
+    private static Apartado Apartar(string texto, int posicion, bool enNombreDelTema)
     {
         var antes = texto[..posicion].TrimEnd();
         var i = antes.Length;
         while (i > 0 && char.IsLetter(antes[i - 1])) i--;
         // Solo una palabra entera (revisión 3): la «A» de una clave Camelot («8A Reggaeton Remix») no es
         // la preposición.
-        if (i < antes.Length && (i == 0 || !char.IsLetterOrDigit(antes[i - 1])) && Articulos.Contains(antes[i..])) return true;
+        if (i < antes.Length && (i == 0 || !char.IsLetterOrDigit(antes[i - 1])) && Articulos.Contains(antes[i..])) return Apartado.Articulo;
 
         var palabra = UltimaPalabra(antes);
-        if (!Prefijos.Contains(Letras(palabra))) return false;
+        if (!Prefijos.Contains(Letras(palabra))) return Apartado.No;
         var delante = antes[..^palabra.Length];
-        return enNombreDelTema || SoloAcompana(delante) || TrasSeparador(delante);
+        return enNombreDelTema || SoloAcompana(delante) || TrasSeparador(delante) ? Apartado.Remixer : Apartado.No;
     }
 
+    /// <summary>
+    /// El estilo de un acierto del contexto (a) vale: no va tras un artículo, ni tras un «DJ» o un «MC» que
+    /// abren un nombre (entonces se anota en <see cref="Busqueda.Remixers"/>), ni es «Disco» junto a la
+    /// palabra de versión, ni otro campo lo ha dado ya por nombre de remixer.
+    /// </summary>
+    private static bool ValeDelante(string texto, Match a, bool enNombreDelTema, Busqueda b)
+    {
+        var escrito = a.Groups["estilo"].Value;
+        switch (Apartar(texto, a.Index, enNombreDelTema))
+        {
+            case Apartado.Articulo: return false;
+            case Apartado.Remixer: b.Remixers.Add(Nombre(escrito)); return false;
+        }
+        return ValeJuntoAVersion(escrito) && Libre(escrito, b);
+    }
+
+    /// <summary>Ningún campo ha dado ya ese estilo por el nombre de quien hizo la versión.</summary>
+    private static bool Libre(string escrito, Busqueda b) => b.Remixers.Count == 0 || !b.Remixers.Contains(Nombre(escrito));
+
     /// <summary>Dentro de un paréntesis o un corchete valen los tres contextos.</summary>
-    private static (string Estilo, string Texto)? EnParentesis(string fragmento)
+    private static (string Estilo, string Texto)? EnParentesis(string fragmento, Busqueda b)
     {
         if (!AlgunEstilo.IsMatch(fragmento) || Transicion.IsMatch(fragmento)) return null;
         foreach (Match a in EstiloYVersion.Matches(fragmento))
-            if (!NoEsElEstilo(fragmento, a.Index, enNombreDelTema: false) && ValeJuntoAVersion(a.Groups["estilo"].Value))
+            if (ValeDelante(fragmento, a, enNombreDelTema: false, b))
                 return (a.Groups["estilo"].Value, a.Value.Trim());
         var limpio = Limpio(fragmento);
-        if (VersionYEstilo.Match(limpio) is { Success: true } b && ValeJuntoAVersion(b.Groups["estilo"].Value))
-            return (b.Groups["estilo"].Value, b.Value.Trim());
-        if (ConAdjetivo(limpio) is { } adjetivo) return adjetivo;
-        if (SoloEstilo.Match(limpio) is { Success: true } c) return (c.Groups["estilo"].Value, "(" + fragmento.Trim() + ")");
+        if (VersionYEstilo.Match(limpio) is { Success: true } v && ValeJuntoAVersion(v.Groups["estilo"].Value) && Libre(v.Groups["estilo"].Value, b))
+            return (v.Groups["estilo"].Value, v.Value.Trim());
+        if (ConAdjetivo(limpio, b) is { } adjetivo) return adjetivo;
+        if (SoloEstilo.Match(limpio) is { Success: true } c && Libre(c.Groups["estilo"].Value, b))
+            return (c.Groups["estilo"].Value, "(" + fragmento.Trim() + ")");
         return null;
     }
 
     /// <summary>El contexto (b) con la forma adjetiva («Versión Flamenca» → Flamenco), en un fragmento ya limpio.</summary>
-    private static (string Estilo, string Texto)? ConAdjetivo(string limpio)
+    private static (string Estilo, string Texto)? ConAdjetivo(string limpio, Busqueda b)
     {
         if (VersionYAdjetivo.Match(limpio) is not { Success: true } m) return null;
         var escrito = m.Groups["adjetivo"].Value;
         foreach (var (patron, estilo) in NombresAdjetivos)
-            if (patron.IsMatch(escrito)) return (estilo, m.Value.Trim());
+            if (patron.IsMatch(escrito)) return Libre(estilo, b) ? (estilo, m.Value.Trim()) : null;
         return null;
     }
 
     /// <summary>
     /// Fuera de los paréntesis: (a) si va detrás de algo (el nombre del tema), tras un guion o al final;
-    /// (b) solo tras un guion. <paramref name="enNombreDelTema"/>: el trozo es el nombre del tema (o
-    /// «Artista - Título» en el nombre del archivo), y un «DJ» dentro abre el nombre del remixer.
+    /// (b) solo tras un guion. <paramref name="enNombreDelTema"/>: el trozo es parte del nombre del tema
+    /// (ver <see cref="PartesDelNombre"/>), y un «DJ» dentro abre el nombre del remixer.
     /// </summary>
-    private static (string Estilo, string Texto)? FueraDeParentesis(string trozo, bool trasGuion, bool enNombreDelTema)
+    private static (string Estilo, string Texto)? FueraDeParentesis(string trozo, bool trasGuion, bool enNombreDelTema, Busqueda b)
     {
         if (!AlgunEstilo.IsMatch(trozo) || Transicion.IsMatch(trozo)) return null;
         foreach (Match a in EstiloYVersion.Matches(trozo))
         {
-            if (NoEsElEstilo(trozo, a.Index, enNombreDelTema) || !ValeJuntoAVersion(a.Groups["estilo"].Value)) continue;
+            if (!ValeDelante(trozo, a, enNombreDelTema, b)) continue;
             var delante = trozo[..a.Index].Trim().Length > 0;
             var alFinal = Limpio(trozo[(a.Index + a.Length)..]).Length == 0;
             if (trasGuion || delante || alFinal) return (a.Groups["estilo"].Value, a.Value.Trim());
         }
         if (!trasGuion) return null;
         var limpio = Limpio(trozo);
-        if (VersionYEstilo.Match(limpio) is { Success: true } b && ValeJuntoAVersion(b.Groups["estilo"].Value))
-            return (b.Groups["estilo"].Value, b.Value.Trim());
-        return ConAdjetivo(limpio);
+        if (VersionYEstilo.Match(limpio) is { Success: true } v && ValeJuntoAVersion(v.Groups["estilo"].Value) && Libre(v.Groups["estilo"].Value, b))
+            return (v.Groups["estilo"].Value, v.Value.Trim());
+        return ConAdjetivo(limpio, b);
     }
 
     private static string Limpio(string s) => Regex.Replace(Morralla.Replace(s, " ").Replace(',', ' '), @"\s+", " ").Trim();

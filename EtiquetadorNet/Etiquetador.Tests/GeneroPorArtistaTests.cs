@@ -464,7 +464,13 @@ public class GeneroPorArtistaTests : IDisposable
             Con("Gasolina", "01 - Daddy Yankee - Gasolina (Extended DJ Mambo Remix)"),
             Con("Gasolina (Intro DJ Mambo Remix)", "Daddy Yankee - Gasolina (Intro DJ Mambo Remix)"),
             Con("Gasolina (DJ Mambo & DJ Trap Remix)", "Daddy Yankee - Gasolina (DJ Mambo & DJ Trap Remix)"),
-            // Revisión 3: «b2b» y los separadores sin espacio.
+            // Revisión 3: «Artista - Título» en el título, el número de pista o el álbum en el nombre del
+            // archivo, «b2b» y los separadores sin espacio.
+            Con("Daddy Yankee - Gasolina DJ Mambo Remix", "Daddy Yankee - Gasolina DJ Mambo Remix"),
+            Con("Daddy Yankee - Gasolina MC Trap Edit", "Daddy Yankee - Gasolina MC Trap Edit"),
+            Con("Gasolina (DJ Mambo Remix)", "Daddy Yankee - Barrio Fino - 01 - Gasolina DJ Mambo Remix"),
+            Con("Gasolina (DJ Mambo Remix)", "Daddy Yankee - 01 - Gasolina DJ Mambo Remix"),
+            Con("Gasolina", "Daddy Yankee - 02 - Gasolina DJ Mambo Remix"),
             Con("Tema (DJ Pepe b2b DJ Trap Remix)", "Daddy Yankee - Tema (DJ Pepe b2b DJ Trap Remix)"),
             Con("Tema (DJ Pepe B2B MC Salsa Edit)", "Daddy Yankee - Tema (DJ Pepe B2B MC Salsa Edit)"),
             Con("Tema (DJ Pepe&DJ Mambo Remix)", "Daddy Yankee - Tema (DJ Pepe&DJ Mambo Remix)"),
