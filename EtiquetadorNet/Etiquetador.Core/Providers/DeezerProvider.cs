@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Etiquetador.Core.Analysis;
+using Etiquetador.Core.Dj;
 
 namespace Etiquetador.Core.Providers;
 
@@ -107,21 +108,33 @@ public sealed class DeezerProvider
         };
     }
 
-    /// <summary>Género del álbum (Get-DeezerGenre).</summary>
+    /// <summary>
+    /// Género del álbum para la etiqueta (Get-DeezerGenre), en inglés; ver <see cref="GeneroDelAlbum"/>.
+    /// Pedir los nombres en inglés (Accept-Language) no bastaría: la caché guarda cada respuesta por su
+    /// URL hasta 30 días, en el idioma en que llegó.
+    /// </summary>
     public async Task<string> AlbumGenreAsync(string albumId, CancellationToken ct = default)
     {
-        if (string.IsNullOrEmpty(albumId)) return "";
-        var al = await _api.GetAsync("https://api.deezer.com/album/" + albumId, ct: ct).ConfigureAwait(false);
-        var data = J.A(J.P(J.P(al, "genres"), "data"));
-        if (data is { Count: > 0 })
-        {
-            var names = new List<string>();
-            foreach (var g in data) { var s = J.S(J.P(g, "name")); if (s.Length > 0) names.Add(s); }
-            var picked = GenrePicker.Pick(null, names);
-            return picked.Length > 0 ? picked : (names.Count > 0 ? names[0] : "");
-        }
-        return "";
+        var generos = await AlbumGenresAsync(albumId, ct).ConfigureAwait(false);
+        var genero = GeneroDelAlbum(generos);
+        if (generos.Count > 0)
+            Log?.Detail($"      dz: géneros del álbum [{string.Join(", ", generos.Select(g => g.Nombre))}] -> '{genero}'");
+        return genero;
     }
+
+    /// <summary>
+    /// El género que se escribe para un álbum, a partir de sus géneros en el orden en que los da Deezer:
+    /// el subgénero concreto que propondría el Asistente (<see cref="GeneroDeezer.Traducir"/>) y, si no
+    /// hay, el que elige <see cref="GenrePicker.PickDeezer"/> entre sus nombres en inglés. "" si no trae
+    /// ninguno.
+    ///
+    /// Se traduce por el identificador porque el nombre llega en el idioma de la IP. Desde España llegan
+    /// «Latino» o «Música Latina», que el selector no reconocía, y un álbum [Rap/Hip Hop, Latino] se
+    /// etiquetaba «Hip Hop», también en canciones de reggaeton.
+    /// </summary>
+    public static string GeneroDelAlbum(IReadOnlyList<(int Id, string Nombre)> generos)
+        => GeneroDeezer.Traducir(generos)
+           ?? GenrePicker.PickDeezer(generos.Select(g => GeneroDeezer.EnIngles(g.Id, g.Nombre)).Where(n => n.Length > 0).ToList());
 
     /// <summary>
     /// Los géneros del álbum con su identificador de Deezer, en el orden en que los da. El nombre llega
