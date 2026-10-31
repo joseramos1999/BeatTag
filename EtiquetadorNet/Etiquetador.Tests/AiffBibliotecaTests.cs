@@ -123,12 +123,13 @@ public class AiffBibliotecaTests : IDisposable
         LibraryScannerTests.WriteMinAiff(aiff);
         using (var f = TagLib.File.Create(aiff)) { f.Tag.Title = "Stop It"; f.Save(); }
 
-        // La caché como la dejó una versión que no conocía los AIFF: solo el MP3.
+        // La caché como la dejó una versión que no conocía los AIFF: solo el MP3. Con BPM, porque una
+        // entrada de entonces con BPM 0 se relee una vez (ver ScanCache.BpmDudoso).
         var fi = new FileInfo(mp3);
         var cacheFile = Path.Combine(_dir, "scan-cache.json");
         File.WriteAllText(cacheFile, JsonSerializer.Serialize(new Dictionary<string, ScanCache.Entry>
         {
-            [mp3] = new() { M = fi.LastWriteTimeUtc.Ticks, S = fi.Length, Ti = "Título que solo está en la caché" },
+            [mp3] = new() { M = fi.LastWriteTimeUtc.Ticks, S = fi.Length, Ti = "Título que solo está en la caché", Bp = 128 },
         }));
 
         var store = new LibraryStore(new AppConfig { Folders = new() { musica } }, () => { }, new ScanCache(cacheFile));
