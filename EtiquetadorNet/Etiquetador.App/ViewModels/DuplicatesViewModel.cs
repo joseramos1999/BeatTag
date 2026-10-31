@@ -846,9 +846,15 @@ public partial class DuplicatesViewModel : ScanViewModelBase
             // Siempre con las otras ediciones del mismo tema (A14): salen distinguidas y cada una
             // conserva su copia, así que no estorban a la limpieza. Las ediciones de DJ que el
             // usuario excluye ya no están en la lista, así que tampoco aparecen como ediciones.
+            // ForceYielding: la continuación vuelve siempre por la cola de la interfaz, DETRÁS de los avisos
+            // de avance. Si la comparación acababa antes de llegar a este await (una biblioteca de pocas
+            // canciones), seguía en el acto, pintaba el resultado, y después llegaban los avisos que
+            // esperaban en la cola y dejaban «Comparando el audio: 3 de 3 canciones…» con la página libre.
             var res = await Task.Run(
-                () => FingerprintDuplicates.Agrupar(lista, t => _huellas.Get(t.FilePath), incluirEdiciones: true,
-                                                    AudioFingerprint.UmbralIgual, avance, ct), ct);
+                () => AgruparPorAudio?.Invoke(lista, avance, ct)
+                      ?? FingerprintDuplicates.Agrupar(lista, t => _huellas.Get(t.FilePath), incluirEdiciones: true,
+                                                       AudioFingerprint.UmbralIgual, avance, ct), ct)
+                .ConfigureAwait(ConfigureAwaitOptions.ContinueOnCapturedContext | ConfigureAwaitOptions.ForceYielding);
 
             // El usuario puede haber cambiado de criterio mientras esto corría: no pisar la tabla.
             if (SelectedMode.Value != DuplicateMode.Fingerprint) return;
@@ -861,6 +867,14 @@ public partial class DuplicatesViewModel : ScanViewModelBase
         catch (Exception e) { Status = "No se pudo comparar el audio: " + e.Message; }
         finally { _agrupando = false; SoltarOcupada(); }
     }
+
+    /// <summary>
+    /// Cómo se agrupa por audio; sin nada, <see cref="FingerprintDuplicates.Agrupar"/> con las huellas
+    /// guardadas. Las pruebas ponen uno que se queda parado hasta que lo sueltan, para mirar la página
+    /// con la comparación en marcha: con tres canciones la de verdad termina en el acto, y la prueba
+    /// fallaba a ratos en la CI cuando acababa antes de poder mirarla.
+    /// </summary>
+    internal Func<List<Track>, IProgress<(int Hechas, int Total)>, CancellationToken, ResultadoPorAudio>? AgruparPorAudio { get; init; }
 
     private void RecontarMarcadas() => Marcadas = Rows.Count(r => r.Marcada);
 
