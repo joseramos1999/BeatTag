@@ -343,30 +343,32 @@ public class HuellasDuplicadosTests
 
     // A7. Cancelar tiene que parar los fpcalc en marcha EN EL ACTO. Antes se dejaba de vaciar su
     // salida y se esperaba su minuto de plazo con WaitForExit, que no mira el token: la barra seguía
-    // ocupada y el registro se llenaba de falsos «no respondió». Aquí el fpcalc de mentira tarda
-    // unos 2 s y deja una marca al terminar; si la marca aparece, es que nadie lo paró.
+    // ocupada y el registro se llenaba de falsos «no respondió».
+    //
+    // El fpcalc de mentira no termina por su cuenta (ver ProgramaQueEspera): la pasada solo vuelve si
+    // alguien lo para, la cancelación enseguida o el plazo de fpcalc al minuto, y la línea va en la
+    // mitad del plazo. Antes eran 1,8 s contra un fpcalc que acababa solo a los 2 s, y en 4 núcleos
+    // con la CPU ocupada la pasada llegó a volver a los 1,7 s. MEDIDO: la cancelación pedida para los
+    // 400 ms llegó a los 1,3 s, porque su temporizador corre en el pool, y lanzar cada fpcalc costó
+    // hasta 0,7 s.
     [Fact]
     public async Task Cancelar_el_analisis_detiene_fpcalc_al_momento()
     {
         var dir = Mp3Fixture.NewTempDir();
         try
         {
-            var marca = Path.Combine(dir, "termino.txt");
-            var fpcalc = ProgramaFalso(dir, "fpcalc",
-                $"ping -n 3 127.0.0.1 >nul\r\necho listo>> \"{marca}\"",
-                $"sleep 2; echo listo >> '{marca}'");
+            var fpcalc = new ProgramaQueEspera(dir, "fpcalc");
             var canciones = Enumerable.Range(0, 3).Select(i => Cancion(dir, $"c{i}.mp3")).ToList();
-            var fp = new FingerprintScanner(Path.Combine(dir, "huellas.json"), fpcalc);
+            var fp = new FingerprintScanner(Path.Combine(dir, "huellas.json"), fpcalc.Ruta);
 
             using var cts = new CancellationTokenSource(400);
             var reloj = Stopwatch.StartNew();
             await fp.ScanAsync(canciones, force: false, progreso: null, cts.Token);
             reloj.Stop();
 
-            Assert.True(reloj.Elapsed < TimeSpan.FromSeconds(1.8),
-                $"la pasada tardó {reloj.Elapsed.TotalSeconds:0.0} s en volver tras cancelar");
-            await Task.Delay(3500);
-            Assert.False(File.Exists(marca), "algún fpcalc siguió vivo después de cancelar");
+            Assert.True(reloj.Elapsed < TimeSpan.FromMilliseconds(FingerprintScanner.TiempoLimiteMs / 2),
+                $"la pasada tardó {reloj.Elapsed.TotalSeconds:0.0} s en volver tras cancelar: esperó al plazo de fpcalc en vez de pararlo");
+            Assert.False(await fpcalc.SiguioVivoAsync(), "algún fpcalc siguió vivo después de cancelar");
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
