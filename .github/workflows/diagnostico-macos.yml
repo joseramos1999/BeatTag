@@ -2,77 +2,41 @@ name: Diagnóstico macOS (temporal)
 
 # TEMPORAL: se quita antes de unir la rama.
 #
-# El latido demostró que el equipo no se para: mueren a la vez Runner.Listener, Runner.Worker y el
-# proceso de las pruebas, todos del MISMO grupo de procesos (el de /opt/hca/start_hca.sh), y solo
-# sobrevive el latido, que ignora SIGHUP y SIGTERM.
+# Causa encontrada y reproducida: Process.Kill(entireProcessTree: true) para los procesos con
+# SIGSTOP, y con el grupo de procesos huérfano el núcleo manda SIGHUP a todo el grupo, que es también
+# el del runner. La aplicación ya mata sin parar a nadie (Procesos.Matar).
 #
-# Sospecha: Process.Kill(entireProcessTree: true) de .NET para primero el proceso con SIGSTOP. Si
-# el grupo queda huérfano mientras hay un proceso parado, el núcleo manda SIGHUP + SIGCONT a todo el
-# grupo (regla POSIX de los grupos huérfanos), y eso se lleva el runner.
-#
-# Reproducción sin nada de la aplicación: un «sleep» PARADO y huérfano en el grupo del runner, y
-# luego procesos cortos que acaban como hijos de launchd. Control: lo mismo sin pararlo.
+# Comprobación: las mismas pruebas que la CI, sin más cambios, en siete equipos por vuelta. Antes
+# moría el runner en uno de cada ocho equipos.
 on:
   push:
     branches: [ claude/ci-macos-cuelgue ]
 
 permissions:
   contents: read
-  statuses: write   # solo para el latido
 
 jobs:
-  repro:
-    name: ${{ matrix.modo }} ${{ matrix.intento }}
+  pruebas:
+    name: comprobación ${{ matrix.intento }}
     runs-on: macos-latest
-    timeout-minutes: 6
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { modo: parado, intento: 1 }
-          - { modo: parado, intento: 2 }
-          - { modo: control, intento: 1 }
+        intento: [ 1, 2, 3, 4, 5, 6, 7 ]
+    defaults:
+      run:
+        working-directory: EtiquetadorNet
     steps:
-      - name: Latido independiente
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: '9.0.x'
+      - run: dotnet restore
+      - run: dotnet build -c Release --no-restore
+      - name: Test
         shell: bash
-        env:
-          TOKEN: ${{ github.token }}
-          NOMBRE: ${{ github.run_attempt }}-${{ matrix.modo }}-${{ matrix.intento }}
-        run: |
-          cat > "$RUNNER_TEMP/latido.sh" <<'EOF'
-          #!/bin/bash
-          trap '' HUP PIPE TERM INT
-          inicio=$(date +%s)
-          for i in $(seq 1 150); do
-            w=$(pgrep -f Runner.Worker > /dev/null && echo vivo || echo MUERTO)
-            l=$(pgrep -f Runner.Listener > /dev/null && echo vivo || echo MUERTO)
-            desc="$(( $(date +%s) - inicio )) s · worker $w · listener $l"
-            printf '{"state":"pending","context":"latido/%s","description":"%s"}' "$NOMBRE" "$desc" \
-              | curl -s -o /dev/null -m 10 -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
-                  "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d @-
-            sleep 2
-          done
-          EOF
-          chmod +x "$RUNNER_TEMP/latido.sh"
-          nohup "$RUNNER_TEMP/latido.sh" > /dev/null 2>&1 &
-          disown
-          sleep 3
-      - name: Reproducir
-        shell: bash
-        run: |
-          set +e
-          ps -o pid,ppid,pgid,stat,command -p $$
-          if [ "${{ matrix.modo }}" = parado ]; then
-            ( sleep 120 & kill -STOP $! ; exit 0 )   # parado, y su padre termina: queda huérfano en el grupo
-          else
-            ( sleep 120 & exit 0 )                     # control: huérfano igual, pero sin parar
-          fi
-          sleep 1
-          ps -axo pid,ppid,pgid,stat,command | grep "sleep 120" | grep -v grep
-          # Procesos cortos que acaban como hijos de launchd: al terminar, el núcleo vuelve a mirar si
-          # el grupo ha quedado huérfano.
-          for i in $(seq 1 40); do ( sleep 0.1 & ); sleep 0.05; done
-          sleep 3
-          echo "El runner sigue vivo"
-          pkill -CONT -f "sleep 120"; pkill -f "sleep 120"
-          exit 0
+        timeout-minutes: 8
+        run: ../scripts/pruebas-vigiladas.sh

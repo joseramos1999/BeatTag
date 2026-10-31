@@ -28,8 +28,6 @@ iniciales="${1:-}"
 for ((i = 0; i < ${#iniciales}; i++)); do
   filtro="${filtro:+$filtro|}FullyQualifiedName~Etiquetador.Tests.${iniciales:i:1}"
 done
-# Para diagnosticar: un filtro de dotnet test entero, que sustituye al de las iniciales.
-if [ -n "${FILTRO_PRUEBAS:-}" ]; then filtro="$FILTRO_PRUEBAS"; fi
 
 es_mac=false
 if [ "$(uname -s)" = Darwin ]; then es_mac=true; fi
