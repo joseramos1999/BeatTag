@@ -253,7 +253,7 @@ public sealed class Fingerprint
         }
         catch (OperationCanceledException)
         {
-            try { proc.Kill(entireProcessTree: true); } catch { /* ya había terminado */ }
+            Procesos.Matar(proc);
             // Muerto el proceso se cierran sus tuberías y las lecturas acaban; se espera un poco a
             // que lo hagan para no dejar nada a medias.
             try { await Task.WhenAll(outTask, errTask).WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); } catch { }

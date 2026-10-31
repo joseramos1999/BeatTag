@@ -196,7 +196,7 @@ internal static class LlaveroMac
         var error = p.StandardError.ReadToEndAsync();
         if (!p.WaitForExit(EsperaMaxima))
         {
-            try { p.Kill(entireProcessTree: true); } catch { }
+            Procesos.Matar(p);
             throw new TimeoutException("El Llavero de macOS no respondió en 15 s (¿está esperando a que se desbloquee?).");
         }
         p.WaitForExit();   // asegura que la salida redirigida se ha leído entera

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Etiquetador.Core;
 using NAudio.Wave;
 
 namespace Etiquetador.App.Services;
@@ -167,7 +168,7 @@ public sealed class AudioPreview : IDisposable
 
         if (ct.IsCancellationRequested)
         {
-            try { if (!p.HasExited) p.Kill(entireProcessTree: true); } catch { }
+            Procesos.Matar(p);
             p.Dispose();
             if (ReferenceEquals(_procMac, p)) { _procMac = null; _tmpMac = null; }
             BorrarSiExiste(tmp);
@@ -230,7 +231,7 @@ public sealed class AudioPreview : IDisposable
         var proc = Interlocked.Exchange(ref _procMac, null);
         if (proc != null)
         {
-            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { }
+            Procesos.Matar(proc);
             proc.Dispose();
             BorrarSiExiste(Interlocked.Exchange(ref _tmpMac, null));
         }
