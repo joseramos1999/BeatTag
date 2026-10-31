@@ -519,10 +519,16 @@ public static class OrganizarPorGenero
             return es;
         }
         // Una lista no es otra forma de escribir su primer género: «Salsa, Vol. 1» o «Reggaeton, Dembow» son
-        // carpetas tuyas. Tampoco un nombre con letras que la clave no conserva: «邦楽 Pop» no es «Pop».
+        // carpetas tuyas. Tampoco un nombre con letras o símbolos que la clave no conserva («邦楽 Pop», «Pop
+        // 🇯🇵», «🔥 Reggaeton»): fuera de lo ASCII solo se admiten espacios y signos de puntuación
+        // («Electro–Latino»). Ni una carpeta que por su nombre marca el tipo de pieza («Mash Up» con el
+        // género «Mash-Up»): quitarla de la ruta cambiaría lo que es la canción, que se quedaría en su sitio
+        // en vez de moverse con su carpeta.
+        var neutra = LoQueDiceLaRuta.De("x");
         bool OtraFormaDeUnGenero(string nombre)
             => !GenerosIa.EsLista(nombre)
-               && TextUtils.RemoveDiacritics(nombre).All(c => !char.IsLetter(c) || char.IsAsciiLetter(c))
+               && TextUtils.RemoveDiacritics(nombre).All(c => char.IsAscii(c) || EsEspacioOPuntuacion(c))
+               && LoQueDiceLaRuta.De(Path.Combine(nombre, "x")) == neutra
                && GeneroPorReglas.Normalizado(nombre) is { } n && forma.ContainsKey(GeneroPorReglas.ClaveGenero(n));
 
         var raices = raicesHabilitadas.Where(r => !string.IsNullOrWhiteSpace(r)).OrderByDescending(r => r.Length).ToList();
@@ -794,6 +800,12 @@ public static class OrganizarPorGenero
         /// <summary>Por género, las canciones que se organizan: las que se mueven y las que ya están en la carpeta de su género.</summary>
         public Dictionary<string, int> Organizadas { get; } = new(StringComparer.Ordinal);
     }
+
+    /// <summary>Un espacio o un signo de puntuación de cualquier alfabeto («–», «’», «¡»), no un símbolo ni un emoji.</summary>
+    private static bool EsEspacioOPuntuacion(char c) => CharUnicodeInfo.GetUnicodeCategory(c)
+        is UnicodeCategory.SpaceSeparator or UnicodeCategory.DashPunctuation or UnicodeCategory.ConnectorPunctuation
+        or UnicodeCategory.OpenPunctuation or UnicodeCategory.ClosePunctuation or UnicodeCategory.InitialQuotePunctuation
+        or UnicodeCategory.FinalQuotePunctuation or UnicodeCategory.OtherPunctuation;
 
     /// <summary>
     /// Las subcarpetas de origen que se conservan dentro del género. Si la canción ya está dentro del

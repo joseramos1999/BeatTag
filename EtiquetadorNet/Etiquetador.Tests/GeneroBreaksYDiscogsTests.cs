@@ -189,10 +189,46 @@ public class GeneroBreaksYDiscogsTests
     [InlineData("2023, Reggaeton", "Reggaeton")]
     [InlineData("邦楽 Pop", "Pop")]
     [InlineData("Русский Rap", "Hip Hop")]
+    // Revisión 4: los emojis, las banderas y los símbolos tampoco son letras para char.IsLetter.
+    [InlineData("Pop 🇯🇵", "Pop")]
+    [InlineData("Reggaeton ★", "Reggaeton")]
+    [InlineData("🔥 Reggaeton", "Reggaeton")]
+    [InlineData("Reggaeton ①", "Reggaeton")]
     public void Una_carpeta_tuya_que_nombra_un_genero_entre_otras_cosas_se_conserva(string carpeta, string genero)
     {
         var plan = EnLaRaiz(EnCarpeta(Path.Combine(carpeta, "Pack"), "a.mp3", genero));
         Assert.Equal(Path.Combine(Raiz, genero, carpeta, "Pack", "a.mp3"), Assert.Single(plan.Movimientos).Destino);
+    }
+
+    // Los signos de puntuación de otros alfabetos sí: «Electro–Latino», con raya, es Electro Latino.
+    [Fact]
+    public void Una_raya_o_un_apostrofo_tipografico_siguen_siendo_otra_forma_del_genero()
+    {
+        var plan = EnLaRaiz(EnCarpeta(Path.Combine("Electro–Latino", "Pack"), "a.mp3", "Electro Latino"),
+                            EnCarpeta(Path.Combine("Drum ’n’ Bass", "Pack"), "b.mp3", "Drum & Bass"));
+
+        Assert.Contains(plan.Movimientos, m => m.Destino == Path.Combine(Raiz, "Electro Latino", "Pack", "a.mp3"));
+        Assert.Contains(plan.Movimientos, m => m.Destino == Path.Combine(Raiz, "Drum & Bass", "Pack", "b.mp3"));
+    }
+
+    // Revisión 4: una carpeta que por su nombre marca el tipo de pieza no se quita de la ruta aunque escriba
+    // de otra forma un género de la biblioteca: con «Dejar en su sitio…» desmarcada, sus canciones se
+    // mueven con ella, como antes, en vez de quedarse por cambiar de tipo.
+    [Fact]
+    public void Una_carpeta_de_mashups_con_otra_forma_de_un_genero_se_mueve_con_sus_canciones()
+    {
+        var canciones = new[]
+        {
+            EnCarpeta(Path.Combine("Mash Up", "Pack"), "a.mp3", "Reggaeton"),
+            EnCarpeta("Otros", "m.mp3", "Mash-Up"),
+        };
+        var disco = new DiscoEnMemoria();
+        foreach (var t in canciones) disco.Archivo(t.FilePath);
+
+        var plan = OrganizarPorGenero.Planear(canciones, new[] { Raiz },
+            new OpcionesOrganizar { Destino = DestinoOrganizar.EnLaRaiz, ConservarEstructura = true, DejarHerramientas = false }, disco);
+
+        Assert.Contains(plan.Movimientos, m => m.Destino == Path.Combine(Raiz, "Reggaeton", "Mash Up", "Pack", "a.mp3"));
     }
 
     [Fact]
