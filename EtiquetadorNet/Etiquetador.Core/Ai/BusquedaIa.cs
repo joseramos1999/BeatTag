@@ -231,7 +231,7 @@ public static class BusquedaIa
             var b = int.Parse(br.Groups[2].Success ? br.Groups[2].Value : br.Groups[4].Value, CultureInfo.InvariantCulture);
             if (BpmValido(a) && BpmValido(b)) Anadir("bpm", $"{Math.Min(a, b)}-{Math.Max(a, b)}", br);
         }
-        else if (BpmSuelto.Match(texto) is { Success: true } bs && int.TryParse(bs.Groups[1].Value, out var bpm) && BpmValido(bpm))
+        else if (BpmSuelto.Match(texto) is { Success: true } bs && int.TryParse(bs.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var bpm) && BpmValido(bpm))
             Anadir("bpm", $"{bpm - 2}-{bpm + 2}", bs);   // «a 128 bpm» admite el margen de un pitch pequeño
 
         if (AniosRango.Match(textoRangos) is { Success: true } ar)
@@ -371,7 +371,7 @@ public static class BusquedaIa
                     res.Add(IdiomasValidos.Contains(id) ? Dentro("idioma", id) : Fuera("Idioma no válido."));
                     break;
                 case "bpm_min" or "bpm_max":
-                    if (int.TryParse(valor, out var b) && BpmValido(b))
+                    if (int.TryParse(valor, NumberStyles.Integer, CultureInfo.InvariantCulture, out var b) && BpmValido(b))
                     {
                         if (campo == "bpm_min") bpmMin = b; else bpmMax = b;
                         citaBpm = cita;

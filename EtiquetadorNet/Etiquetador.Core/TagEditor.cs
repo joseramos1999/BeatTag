@@ -19,7 +19,7 @@ public static class TagEditor
                 f.Tag.Album ?? "",
                 f.Tag.JoinedGenres ?? "",
                 f.Tag.Year,
-                f.Tag.BeatsPerMinute,
+                BpmEtiqueta.Leer(f.Tag),
                 f.Tag.Comment ?? "");
         }
         catch { return new TagValues("", "", "", "", 0, 0, ""); }
@@ -69,9 +69,10 @@ public static class TagEditor
     public static Dictionary<string, Pipeline.FieldChange> PonerBpmKey(TagLib.File f, uint bpm, string? key, bool overwrite)
     {
         var log = new Dictionary<string, Pipeline.FieldChange>();
-        if (bpm > 0 && (overwrite || f.Tag.BeatsPerMinute == 0))
+        var bpmActual = BpmEtiqueta.Leer(f.Tag);
+        if (bpm > 0 && (overwrite || bpmActual == 0))
         {
-            log["Bpm"] = Pipeline.FieldChange.Num(f.Tag.BeatsPerMinute, bpm);
+            log["Bpm"] = Pipeline.FieldChange.Num(bpmActual, bpm);
             f.Tag.BeatsPerMinute = bpm;
         }
         if (!string.IsNullOrWhiteSpace(key) && (overwrite || string.IsNullOrWhiteSpace(f.Tag.InitialKey)))

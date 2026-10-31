@@ -64,7 +64,7 @@ public sealed class DeezerProvider
         if (tk != null)
         {
             var b = J.D(J.P(tk, "bpm"));
-            if (b > 0) bpm = ((int)Math.Round(b)).ToString();
+            if (b > 0) bpm = ((int)Math.Round(b)).ToString(System.Globalization.CultureInfo.InvariantCulture);
             var rd = J.S(J.P(tk, "release_date"));
             var my = Regex.Match(rd, @"^(\d{4})");
             if (my.Success) year = my.Groups[1].Value;
@@ -99,7 +99,7 @@ public sealed class DeezerProvider
             Artist = artistFull,
             Album = J.S(J.P(pick, "album", "title")),
             Year = year,
-            Bpm = bpm.Length > 0 ? int.Parse(bpm) : 0,
+            Bpm = bpm.Length > 0 ? int.Parse(bpm, System.Globalization.CultureInfo.InvariantCulture) : 0,
             CoverUrl = J.S(J.P(pick, "album", "cover_big")),
             AlbumId = J.S(J.P(pick, "album", "id")),
             Score = bestSc < -900 ? 0 : Math.Round(bestSc, 1),

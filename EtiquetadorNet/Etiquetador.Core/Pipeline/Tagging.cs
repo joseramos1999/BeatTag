@@ -68,12 +68,12 @@ public static class Tagging
                 if ((tag.RemixedBy ?? "") == remixer) log["Remixer"] = FieldChange.Str(antes, remixer);
             }
         }
-        if (fields.Bpm && info.Bpm.Length > 0 && TextUtils.Rx(@"^\d+$").IsMatch(info.Bpm) && EscribeBpm(info, tag.BeatsPerMinute, overwrite))
+        var bpmActual = BpmEtiqueta.Leer(tag);
+        if (fields.Bpm && BpmEtiqueta.DeTexto(info.Bpm) is var nb and > 0 && EscribeBpm(info, bpmActual, overwrite))
         {
             try
             {
-                var nb = uint.Parse(info.Bpm);
-                log["Bpm"] = FieldChange.Num(tag.BeatsPerMinute, nb);
+                log["Bpm"] = FieldChange.Num(bpmActual, nb);
                 tag.BeatsPerMinute = nb;
             }
             catch { /* algunos formatos no admiten BPM */ }
@@ -304,8 +304,8 @@ public static class Tagging
         if (fields.Year && TextUtils.Rx(@"^\d{4}$").IsMatch(info.Year) && (overwrite || actual.Year == 0)
             && uint.Parse(info.Year) != actual.Year) return true;
 
-        if (fields.Bpm && TextUtils.Rx(@"^\d+$").IsMatch(info.Bpm) && EscribeBpm(info, actual.Bpm, overwrite)
-            && uint.Parse(info.Bpm) != actual.Bpm) return true;
+        if (fields.Bpm && BpmEtiqueta.DeTexto(info.Bpm) is var bpm and > 0 && EscribeBpm(info, actual.Bpm, overwrite)
+            && bpm != actual.Bpm) return true;
 
         return false;
     }
@@ -345,8 +345,8 @@ public static class Tagging
             && uint.Parse(info.Year) != actual.Year)
             p += actual.Year == 0 ? 2.0 : 1.5;
 
-        if (fields.Bpm && TextUtils.Rx(@"^\d+$").IsMatch(info.Bpm) && EscribeBpm(info, actual.Bpm, overwrite)
-            && uint.Parse(info.Bpm) != actual.Bpm)
+        if (fields.Bpm && BpmEtiqueta.DeTexto(info.Bpm) is var bpm and > 0 && EscribeBpm(info, actual.Bpm, overwrite)
+            && bpm != actual.Bpm)
             p += actual.Bpm == 0 ? 2.0 : 1.5;
 
         return Math.Round(Math.Min(10.0, p), 1);

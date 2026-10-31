@@ -58,9 +58,12 @@ public sealed class ScanCache
         // Un AIFF guardado sin frecuencia y sin la marca del lector de cabecera es uno que TagLib no pudo
         // abrir (un AIFF-C de macOS) antes de que el escáner supiera leer su cabecera: se vuelve a leer
         // en lugar de seguir vacío. Con la marca ya se intentó, y releerlo no daría otra cosa.
+        // Un BPM imposible es de cuando el BPM se leía con la configuración regional («102.000000»
+        // quedaba como 102.000.000; ver BpmEtiqueta): se relee una vez y la entrada se corrige.
         Entry? e;
         lock (_cerrojo) _map.TryGetValue(path, out e);
-        if (e != null && e.M == m && e.S == s && !(e.Sr == 0 && !e.La && LectorAiff.EsAiff(path)))
+        if (e != null && e.M == m && e.S == s && !(e.Sr == 0 && !e.La && LectorAiff.EsAiff(path))
+            && e.Bp <= BpmEtiqueta.Maximo)
             return new Track
             {
                 FilePath = path,
@@ -125,11 +128,12 @@ public sealed class ScanCache
             {
                 var raiz = raizDe(path);
                 if (raiz == null) continue;
+                // Un BPM imposible no se enseña mientras llega la comprobación, que lo relee (ver Read).
                 lista.Add(new Track
                 {
                     FilePath = path, Folder = raiz,
                     Title = e.Ti, Artist = e.Ar, Album = e.Al, Genre = e.Ge,
-                    Year = e.Yr, Bpm = e.Bp, Key = e.Ke, DurationSeconds = e.Du,
+                    Year = e.Yr, Bpm = e.Bp <= BpmEtiqueta.Maximo ? e.Bp : 0, Key = e.Ke, DurationSeconds = e.Du,
                     Bitrate = e.Br, SampleRate = e.Sr, Channels = e.Ch,
                 });
             }

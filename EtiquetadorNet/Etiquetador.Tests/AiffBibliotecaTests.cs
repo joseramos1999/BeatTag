@@ -365,6 +365,25 @@ public class AiffBibliotecaTests : IDisposable
         Assert.Equal(("Stop It", "Fisher", "Stop It EP", "8A", 126u, 1), (t.Title, t.Artist, t.Album, t.Key, t.Bpm, t.DurationSeconds));
     }
 
+    // El BPM de ese bloque, con la cultura española: TagLib leía «102.000000» como 102.000.000 (ver BpmEtiqueta).
+    [Fact]
+    public void El_bpm_del_bloque_id3_de_un_aifc_no_depende_de_la_cultura()
+    {
+        var ruta = Path.Combine(_dir, "bpm.aif");
+        WriteAifc(ruta, "sowt", 16, 2, Rampa(44100 * 4));
+        var id3 = new TagLib.Id3v2.Tag { Title = "Tema" };
+        id3.SetTextFrame("TBPM", "102.000000");
+        AnadirBloque(ruta, "ID3 ", id3.Render().Data);
+
+        var antes = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("es-ES");
+            Assert.Equal(102u, LibraryScanner.ReadTrack(ruta).Bpm);
+        }
+        finally { System.Globalization.CultureInfo.CurrentCulture = antes; }
+    }
+
     // Un AIFF-C comprimido: lo que cuenta su cabecera depende del códec, así que solo se da por bueno
     // lo que no depende de él (frecuencia y canales).
     [Fact]

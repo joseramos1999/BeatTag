@@ -279,7 +279,7 @@ public static class EdicionManual
         var t = (texto ?? "").Trim();
         bpm = 0; aviso = ""; error = "";
         if (t.Length == 0) return true;
-        if (!double.TryParse(t.Replace(',', '.'), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var v) || v > 999)
+        if (!BpmEtiqueta.TryLeer(t, out var v))
         {
             error = $"No se ha guardado nada: el BPM «{t}» no es un número válido. Escribe uno como 128 o 127,5, o déjalo vacío.";
             return false;
@@ -355,7 +355,8 @@ public static class EdicionManual
             Texto(cambios, "Comment", form.Comment, cargado.Comment, tag.Comment, v => tag.Comment = v);
 
             if (anio != cargado.Year && anio != tag.Year) { cambios["Year"] = FieldChange.Num(tag.Year, anio); tag.Year = anio; }
-            if (bpm != cargado.Bpm && bpm != tag.BeatsPerMinute) { cambios["Bpm"] = FieldChange.Num(tag.BeatsPerMinute, bpm); tag.BeatsPerMinute = bpm; }
+            var bpmArchivo = BpmEtiqueta.Leer(tag);
+            if (bpm != cargado.Bpm && bpm != bpmArchivo) { cambios["Bpm"] = FieldChange.Num(bpmArchivo, bpm); tag.BeatsPerMinute = bpm; }
 
             var artistas = tag.Performers ?? Array.Empty<string>();
             if (form.Artist != cargado.Artist)

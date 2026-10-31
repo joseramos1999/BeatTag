@@ -1299,7 +1299,7 @@ public sealed class UndoEngine
             case "Artist": return Lista(tag.Performers, fc, v => tag.Performers = v);
             case "Genre": return Lista(tag.Genres, fc, v => tag.Genres = v);
             case "Year": return Numero(tag.Year, fc, v => tag.Year = v);
-            case "Bpm": return Numero(tag.BeatsPerMinute, fc, v => tag.BeatsPerMinute = v);
+            case "Bpm": return Numero(BpmEtiqueta.Leer(tag), fc, v => tag.BeatsPerMinute = v);
             default:
                 return (false, false);
         }

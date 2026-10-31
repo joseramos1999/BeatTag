@@ -165,7 +165,7 @@ public static class LibraryScanner
                 Album = file.Tag.Album,
                 Genre = file.Tag.JoinedGenres,
                 Year = file.Tag.Year,
-                Bpm = file.Tag.BeatsPerMinute,
+                Bpm = BpmEtiqueta.Leer(file.Tag),   // no Tag.BeatsPerMinute: depende de la configuración regional
                 Key = file.Tag.InitialKey,
                 DurationSeconds = (int)file.Properties.Duration.TotalSeconds,
                 Bitrate = file.Properties.AudioBitrate,
