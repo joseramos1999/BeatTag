@@ -39,7 +39,10 @@ if [ -n "$filtro" ]; then orden+=(--filter "$filtro"); fi
 orden+=(-- xUnit.LongRunningTestSeconds=20 xUnit.DiagnosticMessages=true)
 if $es_mac; then
   export DOTNET_GCHeapHardLimit=0x100000000   # 4 GB por proceso; el equipo tiene 7
-  orden=(nice -n 10 "${orden[@]}")
+  # El registro de diagnóstico de vstest apunta cuándo empieza y acaba cada prueba: con él, el
+  # vigilante dice cuáles están en marcha en cada momento.
+  rm -rf diag
+  orden=(nice -n 10 "${orden[@]:0:2}" --diag diag/vstest.txt "${orden[@]:2}")
 fi
 
 "${orden[@]}" > test.log 2>&1 &
@@ -59,6 +62,14 @@ procesos() { ps -axo ppid= | grep -vc '^ *1$' || true; }
 resultado='^  (Passed|Failed|Skipped|Correctas|Con error|Omitida) '
 hechas() { local n; n=$(grep -cE "$resultado" test.log 2>/dev/null); echo "${n:-0}"; }
 ultima() { grep -E "$resultado" test.log 2>/dev/null | tail -1 | sed -E "s/$resultado//; s/ \[[^]]*\]\$//" | cut -c1-110; }
+
+# Las que han empezado y aún no han acabado, según el registro de diagnóstico del proceso de pruebas.
+en_marcha_ahora() {
+  local f; f=$(ls diag/*host*.txt 2>/dev/null | head -1); [ -n "$f" ] || return 0
+  awk '/RecordStart: Starting test: / { sub(/.*Starting test: /, ""); sub(/\.\r?$/, ""); n[$0]++ }
+       /RecordEnd: test: /           { sub(/.*RecordEnd: test: /, ""); sub(/ execution completed\.\r?$/, ""); n[$0]-- }
+       END { for (t in n) if (n[t] > 0) { sub(/^Etiquetador\.Tests\./, "", t); printf "%s%s", s, t; s = ", " } }' "$f" | cut -c1-600
+}
 
 motivo=""
 inicio=$(date +%s)
@@ -82,7 +93,7 @@ while kill -0 "$pid" 2>/dev/null; do
   echo "$linea" >> vigilancia.log
   # También en la salida del paso, que GitHub enseña en directo: si el equipo cae, mientras el
   # trabajo sigue «en marcha» su página aún enseña el último segundo antes de caer.
-  echo "$linea · $(hechas) hechas · última: $(ultima)"
+  echo "$linea · $(hechas) hechas · última: $(ultima) · en marcha: $(en_marcha_ahora)"
 
   if   [ "$libre" -lt 10 ];   then motivo="macOS dice que solo queda un ${libre} % de memoria libre"
   elif [ "$extra" -gt 1024 ]; then motivo="el swap ha crecido ${extra} MB"
