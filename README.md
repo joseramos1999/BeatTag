@@ -105,7 +105,9 @@ Reescritura en **C# / .NET 9 + Avalonia** de la app original en PowerShell. Wind
 - **Bandeja de entrada**: una carpeta aparte donde dejas la música recién descargada. Antes de que
   entre en la biblioteca, avisa si ya está en ella (o hay otra versión), si está repetida, si su
   calidad es baja o si le faltan etiquetas. Cada canción pasa por *recibida → analizada → revisada →
-  preparada*, y las preparadas se mueven a la biblioteca sin sobrescribir nada y con deshacer.
+  preparada*, y las preparadas se mueven a la biblioteca sin sobrescribir nada y con deshacer: cada
+  traslado queda anotado antes de hacerse, así que un cierre a mitad no deja nada sin poder deshacer,
+  y el proceso se puede cancelar.
   Las descargas que sobran se **descartan a la papelera** de una vez, y cuando una descarga es la
   misma grabación que una canción de la biblioteca con mejor calidad, **«Sustituir la copia de la
   biblioteca»** la pone en su lugar (misma carpeta y mismo nombre, con la ficha de DJ de la antigua) y

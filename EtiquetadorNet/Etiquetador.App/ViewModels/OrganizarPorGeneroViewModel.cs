@@ -617,7 +617,7 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
         var progreso = new Progress<double>(p => Progress = p);
-        ResultadoOrganizar? res = null;
+        ResultadoTraslado? res = null;
         try
         {
             _engine.ReleaseAudio();   // el archivo que suena no se puede mover
@@ -725,7 +725,7 @@ public sealed partial class OrganizarPorGeneroViewModel : ViewModelBase, IEstado
 
     /// <summary>Lo que se dice al terminar.</summary>
     /// <param name="carpetas">A cuántas carpetas distintas han ido las canciones movidas.</param>
-    public static string TextoResultado(ResultadoOrganizar res, int carpetas)
+    public static string TextoResultado(ResultadoTraslado res, int carpetas)
     {
         var texto = res.Movidas switch
         {

@@ -41,6 +41,8 @@
             <Button Content="Pasar las preparadas a la biblioteca" Click="Pasar_Click" IsEnabled="{Binding !IsBusy}"
                     Background="#16A34A" Foreground="White" FontWeight="SemiBold" Margin="0,0,12,4"
                     ToolTip.Tip="Mueve las canciones preparadas a la carpeta de destino. Nunca sobrescribe un archivo existente y se puede deshacer." />
+            <Button Content="Cancelar el proceso" Command="{Binding CancelarPasoCommand}" IsVisible="{Binding Pasando}" Margin="0,0,12,4"
+                    ToolTip.Tip="Para entre un archivo y el siguiente: lo ya pasado se queda en la biblioteca y se puede deshacer; el resto sigue en la bandeja." />
             <Button Content="Escribir ficha en el comentario" Click="Volcar_Click" IsEnabled="{Binding !IsBusy}" Margin="0,0,12,4" />
             <Button Content="Descartar a la papelera" Click="Descartar_Click" IsEnabled="{Binding !IsBusy}" Margin="0,0,12,4"
                     ToolTip.Tip="Envía a la papelera del sistema las descargas seleccionadas que no quieras conservar, por ejemplo las que ya tienes. Con el filtro «Con aviso de duplicado» y Ctrl+A se descartan de una vez; de una canción repetida en la bandeja que no está en la biblioteca se conserva la copia de mejor calidad." />

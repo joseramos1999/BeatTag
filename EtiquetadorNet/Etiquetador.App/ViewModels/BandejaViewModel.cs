@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Collections;
@@ -560,12 +559,19 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
 
     public IReadOnlyList<BandejaRow> Preparadas => Rows.Where(r => r.EstadoValor == EstadoBandeja.Preparada).ToList();
 
+    /// <summary>Se están pasando canciones a la biblioteca: se muestra «Cancelar el proceso».</summary>
+    [ObservableProperty] private bool _pasando;
+
+    private CancellationTokenSource? _pasoCts;
+
     /// <summary>
     /// Mueve las preparadas a la carpeta de destino. La confirmación la pide la vista.
     ///
-    /// Cada movimiento se anota para deshacer EN CUANTO se hace, así que si algo se corta a medias
-    /// lo ya movido sigue siendo reversible. Un archivo que no se puede mover (por ejemplo, porque en
-    /// el destino ya hay uno con ese nombre) se queda en la bandeja con su estado: no se pierde nada.
+    /// Va por el mismo motor que Organizar por género (ver AppEngine.PasarABiblioteca): cada lote se
+    /// anota para deshacer ANTES de moverlo, así que un cierre a mitad no deja nada movido sin anotar;
+    /// si el historial no se puede escribir, no se mueve nada más; y «Cancelar el proceso» lo para
+    /// entre un archivo y el siguiente. Un archivo que no se puede mover (por ejemplo, porque en el
+    /// destino ya hay uno con ese nombre) se queda en la bandeja con su estado: no se pierde nada.
     /// </summary>
     public async Task PasarABibliotecaAsync()
     {
@@ -578,75 +584,71 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
         // Lo escrito en el panel se guarda ANTES de mover: después, las rutas de la selección ya no existen.
         GuardarLoEscrito("antes de pasar a la biblioteca");
         IsBusy = true;
+        Pasando = true;
         Progress = 0;
         Status = $"Pasando {Canciones(filas.Count)} a la biblioteca…";
+        using var cts = new CancellationTokenSource();
+        _pasoCts = cts;
         try
         {
             _engine.ReleaseAudio();
-            var undo = Path.Combine(_engine.Paths.UndoDir, $"run_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
             var rutas = filas.Select(r => r.FilePath).ToList();
-            var progreso = new Progress<double>(p => Progress = p);
+            var progreso = new Progress<double>(p => { if (Pasando) Progress = p; });
 
-            var (hechos, fallos, undoErr) = await Task.Run(() =>
-            {
-                var ok = new List<Traslado>();
-                var mal = new List<Traslado>();
-                var errUndo = "";
-                for (var i = 0; i < rutas.Count; i++)
-                {
-                    var t = TrasladoBandeja.Mover(rutas[i], destino);
-                    if (t.Ok)
-                    {
-                        ok.Add(t);
-                        var rec = new UndoRecord
-                        {
-                            OrigPath = t.Origen, FinalPath = t.Destino, Renamed = true, Origen = nameof(TipoEjecucion.Traslado),
-                        };
-                        try { File.AppendAllText(undo, JsonSerializer.Serialize(rec) + "\n"); }
-                        catch (Exception e) { errUndo = e.Message; }
-                    }
-                    else mal.Add(t);
-                    ((IProgress<double>)progreso).Report(100.0 * (i + 1) / rutas.Count);
-                }
-                return (ok, mal, errUndo);
-            });
+            // La ficha, lo decidido en Enriquecer y las cachés de audio siguen a cada archivo en el
+            // motor; aquí queda lo que es de la bandeja.
+            var res = await Task.Run(() => _engine.PasarABiblioteca(rutas, destino, progreso, cts.Token));
+            Pasando = false;
 
-            foreach (var t in hechos)
+            foreach (var (origen, final) in res.Hechos)
             {
-                _engine.Fichas.Mover(t.Origen, t.Destino);
-                _engine.SeguirArchivo(t.Origen, t.Destino, default);   // huella, identificación y sonoridad, también
-                _engine.Bandeja.Olvidar(t.Origen);
-                _engine.Logger.Detail($"Bandeja → biblioteca: {Path.GetFileName(t.Origen)} → {t.Destino}");
+                _engine.Bandeja.Olvidar(origen);
+                _engine.Logger.Detail($"Bandeja → biblioteca: {Path.GetFileName(origen)} → {final}");
             }
-            foreach (var t in fallos)
-                _engine.Logger.Log($"Bandeja: no se movió {Path.GetFileName(t.Origen)}: {t.Error}", LogKind.Err);
-
-            var errFichas = _engine.Fichas.Guardar();
             GuardarBandeja();
-
-            var movidas = new HashSet<string>(hechos.Select(h => h.Origen), StringComparer.OrdinalIgnoreCase);
-            foreach (var r in Rows.Where(r => movidas.Contains(r.FilePath)).ToList()) Rows.Remove(r);
-            Seleccionar(Array.Empty<BandejaRow>());
+            QuitarFilas(res.Hechos.Select(h => h.Origen).ToList());
 
             // Ya están en una carpeta de la biblioteca: se reescanea para que aparezcan en todas las
             // páginas. Esto vuelve a revisar la bandeja con la biblioteca nueva.
-            if (hechos.Count > 0) await _store.ScanAsync();
+            if (res.Movidas > 0) await _store.ScanAsync();
             else await RevisarAsync();
 
-            var texto = $"{Canciones(hechos.Count)} {(hechos.Count == 1 ? "pasada" : "pasadas")} a la biblioteca";
-            if (fallos.Count > 0) texto += $" · {fallos.Count} se {(fallos.Count == 1 ? "queda" : "quedan")} en la bandeja: {fallos[0].Error}";
-            texto += undoErr.Length > 0
-                ? $". ⚠ El traslado NO quedó anotado y no se podrá deshacer: {undoErr}"
-                : hechos.Count > 0 ? ". Se puede deshacer desde Enriquecer." : ".";
-            if (errFichas.Length > 0) texto += $" ⚠ No se pudieron guardar las fichas: {errFichas}";
-            Status = texto;
+            Status = TextoPasadas(res);
         }
         catch (Exception e)
         {
             _engine.Logger.Error("Error al pasar canciones a la biblioteca", e);
             Status = "Error al pasar a la biblioteca: " + e.Message;
         }
-        finally { IsBusy = false; Progress = 0; }
+        finally { _pasoCts = null; Pasando = false; IsBusy = false; Progress = 0; }
+    }
+
+    /// <summary>
+    /// El resumen de «Pasar a la biblioteca»: cuántas se han pasado, si se canceló, las que se quedan en
+    /// la bandeja con el primer motivo y, si se detuvo por el historial, por qué.
+    /// </summary>
+    internal static string TextoPasadas(ResultadoTraslado res)
+    {
+        // Sin historial o sin carpeta de destino no se ha tocado nada: basta con el motivo.
+        if (res.Movidas == 0 && res.Detenido.Length > 0) return res.Detenido;
+
+        var texto = $"{Canciones(res.Movidas)} {(res.Movidas == 1 ? "pasada" : "pasadas")} a la biblioteca";
+        if (res.Cancelado && res.Detenido.Length == 0) texto = "Cancelado. " + texto + "; las demás siguen en la bandeja";
+        if (res.Fallos.Count > 0)
+            texto += $" · {res.Fallos.Count} se {(res.Fallos.Count == 1 ? "queda" : "quedan")} en la bandeja ({res.Fallos[0]})";
+        texto += ".";
+        if (res.Detenido.Length > 0) texto += " " + res.Detenido;
+        if (res.UndoErr.Length > 0) texto += " ⚠ " + res.UndoErr;
+        if (res.Movidas > 0) texto += " Se puede deshacer desde Enriquecer.";
+        return texto;
+    }
+
+    /// <summary>Para el paso a la biblioteca entre un archivo y el siguiente: lo ya pasado se queda y se puede deshacer.</summary>
+    [RelayCommand]
+    private void CancelarPaso()
+    {
+        try { _pasoCts?.Cancel(); }
+        catch (ObjectDisposedException) { /* ya había terminado */ }
     }
 
     // --- Descartar a la papelera (X15) ---
@@ -725,11 +727,15 @@ public partial class BandejaViewModel : ViewModelBase, IEstadoPagina, IProgresoP
 
     private CancellationTokenSource? _descarteCts;
 
-    /// <summary>Para el descarte a la papelera entre un archivo y el siguiente. Lo usa el cierre de la ventana.</summary>
-    public void CancelarDescarte()
+    /// <summary>
+    /// Para el descarte a la papelera o el paso a la biblioteca entre un archivo y el siguiente. Lo usa
+    /// el cierre de la ventana.
+    /// </summary>
+    public void Cancelar()
     {
         try { _descarteCts?.Cancel(); }
         catch (ObjectDisposedException) { /* ya había terminado */ }
+        CancelarPaso();
     }
 
     /// <summary>Quita de la tabla las filas de esas rutas, sin releer la bandeja.</summary>
