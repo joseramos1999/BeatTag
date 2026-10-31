@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
+using Etiquetador.Core;
 using Microsoft.VisualBasic.FileIO;
 
 namespace Etiquetador.App.Services;
@@ -266,7 +267,7 @@ public static class Papelera
             var err = p.StandardError.ReadToEndAsync();
             if (!p.WaitForExit(EsperaFinderMs))
             {
-                try { p.Kill(entireProcessTree: true); } catch { }
+                Procesos.Matar(p);
                 return (false, "Finder no respondió a tiempo (puede que macOS esté esperando a que le des permiso)");
             }
             p.WaitForExit();
