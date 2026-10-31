@@ -2,15 +2,11 @@ name: Diagnóstico macOS (temporal)
 
 # TEMPORAL: se quita antes de unir la rama.
 #
-# Con las pruebas, uno de cada cinco o seis equipos macOS se para entero a los pocos segundos, sin
-# quedarse sin memoria ni disco, en macOS 26 y también en macOS 15. En los dos cuelgues en que se vio
-# qué pruebas estaban en marcha, una se repetía: HuellasDuplicadosTests.Varias_consultas_a_la_vez_
-# esperan_a_la_misma_lectura (ocho hilos con una barrera esperando a la misma lectura), que llegó el
-# 19 de octubre, horas antes del primer cuelgue. Esta vuelta lo comprueba:
-#   - control:  todas las pruebas, cuatro veces seguidas;
-#   - sin-ella: todas menos esa, cuatro veces seguidas;
-#   - aislada:  solo esa, cuarenta veces seguidas y con la CPU ocupada.
-# El límite de 10 minutos corta el trabajo aunque el equipo no responda.
+# Con las pruebas, uno de cada ocho equipos macOS recién arrancados se para entero a los pocos
+# segundos, en macOS 26 y en macOS 15. En los dos cuelgues en que se vio qué pruebas estaban en
+# marcha se repetía HuellasDuplicadosTests.Varias_consultas_a_la_vez_esperan_a_la_misma_lectura. Sin
+# ella, 0 cuelgues en 9 equipos; con ella, 1 en 6. Pocos para fiarse: esta vuelta corre SIN ella en
+# los siete equipos, con el vigilante, para juntar suficientes equipos recién arrancados.
 on:
   push:
     branches: [ claude/ci-macos-cuelgue ]
@@ -18,25 +14,15 @@ on:
 permissions:
   contents: read
 
-env:
-  SOSPECHOSA: Etiquetador.Tests.HuellasDuplicadosTests.Varias_consultas_a_la_vez_esperan_a_la_misma_lectura
-
 jobs:
   pruebas:
-    name: ${{ matrix.modo }} ${{ matrix.intento }}
+    name: sin-ella ${{ matrix.intento }}
     runs-on: macos-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { modo: control, intento: 1 }
-          - { modo: control, intento: 2 }
-          - { modo: sin-ella, intento: 1 }
-          - { modo: sin-ella, intento: 2 }
-          - { modo: sin-ella, intento: 3 }
-          - { modo: aislada, intento: 1 }
-          - { modo: aislada, intento: 2 }
+        intento: [ 1, 2, 3, 4, 5, 6, 7 ]
     defaults:
       run:
         working-directory: EtiquetadorNet
@@ -52,16 +38,6 @@ jobs:
       - name: Test
         shell: bash
         timeout-minutes: 8
-        run: |
-          case "${{ matrix.modo }}" in
-            control)  filtro="FullyQualifiedName~Etiquetador.Tests"; vueltas=4 ;;
-            sin-ella) filtro="FullyQualifiedName!=$SOSPECHOSA"; vueltas=4 ;;
-            aislada)  filtro="FullyQualifiedName=$SOSPECHOSA"; vueltas=40
-                      for i in 1 2 3; do yes > /dev/null & done ;;
-          esac
-          for v in $(seq 1 $vueltas); do
-            inicio=$(date +%s)
-            codigo=0; dotnet test -c Release --no-build --filter "$filtro" > test.log 2>&1 || codigo=$?
-            echo "vuelta $v: código $codigo en $(( $(date +%s) - inicio )) s · $(grep -aoE 'Total: +[0-9]+' test.log | tail -1 || true)"
-          done
-          pkill yes || true
+        env:
+          FILTRO_PRUEBAS: FullyQualifiedName!=Etiquetador.Tests.HuellasDuplicadosTests.Varias_consultas_a_la_vez_esperan_a_la_misma_lectura
+        run: ../scripts/pruebas-vigiladas.sh
