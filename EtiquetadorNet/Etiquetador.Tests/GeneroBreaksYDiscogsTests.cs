@@ -181,6 +181,38 @@ public class GeneroBreaksYDiscogsTests
         Assert.Contains(plan.Movimientos, m => m.Destino == Path.Combine(Raiz, "Electro Latino", "Pack", "a.mp3"));
     }
 
+    // Revisión 3: un nombre con varios géneros, o con letras que la clave no conserva, no es otra forma
+    // de escribir un género: son carpetas tuyas y se conservan, como antes de reconocer las otras formas.
+    [Theory]
+    [InlineData("Salsa, Vol. 1", "Salsa")]
+    [InlineData("Reggaeton, Dembow", "Reggaeton")]
+    [InlineData("2023, Reggaeton", "Reggaeton")]
+    [InlineData("邦楽 Pop", "Pop")]
+    [InlineData("Русский Rap", "Hip Hop")]
+    public void Una_carpeta_tuya_que_nombra_un_genero_entre_otras_cosas_se_conserva(string carpeta, string genero)
+    {
+        var plan = EnLaRaiz(EnCarpeta(Path.Combine(carpeta, "Pack"), "a.mp3", genero));
+        Assert.Equal(Path.Combine(Raiz, genero, carpeta, "Pack", "a.mp3"), Assert.Single(plan.Movimientos).Destino);
+    }
+
+    [Fact]
+    public void Dos_volumenes_con_el_mismo_archivo_no_chocan()
+    {
+        var plan = EnLaRaiz(EnCarpeta("Salsa, Vol. 1", "01 Intro.mp3", "Salsa"), EnCarpeta("Salsa, Vol. 2", "01 Intro.mp3", "Salsa"));
+        Assert.Equal(2, plan.Movimientos.Count);
+        Assert.Contains(plan.Movimientos, m => m.Destino == Path.Combine(Raiz, "Salsa", "Salsa, Vol. 2", "01 Intro.mp3"));
+    }
+
+    // Una carpeta que el propio BeatTag creó con letras que la clave no conserva se sigue reconociendo
+    // por su nombre exacto.
+    [Fact]
+    public void La_carpeta_exacta_de_un_genero_con_otras_letras_se_sigue_reconociendo()
+    {
+        var plan = EnLaRaiz(EnCarpeta(Path.Combine("J-Pop 日本", "Pack"), "a.mp3", "J-Pop 日本"));
+        Assert.Empty(plan.Movimientos);
+        Assert.Equal(MotivoOmision.YaEnSuSitio, Assert.Single(plan.Omitidas).Motivo);
+    }
+
     // Revisión 2: si una forma conocida minoritaria daba nombre al género, la carpeta de la mayoría
     // («Drum&Bass», que la tabla no conoce: el «&» va sin espacios) quedaba dentro de la nueva. La
     // carpeta se llama como la mayoría, así que lo que ya está en ella se queda.

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Etiquetador.Core.Ai;
 
 namespace Etiquetador.Core.Dj;
 
@@ -504,19 +505,25 @@ public static class OrganizarPorGenero
         }
 
         // Las carpetas que son de un género: una canción que ya está en una de ellas, dentro del destino,
-        // cuenta desde ahí (volver a organizar no anida «Pop/Pop»). Son «Otros géneros», «Sin género» y
-        // las que se llaman como un género de la biblioteca o como otra forma de escribirlo, contada igual
+        // cuenta desde ahí (volver a organizar no anida «Pop/Pop»). Son «Otros géneros», «Sin género», las
+        // que se llaman como un género de la biblioteca y las que lo escriben de otra forma, contada igual
         // que al agrupar los géneros: una carpeta «Breaks», «Rap» o «Electro-Latino» es la de Breakbeat,
         // Hip Hop o Electro Latino, y no tiene que acabar dentro de la nueva («Breakbeat/Breaks»).
+        var nombresDeGenero = new HashSet<string>(ComparadorRutas.Instancia) { CarpetaOtros, CarpetaSinGenero };
+        foreach (var g in generos) nombresDeGenero.Add(NombreCarpetaGenero(g.Genero));
         var esCarpetaDeGenero = new Dictionary<string, bool>(ComparadorRutas.Instancia);
         bool EsCarpetaDeGenero(string nombre)
         {
             if (!esCarpetaDeGenero.TryGetValue(nombre, out var es))
-                esCarpetaDeGenero[nombre] = es =
-                    ComparadorRutas.Instancia.Equals(nombre, CarpetaOtros) || ComparadorRutas.Instancia.Equals(nombre, CarpetaSinGenero)
-                    || (GeneroPorReglas.Normalizado(nombre) is { } n && forma.ContainsKey(GeneroPorReglas.ClaveGenero(n)));
+                esCarpetaDeGenero[nombre] = es = nombresDeGenero.Contains(nombre) || OtraFormaDeUnGenero(nombre);
             return es;
         }
+        // Una lista no es otra forma de escribir su primer género: «Salsa, Vol. 1» o «Reggaeton, Dembow» son
+        // carpetas tuyas. Tampoco un nombre con letras que la clave no conserva: «邦楽 Pop» no es «Pop».
+        bool OtraFormaDeUnGenero(string nombre)
+            => !GenerosIa.EsLista(nombre)
+               && TextUtils.RemoveDiacritics(nombre).All(c => !char.IsLetter(c) || char.IsAsciiLetter(c))
+               && GeneroPorReglas.Normalizado(nombre) is { } n && forma.ContainsKey(GeneroPorReglas.ClaveGenero(n));
 
         var raices = raicesHabilitadas.Where(r => !string.IsNullOrWhiteSpace(r)).OrderByDescending(r => r.Length).ToList();
         var raizDe = new Dictionary<string, string?>(ComparadorRutas.Instancia);
