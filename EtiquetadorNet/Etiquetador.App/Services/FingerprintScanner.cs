@@ -39,8 +39,11 @@ public sealed class FingerprintScanner
     /// </summary>
     private const int SegundosAnalizados = 120;
 
-    /// <summary>Tiempo maximo por archivo. Pasado esto, fpcalc esta colgado y se mata.</summary>
-    private const int TiempoLimiteMs = 60_000;
+    /// <summary>
+    /// Tiempo maximo por archivo. Pasado esto, fpcalc esta colgado y se mata. Interno para que la
+    /// prueba de cancelar distinga «lo paró la cancelación» de «esperó a este plazo».
+    /// </summary>
+    internal const int TiempoLimiteMs = 60_000;
 
     private readonly string _cacheFile;
     private readonly string _fpcalc;

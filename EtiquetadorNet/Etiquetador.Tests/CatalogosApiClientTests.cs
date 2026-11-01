@@ -235,6 +235,11 @@ public class CatalogosApiClientTests
         Assert.True(File.Exists(nueva));
     }
 
+    // Se espera a que la poda TERMINE, no a que pase un plazo. Antes se miraba el disco cada 50 ms
+    // durante 5 s y falló alguna vez con la batería completa: la poda corre en un hilo del pool y
+    // empieza cuando queda uno libre (medido: hasta 0,3 s tarde con otra compilación a la vez, para
+    // luego tardar milisegundos). El minuto es solo el tope para que una poda colgada falle en vez de
+    // colgar la batería.
     [Fact]
     public async Task La_poda_automatica_va_en_segundo_plano()
     {
@@ -247,10 +252,13 @@ public class CatalogosApiClientTests
             Directory.CreateDirectory(Path.GetDirectoryName(vieja)!);
             File.WriteAllText(vieja, "{}");
             File.SetLastWriteTime(vieja, DateTime.Now.AddDays(-60));
+            Assert.Null(api.PodaEnCurso);
 
             Assert.Null(api.ReadCache("https://api.deezer.com/search?q=otra"));   // primer contacto con la caché
 
-            for (var i = 0; i < 100 && File.Exists(vieja); i++) await Task.Delay(50);
+            var poda = api.PodaEnCurso;
+            Assert.True(poda != null, "tocar la caché no lanzó la poda");
+            await poda.WaitAsync(TimeSpan.FromMinutes(1));
             Assert.False(File.Exists(vieja));
             Assert.True(File.Exists(Path.Combine(paths.CacheDir, ".ultima-poda")));
         }

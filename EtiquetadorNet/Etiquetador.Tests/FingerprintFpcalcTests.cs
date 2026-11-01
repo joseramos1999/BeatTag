@@ -123,33 +123,27 @@ public class FingerprintFpcalcTests
 
     // ---------- fpcalc con plazo ----------
 
-    /// <summary>
-    /// Un programa que tarda ~2 s y, si nadie lo para, deja una marca en disco al terminar. Si la
-    /// marca no aparece, es que se le paró de verdad (a él y a lo que lanzó).
-    /// </summary>
-    private static ProcessStartInfo Lento(string marca)
-        => OperatingSystem.IsWindows()
-            ? new ProcessStartInfo("cmd.exe") { Arguments = $"/c ping -n 3 127.0.0.1 >nul & echo listo> \"{marca}\"" }
-            : new ProcessStartInfo("/bin/sh") { ArgumentList = { "-c", $"sleep 2; echo listo > '{marca}'" } };
-
     // Antes no había límite: un archivo dañado que dejara a fpcalc sin terminar paraba la pasada de
     // Enriquecer en esa canción hasta que el usuario cancelaba.
+    //
+    // El programa no termina por su cuenta (ver ProgramaQueEspera): si la llamada vuelve, es que la
+    // paró el plazo, llegue cuando llegue. Antes se exigía volver en menos de 10 s con un programa que
+    // acababa solo a los 2 s. El minuto es solo el tope para no colgar la batería si el plazo no se
+    // respeta.
     [Fact]
     public async Task Un_programa_que_no_termina_se_para_al_vencer_el_plazo()
     {
         var dir = Mp3Fixture.NewTempDir();
         try
         {
-            var marca = Path.Combine(dir, "termino.txt");
-            var reloj = Stopwatch.StartNew();
+            var programa = new ProgramaQueEspera(dir, "colgado");
 
-            var r = await Fingerprint.EjecutarConLimiteAsync(Lento(marca), TimeSpan.FromMilliseconds(500));
+            var r = await Fingerprint.EjecutarConLimiteAsync(programa.Arranque(), TimeSpan.FromMilliseconds(500))
+                                     .WaitAsync(TimeSpan.FromMinutes(1));
 
             Assert.NotNull(r);
             Assert.True(r!.Colgado);
-            Assert.True(reloj.Elapsed < TimeSpan.FromSeconds(10));
-            await Task.Delay(3500);
-            Assert.False(File.Exists(marca), "el programa siguió vivo después de vencer el plazo");
+            Assert.False(await programa.SiguioVivoAsync(), "el programa siguió vivo después de vencer el plazo");
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
@@ -161,14 +155,19 @@ public class FingerprintFpcalcTests
         var dir = Mp3Fixture.NewTempDir();
         try
         {
-            var marca = Path.Combine(dir, "termino.txt");
+            var programa = new ProgramaQueEspera(dir, "colgado");
+            var plazo = TimeSpan.FromSeconds(60);
             using var cts = new CancellationTokenSource(300);
+            var reloj = Stopwatch.StartNew();
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                () => Fingerprint.EjecutarConLimiteAsync(Lento(marca), TimeSpan.FromSeconds(60), cts.Token));
+                () => Fingerprint.EjecutarConLimiteAsync(programa.Arranque(), plazo, cts.Token));
 
-            await Task.Delay(3500);
-            Assert.False(File.Exists(marca), "el programa siguió vivo después de cancelar");
+            // La excepción sola no basta: si la cancelación no llegara al programa, al vencer el plazo
+            // también se lanzaría, porque el token ya estaba cancelado. Tiene que volver mucho antes.
+            Assert.True(reloj.Elapsed < plazo / 2,
+                $"tardó {reloj.Elapsed.TotalSeconds:0.0} s en volver tras cancelar: esperó al plazo en vez de pararse");
+            Assert.False(await programa.SiguioVivoAsync(), "el programa siguió vivo después de cancelar");
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }

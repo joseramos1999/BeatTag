@@ -30,6 +30,7 @@ public sealed class ApiClient : IDisposable
     private int _cacheHits, _cacheMiss;
     private long _fallosDeRed;
     private int _podaLanzada;
+    private Task? _poda;
 
     /// <summary>Log opcional: cada petición queda trazada en el archivo (no en la UI).</summary>
     public Logger? Log { get; set; }
@@ -48,6 +49,15 @@ public sealed class ApiClient : IDisposable
     /// toca. Se puede apagar para las pruebas que miden la caché.
     /// </summary>
     public bool PodaAutomatica { get; set; } = true;
+
+    /// <summary>
+    /// La poda automática ya lanzada, o null si aún no se ha tocado la caché. Existe para que las
+    /// pruebas esperen a que TERMINE en vez de mirar el disco durante un plazo fijo: la poda corre en
+    /// un hilo del pool y empieza cuando queda uno libre. MEDIDO en octubre de 2026 con la batería
+    /// completa y otra compilación a la vez: llegó a empezar 0,3 s después de pedirla, aunque luego
+    /// solo tarde unos milisegundos, y la prueba que le daba 5 s falló alguna vez en Windows.
+    /// </summary>
+    internal Task? PodaEnCurso => Volatile.Read(ref _poda);
 
     /// <summary>
     /// Peticiones que se quedaron SIN respuesta válida desde que se creó el cliente: sin conexión,
@@ -216,7 +226,7 @@ public sealed class ApiClient : IDisposable
     private void ProgramarPoda()
     {
         if (!PodaAutomatica || Interlocked.Exchange(ref _podaLanzada, 1) == 1) return;
-        _ = Task.Run(() =>
+        Volatile.Write(ref _poda, Task.Run(() =>
         {
             try
             {
@@ -227,7 +237,7 @@ public sealed class ApiClient : IDisposable
                 if (n > 0) Log?.Detail($"Caché de red: {n} respuestas caducadas borradas ({bytes / (1024.0 * 1024.0):0.#} MB).");
             }
             catch { /* best-effort: la poda nunca debe molestar */ }
-        });
+        }));
     }
 
     private static void BorrarSinFallar(string path)
