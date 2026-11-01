@@ -11,35 +11,35 @@ namespace Etiquetador.Tests;
 public class ProcesosTests
 {
     /// <summary>
-    /// Un programa que lanza a OTRO, y ese otro deja una marca en disco a los ~2 s. Si la marca no
-    /// aparece, se paró también lo que había lanzado.
+    /// Un programa que lanza a OTRO, y es ese otro el que deja la marca, y solo cuando la prueba lo
+    /// suelta (ver ProgramaQueEspera). Si al soltarlo no la deja, se paró también lo que había lanzado.
     /// </summary>
-    private static ProcessStartInfo ConNieto(string dir, string marca)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            var bat = Path.Combine(dir, "nieto.cmd");
-            File.WriteAllText(bat, $"@ping -n 3 127.0.0.1 >nul\r\n@echo tarde> \"{marca}\"\r\n");
-            return new ProcessStartInfo("cmd.exe") { ArgumentList = { "/c", "cmd.exe", "/c", bat }, UseShellExecute = false, CreateNoWindow = true };
-        }
-        return new ProcessStartInfo("/bin/sh") { ArgumentList = { "-c", $"(sleep 2; echo tarde > '{marca}') & wait" }, UseShellExecute = false };
-    }
+    private static ProcessStartInfo ConNieto(ProgramaQueEspera nieto)
+        => OperatingSystem.IsWindows()
+            ? new ProcessStartInfo("cmd.exe") { ArgumentList = { "/c", "cmd.exe", "/c", nieto.Ruta }, UseShellExecute = false, CreateNoWindow = true }
+            : new ProcessStartInfo("/bin/sh") { ArgumentList = { "-c", "\"$0\" & wait", nieto.Ruta }, UseShellExecute = false };
 
+    // Se mata cuando el nieto YA está en marcha (lo apunta él), no a los 500 ms. Antes el nieto
+    // dejaba la marca solo a los ~2 s de arrancar y se esperaban 500 ms antes de matar: falló en la
+    // CI de Windows tras unir el PR #6, con la prueba durando 5 s cuando sus esperas suman 3,5. Un
+    // retraso de ese tamaño en el Task.Delay, que corre en el pool, basta para que el nieto escriba
+    // antes de que lo maten: medido en octubre de 2026, los temporizadores llegaban hasta 0,9 s tarde
+    // en 4 núcleos y lanzar un programa costaba hasta 0,7 s. Y matar antes de que el nieto exista
+    // pasaba sin probar nada.
     [Fact]
     public async Task Matar_para_tambien_lo_que_lanzo_el_proceso()
     {
         var dir = Mp3Fixture.NewTempDir();
         try
         {
-            var marca = Path.Combine(dir, "tarde.txt");
-            using var p = Process.Start(ConNieto(dir, marca))!;
-            await Task.Delay(500);   // que le dé tiempo a lanzar al nieto
+            var nieto = new ProgramaQueEspera(dir, "nieto");
+            using var p = Process.Start(ConNieto(nieto))!;
+            await nieto.EsperarQueArranqueAsync();
 
             Procesos.Matar(p);
 
-            Assert.True(p.WaitForExit(5000), "el proceso sigue vivo");
-            await Task.Delay(3000);
-            Assert.False(File.Exists(marca), "lo que lanzó el proceso siguió vivo");
+            Assert.True(p.WaitForExit(TimeSpan.FromMinutes(1)), "el proceso sigue vivo");
+            Assert.False(await nieto.SiguioVivoAsync(), "lo que lanzó el proceso siguió vivo");
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }

@@ -20,6 +20,9 @@ namespace Etiquetador.Tests;
 /// al soltarlo la deja en un segundo. Por si una prueba se rompe antes de soltarlo, se rinde solo a
 /// los dos minutos sin dejar marca: más que el minuto de tope de las pruebas y que el plazo de
 /// fpcalc, y no tanto como para que la batería espere mucho a un programa vivo al terminar.
+///
+/// Al arrancar apunta que está en marcha (<see cref="EsperarQueArranqueAsync"/>), para las pruebas
+/// que lo lanzan a través de otro programa y necesitan que ya exista antes de matar al de fuera.
 /// </summary>
 internal sealed class ProgramaQueEspera
 {
@@ -28,11 +31,13 @@ internal sealed class ProgramaQueEspera
 
     private readonly string _suelta;
     private readonly string _marca;
+    private readonly string _enMarcha;
 
     public ProgramaQueEspera(string dir, string nombre)
     {
         _suelta = Path.Combine(dir, "suelta");
         _marca = Path.Combine(dir, "marca");
+        _enMarcha = Path.Combine(dir, "en-marcha");
         // Rutas relativas a la carpeta del propio guion: nada que entrecomillar.
         if (OperatingSystem.IsWindows())
         {
@@ -40,6 +45,7 @@ internal sealed class ProgramaQueEspera
             File.WriteAllText(Ruta,
                 "@echo off\r\n" +
                 "cd /d \"%~dp0\"\r\n" +
+                "type nul > en-marcha\r\n" +
                 "for /l %%i in (1,1,120) do (\r\n" +
                 "  if exist suelta goto suelto\r\n" +
                 "  ping -n 2 127.0.0.1 >nul\r\n" +
@@ -54,6 +60,7 @@ internal sealed class ProgramaQueEspera
             File.WriteAllText(Ruta,
                 "#!/bin/sh\n" +
                 "cd \"$(dirname \"$0\")\"\n" +
+                ": > en-marcha\n" +
                 "i=0\n" +
                 "while [ ! -e suelta ] && [ $i -lt 600 ]; do sleep 0.2; i=$((i+1)); done\n" +
                 "[ -e suelta ] && echo listo >> marca\n");
@@ -64,6 +71,21 @@ internal sealed class ProgramaQueEspera
     }
 
     public ProcessStartInfo Arranque() => new(Ruta);
+
+    /// <summary>
+    /// Espera a que el programa haya arrancado de verdad: lo apunta él mismo nada más empezar. Para
+    /// cuando la prueba necesita que exista antes de pararlo (matar a un hijo que aún no se ha lanzado
+    /// no demuestra nada). El minuto es solo el tope contra cuelgues.
+    /// </summary>
+    public async Task EsperarQueArranqueAsync()
+    {
+        var reloj = Stopwatch.StartNew();
+        while (!File.Exists(_enMarcha))
+        {
+            Assert.True(reloj.Elapsed < TimeSpan.FromMinutes(1), "el programa no llegó a arrancar en un minuto");
+            await Task.Delay(20);
+        }
+    }
 
     /// <summary>
     /// Lo suelta y espera: si quedaba vivo, en este rato deja la marca. Los 3,5 s solo pueden dejar
